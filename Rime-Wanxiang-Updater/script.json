@@ -1,0 +1,39 @@
+{
+  "runInApp" : false,
+  "localizedNames" : {
+    "it" : "",
+    "en" : "",
+    "zh" : "",
+    "de" : "",
+    "fr" : "",
+    "ru" : "",
+    "es" : "",
+    "pt" : "",
+    "ja" : ""
+  },
+  "remoteResource" : null,
+  "iconImage" : null,
+  "intentInputTypes" : [
+
+  ],
+  "contributors" : [
+
+  ],
+  "description" : "",
+  "localizedDescriptions" : {
+    "it" : "",
+    "en" : "",
+    "zh" : "",
+    "de" : "",
+    "fr" : "",
+    "ru" : "",
+    "es" : "",
+    "pt" : "",
+    "ja" : ""
+  },
+  "name" : "Rime-Updater-New5",
+  "color" : "rgba(238, 92, 98,1)",
+  "icon" : "square.2.layers.3d.fill",
+  "author" : null,
+  "version" : "1.0.0"
+}
