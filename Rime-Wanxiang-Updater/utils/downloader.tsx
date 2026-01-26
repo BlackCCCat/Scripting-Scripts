@@ -36,14 +36,22 @@ async function downloadWithFetchFallback(
 
   const totalHeader = res.headers?.get?.("content-length");
   const total = totalHeader ? Number(totalHeader) : undefined;
+  const fm = (globalThis as any).FileManager;
+  const Data = (globalThis as any).Data;
+  const reader = res?.body?.getReader?.();
+  const canAppend =
+    !!reader &&
+    (typeof fm?.appendData === "function" ||
+      typeof fm?.appendDataSync === "function") &&
+    (Data?.fromUint8Array || Data?.fromArrayBuffer);
+
   if (
-    !Number.isFinite(total) ||
-    (typeof total === "number" && total > LARGE_FALLBACK_BYTES)
+    !canAppend &&
+    (!Number.isFinite(total) ||
+      (typeof total === "number" && total > LARGE_FALLBACK_BYTES))
   ) {
     throw new Error("兜底下载已关闭：文件过大或无法获取大小");
   }
-
-  const fm = (globalThis as any).FileManager;
 
   if (fm?.createDirectory) {
     const parent = dirOf(dstPath);
@@ -54,12 +62,47 @@ async function downloadWithFetchFallback(
     }
   }
 
+  if (canAppend && reader) {
+    await removeFileLoose(dstPath);
+    let received = 0;
+    for (;;) {
+      const r = await reader.read();
+      if (r?.done) break;
+      if (!r?.value) continue;
+      const chunk =
+        r.value instanceof Uint8Array ? r.value : new Uint8Array(r.value);
+      const data = Data.fromUint8Array
+        ? Data.fromUint8Array(chunk)
+        : Data.fromArrayBuffer(chunk.buffer);
+      if (data) {
+        if (typeof fm.appendDataSync === "function")
+          fm.appendDataSync(dstPath, data);
+        else await fm.appendData(dstPath, data);
+      }
+      received += chunk.length;
+      onProgress?.({
+        received,
+        total: Number.isFinite(total) ? total : undefined,
+        percent:
+          Number.isFinite(total) && total && total > 0
+            ? received / total
+            : undefined,
+      });
+    }
+    onProgress?.({
+      received,
+      total: Number.isFinite(total) ? total : undefined,
+      percent:
+        Number.isFinite(total) && total && total > 0 ? received / total : 1,
+    });
+    return;
+  }
+
   const buf = await res.arrayBuffer();
   const bytes = new Uint8Array(buf);
   if (typeof fm?.writeAsBytes === "function") {
     await fm.writeAsBytes(dstPath, bytes);
   } else {
-    const Data = (globalThis as any).Data;
     const FileEntity = (globalThis as any).FileEntity;
     if (
       FileEntity?.openNewForWriting &&
