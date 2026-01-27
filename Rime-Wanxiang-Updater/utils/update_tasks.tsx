@@ -3,13 +3,17 @@ import { Path } from "scripting"
 import type { AppConfig } from "./config"
 import { getExcludePatterns } from "./config"
 import { downloadWithProgress } from "./downloader"
-import { ensureDir, removeDirSafe, unzipToDirWithOverwrite } from "./fs"
+import { ensureDir, removeDirSafe, unzipToDirWithOverwrite, mergeSubdirsByName } from "./fs"
 import { deployHamster } from "./deploy"
 import { detectRimeDir } from "./hamster"
 import { checkUpdate as checkSchemeUpdate, doUpdate as doSchemeUpdate } from "./updater"
 import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
 
 declare const fetch: any
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms))
+}
 
 const OWNER = "amzxyz"
 const GH_REPO = "rime_wanxiang"
@@ -269,11 +273,19 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void) {
   const installRoot = await resolveRimeDir(cfg)
   onStage?.("部署前清理 build…")
   await removeDirSafe(Path.join(installRoot, "build"))
+  for (let i = 3; i >= 1; i--) {
+    onStage?.(`部署倒计时：${i}s`)
+    await sleep(1000)
+  }
   onStage?.("触发部署中…")
   await deployHamster(cfg.inputMethod)
 }
 
 export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) => void) {
+  for (let i = 3; i >= 1; i--) {
+    onStage?.(`部署倒计时：${i}s`)
+    await sleep(1000)
+  }
   onStage?.("触发部署中…")
   await deployHamster(cfg.inputMethod)
   onStage?.("部署完成")
@@ -356,7 +368,11 @@ export async function updateDict(
   const exclude = getExcludePatterns(cfg)
   const dictDir = Path.join(installRoot, "dicts")
   await ensureDir(dictDir)
-  await unzipToDirWithOverwrite(zipPath, dictDir, { excludePatterns: exclude })
+  await unzipToDirWithOverwrite(zipPath, dictDir, { excludePatterns: exclude, flattenSingleDir: true })
+  await mergeSubdirsByName(dictDir, {
+    excludePatterns: exclude,
+    namePattern: /dict/i,
+  })
 
   await setDictMeta({
     installRoot,
@@ -477,6 +493,13 @@ export async function autoUpdateAll(
       autoDeploy: false,
     })
   }
+
+  // 自动更新后统一清理 dicts 下残留的词库子文件夹
+  const exclude = getExcludePatterns(cfg)
+  await mergeSubdirsByName(Path.join(installRoot, "dicts"), {
+    excludePatterns: exclude,
+    namePattern: /dict/i,
+  })
 
   // 统一部署（你指定：安装目录/build）
   await deployIfEnabled(cfg, params.onStage)

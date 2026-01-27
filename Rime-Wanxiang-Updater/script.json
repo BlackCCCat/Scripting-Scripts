@@ -33,7 +33,7 @@
   },
   "name" : "Rime-Wanxiang-Updater",
   "color" : "rgba(238, 92, 98,1)",
-  "icon" : "square.2.layers.3d.fill",
+  "icon" : "keyboard.fill",
   "author" : null,
   "version" : "1.0.0"
 }

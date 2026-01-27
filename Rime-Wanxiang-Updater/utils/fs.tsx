@@ -5,7 +5,6 @@ import { Runtime } from "./runtime"
 export type CopyOptions = {
   excludePatterns: string[]
   overwritePolicy: "overwrite" | "keepExisting"
-  onFile?: (info: { src: string; dst: string; skipped: boolean }) => void
 }
 
 function fmOrThrow() {
@@ -51,6 +50,18 @@ async function isDirectory(p: string): Promise<boolean> {
   const fm = fmOrThrow()
   if (typeof fm.isDirectory === "function") return !!(await fm.isDirectory(p))
   if (typeof fm.isDir === "function") return !!(await fm.isDir(p))
+  if (typeof fm.stat === "function") {
+    try {
+      const st = await fm.stat(p)
+      if (st && typeof st.type === "string") return st.type === "directory"
+    } catch {}
+  }
+  if (typeof fm.statSync === "function") {
+    try {
+      const st = fm.statSync(p)
+      if (st && typeof st.type === "string") return st.type === "directory"
+    } catch {}
+  }
   return false
 }
 
@@ -129,7 +140,6 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
         matchAny(rel, patterns) ||
         matchAny(src, patterns)
       if (excluded) {
-        opts.onFile?.({ src, dst, skipped: true })
         continue
       }
 
@@ -146,7 +156,6 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
 
       const dstExists = await exists(dst)
       if (dstExists && opts.overwritePolicy === "keepExisting") {
-        opts.onFile?.({ src, dst, skipped: true })
         continue
       }
 
@@ -156,7 +165,6 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
       }
 
       await copy(src, dst)
-      opts.onFile?.({ src, dst, skipped: false })
     }
   }
 
@@ -166,7 +174,7 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
 export async function unzipToDirWithOverwrite(
   zipPath: string,
   destDir: string,
-  opts?: { excludePatterns?: string[] }
+  opts?: { excludePatterns?: string[]; flattenSingleDir?: boolean }
 ) {
   const fm = fmOrThrow()
   if (typeof fm.unzip !== "function") throw new Error("FileManager.unzip 不可用")
@@ -178,15 +186,49 @@ export async function unzipToDirWithOverwrite(
     await ensureDir(tmpDir)
     await fm.unzip(zipPath, tmpDir)
     const children = await list(tmpDir)
-    let srcRoot = tmpDir
-    if (children.length === 1) {
-      const only = Path.join(tmpDir, children[0])
-      if (await isDirectory(only)) srcRoot = only
+    const isIgnorable = (name: string) =>
+      name === "__MACOSX" || name === ".DS_Store"
+    const visible = children.filter((name) => name && !isIgnorable(name))
+
+    const patterns = compilePatterns(opts?.excludePatterns ?? [])
+    const shouldSkip = (name: string, rel: string, src: string) =>
+      matchAny(name, patterns) || matchAny(rel, patterns) || matchAny(src, patterns)
+
+    const dirs: string[] = []
+    const files: string[] = []
+    for (const name of visible) {
+      const full = Path.join(tmpDir, name)
+      if (await isDirectory(full)) dirs.push(name)
+      else files.push(name)
     }
-    await copyDirWithPolicy(srcRoot, destDir, {
-      excludePatterns: opts?.excludePatterns ?? [],
-      overwritePolicy: "overwrite",
-    })
+
+    if (opts?.flattenSingleDir && dirs.length === 1) {
+      for (const name of files) {
+        const src = Path.join(tmpDir, name)
+        const dst = Path.join(destDir, name)
+        if (shouldSkip(name, name, src)) continue
+        await ensureDir(Path.dirname(dst))
+        if (await exists(dst)) {
+          try { await remove(dst) } catch {}
+        }
+        await copy(src, dst)
+      }
+      const srcRoot = Path.join(tmpDir, dirs[0])
+      await copyDirWithPolicy(srcRoot, destDir, {
+        excludePatterns: opts?.excludePatterns ?? [],
+        overwritePolicy: "overwrite",
+      })
+    } else {
+      let srcRoot = tmpDir
+      if (visible.length === 1) {
+        const only = Path.join(tmpDir, visible[0])
+        if (await isDirectory(only)) srcRoot = only
+      }
+      await copyDirWithPolicy(srcRoot, destDir, {
+        excludePatterns: opts?.excludePatterns ?? [],
+        overwritePolicy: "overwrite",
+      })
+    }
   } finally {
     await removeDirSafe(tmpDir)
   }
@@ -196,4 +238,80 @@ export async function removeDirSafe(dir: string) {
   try {
     if (await exists(dir)) await remove(dir)
   } catch {}
+}
+
+export async function flattenSingleSubdir(
+  parentDir: string,
+  opts?: { excludePatterns?: string[]; namePattern?: RegExp }
+): Promise<boolean> {
+  if (!(await exists(parentDir))) return false
+  const children = await list(parentDir)
+  const isIgnorable = (name: string) =>
+    name === "__MACOSX" || name === ".DS_Store"
+  const visible = children.filter((name) => name && !isIgnorable(name))
+
+  const dirs: string[] = []
+  for (const name of visible) {
+    const full = Path.join(parentDir, name)
+    if (await isDirectory(full)) dirs.push(name)
+  }
+
+  if (dirs.length !== 1) return false
+  if (opts?.namePattern && !opts.namePattern.test(dirs[0])) return false
+
+  const srcRoot = Path.join(parentDir, dirs[0])
+  await copyDirWithPolicy(srcRoot, parentDir, {
+    excludePatterns: opts?.excludePatterns ?? [],
+    overwritePolicy: "overwrite",
+  })
+
+  await removeDirSafe(srcRoot)
+  return true
+}
+
+async function hasExcludedMatch(dir: string, patterns: RegExp[]): Promise<boolean> {
+  const items = await list(dir)
+  for (const name of items) {
+    if (!name || name === "." || name === "..") continue
+    const full = Path.join(dir, name)
+    const rel = full.startsWith(dir) ? full.slice(dir.length + 1) : name
+    if (matchAny(name, patterns) || matchAny(rel, patterns) || matchAny(full, patterns)) {
+      return true
+    }
+    if (await isDirectory(full)) {
+      if (await hasExcludedMatch(full, patterns)) return true
+    }
+  }
+  return false
+}
+
+export async function mergeSubdirsByName(
+  parentDir: string,
+  opts?: { excludePatterns?: string[]; namePattern?: RegExp }
+): Promise<number> {
+  if (!(await exists(parentDir))) return 0
+  const children = await list(parentDir)
+  const isIgnorable = (name: string) =>
+    name === "__MACOSX" || name === ".DS_Store"
+  const patterns = compilePatterns(opts?.excludePatterns ?? [])
+
+  let merged = 0
+  for (const name of children) {
+    if (!name || isIgnorable(name)) continue
+    const full = Path.join(parentDir, name)
+    if (!(await isDirectory(full))) continue
+    if (opts?.namePattern && !opts.namePattern.test(name)) continue
+
+    await copyDirWithPolicy(full, parentDir, {
+      excludePatterns: opts?.excludePatterns ?? [],
+      overwritePolicy: "overwrite",
+    })
+
+    const keepDir = patterns.length ? await hasExcludedMatch(full, patterns) : false
+    if (!keepDir) {
+      await removeDirSafe(full)
+    }
+    merged += 1
+  }
+  return merged
 }
