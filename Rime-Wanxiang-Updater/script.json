@@ -1,39 +1,39 @@
 {
-  "runInApp" : false,
-  "localizedNames" : {
-    "it" : "",
-    "en" : "",
-    "zh" : "",
-    "de" : "",
-    "fr" : "",
-    "ru" : "",
-    "es" : "",
-    "pt" : "",
-    "ja" : ""
+  "runInApp": false,
+  "localizedNames": {
+    "it": "",
+    "en": "",
+    "zh": "",
+    "de": "",
+    "fr": "",
+    "ru": "",
+    "es": "",
+    "pt": "",
+    "ja": ""
   },
-  "remoteResource" : null,
-  "iconImage" : null,
-  "intentInputTypes" : [
-
-  ],
-  "contributors" : [
-
-  ],
-  "description" : "",
-  "localizedDescriptions" : {
-    "it" : "",
-    "en" : "",
-    "zh" : "",
-    "de" : "",
-    "fr" : "",
-    "ru" : "",
-    "es" : "",
-    "pt" : "",
-    "ja" : ""
+  "iconImage": null,
+  "intentInputTypes": [],
+  "contributors": [],
+  "description": "",
+  "localizedDescriptions": {
+    "it": "",
+    "en": "",
+    "zh": "",
+    "de": "",
+    "fr": "",
+    "ru": "",
+    "es": "",
+    "pt": "",
+    "ja": ""
   },
-  "name" : "Rime-Wanxiang-Updater",
-  "color" : "rgba(238, 92, 98,1)",
-  "icon" : "keyboard.fill",
-  "author" : null,
-  "version" : "1.0.0"
+  "name": "Rime-Wanxiang-Updater",
+  "color": "rgba(238, 92, 98,1)",
+  "icon": "keyboard.fill",
+  "remoteResource": {
+    "hash": "",
+    "autoUpdateInterval": null,
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Rime-Wanxiang-Updater.zip"
+  },
+  "author": "BlackCCCat",
+  "version": "1.0.0"
 }
