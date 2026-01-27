@@ -1,0 +1,45 @@
+name: Zip Folders On Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  zip-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create zip archives for each top-level folder
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+
+          for dir in */; do
+            folder="${dir%/}"
+
+            # Skip metadata and build output folders if present.
+            if [[ "$folder" == ".github" || "$folder" == "dist" ]]; then
+              continue
+            fi
+
+            echo "Zipping $folder -> dist/${folder}.zip"
+            zip -r "dist/${folder}.zip" "$folder"
+          done
+
+          echo "Generated archives:"
+          ls -lh dist
+
+      - name: Upload archives to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
