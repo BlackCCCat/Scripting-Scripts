@@ -47,8 +47,8 @@ const PRO_KEYS: ProSchemeKey[] = [
   "shouyou",
 ];
 const INPUT_METHODS: { label: string; value: InputMethod }[] = [
-  { label: "仓输入法", value: "cang" },
-  { label: "元书输入法", value: "yushu" },
+  { label: "仓输入法", value: "hamster" },
+  { label: "元书输入法", value: "hamster3" },
 ];
 
 function CenterRowButton(props: {
@@ -372,6 +372,17 @@ export function SettingsView(props: {
                 </Text>
               ))}
             </Picker>
+          </Section>
+
+          <Section header={<Text>更新设置</Text>}>
+            <Toggle
+              title={"启动时自动检查更新"}
+              value={cfg.autoCheckOnLaunch}
+              onChanged={(v: boolean) =>
+                setCfg((c) => ({ ...c, autoCheckOnLaunch: v }))
+              }
+              toggleStyle="switch"
+            />
           </Section>
 
           <Section header={<Text>排除文件（按行）</Text>}>
