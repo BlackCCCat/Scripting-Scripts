@@ -1,39 +1,43 @@
 {
-  "runInApp": false,
-  "localizedNames": {
-    "it": "",
-    "en": "",
-    "zh": "",
-    "de": "",
-    "fr": "",
-    "ru": "",
-    "es": "",
-    "pt": "",
-    "ja": ""
-  },
-  "iconImage": null,
   "intentInputTypes": [],
-  "contributors": [],
-  "description": "",
-  "localizedDescriptions": {
-    "it": "",
-    "en": "",
-    "zh": "",
+  "version": "1.0.3",
+  "runInApp": false,
+  "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/wanxiang_logo.PNG",
+  "localizedNames": {
     "de": "",
-    "fr": "",
-    "ru": "",
+    "it": "",
     "es": "",
+    "zh": "",
     "pt": "",
-    "ja": ""
+    "ja": "",
+    "en": "",
+    "ru": "",
+    "fr": ""
   },
-  "name": "Rime-Wanxiang-Updater",
-  "color": "rgba(238, 92, 98,1)",
+  "author": {
+    "name": "BlackCCCat",
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat"
+  },
+  "name": "万象下载更新",
   "icon": "keyboard.fill",
+  "contributors": [],
+  "description": "万象方案下载更新",
+  "color": "rgba(238, 92, 98,1)",
   "remoteResource": {
-    "hash": "",
-    "autoUpdateInterval": null,
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Rime-Wanxiang-Updater.zip"
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Rime-Wanxiang-Updater.zip",
+    "hash": "a0a30a4ba92a83e0993c41e7dcd84853",
+    "autoUpdateInterval": null
   },
-  "author": "BlackCCCat",
-  "version": "1.0.2"
+  "localizedDescriptions": {
+    "en": "",
+    "pt": "",
+    "zh": "",
+    "ja": "",
+    "it": "",
+    "de": "",
+    "es": "",
+    "fr": "",
+    "ru": ""
+  }
 }
