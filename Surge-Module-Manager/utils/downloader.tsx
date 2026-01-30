@@ -1,11 +1,7 @@
+import { Path } from "scripting"
 import { moduleFilePath, ensureStorage, type ModuleInfo } from "./storage"
 import { loadConfig } from "./config"
-
-function fetchOrThrow(): any {
-  const fetchFn: any = (globalThis as any).fetch
-  if (typeof fetchFn !== "function") throw new Error("fetch 不可用，无法下载")
-  return fetchFn
-}
+import { downloadWithProgress } from "./stream_downloader"
 
 function injectNameFlag(content: string): string {
   if (content.includes("🔗")) return content
@@ -42,21 +38,25 @@ function injectUrl(content: string, url?: string): string {
 export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; message?: string }> {
   await ensureStorage()
 
-  const fetchFn = fetchOrThrow()
-  const res = await fetchFn(info.link)
-  const status = typeof res?.status === "number" ? res.status : 0
-  if (status === 404) {
-    return { ok: false, message: `模块不存在（404）: ${info.link}` }
+  const fm: any = (globalThis as any).FileManager
+  if (!fm?.readAsString || !fm?.writeAsString) {
+    throw new Error("FileManager 读写方法不可用")
   }
-  if (status && status >= 400) {
-    return { ok: false, message: `下载失败（${status}）: ${info.link}` }
+
+  const tmpDir = fm.temporaryDirectory ?? Path.join(Path.dirname(moduleFilePath(info.name)), ".tmp")
+  const tmpPath = Path.join(tmpDir, `${info.name}_${Date.now()}.tmp`)
+
+  try {
+    await downloadWithProgress(info.link, tmpPath)
+  } catch (e: any) {
+    return { ok: false, message: `下载失败: ${String(e?.message ?? e)}` }
   }
 
   let text = ""
   try {
-    text = await res.text()
+    text = await fm.readAsString(tmpPath)
   } catch (e: any) {
-    return { ok: false, message: `读取响应失败: ${String(e?.message ?? e)}` }
+    return { ok: false, message: `读取文件失败: ${String(e?.message ?? e)}` }
   }
 
   if (!text) {
@@ -67,10 +67,13 @@ export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; m
   content = injectUrl(content, info.link)
   content = injectCategory(content, info.category)
 
-  const fm: any = (globalThis as any).FileManager
-  if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
   const path = moduleFilePath(info.name)
   await fm.writeAsString(path, content)
+
+  try {
+    if (typeof fm.remove === "function") await fm.remove(tmpPath)
+    else if (typeof fm.removeSync === "function") fm.removeSync(tmpPath)
+  } catch {}
 
   return { ok: true }
 }
