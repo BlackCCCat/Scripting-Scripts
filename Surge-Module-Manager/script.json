@@ -1,0 +1,43 @@
+{
+  "name": "Surge模块管理",
+  "description": "",
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Surge-Module-Manager.zip",
+    "hash": "",
+    "autoUpdateInterval": null
+  },
+  "localizedNames": {
+    "de": "",
+    "ja": "",
+    "es": "",
+    "fr": "",
+    "it": "",
+    "pt": "",
+    "zh": "",
+    "en": "",
+    "ru": ""
+  },
+  "icon": "square.grid.2x2.fill",
+  "contributors": [],
+  "color": "rgba(28, 140, 255,1)",
+  "intentInputTypes": [],
+  "localizedDescriptions": {
+    "en": "",
+    "ru": "",
+    "pt": "",
+    "fr": "",
+    "de": "",
+    "zh": "",
+    "ja": "",
+    "it": "",
+    "es": ""
+  },
+  "iconImage": "",
+  "runInApp": false,
+  "author": {
+    "email": null,
+    "name": "BlackCCCat",
+    "homepage": "https:\/\/github.com\/BlackCCCat"
+  },
+  "version": "1.0.3"
+}
