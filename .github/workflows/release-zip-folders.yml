@@ -24,8 +24,8 @@ jobs:
           for dir in */; do
             folder="${dir%/}"
 
-            # Skip metadata and build output folders if present.
-            if [[ "$folder" == ".github" || "$folder" == "dist" ]]; then
+            # Skip metadata, build output, and src folders if present.
+            if [[ "$folder" == ".github" || "$folder" == "dist" || "$folder" == "src" ]]; then
               continue
             fi
 
