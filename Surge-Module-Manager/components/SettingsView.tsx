@@ -246,6 +246,18 @@ export function SettingsView(props: {
             ) : null}
           </Section>
 
+          <Section header={<Text>链接格式</Text>}>
+            <TextField
+              label={<Text>前缀</Text>}
+              value={cfg.linkPatternsText}
+              onChanged={(v: string) => setCfg((c) => ({ ...c, linkPatternsText: v }))}
+              axis="vertical"
+              lineLimit={{ min: 3, max: 6 }}
+              prompt={"例如：\n#!url=\n#SUBSCRIBED \n每行一个，按顺序优先匹配"}
+              textFieldStyle="roundedBorder"
+            />
+          </Section>
+
           <Section header={<Text>分类列表</Text>}>
             {cfg.categories.length === 0 ? (
               <Text>暂无分类</Text>

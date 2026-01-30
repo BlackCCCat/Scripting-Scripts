@@ -76,6 +76,25 @@ function parseTag(content: string, key: string): string | undefined {
   return m?.[1]?.trim()
 }
 
+function getLinkPrefixes(): string[] {
+  const cfg = loadConfig()
+  const raw = String(cfg.linkPatternsText ?? "").split(/\r?\n/g)
+  return raw.map((s) => s.trim()).filter(Boolean)
+}
+
+function parseLinkFromContent(content: string, prefixes: string[]): string {
+  const lines = String(content ?? "").split(/\r?\n/g)
+  for (const lineRaw of lines) {
+    const line = lineRaw.trimStart()
+    for (const prefix of prefixes) {
+      if (line.startsWith(prefix)) {
+        return line.slice(prefix.length).trim()
+      }
+    }
+  }
+  return ""
+}
+
 async function listModuleFiles(dir: string): Promise<string[]> {
   const fm = fmOrThrow()
   const list = await fm.readDirectory(dir)
@@ -105,7 +124,7 @@ export async function loadModules(): Promise<ModuleInfo[]> {
     } catch {
       text = ""
     }
-    const link = parseTag(text, "url") ?? ""
+    const link = parseLinkFromContent(text, getLinkPrefixes())
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
     modules.push({ name, link, category })
   }
@@ -158,13 +177,25 @@ function upsertTag(content: string, key: string, value?: string): string {
   return `${line}\n${content}`
 }
 
+function upsertLink(content: string, prefixes: string[], value?: string): string {
+  const trimmed = String(value ?? "").trim()
+  if (!trimmed) return content
+  const first = prefixes[0] ?? "#url="
+  const lines = String(content ?? "").split(/\r?\n/g)
+  const filtered = lines.filter((line) => {
+    const t = line.trimStart()
+    return !prefixes.some((p) => t.startsWith(p))
+  })
+  return `${first}${trimmed}\n${filtered.join("\n")}`
+}
+
 export async function updateModuleMetadata(moduleName: string, info: { link?: string; category?: string }) {
   const fm = fmOrThrow()
   const path = moduleFilePath(moduleName)
   if (!(await exists(path))) return
   const raw = await fm.readAsString(path)
   let content = String(raw ?? "")
-  content = upsertTag(content, "url", info.link)
+  content = upsertLink(content, getLinkPrefixes(), info.link)
   content = upsertTag(content, "category", info.category)
   await fm.writeAsString(path, content)
 }

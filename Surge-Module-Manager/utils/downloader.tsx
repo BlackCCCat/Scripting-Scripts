@@ -1,4 +1,5 @@
 import { moduleFilePath, ensureStorage, type ModuleInfo } from "./storage"
+import { loadConfig } from "./config"
 
 function fetchOrThrow(): any {
   const fetchFn: any = (globalThis as any).fetch
@@ -24,11 +25,18 @@ function injectCategory(content: string, category?: string): string {
 function injectUrl(content: string, url?: string): string {
   const u = String(url ?? "").trim()
   if (!u) return content
-  const line = `#!url=${u}`
-  if (/^\s*#!\s*url\s*=.*$/im.test(content)) {
-    return content.replace(/^\s*#!\s*url\s*=.*$/im, line)
-  }
-  return `${line}\n${content}`
+  const cfg = loadConfig()
+  const prefixes = String(cfg.linkPatternsText ?? "")
+    .split(/\r?\n/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const first = prefixes[0] ?? "#url="
+  const lines = String(content ?? "").split(/\r?\n/g)
+  const filtered = lines.filter((line) => {
+    const t = line.trimStart()
+    return !prefixes.some((p) => t.startsWith(p))
+  })
+  return `${first}${u}\n${filtered.join("\n")}`
 }
 
 export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; message?: string }> {

@@ -201,7 +201,16 @@ export function HomeView() {
         await Dialog.alert({ message: "模块内容为空或读取失败" })
         return
       }
-      await QuickLook.previewText(text, true)
+      const controller = new (globalThis as any).EditorController({
+        content: String(text),
+        ext: "txt",
+        readOnly: true,
+      })
+      try {
+        await controller.present({ navigationTitle: target.name, fullscreen: true })
+      } finally {
+        controller.dispose()
+      }
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) })
     }
