@@ -4,6 +4,7 @@ import {
   Form,
   Navigation,
   NavigationStack,
+  EmptyView,
   List,
   Section,
   Text,
@@ -304,15 +305,13 @@ export function EditModuleView(props: {
                   <Button title="清除" action={() => setFilterText("")} />
                 </HStack>
               ) : null}
-              <List
-                listStyle="plain"
-                frame={{ height: 360 }}
-              >
+              <List listStyle="plain" frame={{ height: 360 }}>
                 {shownItems.map((item) => {
                   const existed = existingLinks.has(item.link)
                   return (
                     <VStack
                       key={item.link}
+                      listRowBackground={<EmptyView />}
                       contextMenu={{
                         menuItems: (
                           <Group>
