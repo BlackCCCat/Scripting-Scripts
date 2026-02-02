@@ -1,0 +1,43 @@
+{
+  "contributors": [],
+  "localizedDescriptions": {
+    "en": "",
+    "it": "",
+    "es": "",
+    "pt": "",
+    "ru": "",
+    "de": "",
+    "zh": "",
+    "ja": "",
+    "fr": ""
+  },
+  "localizedNames": {
+    "it": "",
+    "de": "",
+    "fr": "",
+    "zh": "",
+    "pt": "",
+    "en": "",
+    "ja": "",
+    "ru": "",
+    "es": ""
+  },
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Calendar-Tomato-Logger.zip",
+    "hash": "",
+    "autoUpdateInterval": null
+  },
+  "runInApp": false,
+  "author": {
+    "email": null,
+    "name": "BlackCCCat",
+    "homepage": "https:\/\/github.com\/BlackCCCat"
+  },
+  "icon": "calendar.badge.clock",
+  "intentInputTypes": [],
+  "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/CalendarTomatoLogger2.png",
+  "name": "日历番茄钟",
+  "color": "rgba(252, 124, 93,1)",
+  "version": "",
+  "description": ""
+}
