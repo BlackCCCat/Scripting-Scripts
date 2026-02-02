@@ -6,7 +6,6 @@ async function run() {
     element: <CalendarTimerView />,
     modalPresentationStyle: "fullScreen",
   })
-  Script.exit()
 }
 
 run()
