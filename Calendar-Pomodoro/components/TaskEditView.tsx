@@ -1,5 +1,6 @@
 import {
   Button,
+  DisclosureGroup,
   Form,
   HStack,
   Navigation,
@@ -12,11 +13,13 @@ import {
   Toggle,
   VStack,
   useEffect,
+  useRef,
   useState,
 } from "scripting"
 
 import { COUNTDOWN_OPTIONS, NOTIFICATION_INTERVAL_OPTIONS } from "../constants"
 import type { Task } from "../types"
+import { loadSettings, saveSettings, type AppSettings } from "../utils/settings"
 
 function newTaskId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
@@ -46,11 +49,15 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
   const dismiss = Navigation.useDismiss()
   const [name, setName] = useState(props.initial?.name ?? "")
   const [sources, setSources] = useState<CalendarSource[]>([])
-  const [sourceIdx, setSourceIdx] = useState(0)
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([])
+  const [sourcesExpanded, setSourcesExpanded] = useState(false)
   const [calendars, setCalendars] = useState<Calendar[]>([])
   const [calendarIdx, setCalendarIdx] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const selectionInitRef = useRef(false)
+  const initialSourceInjectedRef = useRef(false)
   const [useCountdown, setUseCountdown] = useState(Boolean(props.initial?.useCountdown ?? false))
   const [useNotification, setUseNotification] = useState(
     Boolean(props.initial?.useNotification ?? false)
@@ -68,28 +75,31 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
 
   useEffect(() => {
     void loadSources()
+    void loadAppSettings()
   }, [])
 
   useEffect(() => {
     if (!sources.length) return
-    if (!props.initial?.calendarId) return
-    void (async () => {
-      try {
-        const list = await Calendar.forEvents()
-        const found = list.find((c) => c.identifier === props.initial?.calendarId)
-        const sourceId = found?.source?.identifier
-        if (!sourceId) return
-        const idx = sources.findIndex((s) => s.identifier === sourceId)
-        if (idx >= 0) setSourceIdx(idx + 1)
-      } catch {
-        // ignore
-      }
-    })()
-  }, [sources, props.initial?.calendarId])
+    if (!settings) return
+    if (selectionInitRef.current) return
+    const savedIds = settings.selectedCalendarSourceIds ?? []
+    const availableIds = sources.map((src) => src.identifier)
+    const initialIds =
+      savedIds.length > 0
+        ? savedIds.filter((id) => availableIds.includes(id))
+        : availableIds
+    selectionInitRef.current = true
+    setSelectedSourceIds(initialIds)
+  }, [sources, settings])
+
+  useEffect(() => {
+    if (!selectionInitRef.current || !settings) return
+    void saveSettings({ ...settings, selectedCalendarSourceIds: selectedSourceIds })
+  }, [selectedSourceIds, settings])
 
   useEffect(() => {
     void loadCalendars()
-  }, [sourceIdx, sources.length])
+  }, [selectedSourceIds, sources.length])
 
   useEffect(() => {
     if (!calendars.length) return
@@ -102,6 +112,25 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
     }
     setCalendarIdx((idx) => (idx >= 0 && idx < calendars.length ? idx : 0))
   }, [calendars, props.initial?.calendarId])
+
+  useEffect(() => {
+    if (initialSourceInjectedRef.current) return
+    if (!props.initial?.calendarId) return
+    if (!sources.length) return
+    void (async () => {
+      try {
+        const list = await Calendar.forEvents()
+        const found = list.find((c) => c.identifier === props.initial?.calendarId)
+        const sourceId = found?.source?.identifier
+        if (!sourceId) return
+        if (!selectedSourceIds.includes(sourceId)) {
+          setSelectedSourceIds((prev) => [...prev, sourceId])
+        }
+      } finally {
+        initialSourceInjectedRef.current = true
+      }
+    })()
+  }, [props.initial?.calendarId, sources, selectedSourceIds])
 
   async function loadSources() {
     try {
@@ -116,19 +145,59 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
     }
   }
 
+  async function loadAppSettings() {
+    try {
+      const data = await loadSettings()
+      setSettings(data)
+    } catch {
+      setSettings({
+        showMarkdown: true,
+        selectedCalendarSourceIds: [],
+      })
+    }
+  }
+
   async function loadCalendars() {
     try {
       setLoading(true)
       setError("")
-      const targetSource = sourceIdx > 0 ? sources[sourceIdx - 1] : null
-      const list = targetSource ? await targetSource.getCalendars("event") : await Calendar.forEvents()
-      const writable = (list ?? []).filter((c) => c.isForEvents && c.allowsContentModifications)
+      if (!selectedSourceIds.length) {
+        setCalendars([])
+        return
+      }
+      const selectedSources = sources.filter((src) => selectedSourceIds.includes(src.identifier))
+      const lists = await Promise.all(
+        selectedSources.map((src) => src.getCalendars("event"))
+      )
+      const merged = (lists ?? []).flat().filter(Boolean)
+      const seen = new Set<string>()
+      const unique = merged.filter((cal) => {
+        if (!cal?.identifier) return false
+        if (seen.has(cal.identifier)) return false
+        seen.add(cal.identifier)
+        return true
+      })
+      const writable = unique.filter((c) => c.isForEvents && c.allowsContentModifications)
       setCalendars(writable)
     } catch (e: any) {
       setError(String(e?.message ?? e))
     } finally {
       setLoading(false)
     }
+  }
+
+  async function toggleSource(sourceId: string, enabled: boolean) {
+    if (!enabled && selectedSourceIds.length <= 1 && selectedSourceIds.includes(sourceId)) {
+      await Dialog.alert({ message: "至少选择一个日历账户" })
+      return
+    }
+    setSelectedSourceIds((prev) => {
+      if (enabled) {
+        if (prev.includes(sourceId)) return prev
+        return [...prev, sourceId]
+      }
+      return prev.filter((id) => id !== sourceId)
+    })
   }
 
   async function onSave() {
@@ -176,27 +245,35 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
               prompt="例如：读书"
             />
 
-            {loading ? <Text>日历加载中...</Text> : null}
-            {error ? <Text>{error}</Text> : null}
 
-            {sources.length ? (
-              <Picker
-                title="日历账户"
-                pickerStyle="menu"
-                value={sourceIdx}
-                onChanged={(idx: number) => {
-                  setSourceIdx(idx)
-                  setCalendarIdx(0)
-                }}
-              >
-                <Text tag={0}>全部账户</Text>
-                {sources.map((src, idx) => (
-                  <Text key={src.identifier} tag={idx + 1}>
-                    {src.title}
+            <DisclosureGroup
+              label={(
+                <HStack>
+                  <Text>日历账户</Text>
+                  <Spacer />
+                  <Text foregroundStyle="secondaryLabel">
+                    已选 {selectedSourceIds.length}/{sources.length}
                   </Text>
-                ))}
-              </Picker>
-            ) : null}
+                </HStack>
+              )}
+              isExpanded={sourcesExpanded}
+              onChanged={(value: boolean) => setSourcesExpanded(value)}
+            >
+              {sources.length ? (
+                sources.map((src) => (
+                  <Toggle
+                    key={src.identifier}
+                    value={selectedSourceIds.includes(src.identifier)}
+                    onChanged={(value: boolean) => void toggleSource(src.identifier, value)}
+                    toggleStyle="switch"
+                  >
+                    <Text>{src.title}</Text>
+                  </Toggle>
+                ))
+              ) : (
+                <Text foregroundStyle="secondaryLabel">暂无日历账户</Text>
+              )}
+            </DisclosureGroup>
 
             {calendars.length ? (
               <Picker

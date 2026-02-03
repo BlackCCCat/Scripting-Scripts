@@ -3,12 +3,14 @@ import { BASE_DIR_NAME } from "../constants"
 
 export type AppSettings = {
   showMarkdown: boolean
+  selectedCalendarSourceIds: string[]
 }
 
 const SETTINGS_FILE_NAME = "settings.json"
 
 const DEFAULT_SETTINGS: AppSettings = {
   showMarkdown: true,
+  selectedCalendarSourceIds: [],
 }
 
 function fmOrThrow(): any {
@@ -64,8 +66,12 @@ export async function loadSettings(): Promise<AppSettings> {
   try {
     const raw = await fm.readAsString(path)
     const data = JSON.parse(String(raw ?? ""))
+    const selectedCalendarSourceIds = Array.isArray(data?.selectedCalendarSourceIds)
+      ? data.selectedCalendarSourceIds.filter((item: any) => typeof item === "string")
+      : DEFAULT_SETTINGS.selectedCalendarSourceIds
     return {
       showMarkdown: typeof data?.showMarkdown === "boolean" ? data.showMarkdown : DEFAULT_SETTINGS.showMarkdown,
+      selectedCalendarSourceIds,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

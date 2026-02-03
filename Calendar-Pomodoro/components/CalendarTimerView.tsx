@@ -26,7 +26,7 @@ import { COUNTDOWN_OPTIONS, COUNT_UP_WINDOW_MS, NOTIFICATION_INTERVAL_OPTIONS } 
 import { registerTimerActivity } from "../live_activity_ui"
 import type { Task, TimerActivityState } from "../types"
 import { loadTasks, saveTasks } from "../utils/storage"
-import { loadSettings, saveSettings } from "../utils/settings"
+import { loadSettings, saveSettings, type AppSettings } from "../utils/settings"
 import { formatDateTime, formatDuration } from "../utils/time"
 import { TaskEditView } from "./TaskEditView"
 
@@ -47,6 +47,7 @@ export function CalendarTimerView() {
   const [showMarkdown, setShowMarkdown] = useState(true)
   const timerIdRef = useRef<number | null>(null)
   const settingsLoadedRef = useRef(false)
+  const settingsRef = useRef<AppSettings | null>(null)
   const activityRef = useRef<LiveActivity<TimerActivityState> | null>(null)
   const stoppingRef = useRef(false)
   const noteSaveTimerRef = useRef<number | null>(null)
@@ -92,7 +93,10 @@ export function CalendarTimerView() {
 
   useEffect(() => {
     if (!settingsLoadedRef.current) return
-    void saveSettings({ showMarkdown })
+    const current = settingsRef.current ?? { showMarkdown, selectedCalendarSourceIds: [] }
+    const next = { ...current, showMarkdown }
+    settingsRef.current = next
+    void saveSettings(next)
   }, [showMarkdown])
 
   useEffect(() => {
@@ -160,6 +164,7 @@ export function CalendarTimerView() {
     try {
       const settings = await loadSettings()
       settingsLoadedRef.current = true
+      settingsRef.current = settings
       setShowMarkdown(settings.showMarkdown)
     } catch {
       settingsLoadedRef.current = true
