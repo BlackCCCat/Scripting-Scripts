@@ -36,6 +36,8 @@ import type { Task, TimerActivityState } from "../types"
 import { loadTasks, saveTasks } from "../utils/storage"
 // 本地持久化（设置）
 import { loadSettings, saveSettings, type AppSettings } from "../utils/settings"
+// 本地持久化（计时会话）
+import { clearSession, loadSession, saveSession, type TimerSession } from "../utils/session"
 // 时间格式化工具
 import { formatDateTime, formatDuration } from "../utils/time"
 // 任务新增/编辑页面
@@ -72,12 +74,22 @@ export function CalendarTimerView() {
   const activityRef = useRef<LiveActivity<TimerActivityState> | null>(null)
   const stoppingRef = useRef(false)
   const noteSaveTimerRef = useRef<number | null>(null)
+  const tasksLoadedRef = useRef(false)
+  const restoreDoneRef = useRef(false)
 
   useEffect(() => {
     // 首次进入：加载任务与设置
     void refreshTasks()
     void loadAppSettings()
   }, [])
+
+  useEffect(() => {
+    // 任务加载完成后尝试恢复计时会话
+    if (!tasksLoadedRef.current) return
+    if (restoreDoneRef.current) return
+    restoreDoneRef.current = true
+    void restoreSessionIfNeeded()
+  }, [tasks])
 
   // 根据 activeTaskId 取出当前任务
   const activeTask = useMemo(() => {
@@ -186,13 +198,82 @@ export function CalendarTimerView() {
     }
   }
 
+  async function persistSessionState(next: TimerSession | null) {
+    try {
+      if (!next) {
+        await clearSession()
+        return
+      }
+      await saveSession(next)
+    } catch {
+      // ignore session persistence errors
+    }
+  }
+
   async function refreshTasks() {
     // 读取已保存的任务列表
     try {
       const list = await loadTasks()
       setTasks(list)
+      tasksLoadedRef.current = true
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) })
+    }
+  }
+
+  async function restoreSessionIfNeeded() {
+    try {
+      const session = await loadSession()
+      if (!session) return
+      const task = tasks.find((t) => t.id === session.taskId)
+      if (!task) {
+        await clearSession()
+        return
+      }
+
+      const now = new Date()
+      const sessionStart = new Date(session.sessionStartAt)
+      const segmentStart = session.segmentStartAt ? new Date(session.segmentStartAt) : null
+      const elapsed = session.running && segmentStart
+        ? session.accumulatedMs + (now.getTime() - segmentStart.getTime())
+        : session.accumulatedMs
+
+      setActiveTaskId(task.id)
+      setSessionStartAt(sessionStart)
+      setAccumulatedMs(session.accumulatedMs)
+      setElapsedMs(elapsed)
+      setRunning(session.running)
+      setPaused(session.paused)
+      setSegmentStartAt(session.running ? segmentStart : null)
+
+      const calendar = await resolveCalendar(task)
+      if (calendar) setActiveCalendar(calendar)
+
+      if (session.activityId) {
+        const existing = await LiveActivity.from<TimerActivityState>(
+          session.activityId,
+          "calendar-loger-timer"
+        )
+        if (existing) {
+          activityRef.current = existing
+          const state = await existing.getActivityState()
+          if (state === "dismissed" || state === "ended") {
+            activityRef.current = null
+          } else {
+            await updateLiveActivity(task, now, elapsed, session.paused ? now : undefined)
+            return
+          }
+        }
+      }
+
+      if (session.running || session.paused) {
+        const activityId = await startLiveActivity(task, now, elapsed)
+        if (activityId) {
+          await saveSession({ ...session, activityId })
+        }
+      }
+    } catch {
+      // ignore restore errors
     }
   }
 
@@ -378,21 +459,26 @@ export function CalendarTimerView() {
     return activityRef.current
   }
 
-  async function startLiveActivity(task: Task, now: Date, elapsed: number) {
+  async function startLiveActivity(task: Task, now: Date, elapsed: number): Promise<string | null> {
     // 启动 Live Activity
     const activity = await ensureLiveActivity(true)
-    if (!activity) return
-    await activity.start(buildActivityState(task, now, elapsed), {
+    if (!activity) return null
+    const ok = await activity.start(buildActivityState(task, now, elapsed), {
       relevanceScore: 1,
-      staleDate: new Date(now.getTime() + 1000 * 60 * 60 * 6),
+      // 适当延长 staleDate，避免出现加载占位
+      staleDate: new Date(now.getTime() + 1000 * 60 * 60 * 24),
     })
+    if (!ok) return null
+    return activity.activityId ?? null
   }
 
   async function updateLiveActivity(task: Task, now: Date, elapsed: number, pausedAt?: Date) {
     // 更新 Live Activity 状态（暂停/继续/计时）
     const activity = await ensureLiveActivity()
     if (!activity || !activity.started) return
-    await activity.update(buildActivityState(task, now, elapsed, pausedAt))
+    await activity.update(buildActivityState(task, now, elapsed, pausedAt), {
+      staleDate: new Date(now.getTime() + 1000 * 60 * 60 * 24),
+    })
   }
 
   async function endLiveActivity(task: Task, now: Date, elapsed: number) {
@@ -424,7 +510,21 @@ export function CalendarTimerView() {
       setSegmentStartAt(resumeAt)
       setRunning(true)
       setPaused(false)
-      await updateLiveActivity(task, resumeAt, accumulatedMs)
+      let activityId = activityRef.current?.activityId
+      if (activityRef.current?.started) {
+        await updateLiveActivity(task, resumeAt, accumulatedMs)
+      } else {
+        activityId = await startLiveActivity(task, resumeAt, accumulatedMs)
+      }
+      await persistSessionState({
+        taskId: task.id,
+        sessionStartAt: sessionStartAt.getTime(),
+        segmentStartAt: resumeAt.getTime(),
+        accumulatedMs,
+        running: true,
+        paused: false,
+        activityId: activityId ?? undefined,
+      })
       return
     }
 
@@ -449,7 +549,16 @@ export function CalendarTimerView() {
 
     // 通知与 Live Activity
     await scheduleNotifications(task)
-    await startLiveActivity(task, start, 0)
+    const activityId = await startLiveActivity(task, start, 0)
+    await persistSessionState({
+      taskId: task.id,
+      sessionStartAt: start.getTime(),
+      segmentStartAt: start.getTime(),
+      accumulatedMs: 0,
+      running: true,
+      paused: false,
+      activityId: activityId ?? undefined,
+    })
   }
 
   async function pauseTimer() {
@@ -465,6 +574,17 @@ export function CalendarTimerView() {
     await clearNotifications()
     if (activeTask) {
       await updateLiveActivity(activeTask, now, total, now)
+      if (sessionStartAt) {
+        await persistSessionState({
+          taskId: activeTask.id,
+          sessionStartAt: sessionStartAt.getTime(),
+          segmentStartAt: undefined,
+          accumulatedMs: total,
+          running: false,
+          paused: true,
+          activityId: activityRef.current?.activityId,
+        })
+      }
     }
   }
 
@@ -483,6 +603,7 @@ export function CalendarTimerView() {
     setElapsedMs(0)
     await clearNotifications()
     await endLiveActivity(activeTask, now, total)
+    await persistSessionState(null)
   }
 
   async function stopTimer(options?: { auto?: boolean }) {
@@ -538,6 +659,7 @@ export function CalendarTimerView() {
 
     // 清理 Live Activity
     await endLiveActivity(activeTask, now, total)
+    await persistSessionState(null)
 
     // 清空该任务的笔记草稿
     setTasks((prev) => {
