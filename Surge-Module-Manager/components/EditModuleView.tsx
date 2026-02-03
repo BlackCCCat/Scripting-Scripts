@@ -31,7 +31,14 @@ function CenterRowButton(props: {
   onPress: () => void
 }) {
   return (
-    <Button role={props.role} action={props.onPress} disabled={props.disabled}>
+    <Button
+      role={props.role}
+      action={() => {
+        HapticFeedback.mediumImpact()
+        props.onPress()
+      }}
+      disabled={props.disabled}
+    >
       <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
         <Text opacity={0} frame={{ width: 1 }}>
           .
@@ -265,12 +272,15 @@ export function EditModuleView(props: {
           </Section>
 
           <Section header={<Text>分类</Text>}>
-            <Picker
-              title={"模块分类"}
-              pickerStyle="menu"
-              value={categoryIdx}
-              onChanged={(idx: number) => setCategoryIdx(idx)}
-            >
+              <Picker
+                title={"模块分类"}
+                pickerStyle="menu"
+                value={categoryIdx}
+                onChanged={(idx: number) => {
+                  HapticFeedback.heavyImpact()
+                  setCategoryIdx(idx)
+                }}
+              >
               {categoryOptions.map((c, idx) => (
                 <Text key={`${c}-${idx}`} tag={idx}>
                   {c}
@@ -289,10 +299,23 @@ export function EditModuleView(props: {
               header={(
                 <HStack>
                   <Text>在线模块(来自</Text>
-                  <Button title="LoonKissSurge" action={() => openLink("https://github.com/QingRex/LoonKissSurge/")} />
+                  <Button
+                    title="LoonKissSurge"
+                    action={() => {
+                      HapticFeedback.mediumImpact()
+                      openLink("https://github.com/QingRex/LoonKissSurge/")
+                    }}
+                  />
                   <Text>)</Text>
                   <Spacer />
-                  <Button title="" systemImage="magnifyingglass" action={onSearch} />
+                  <Button
+                    title=""
+                    systemImage="magnifyingglass"
+                    action={() => {
+                      HapticFeedback.mediumImpact()
+                      onSearch()
+                    }}
+                  />
                 </HStack>
               )}
             >
@@ -302,7 +325,13 @@ export function EditModuleView(props: {
                 <HStack>
                   <Text>筛选：{filterText}</Text>
                   <Spacer />
-                  <Button title="清除" action={() => setFilterText("")} />
+                  <Button
+                    title="清除"
+                    action={() => {
+                      HapticFeedback.mediumImpact()
+                      setFilterText("")
+                    }}
+                  />
                 </HStack>
               ) : null}
               <List listStyle="plain" frame={{ height: 360 }}>
@@ -317,7 +346,13 @@ export function EditModuleView(props: {
                           <Group>
                             <Button title="复制名称" action={() => Pasteboard.setString(item.name)} />
                             <Button title="复制链接" action={() => Pasteboard.setString(item.link)} />
-                            <Button title="打开链接" action={() => openLink(item.link)} />
+                            <Button
+                              title="打开链接"
+                              action={() => {
+                                HapticFeedback.mediumImpact()
+                                openLink(item.link)
+                              }}
+                            />
                           </Group>
                         ),
                       }}
@@ -327,17 +362,18 @@ export function EditModuleView(props: {
                         <Spacer />
                         {existed ? (
                           <Text foregroundStyle="secondaryLabel">已添加</Text>
-                        ) : (
-                          <Button
-                            title="添加"
-                            buttonStyle="borderedProminent"
-                            tint="systemGreen"
-                            action={() => {
-                              setName(item.name)
-                              setLink(item.link)
-                            }}
-                          />
-                        )}
+                          ) : (
+                            <Button
+                              title="添加"
+                              buttonStyle="borderedProminent"
+                              tint="systemGreen"
+                              action={() => {
+                                HapticFeedback.mediumImpact()
+                                setName(item.name)
+                                setLink(item.link)
+                              }}
+                            />
+                          )}
                       </HStack>
                     </VStack>
                   )

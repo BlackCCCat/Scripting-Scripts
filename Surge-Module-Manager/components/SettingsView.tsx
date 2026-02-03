@@ -30,7 +30,14 @@ function CenterRowButton(props: {
   onPress: () => void
 }) {
   return (
-    <Button role={props.role} action={props.onPress} disabled={props.disabled}>
+    <Button
+      role={props.role}
+      action={() => {
+        HapticFeedback.mediumImpact()
+        props.onPress()
+      }}
+      disabled={props.disabled}
+    >
       <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
         <Text opacity={0} frame={{ width: 1 }}>
           .
@@ -45,7 +52,12 @@ function CenterRowButton(props: {
 
 function PlainRowButton(props: { title: string; onPress: () => void }) {
   return (
-    <Button action={props.onPress}>
+    <Button
+      action={() => {
+        HapticFeedback.mediumImpact()
+        props.onPress()
+      }}
+    >
       <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
         <Text opacity={0} frame={{ width: 1 }}>
           .
@@ -178,8 +190,9 @@ export function SettingsView(props: {
     await refreshCounts()
   }
 
-  function deleteCategoryAt(indices: number[]) {
+function deleteCategoryAt(indices: number[]) {
     if (!indices.length) return
+    HapticFeedback.heavyImpact()
     setCfg((c) => {
       const next = [...(c.categories ?? [])]
       const sorted = [...indices].sort((a, b) => b - a)
@@ -225,6 +238,7 @@ export function SettingsView(props: {
                 pickerStyle="menu"
                 value={bookmarkIdx}
                 onChanged={(idx: number) => {
+                  HapticFeedback.heavyImpact()
                   setBookmarkIdx(idx)
                   const b = bookmarks[idx]
                   if (b?.path) {
@@ -274,7 +288,13 @@ export function SettingsView(props: {
                         leadingSwipeActions={{
                           allowsFullSwipe: false,
                           actions: [
-                            <Button title="编辑" action={() => editCategory(cat)} />,
+                            <Button
+                              title="编辑"
+                              action={() => {
+                                HapticFeedback.mediumImpact()
+                                editCategory(cat)
+                              }}
+                            />,
                           ],
                         }}
                       >

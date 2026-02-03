@@ -45,7 +45,15 @@ export function ModulePickerView(props: {
         navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}
         toolbar={{
-          topBarTrailing: <Button title="完成" action={done} />,
+          topBarTrailing: (
+            <Button
+              title="完成"
+              action={() => {
+                HapticFeedback.mediumImpact()
+                done()
+              }}
+            />
+          ),
         }}
       >
         <Section header={<Text>模块列表</Text>}>
@@ -53,7 +61,10 @@ export function ModulePickerView(props: {
             <Toggle
               key={m.name}
               value={!!selected[m.name]}
-              onChanged={(v: boolean) => toggle(m.name, v)}
+              onChanged={(v: boolean) => {
+                HapticFeedback.heavyImpact()
+                toggle(m.name, v)
+              }}
             >
               {(
                 <VStack>

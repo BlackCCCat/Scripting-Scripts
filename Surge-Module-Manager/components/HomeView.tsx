@@ -47,6 +47,10 @@ function CenterRowButton(props: { title: string; disabled?: boolean; onPress: ()
 
 
 export function HomeView() {
+  const withButtonHaptic = (action: () => void | Promise<void>) => () => {
+    HapticFeedback.mediumImpact()
+    void action()
+  }
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
   const [modules, setModules] = useState<ModuleInfo[]>([])
   const [stage, setStage] = useState("就绪")
@@ -305,12 +309,12 @@ export function HomeView() {
         navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}
         toolbar={{
-          topBarTrailing: <Button title="" systemImage="gearshape" action={openSettings} />,
+          topBarTrailing: <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />,
         }}
       >
         <Section header={<Text>操作</Text>}>
-          <CenterRowButton title="添加模块" onPress={addModule} disabled={busy} />
-          <CenterRowButton title="全部更新" onPress={downloadAll} disabled={busy} />
+          <CenterRowButton title="添加模块" onPress={withButtonHaptic(addModule)} disabled={busy} />
+          <CenterRowButton title="全部更新" onPress={withButtonHaptic(downloadAll)} disabled={busy} />
         </Section>
 
         <Section header={<Text>状态</Text>}>
@@ -329,7 +333,10 @@ export function HomeView() {
                 title="筛选分类"
                 pickerStyle="menu"
                 value={filterIdx}
-                onChanged={(idx: number) => setFilterCategory(filterOptions[idx] ?? "全部")}
+                onChanged={(idx: number) => {
+                  HapticFeedback.heavyImpact()
+                  setFilterCategory(filterOptions[idx] ?? "全部")
+                }}
               >
                 {filterOptions.map((c, idx) => (
                   <Text key={`${c}-${idx}`} tag={idx}>
@@ -349,22 +356,22 @@ export function HomeView() {
                 contextMenu={{
                   menuItems: (
                     <Group>
-                      <Button title="查看模块" action={() => viewModuleContent(m)} />
-                      <Button title="复制链接" action={() => copyModuleLink(m)} />
-                      <Button title="删除" role="destructive" action={() => deleteModuleFor(m)} />
+                      <Button title="查看模块" action={withButtonHaptic(() => viewModuleContent(m))} />
+                      <Button title="复制链接" action={withButtonHaptic(() => copyModuleLink(m))} />
+                      <Button title="删除" role="destructive" action={withButtonHaptic(() => deleteModuleFor(m))} />
                     </Group>
                   ),
                 }}
                 leadingSwipeActions={{
                   allowsFullSwipe: false,
                   actions: [
-                    <Button title="更新" tint="systemGreen" action={() => downloadSingle(m)} />,
+                    <Button title="更新" tint="systemGreen" action={withButtonHaptic(() => downloadSingle(m))} />,
                   ],
                 }}
                 trailingSwipeActions={{
                   allowsFullSwipe: false,
                   actions: [
-                    <Button title="编辑" tint="systemOrange" action={() => modifyModuleFor(m)} />,
+                    <Button title="编辑" tint="systemOrange" action={withButtonHaptic(() => modifyModuleFor(m))} />,
                   ],
                 }}
               >
