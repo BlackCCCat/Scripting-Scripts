@@ -38,8 +38,13 @@ function CenterRowButton(props: {
   disabled?: boolean
   onPress: () => void
 }) {
+  const handlePress = () => {
+    // 按钮触觉反馈：mediumImpact
+    HapticFeedback.mediumImpact()
+    void props.onPress()
+  }
   return (
-    <Button role={props.role} action={props.onPress} disabled={props.disabled}>
+    <Button role={props.role} action={handlePress} disabled={props.disabled}>
       {/* 通过左右 Spacer 让文字居中对齐 */}
       <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
         <Text opacity={0} frame={{ width: 1 }}>
@@ -285,14 +290,20 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                 </HStack>
               )}
               isExpanded={sourcesExpanded}
-              onChanged={(value: boolean) => setSourcesExpanded(value)}
+              onChanged={(value: boolean) => {
+                HapticFeedback.heavyImpact()
+                setSourcesExpanded(value)
+              }}
             >
               {sources.length ? (
                 sources.map((src) => (
                   <Toggle
                     key={src.identifier}
                     value={selectedSourceIds.includes(src.identifier)}
-                    onChanged={(value: boolean) => void toggleSource(src.identifier, value)}
+                    onChanged={(value: boolean) => {
+                      HapticFeedback.heavyImpact()
+                      void toggleSource(src.identifier, value)
+                    }}
                     toggleStyle="switch"
                   >
                     <Text>{src.title}</Text>
@@ -309,7 +320,10 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                 title="关联日历"
                 pickerStyle="menu"
                 value={calendarIdx}
-                onChanged={(idx: number) => setCalendarIdx(idx)}
+                onChanged={(idx: number) => {
+                  HapticFeedback.heavyImpact()
+                  setCalendarIdx(idx)
+                }}
               >
                 {calendars.map((cal, idx) => (
                   <Text key={cal.identifier} tag={idx}>
@@ -324,7 +338,13 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
 
           <Section header={<Text>计时选项</Text>}>
             {/* 通知开关与频率 */}
-            <Toggle value={useNotification} onChanged={(v: boolean) => setUseNotification(v)}>
+            <Toggle
+              value={useNotification}
+              onChanged={(v: boolean) => {
+                HapticFeedback.heavyImpact()
+                setUseNotification(v)
+              }}
+            >
               <Text>使用通知</Text>
             </Toggle>
             {useNotification ? (
@@ -332,7 +352,10 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                 title="通知频率"
                 pickerStyle="menu"
                 value={notificationIdx}
-                onChanged={(idx: number) => setNotificationIdx(idx)}
+                onChanged={(idx: number) => {
+                  HapticFeedback.heavyImpact()
+                  setNotificationIdx(idx)
+                }}
               >
                 {NOTIFICATION_INTERVAL_OPTIONS.map((opt, idx) => (
                   <Text key={`${opt.label}-${idx}`} tag={idx}>
@@ -342,7 +365,13 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
               </Picker>
             ) : null}
             {/* 倒计时开关与时长 */}
-            <Toggle value={useCountdown} onChanged={(v: boolean) => setUseCountdown(v)}>
+            <Toggle
+              value={useCountdown}
+              onChanged={(v: boolean) => {
+                HapticFeedback.heavyImpact()
+                setUseCountdown(v)
+              }}
+            >
               <Text>使用倒计时</Text>
             </Toggle>
             {useCountdown ? (

@@ -584,6 +584,12 @@ export function CalendarTimerView() {
     void persistTasks(next)
   }
 
+  // 按钮统一触觉反馈：mediumImpact
+  const withButtonHaptic = (action: () => void | Promise<void>) => () => {
+    HapticFeedback.mediumImpact()
+    void action()
+  }
+
   // 状态文案
   const statusText = running ? "计时中" : paused ? "暂停中" : sessionStartAt ? "已停止" : "未开始"
 
@@ -596,12 +602,16 @@ export function CalendarTimerView() {
         toolbar={{
           // 左侧退出，右侧编辑 + 新增
           topBarLeading: (
-            <Button title="" systemImage="xmark.circle" action={() => Script.exit()} />
+            <Button
+              title=""
+              systemImage="xmark.circle"
+              action={withButtonHaptic(() => Script.exit())}
+            />
           ),
           topBarTrailing: (
             <HStack>
               <EditButton />
-              <Button title="" systemImage="plus.circle" action={addTask} />
+              <Button title="" systemImage="plus.circle" action={withButtonHaptic(addTask)} />
             </HStack>
           ),
         }}
@@ -631,7 +641,7 @@ export function CalendarTimerView() {
                   buttonStyle="borderedProminent"
                   tint="black"
                   disabled={(!running && !paused) || saving}
-                  action={cancelTimer}
+                  action={withButtonHaptic(cancelTimer)}
                 />
                 <Spacer />
                 <Button
@@ -639,7 +649,7 @@ export function CalendarTimerView() {
                   buttonStyle="borderedProminent"
                   tint="systemRed"
                   disabled={(!running && !paused) || saving}
-                  action={() => stopTimer()}
+                  action={withButtonHaptic(() => stopTimer())}
                 />
                 <Spacer />
                 <Button
@@ -647,7 +657,7 @@ export function CalendarTimerView() {
                   buttonStyle="borderedProminent"
                   tint="systemOrange"
                   disabled={!running || saving}
-                  action={pauseTimer}
+                  action={withButtonHaptic(pauseTimer)}
                 />
                 <Spacer />
                 <Button
@@ -655,7 +665,7 @@ export function CalendarTimerView() {
                   buttonStyle="borderedProminent"
                   tint="systemGreen"
                   disabled={saving}
-                  action={() => startTask(activeTask)}
+                  action={withButtonHaptic(() => startTask(activeTask))}
                 />
               </HStack>
             </VStack>
@@ -671,13 +681,13 @@ export function CalendarTimerView() {
               <Button
                 title=""
                 systemImage={showMarkdown ? "eye.fill" : "eye.slash.fill"}
-                action={() => setShowMarkdown((prev) => !prev)}
+                action={withButtonHaptic(() => setShowMarkdown((prev) => !prev))}
               />
               <Spacer />
               <Button
                 title=""
                 systemImage="arrow.down.backward.and.arrow.up.forward"
-                action={openNoteEditor}
+                action={withButtonHaptic(openNoteEditor)}
               />
             </HStack>
           )}
@@ -729,8 +739,12 @@ export function CalendarTimerView() {
                     trailingSwipeActions={{
                       allowsFullSwipe: false,
                       actions: [
-                        <Button title="编辑" action={() => editTask(task)} />,
-                        <Button title="删除" role="destructive" action={() => removeTask(task)} />,
+                        <Button title="编辑" action={withButtonHaptic(() => editTask(task))} />,
+                        <Button
+                          title="删除"
+                          role="destructive"
+                          action={withButtonHaptic(() => removeTask(task))}
+                        />,
                       ],
                     }}
                   >
@@ -773,7 +787,7 @@ export function CalendarTimerView() {
                           buttonStyle="borderedProminent"
                           tint="systemGreen"
                           disabled={saving}
-                          action={() => startTask(task)}
+                          action={withButtonHaptic(() => startTask(task))}
                         />
                       )}
                     </HStack>
