@@ -4,20 +4,19 @@
 import {
   HStack,
   Image,
-  LiveActivity,
   LiveActivityUI,
   LiveActivityUIExpandedCenter,
   Spacer,
   Text,
   TimerIntervalLabel,
+  type LiveActivityUIBuilder,
 } from "scripting"
 
 // Live Activity 状态类型
 import type { TimerActivityState } from "./types"
 
-export function registerTimerActivity() {
-  // 注册 Live Activity：名称需与主脚本启动时一致
-  return LiveActivity.register<TimerActivityState>("calendar-loger-timer", (state) => {
+// Live Activity UI 构建函数（由 live_activity.tsx 负责注册）
+export const liveActivityBuilder: LiveActivityUIBuilder<TimerActivityState> = (state) => {
     // 将时间戳转换为 Date，供 TimerIntervalLabel 使用
     const fromDate = new Date(state.from)
     const toDate = new Date(state.to)
@@ -112,17 +111,16 @@ export function registerTimerActivity() {
     )
 
     // Live Activity 各区域的 UI 组合
-    return (
-      <LiveActivityUI
-        content={lockScreenContent}
-        compactLeading={compactLeadingNode}
-        compactTrailing={compactTrailingNode}
-        minimal={minimalNode}
-      >
-        <LiveActivityUIExpandedCenter>
-          {islandExpandedContent}
-        </LiveActivityUIExpandedCenter>
-      </LiveActivityUI>
-    )
-  })
+  return (
+    <LiveActivityUI
+      content={lockScreenContent}
+      compactLeading={compactLeadingNode}
+      compactTrailing={compactTrailingNode}
+      minimal={minimalNode}
+    >
+      <LiveActivityUIExpandedCenter>
+        {islandExpandedContent}
+      </LiveActivityUIExpandedCenter>
+    </LiveActivityUI>
+  )
 }

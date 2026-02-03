@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
   LiveActivity,
+  type LiveActivityState,
   Markdown,
   Notification,
   Script,
@@ -29,7 +30,7 @@ import {
 // 业务常量（倒计时/通知选项、正计时窗口）
 import { COUNTDOWN_OPTIONS, COUNT_UP_WINDOW_MS, NOTIFICATION_INTERVAL_OPTIONS } from "../constants"
 // Live Activity UI 注册器
-import { registerTimerActivity } from "../live_activity_ui"
+import { PomodoroLiveActivity } from "../live_activity"
 // 类型定义
 import type { Task, TimerActivityState } from "../types"
 // 本地持久化（任务）
@@ -44,7 +45,9 @@ import { formatDateTime, formatDuration } from "../utils/time"
 import { TaskEditView } from "./TaskEditView"
 
 // Live Activity 创建器（用于 start/update/end）
-const createTimerActivity = registerTimerActivity()
+const createTimerActivity = PomodoroLiveActivity
+// 兼容历史名称，清理残留活动
+const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"]
 
 export function CalendarTimerView() {
   // 任务列表与当前选中任务
@@ -72,6 +75,16 @@ export function CalendarTimerView() {
   const settingsLoadedRef = useRef(false)
   const settingsRef = useRef<AppSettings | null>(null)
   const activityRef = useRef<LiveActivity<TimerActivityState> | null>(null)
+  const activityStartRef = useRef<Promise<boolean> | null>(null)
+  const activityReadyRef = useRef(false)
+  const activityListenerRef = useRef<((state: LiveActivityState) => void) | null>(null)
+  const activeTaskRef = useRef<Task | null>(null)
+  const sessionStartAtRef = useRef<Date | null>(null)
+  const segmentStartAtRef = useRef<Date | null>(null)
+  const accumulatedMsRef = useRef(0)
+  const runningRef = useRef(false)
+  const pausedRef = useRef(false)
+  const staleRefreshAtRef = useRef(0)
   const stoppingRef = useRef(false)
   const noteSaveTimerRef = useRef<number | null>(null)
   const tasksLoadedRef = useRef(false)
@@ -96,6 +109,16 @@ export function CalendarTimerView() {
     if (!activeTaskId) return null
     return tasks.find((t) => t.id === activeTaskId) ?? null
   }, [tasks, activeTaskId])
+
+  useEffect(() => {
+    // 将关键状态同步到 ref，供 Live Activity 回调使用
+    activeTaskRef.current = activeTask
+    sessionStartAtRef.current = sessionStartAt
+    segmentStartAtRef.current = segmentStartAt
+    accumulatedMsRef.current = accumulatedMs
+    runningRef.current = running
+    pausedRef.current = paused
+  }, [activeTask, sessionStartAt, segmentStartAt, accumulatedMs, running, paused])
 
   // 当前任务的计时模式
   const isCountdown = !!(activeTask?.useCountdown && (activeTask.countdownSeconds ?? 0) > 0)
@@ -224,10 +247,20 @@ export function CalendarTimerView() {
   async function restoreSessionIfNeeded() {
     try {
       const session = await loadSession()
+      const activities = await collectLiveActivities()
+
+      // 没有进行中的会话时，清理掉残留的 Live Activity，避免“幽灵计时”
+      if (!session || (!session.running && !session.paused)) {
+        await endActivities(activities, null)
+        await clearSession()
+        return
+      }
+
       if (!session) return
       const task = tasks.find((t) => t.id === session.taskId)
       if (!task) {
         await clearSession()
+        await endActivities(activities, null)
         return
       }
 
@@ -249,21 +282,32 @@ export function CalendarTimerView() {
       const calendar = await resolveCalendar(task)
       if (calendar) setActiveCalendar(calendar)
 
-      if (session.activityId) {
-        const existing = await LiveActivity.from<TimerActivityState>(
-          session.activityId,
-          "calendar-loger-timer"
-        )
-        if (existing) {
-          activityRef.current = existing
-          const state = await existing.getActivityState()
-          if (state === "dismissed" || state === "ended") {
-            activityRef.current = null
-          } else {
-            await updateLiveActivity(task, now, elapsed, session.paused ? now : undefined)
-            return
-          }
+      // 保留当前会话对应的 Live Activity，其他残留的全部结束
+      let keepActivity: LiveActivity<TimerActivityState> | null = null
+      let keepId = session.activityId
+      if (!keepId && activities.length) {
+        keepId = activities[0]?.id
+        await saveSession({ ...session, activityId: keepId })
+      }
+
+      for (const item of activities) {
+        if (keepId && item.id === keepId) {
+          keepActivity = item.activity
+        } else {
+          await endActivities([item], task)
         }
+      }
+
+      if (keepActivity) {
+        activityRef.current = keepActivity
+        const state = await keepActivity.getActivityState()
+        if (state !== "dismissed" && state !== "ended") {
+          activityReadyRef.current = true
+          await updateLiveActivity(task, now, elapsed, session.paused ? now : undefined)
+          return
+        }
+        activityRef.current = null
+        activityReadyRef.current = false
       }
 
       if (session.running || session.paused) {
@@ -275,6 +319,52 @@ export function CalendarTimerView() {
     } catch {
       // ignore restore errors
     }
+  }
+
+  async function collectLiveActivities(): Promise<Array<{ id: string; activity: LiveActivity<TimerActivityState> }>> {
+    try {
+      const ids = await LiveActivity.getAllActivitiesIds()
+      const list: Array<{ id: string; activity: LiveActivity<TimerActivityState> }> = []
+      for (const id of ids) {
+        let activity: LiveActivity<TimerActivityState> | null = null
+        for (const name of LIVE_ACTIVITY_NAMES) {
+          activity = await LiveActivity.from<TimerActivityState>(id, name)
+          if (activity) break
+        }
+        if (activity) list.push({ id, activity })
+      }
+      return list
+    } catch {
+      return []
+    }
+  }
+
+  function buildFallbackActivityState(now: Date): TimerActivityState {
+    return {
+      title: "已结束",
+      calendarTitle: "",
+      from: now.getTime(),
+      to: now.getTime() + 1000,
+      countsDown: false,
+    }
+  }
+
+  async function endActivities(
+    items: Array<{ id: string; activity: LiveActivity<TimerActivityState> }>,
+    task: Task | null
+  ) {
+    if (!items.length) return
+    const now = new Date()
+    const state = task ? buildActivityState(task, now, 0) : buildFallbackActivityState(now)
+    await Promise.all(
+      items.map(async ({ activity }) => {
+        try {
+          await activity.end(state, { dismissTimeInterval: 0 })
+        } catch {
+          // ignore
+        }
+      })
+    )
   }
 
   async function loadAppSettings() {
@@ -424,24 +514,24 @@ export function CalendarTimerView() {
     const countdownSeconds = task.countdownSeconds ?? 0
     if (task.useCountdown && countdownSeconds > 0) {
       const remaining = Math.max(0, countdownSeconds * 1000 - elapsed)
-      return {
+      const base: TimerActivityState = {
         title: task.name,
         calendarTitle: task.calendarTitle,
         from: now.getTime(),
         to: now.getTime() + remaining,
         countsDown: true,
-        pauseTime: pausedAt ? pausedAt.getTime() : undefined,
       }
+      return pausedAt ? { ...base, pauseTime: pausedAt.getTime() } : base
     }
     const from = now.getTime() - elapsed
-    return {
+    const base: TimerActivityState = {
       title: task.name,
       calendarTitle: task.calendarTitle,
       from,
       to: from + COUNT_UP_WINDOW_MS,
       countsDown: false,
-      pauseTime: pausedAt ? pausedAt.getTime() : undefined,
     }
+    return pausedAt ? { ...base, pauseTime: pausedAt.getTime() } : base
   }
 
   async function ensureLiveActivity(createNew = false): Promise<LiveActivity<TimerActivityState> | null> {
@@ -454,7 +544,33 @@ export function CalendarTimerView() {
     }
     // 需要新实例时重新创建
     if (createNew || !activityRef.current) {
+      if (activityRef.current && activityListenerRef.current) {
+        activityRef.current.removeUpdateListener(activityListenerRef.current)
+      }
       activityRef.current = createTimerActivity()
+      activityReadyRef.current = false
+      activityListenerRef.current = (state) => {
+        if (state === "stale") {
+          const nowTs = Date.now()
+          if (nowTs - staleRefreshAtRef.current < 5000) return
+          staleRefreshAtRef.current = nowTs
+          const task = activeTaskRef.current
+          const sessionStart = sessionStartAtRef.current
+          if (task && sessionStart) {
+            const now = new Date()
+            const segmentStart = segmentStartAtRef.current
+            const segmentElapsed =
+              runningRef.current && segmentStart ? now.getTime() - segmentStart.getTime() : 0
+            const elapsed = accumulatedMsRef.current + Math.max(0, segmentElapsed)
+            void updateLiveActivity(task, now, elapsed, pausedRef.current ? now : undefined)
+          }
+        }
+        if (state === "dismissed" || state === "ended") {
+          activityRef.current = null
+          activityReadyRef.current = false
+        }
+      }
+      activityRef.current.addUpdateListener(activityListenerRef.current)
     }
     return activityRef.current
   }
@@ -463,32 +579,87 @@ export function CalendarTimerView() {
     // 启动 Live Activity
     const activity = await ensureLiveActivity(true)
     if (!activity) return null
-    const ok = await activity.start(buildActivityState(task, now, elapsed), {
+    if (activityStartRef.current) {
+      const ok = await activityStartRef.current
+      if (!ok) return null
+      activityReadyRef.current = true
+      return activity.activityId ?? null
+    }
+    const startPromise = activity.start(buildActivityState(task, now, elapsed), {
       relevanceScore: 1,
       // 适当延长 staleDate，避免出现加载占位
-      staleDate: new Date(now.getTime() + 1000 * 60 * 60 * 24),
+      staleDate: now.getTime() + 1000 * 60 * 60 * 24,
     })
-    if (!ok) return null
+    activityStartRef.current = startPromise
+    const ok = await startPromise
+    activityStartRef.current = null
+    if (!ok) {
+      activityRef.current = null
+      activityReadyRef.current = false
+      return null
+    }
+    activityReadyRef.current = true
     return activity.activityId ?? null
   }
 
   async function updateLiveActivity(task: Task, now: Date, elapsed: number, pausedAt?: Date) {
     // 更新 Live Activity 状态（暂停/继续/计时）
     const activity = await ensureLiveActivity()
-    if (!activity || !activity.started) return
-    await activity.update(buildActivityState(task, now, elapsed, pausedAt), {
-      staleDate: new Date(now.getTime() + 1000 * 60 * 60 * 24),
+    if (!activity) return
+    if (!activityReadyRef.current) {
+      if (activityStartRef.current) {
+        const ok = await activityStartRef.current
+        if (!ok) return
+        activityReadyRef.current = true
+      } else {
+        return
+      }
+    }
+    if (!activity.started) return
+    const ok = await activity.update(buildActivityState(task, now, elapsed, pausedAt), {
+      staleDate: now.getTime() + 1000 * 60 * 60 * 24,
     })
+    if (!ok) {
+      activityRef.current = null
+      activityReadyRef.current = false
+      const activityId = await startLiveActivity(task, now, elapsed)
+      if (activityId && sessionStartAt) {
+        await persistSessionState({
+          taskId: task.id,
+          sessionStartAt: sessionStartAt.getTime(),
+          segmentStartAt: running && segmentStartAt ? segmentStartAt.getTime() : undefined,
+          accumulatedMs,
+          running,
+          paused,
+          activityId,
+        })
+      }
+    }
   }
 
   async function endLiveActivity(task: Task, now: Date, elapsed: number) {
     // 结束 Live Activity
     const activity = activityRef.current
-    if (!activity || !activity.started) return
+    if (!activity) return
+    if (!activityReadyRef.current) {
+      if (activityStartRef.current) {
+        const ok = await activityStartRef.current
+        if (!ok) return
+        activityReadyRef.current = true
+      } else {
+        return
+      }
+    }
+    if (!activity.started) return
     await activity.end(buildActivityState(task, now, elapsed), {
       dismissTimeInterval: 0,
     })
+    if (activityListenerRef.current) {
+      activity.removeUpdateListener(activityListenerRef.current)
+      activityListenerRef.current = null
+    }
     activityRef.current = null
+    activityReadyRef.current = false
   }
 
   async function startTask(task: Task) {
