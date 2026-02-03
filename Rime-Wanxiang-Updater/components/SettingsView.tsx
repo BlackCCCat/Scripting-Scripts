@@ -16,53 +16,52 @@ import {
   useMemo,
   useState,
   Path,
-} from "scripting";
+} from "scripting"
 
-import { Runtime } from "../utils/runtime";
+import { Runtime } from "../utils/runtime"
 import {
   loadConfig,
   saveConfig,
   type AppConfig,
   type ProSchemeKey,
   type InputMethod,
-} from "../utils/config";
-import { removeDirSafe } from "../utils/fs";
-import { detectRimeDir } from "../utils/hamster";
+} from "../utils/config"
+import { removeDirSafe } from "../utils/fs"
+import { detectRimeDir } from "../utils/hamster"
 
-type AlertNode = any;
+type AlertNode = any
 type AlertState = {
-  title: string;
-  isPresented: boolean;
-  message: AlertNode;
-  actions: AlertNode;
-};
+  title: string
+  isPresented: boolean
+  message: AlertNode
+  actions: AlertNode
+}
 
-const PRO_KEYS: ProSchemeKey[] = [
-  "moqi",
-  "flypy",
-  "zrm",
-  "tiger",
-  "wubi",
-  "hanxin",
-  "shouyou",
-];
+const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
 const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "仓输入法", value: "hamster" },
   { label: "元书输入法", value: "hamster3" },
-];
+]
 
 function CenterRowButton(props: {
-  title: string;
-  role?: "cancel" | "destructive";
-  disabled?: boolean;
-  onPress: () => void;
+  title: string
+  role?: "cancel" | "destructive"
+  disabled?: boolean
+  onPress: () => void
 }) {
+  const haptic = () => {
+    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+  }
   return (
-    <Button role={props.role} action={props.onPress} disabled={props.disabled}>
-      <HStack
-        frame={{ width: "100%" as any }}
-        padding={{ top: 14, bottom: 14 }}
-      >
+    <Button
+      role={props.role}
+      action={() => {
+        haptic()
+        props.onPress()
+      }}
+      disabled={props.disabled}
+    >
+      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
         {/* ✅ 同样加 leading 锚点 */}
         <Text opacity={0} frame={{ width: 1 }}>
           .
@@ -73,41 +72,35 @@ function CenterRowButton(props: {
         <Spacer />
       </HStack>
     </Button>
-  );
+  )
 }
 
 export function SettingsView(props: {
-  initial?: AppConfig;
-  onDone?: (cfg: AppConfig) => void;
+  initial?: AppConfig
+  onDone?: (cfg: AppConfig) => void
 }) {
-  const dismiss = Navigation.useDismiss();
+  const dismiss = Navigation.useDismiss()
 
-  const initialCfg = props.initial ?? loadConfig();
-  const initialSchemeEdition = initialCfg.schemeEdition;
-  const initialProSchemeKey = initialCfg.proSchemeKey;
-  const initialHamsterRootPath = initialCfg.hamsterRootPath;
-  const [cfg, setCfg] = useState<AppConfig>(initialCfg);
+  const initialCfg = props.initial ?? loadConfig()
+  const initialSchemeEdition = initialCfg.schemeEdition
+  const initialProSchemeKey = initialCfg.proSchemeKey
+  const initialHamsterRootPath = initialCfg.hamsterRootPath
+  const [cfg, setCfg] = useState<AppConfig>(initialCfg)
 
   // ✅ 用 number 承载 Picker 值（与你示例一致）
   // 0=CNB 1=GitHub
-  const [releaseIdx, setReleaseIdx] = useState<number>(
-    initialCfg.releaseSource === "github" ? 1 : 0,
-  );
+  const [releaseIdx, setReleaseIdx] = useState<number>(initialCfg.releaseSource === "github" ? 1 : 0)
   // 0=base 1=pro
-  const [schemeIdx, setSchemeIdx] = useState<number>(
-    initialCfg.schemeEdition === "pro" ? 1 : 0,
-  );
+  const [schemeIdx, setSchemeIdx] = useState<number>(initialCfg.schemeEdition === "pro" ? 1 : 0)
   // pro key index
   const [proKeyIdx, setProKeyIdx] = useState<number>(() => {
-    const i = PRO_KEYS.indexOf(initialCfg.proSchemeKey);
-    return i >= 0 ? i : 0;
-  });
+    const i = PRO_KEYS.indexOf(initialCfg.proSchemeKey)
+    return i >= 0 ? i : 0
+  })
   const [inputIdx, setInputIdx] = useState<number>(() => {
-    const i = INPUT_METHODS.findIndex(
-      (m) => m.value === initialCfg.inputMethod,
-    );
-    return i >= 0 ? i : 0;
-  });
+    const i = INPUT_METHODS.findIndex((m) => m.value === initialCfg.inputMethod)
+    return i >= 0 ? i : 0
+  })
 
   // 当 picker 变化时，同步回 cfg（保持 cfg 是最终保存对象）
   useEffect(() => {
@@ -115,41 +108,36 @@ export function SettingsView(props: {
       ...c,
       releaseSource: releaseIdx === 1 ? "github" : "cnb",
       schemeEdition: schemeIdx === 1 ? "pro" : "base",
-      proSchemeKey:
-        PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      inputMethod:
-        INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))]
-          .value,
-    }));
-  }, [releaseIdx, schemeIdx, proKeyIdx, inputIdx]);
+      proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
+      inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
+    }))
+  }, [releaseIdx, schemeIdx, proKeyIdx, inputIdx])
 
   const [alert, setAlert] = useState<AlertState>({
     title: "",
     isPresented: false,
-    message: <Text> </Text>,
-    actions: <Text> </Text>,
-  });
-  const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>(
-    [],
-  );
-  const [bookmarkIdx, setBookmarkIdx] = useState<number>(0);
+    message: <Text>{" "}</Text>,
+    actions: <Text>{" "}</Text>,
+  })
+  const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>([])
+  const [bookmarkIdx, setBookmarkIdx] = useState<number>(0)
 
   useEffect(() => {
-    const latest = props.initial ?? loadConfig();
-    setCfg(latest);
-    setReleaseIdx(latest.releaseSource === "github" ? 1 : 0);
-    setSchemeIdx(latest.schemeEdition === "pro" ? 1 : 0);
-    const i = PRO_KEYS.indexOf(latest.proSchemeKey);
-    setProKeyIdx(i >= 0 ? i : 0);
-    const im = INPUT_METHODS.findIndex((m) => m.value === latest.inputMethod);
-    setInputIdx(im >= 0 ? im : 0);
-    (async () => {
-      await refreshBookmarks(latest);
-    })();
-  }, []);
+    const latest = props.initial ?? loadConfig()
+    setCfg(latest)
+    setReleaseIdx(latest.releaseSource === "github" ? 1 : 0)
+    setSchemeIdx(latest.schemeEdition === "pro" ? 1 : 0)
+    const i = PRO_KEYS.indexOf(latest.proSchemeKey)
+    setProKeyIdx(i >= 0 ? i : 0)
+    const im = INPUT_METHODS.findIndex((m) => m.value === latest.inputMethod)
+    setInputIdx(im >= 0 ? im : 0)
+    ;(async () => {
+      await refreshBookmarks(latest)
+    })()
+  }, [])
 
   function closeAlert() {
-    setAlert((a) => ({ ...a, isPresented: false }));
+    setAlert((a) => ({ ...a, isPresented: false }))
   }
 
   function showInfo(title: string, msg: string) {
@@ -157,54 +145,57 @@ export function SettingsView(props: {
       title,
       isPresented: true,
       message: <Text>{msg}</Text>,
-      actions: <Button title="OK" action={closeAlert} />,
-    });
+      actions: (
+        <Button
+          title="OK"
+          action={() => {
+            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+            closeAlert()
+          }}
+        />
+      ),
+    })
   }
 
-  async function refreshBookmarks(
-    current?: AppConfig,
-  ): Promise<{ name: string; path: string }[]> {
-    const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager;
-    let list: any = [];
+  async function refreshBookmarks(current?: AppConfig): Promise<{ name: string; path: string }[]> {
+    const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
+    let list: any = []
     if (fm?.getAllFileBookmarks) {
       try {
-        const r = fm.getAllFileBookmarks();
-        list = r && typeof r.then === "function" ? await r : r;
+        const r = fm.getAllFileBookmarks()
+        list = r && typeof r.then === "function" ? await r : r
       } catch {
-        list = [];
+        list = []
       }
     }
-    const arr = Array.isArray(list) ? list : [];
+    const arr = Array.isArray(list) ? list : []
     const cleaned = arr
-      .map((x: any) => ({
-        name: String(x?.name ?? ""),
-        path: String(x?.path ?? ""),
-      }))
-      .filter((x: any) => x.name && x.path);
-    setBookmarks(cleaned);
+      .map((x: any) => ({ name: String(x?.name ?? ""), path: String(x?.path ?? "") }))
+      .filter((x: any) => x.name && x.path)
+    setBookmarks(cleaned)
 
-    const target = current?.hamsterRootPath ?? cfg.hamsterRootPath;
+    const target = current?.hamsterRootPath ?? cfg.hamsterRootPath
     if (cleaned.length) {
-      const idx = cleaned.findIndex((b) => b.path === target);
-      setBookmarkIdx(idx >= 0 ? idx : 0);
+      const idx = cleaned.findIndex((b) => b.path === target)
+      setBookmarkIdx(idx >= 0 ? idx : 0)
       if (idx < 0 && !target) {
-        setCfg((c) => ({ ...c, hamsterRootPath: cleaned[0].path }));
+        setCfg((c) => ({ ...c, hamsterRootPath: cleaned[0].path }))
       }
     } else {
-      setBookmarkIdx(0);
+      setBookmarkIdx(0)
     }
-    return cleaned;
+    return cleaned
   }
 
   // ✅ 仅从书签选择
   async function pickFolder() {
     try {
-      const list = await refreshBookmarks();
+      const list = await refreshBookmarks()
       if (!list.length) {
-        showInfo("未找到书签", "请先在 工具-文件书签 中添加文件夹后再选择。");
+        showInfo("未找到书签", "请先在 工具-文件书签 中添加文件夹后再选择。")
       }
     } catch (e: any) {
-      showInfo("选择失败", String(e?.message ?? e));
+      showInfo("选择失败", String(e?.message ?? e))
     }
   }
 
@@ -212,40 +203,36 @@ export function SettingsView(props: {
     const fixed: AppConfig = {
       ...cfg,
       // base 时 proKey 也可以保留，不影响；若你想 base 时清空也可以在这里处理
-      proSchemeKey:
-        PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      inputMethod:
-        INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))]
-          .value,
-    };
+      proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
+      inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
+    }
 
     try {
-      saveConfig(fixed);
+      saveConfig(fixed)
       const schemeChanged =
         fixed.schemeEdition !== initialSchemeEdition ||
-        (fixed.schemeEdition === "pro" &&
-          fixed.proSchemeKey !== initialProSchemeKey);
-      const pathChanged = fixed.hamsterRootPath !== initialHamsterRootPath;
+        (fixed.schemeEdition === "pro" && fixed.proSchemeKey !== initialProSchemeKey)
+      const pathChanged = fixed.hamsterRootPath !== initialHamsterRootPath
       if (schemeChanged && !pathChanged) {
         try {
-          const { rimeDir } = await detectRimeDir(fixed);
-          const installRoot = rimeDir || fixed.hamsterRootPath;
+          const { rimeDir } = await detectRimeDir(fixed)
+          const installRoot = rimeDir || fixed.hamsterRootPath
           if (installRoot) {
-            await removeDirSafe(Path.join(installRoot, "UpdateCache"));
+            await removeDirSafe(Path.join(installRoot, "UpdateCache"))
           }
         } catch {}
       }
-      props.onDone?.(fixed);
-      dismiss();
+      props.onDone?.(fixed)
+      dismiss()
     } catch (e: any) {
-      showInfo("保存失败", String(e?.message ?? e));
+      showInfo("保存失败", String(e?.message ?? e))
     }
   }
 
   // 供 Picker 渲染用的文本数组（与你示例一致：Text tag={index}）
-  const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], []);
-  const schemeLabels = useMemo<string[]>(() => ["base", "pro"], []);
-  const proLabels = useMemo<string[]>(() => PRO_KEYS.slice(), []);
+  const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
+  const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
+  const proLabels = useMemo<string[]>(() => PRO_KEYS.slice(), [])
 
   return (
     <NavigationStack>
@@ -265,9 +252,7 @@ export function SettingsView(props: {
             <TextField
               label={<Text>路径</Text>}
               value={cfg.hamsterRootPath}
-              onChanged={(v: string) =>
-                setCfg((c) => ({ ...c, hamsterRootPath: v }))
-              }
+              onChanged={(v: string) => setCfg((c) => ({ ...c, hamsterRootPath: v }))}
               prompt="粘贴或选择 Hamster 根目录"
               textFieldStyle="roundedBorder"
             />
@@ -280,14 +265,15 @@ export function SettingsView(props: {
                 pickerStyle="menu"
                 value={bookmarkIdx}
                 onChanged={(idx: number) => {
-                  setBookmarkIdx(idx);
-                  const b = bookmarks[idx];
+                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                  setBookmarkIdx(idx)
+                  const b = bookmarks[idx]
                   if (b?.path) {
-                    const next: AppConfig = { ...cfg, hamsterRootPath: b.path };
-                    setCfg(next);
+                    const next: AppConfig = { ...cfg, hamsterRootPath: b.path }
+                    setCfg(next)
                     try {
-                      saveConfig(next);
-                      props.onDone?.(next);
+                      saveConfig(next)
+                      props.onDone?.(next)
                     } catch {}
                   }
                 }}
@@ -307,7 +293,10 @@ export function SettingsView(props: {
               title={"发布源"}
               pickerStyle="menu"
               value={releaseIdx}
-              onChanged={setReleaseIdx}
+              onChanged={(v: number) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                setReleaseIdx(v)
+              }}
             >
               {releaseLabels.map((label, index) => (
                 <Text key={label} tag={index}>
@@ -320,9 +309,7 @@ export function SettingsView(props: {
               <TextField
                 label={<Text>GitHub Token</Text>}
                 value={cfg.githubToken}
-                onChanged={(v: string) =>
-                  setCfg((c) => ({ ...c, githubToken: v }))
-                }
+                onChanged={(v: string) => setCfg((c) => ({ ...c, githubToken: v }))}
                 prompt="GitHub Token（可选）：提高请求限额"
                 textFieldStyle="roundedBorder"
               />
@@ -334,7 +321,10 @@ export function SettingsView(props: {
               title={"方案"}
               pickerStyle="menu"
               value={schemeIdx}
-              onChanged={setSchemeIdx}
+              onChanged={(v: number) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                setSchemeIdx(v)
+              }}
             >
               {schemeLabels.map((label, index) => (
                 <Text key={label} tag={index}>
@@ -348,7 +338,10 @@ export function SettingsView(props: {
                 title={"Pro 辅助码"}
                 pickerStyle="menu"
                 value={proKeyIdx}
-                onChanged={setProKeyIdx}
+                onChanged={(v: number) => {
+                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                  setProKeyIdx(v)
+                }}
               >
                 {proLabels.map((label, index) => (
                   <Text key={label} tag={index}>
@@ -364,7 +357,10 @@ export function SettingsView(props: {
               title={"输入法"}
               pickerStyle="menu"
               value={inputIdx}
-              onChanged={setInputIdx}
+              onChanged={(v: number) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                setInputIdx(v)
+              }}
             >
               {INPUT_METHODS.map((m, index) => (
                 <Text key={m.value} tag={index}>
@@ -378,9 +374,10 @@ export function SettingsView(props: {
             <Toggle
               title={"启动时自动检查更新"}
               value={cfg.autoCheckOnLaunch}
-              onChanged={(v: boolean) =>
+              onChanged={(v: boolean) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
                 setCfg((c) => ({ ...c, autoCheckOnLaunch: v }))
-              }
+              }}
               toggleStyle="switch"
             />
           </Section>
@@ -389,9 +386,7 @@ export function SettingsView(props: {
             <TextField
               label={<Text>规则</Text>}
               value={cfg.excludePatternsText}
-              onChanged={(v: string) =>
-                setCfg((c) => ({ ...c, excludePatternsText: v }))
-              }
+              onChanged={(v: string) => setCfg((c) => ({ ...c, excludePatternsText: v }))}
               axis="vertical"
               lineLimit={{ min: 6, max: 10 }}
               prompt={"例如：\nuser.yaml\n*.custom.yaml\ntips_show.txt"}
@@ -401,14 +396,10 @@ export function SettingsView(props: {
 
           <Section>
             <CenterRowButton title="保存" onPress={saveAndClose} />
-            <CenterRowButton
-              title="取消"
-              role="cancel"
-              onPress={() => dismiss()}
-            />
+            <CenterRowButton title="取消" role="cancel" onPress={() => dismiss()} />
           </Section>
         </Form>
       </VStack>
     </NavigationStack>
-  );
+  )
 }
