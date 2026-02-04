@@ -11,6 +11,7 @@ import {
   Text,
   VStack,
   useEffect,
+  useMemo,
   useState,
 } from "scripting"
 
@@ -23,6 +24,7 @@ import {
   sortModules,
   type ModuleInfo,
   updateModuleMetadata,
+  listDirectSubDirs,
 } from "../utils/storage"
 import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
@@ -60,10 +62,32 @@ export function HomeView() {
   const categories = cfg.categories ?? []
   const filterOptions = ["全部", ...categories]
   const filterIdx = Math.max(0, filterOptions.indexOf(filterCategory))
-  const filteredModules =
-    filterCategory === "全部"
-      ? modules
-      : modules.filter((m) => m.category === filterCategory)
+  const dirOptions = useMemo(() => {
+    const set = new Set<string>()
+    const base = loadConfig().baseDir
+    for (const m of modules) {
+      const p = m.filePath ? String(m.filePath) : ""
+      if (!p) continue
+      const rel = base ? p.replace(base, "").replace(/^\/+/, "") : p
+      const dir = rel.includes("/") ? rel.split("/")[0] : ""
+      if (dir) set.add(dir)
+    }
+    return ["全部", ...Array.from(set)]
+  }, [modules])
+  const [filterDir, setFilterDir] = useState("全部")
+  const filteredModules = modules.filter((m) => {
+    const catOk = filterCategory === "全部" ? true : m.category === filterCategory
+    const dirOk = (() => {
+      if (filterDir === "全部") return true
+      const p = m.filePath ? String(m.filePath) : ""
+      if (!p) return false
+      const base = loadConfig().baseDir
+      const rel = base ? p.replace(base, "").replace(/^\/+/, "") : p
+      const dir = rel.includes("/") ? rel.split("/")[0] : ""
+      return dir === filterDir
+    })()
+    return catOk && dirOk
+  })
 
   async function refreshModules() {
     await ensureStorage()
@@ -74,6 +98,12 @@ export function HomeView() {
   useEffect(() => {
     void refreshModules()
   }, [])
+
+  useEffect(() => {
+    if (filterDir !== "全部" && !dirOptions.includes(filterDir)) {
+      setFilterDir("全部")
+    }
+  }, [dirOptions, filterDir])
 
   useEffect(() => {
     if (filterCategory === "全部") return
@@ -103,8 +133,10 @@ export function HomeView() {
       await Dialog.alert({ message: "请先在设置页添加分类" })
       return
     }
+    const baseDir = loadConfig().baseDir
+    const subDirs = await listDirectSubDirs(baseDir)
     const info = await Navigation.present<ModuleInfo>({
-      element: <EditModuleView title="添加模块" categories={categories} />,
+      element: <EditModuleView title="添加模块" categories={categories} saveDirs={subDirs} />,
     })
     if (!info) return
 
@@ -157,17 +189,18 @@ export function HomeView() {
     if (idx < 0) return
 
     const next = [...current]
+    const merged: ModuleInfo = { ...target, ...updated }
 
-    if (updated.name) {
-      const nameExists = current.some((m, i) => i !== idx && m.name === updated.name)
+    if (merged.name) {
+      const nameExists = current.some((m, i) => i !== idx && m.name === merged.name)
       if (nameExists) {
         await Dialog.alert({ message: "模块名称已存在" })
         return
       }
     }
 
-    if (updated.link) {
-      const linkExists = current.some((m, i) => i !== idx && m.link === updated.link)
+    if (merged.link) {
+      const linkExists = current.some((m, i) => i !== idx && m.link === merged.link)
       if (linkExists) {
         await Dialog.alert({ message: "下载链接已存在" })
         return
@@ -178,13 +211,13 @@ export function HomeView() {
     setStage("修改模块中…")
     setProgress("")
     try {
-      next[idx] = updated
-      if (updated.name && updated.name !== target.name) {
-        await renameModuleFile(target.name, updated.name)
+      next[idx] = merged
+      if (merged.name && merged.name !== target.name) {
+        await renameModuleFile(target, merged.name)
       }
-      await updateModuleMetadata(updated.name, {
-        link: updated.link,
-        category: updated.category,
+      await updateModuleMetadata(merged, {
+        link: merged.link,
+        category: merged.category,
       })
       await refreshModules()
       setStage("修改完成")
@@ -199,7 +232,7 @@ export function HomeView() {
     try {
       const fm: any = (globalThis as any).FileManager
       if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
-      const path = moduleFilePath(target.name)
+      const path = target.filePath ?? moduleFilePath(target.name)
       const text = await fm.readAsString(path)
       if (!text) {
         await Dialog.alert({ message: "模块内容为空或读取失败" })
@@ -231,7 +264,7 @@ export function HomeView() {
     setStage("删除模块中…")
     setProgress("")
     try {
-      await removeModuleFile(target.name)
+      await removeModuleFile(target)
       await refreshModules()
       setStage("删除完成")
     } catch (e: any) {
@@ -326,9 +359,28 @@ export function HomeView() {
           header={(
             <HStack>
               <Text>
-                {filteredModules.length > 0 ? `模块列表(${filteredModules.length})` : "模块列表"}
+                {filteredModules.length > 0
+                  ? `模块列表(${filteredModules.length})`
+                  : "模块列表"}
               </Text>
               <Spacer />
+              {dirOptions.length > 1 ? (
+                <Picker
+                  title="子文件夹"
+                  pickerStyle="menu"
+                  value={Math.max(0, dirOptions.indexOf(filterDir))}
+                  onChanged={(idx: number) => {
+                    HapticFeedback.heavyImpact()
+                    setFilterDir(dirOptions[idx] ?? "全部")
+                  }}
+                >
+                  {dirOptions.map((d, idx) => (
+                    <Text key={`${d}-${idx}`} tag={idx}>
+                      {d}
+                    </Text>
+                  ))}
+                </Picker>
+              ) : null}
               <Picker
                 title="筛选分类"
                 pickerStyle="menu"

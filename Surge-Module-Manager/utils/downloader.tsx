@@ -43,7 +43,8 @@ export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; m
     throw new Error("FileManager 读写方法不可用")
   }
 
-  const tmpDir = fm.temporaryDirectory ?? Path.join(Path.dirname(moduleFilePath(info.name)), ".tmp")
+  const targetDir = info.saveDir
+  const tmpDir = fm.temporaryDirectory ?? Path.join(Path.dirname(moduleFilePath(info.name, targetDir)), ".tmp")
   const tmpPath = Path.join(tmpDir, `${info.name}_${Date.now()}.tmp`)
 
   try {
@@ -67,7 +68,7 @@ export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; m
   content = injectUrl(content, info.link)
   content = injectCategory(content, info.category)
 
-  const path = moduleFilePath(info.name)
+  const path = moduleFilePath(info.name, targetDir)
   await fm.writeAsString(path, content)
 
   try {

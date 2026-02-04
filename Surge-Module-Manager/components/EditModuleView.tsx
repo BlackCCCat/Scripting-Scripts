@@ -55,6 +55,7 @@ export function EditModuleView(props: {
   title: string
   categories: string[]
   initial?: ModuleInfo
+  saveDirs?: string[]
 }) {
   const dismiss = Navigation.useDismiss()
 
@@ -74,6 +75,12 @@ export function EditModuleView(props: {
     categoryOptions.findIndex((c) => c === (initial?.category ?? ""))
   )
   const [categoryIdx, setCategoryIdx] = useState<number>(initialIdx >= 0 ? initialIdx : 0)
+  const saveDirOptions = useMemo<string[]>(() => {
+    const dirs = props.saveDirs ?? []
+    if (!dirs.length) return []
+    return ["根目录", ...dirs]
+  }, [props.saveDirs])
+  const [saveDirIdx, setSaveDirIdx] = useState<number>(0)
 
   useEffect(() => {
     if (!showLibrary) return
@@ -196,6 +203,8 @@ export function EditModuleView(props: {
     const trimmedName = name.trim()
     const trimmedLink = link.trim()
     const cat = categoryOptions[categoryIdx] === "不设置分类" ? undefined : categoryOptions[categoryIdx]
+    const saveDir =
+      saveDirOptions.length && saveDirIdx > 0 ? saveDirOptions[saveDirIdx] : undefined
 
     if (!trimmedName || !trimmedLink) {
       await Dialog.alert({ message: "名称和链接不能为空" })
@@ -206,6 +215,7 @@ export function EditModuleView(props: {
       name: trimmedName,
       link: trimmedLink,
       category: cat,
+      saveDir,
     }
     dismiss(result)
   }
@@ -272,10 +282,10 @@ export function EditModuleView(props: {
           </Section>
 
           <Section header={<Text>分类</Text>}>
-              <Picker
-                title={"模块分类"}
-                pickerStyle="menu"
-                value={categoryIdx}
+            <Picker
+              title={"模块分类"}
+              pickerStyle="menu"
+              value={categoryIdx}
                 onChanged={(idx: number) => {
                   HapticFeedback.heavyImpact()
                   setCategoryIdx(idx)
@@ -288,6 +298,29 @@ export function EditModuleView(props: {
               ))}
             </Picker>
           </Section>
+
+          {showLibrary && saveDirOptions.length ? (
+            <Section header={<Text>保存路径</Text>}>
+              <Picker
+                title={"保存路径"}
+                pickerStyle="menu"
+                value={saveDirIdx}
+                onChanged={(idx: number) => {
+                  HapticFeedback.heavyImpact()
+                  setSaveDirIdx(idx)
+                }}
+              >
+                {saveDirOptions.map((p, idx) => {
+                  const label = idx === 0 ? "根目录" : (String(p).split("/").pop() ?? p)
+                  return (
+                    <Text key={`${p}-${idx}`} tag={idx}>
+                      {label}
+                    </Text>
+                  )
+                })}
+              </Picker>
+            </Section>
+          ) : null}
 
           <Section>
             <CenterRowButton title="保存" onPress={onSave} />

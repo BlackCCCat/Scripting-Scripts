@@ -5,6 +5,8 @@ export type ModuleInfo = {
   name: string
   link: string
   category?: string
+  filePath?: string
+  saveDir?: string
 }
 
 const BASE_DIR_NAME = "SurgeModulesManager"
@@ -95,15 +97,28 @@ function parseLinkFromContent(content: string, prefixes: string[]): string {
   return ""
 }
 
-async function listModuleFiles(dir: string): Promise<string[]> {
+async function isDirectory(path: string): Promise<boolean> {
+  const fm = fmOrThrow()
+  if (typeof fm.isDirectory === "function") return !!(await fm.isDirectory(path))
+  if (typeof fm.isDir === "function") return !!(await fm.isDir(path))
+  return false
+}
+
+async function listModuleFilesRecursive(dir: string): Promise<string[]> {
   const fm = fmOrThrow()
   const list = await fm.readDirectory(dir)
   if (!Array.isArray(list)) return []
   const files: string[] = []
   for (const entry of list) {
     const raw = String(entry)
-    if (!raw.toLowerCase().endsWith(".sgmodule")) continue
-    files.push(raw.includes("/") ? raw : Path.join(dir, raw))
+    const full = raw.includes("/") ? raw : Path.join(dir, raw)
+    if (await isDirectory(full)) {
+      const sub = await listModuleFilesRecursive(full)
+      files.push(...sub)
+      continue
+    }
+    if (!full.toLowerCase().endsWith(".sgmodule")) continue
+    files.push(full)
   }
   return files
 }
@@ -114,7 +129,7 @@ export async function loadModules(): Promise<ModuleInfo[]> {
   const dir = getModulesDir()
 
   const modules: ModuleInfo[] = []
-  const files = await listModuleFiles(dir)
+  const files = await listModuleFilesRecursive(dir)
   for (const path of files) {
     const name = extractNameFromPath(path)
     if (!name) continue
@@ -126,18 +141,24 @@ export async function loadModules(): Promise<ModuleInfo[]> {
     }
     const link = parseLinkFromContent(text, getLinkPrefixes())
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
-    modules.push({ name, link, category })
+    modules.push({ name, link, category, filePath: path })
   }
   return modules
 }
 
-export function moduleFilePath(moduleName: string): string {
-  return Path.join(getModulesDir(), `${moduleName}.sgmodule`)
+export function moduleFilePath(moduleName: string, dir?: string): string {
+  const base = dir ?? getModulesDir()
+  return Path.join(base, `${moduleName}.sgmodule`)
 }
 
-export async function removeModuleFile(moduleName: string): Promise<void> {
+function resolveModulePath(target: ModuleInfo | string): string {
+  if (typeof target === "string") return moduleFilePath(target)
+  return target.filePath ?? moduleFilePath(target.name)
+}
+
+export async function removeModuleFile(target: ModuleInfo | string): Promise<void> {
   const fm = fmOrThrow()
-  const path = moduleFilePath(moduleName)
+  const path = resolveModulePath(target)
   if (!(await exists(path))) return
   if (typeof fm.remove === "function") {
     await fm.remove(path)
@@ -150,10 +171,10 @@ export async function removeModuleFile(moduleName: string): Promise<void> {
   throw new Error("FileManager.remove 不可用")
 }
 
-export async function renameModuleFile(oldName: string, newName: string): Promise<void> {
+export async function renameModuleFile(oldTarget: ModuleInfo | string, newName: string): Promise<void> {
   const fm = fmOrThrow()
-  const from = moduleFilePath(oldName)
-  const to = moduleFilePath(newName)
+  const from = resolveModulePath(oldTarget)
+  const to = Path.join(Path.dirname(from), `${newName}.sgmodule`)
   if (!(await exists(from))) return
   if (typeof fm.rename === "function") {
     await fm.rename(from, to)
@@ -189,15 +210,32 @@ function upsertLink(content: string, prefixes: string[], value?: string): string
   return `${first}${trimmed}\n${filtered.join("\n")}`
 }
 
-export async function updateModuleMetadata(moduleName: string, info: { link?: string; category?: string }) {
+export async function updateModuleMetadata(target: ModuleInfo | string, info: { link?: string; category?: string }) {
   const fm = fmOrThrow()
-  const path = moduleFilePath(moduleName)
+  const path = resolveModulePath(target)
   if (!(await exists(path))) return
   const raw = await fm.readAsString(path)
   let content = String(raw ?? "")
   content = upsertLink(content, getLinkPrefixes(), info.link)
   content = upsertTag(content, "category", info.category)
   await fm.writeAsString(path, content)
+}
+
+export async function listDirectSubDirs(baseDir?: string): Promise<string[]> {
+  const fm = fmOrThrow()
+  const root = baseDir ?? getModulesDir()
+  const list = await fm.readDirectory(root)
+  if (!Array.isArray(list)) return []
+  const dirs: string[] = []
+  for (const entry of list) {
+    const raw = String(entry)
+    const full = raw.includes("/") ? raw : Path.join(root, raw)
+    const name = raw.includes("/") ? raw.split("/").pop() ?? raw : raw
+    if (!name || name.startsWith(".")) continue
+    if (name === "__pycache__" || name === "__pypackages__") continue
+    if (await isDirectory(full)) dirs.push(full)
+  }
+  return dirs
 }
 
 export async function loadCategoriesFromModules(baseDir?: string): Promise<{
@@ -210,10 +248,10 @@ export async function loadCategoriesFromModules(baseDir?: string): Promise<{
   const altDir = baseDir ? Path.join(baseDir, MODULES_DIR_NAME) : undefined
   let files: string[] = []
   if (await exists(primaryDir)) {
-    files = await listModuleFiles(primaryDir)
+    files = await listModuleFilesRecursive(primaryDir)
   }
   if (!files.length && altDir && (await exists(altDir))) {
-    files = await listModuleFiles(altDir)
+    files = await listModuleFilesRecursive(altDir)
   }
   const set = new Set<string>()
   for (const path of files) {
@@ -236,10 +274,10 @@ export async function renameCategoryInModules(oldName: string, newName: string, 
   const altDir = baseDir ? Path.join(baseDir, MODULES_DIR_NAME) : undefined
   let files: string[] = []
   if (await exists(primaryDir)) {
-    files = await listModuleFiles(primaryDir)
+    files = await listModuleFilesRecursive(primaryDir)
   }
   if (!files.length && altDir && (await exists(altDir))) {
-    files = await listModuleFiles(altDir)
+    files = await listModuleFilesRecursive(altDir)
   }
   for (const path of files) {
     let text = ""
@@ -261,10 +299,10 @@ export async function countModulesByCategory(baseDir?: string): Promise<Record<s
   const altDir = baseDir ? Path.join(baseDir, MODULES_DIR_NAME) : undefined
   let files: string[] = []
   if (await exists(primaryDir)) {
-    files = await listModuleFiles(primaryDir)
+    files = await listModuleFilesRecursive(primaryDir)
   }
   if (!files.length && altDir && (await exists(altDir))) {
-    files = await listModuleFiles(altDir)
+    files = await listModuleFilesRecursive(altDir)
   }
   const counts: Record<string, number> = {}
   for (const path of files) {
