@@ -63,6 +63,26 @@ function clamp(v: number, a = 0, b = 1) {
   return Math.max(a, Math.min(b, v))
 }
 
+type HapticLevel = 'light' | 'medium' | 'heavy'
+
+function fireHaptic(level: HapticLevel) {
+  try {
+    const h = (globalThis as any).HapticFeedback
+    if (!h) return
+    if (level === 'light') {
+      if (typeof h.lightImpact === 'function') h.lightImpact()
+      else if (typeof h.mediumImpact === 'function') h.mediumImpact()
+      return
+    }
+    if (level === 'heavy') {
+      if (typeof h.heavyImpact === 'function') h.heavyImpact()
+      else if (typeof h.mediumImpact === 'function') h.mediumImpact()
+      return
+    }
+    if (typeof h.mediumImpact === 'function') h.mediumImpact()
+  } catch {}
+}
+
 function RectOverlay({
   box,
   selected,
@@ -75,6 +95,10 @@ function RectOverlay({
   const stroke = selected ? 'rgba(0,122,255,1)' : 'rgba(0,200,0,1)'
   const fill = selected ? 'rgba(0,122,255,0.18)' : 'rgba(0,200,0,0.06)'
   const hitPad = 6
+  const handleTap = () => {
+    fireHaptic('light')
+    onTap()
+  }
   return (
     <>
       <Rectangle
@@ -82,7 +106,7 @@ function RectOverlay({
         fill={'rgba(0,0,0,0.001)'}
         frame={{ width: box.width + hitPad * 2, height: box.height + hitPad * 2 }}
         position={{ x: box.left + box.width / 2, y: box.top + box.height / 2 }}
-        onTapGesture={() => onTap()}
+        onTapGesture={handleTap}
       />
       <Rectangle
         // a faint green fill so it's visible and hit-testable
@@ -90,7 +114,6 @@ function RectOverlay({
         stroke={stroke}
         frame={{ width: box.width, height: box.height }}
         position={{ x: box.left + box.width / 2, y: box.top + box.height / 2 }}
-        onTapGesture={() => onTap()}
       />
     </>
   )
@@ -105,6 +128,7 @@ function ToolbarButton(props: {
   font?: number | Font | { name: string; size: number }
   imageScale?: 'small' | 'medium' | 'large'
   background?: boolean
+  haptic?: HapticLevel
 }) {
   const isActive = props.active ?? false
   const foreground = isActive ? 'systemBlue' : undefined
@@ -115,9 +139,13 @@ function ToolbarButton(props: {
   const padding = layout === 'vertical'
     ? { top: 10, bottom: 10, left: 12, right: 12 }
     : { top: 6, bottom: 6, left: 10, right: 10 }
+  const handlePress = () => {
+    fireHaptic(props.haptic ?? 'medium')
+    props.onPress()
+  }
   return (
     <Button
-      action={props.onPress}
+      action={handlePress}
       buttonStyle="plain"
       background={hasBackground ? { style: 'secondarySystemBackground', shape: { type: 'rect', cornerRadius: 10 } } : undefined}
     >
@@ -146,6 +174,10 @@ function ToolbarButton(props: {
 
 export default function App({ initialImage }: { initialImage?: UIImage | null }) {
   const dismiss = Navigation.useDismiss()
+  const withHaptic = (action: () => void | Promise<void>, level: HapticLevel = 'medium') => () => {
+    fireHaptic(level)
+    void action()
+  }
 
   const [image, setImage] = useState<UIImage | null>(null)
   const [items, setItems] = useState<RecognizedItem[]>([])
@@ -486,7 +518,7 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
       <ZStack>
         <VStack spacing={8} padding toast={{ message: toastMsg, isPresented: toastShown, onChanged: (v: boolean) => setToastShown(v), duration: 2, position: 'bottom' }}>
           <HStack spacing={8} alignment="center" zIndex={2}>
-            <Button title="" systemImage="xmark" buttonStyle="plain" action={() => dismiss()} />
+            <Button title="" systemImage="xmark" buttonStyle="plain" action={withHaptic(() => dismiss(), 'light')} />
             <Text font="headline">Vision OCR</Text>
             <Spacer />
             {loading ? <ProgressView value={0.5} /> : null}
@@ -496,14 +528,14 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
           <VStack frame={{ maxWidth: 'infinity', maxHeight: 'infinity' }} alignment="center">
             <Spacer />
             <VStack spacing={10} alignment="center">
-              <ToolbarButton title="相册" systemImage="photo" onPress={pickPhoto} layout="vertical" font={18} imageScale="large" background={false} />
-              <ToolbarButton title="文件" systemImage="doc" onPress={pickFile} layout="vertical" font={18} imageScale="large" background={false} />
-              <ToolbarButton title="拍照" systemImage="camera" onPress={takePhoto} layout="vertical" font={18} imageScale="large" background={false} />
-              <ToolbarButton title="粘贴" systemImage="doc.on.clipboard" onPress={pasteImage} layout="vertical" font={18} imageScale="large" background={false} />
+              <ToolbarButton title="相册" systemImage="photo" onPress={pickPhoto} layout="vertical" font={18} imageScale="large" background={false} haptic="medium" />
+              <ToolbarButton title="文件" systemImage="doc" onPress={pickFile} layout="vertical" font={18} imageScale="large" background={false} haptic="medium" />
+              <ToolbarButton title="拍照" systemImage="camera" onPress={takePhoto} layout="vertical" font={18} imageScale="large" background={false} haptic="medium" />
+              <ToolbarButton title="粘贴" systemImage="doc.on.clipboard" onPress={pasteImage} layout="vertical" font={18} imageScale="large" background={false} haptic="medium" />
               <Toggle
                 title="自动读取剪贴板"
                 value={autoPaste}
-                onChanged={(v: boolean) => setAutoPaste(v)}
+                onChanged={(v: boolean) => { fireHaptic('light'); setAutoPaste(v) }}
                 toggleStyle="switch"
               />
             </VStack>
@@ -514,19 +546,21 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
         {image ? (
           <GroupBox label={<Label title="操作" systemImage="slider.horizontal.3" />} zIndex={1}>
             <HStack spacing={8}>
-              <ToolbarButton title="重置图片" systemImage="xmark.bin" onPress={resetImage} />
+              <ToolbarButton title="重置图片" systemImage="xmark.bin" onPress={resetImage} haptic="heavy" />
               <ToolbarButton
                 title={multiSelect ? '合并复制' : '复制全部'}
                 systemImage="doc.on.doc"
                 onPress={multiSelect ? copySelectedMulti : copyAll}
+                haptic="medium"
               />
               <ToolbarButton
                 title="多选"
                 systemImage={multiSelect ? 'checkmark.circle.fill' : 'checkmark.circle'}
                 onPress={toggleMultiSelect}
                 active={multiSelect}
+                haptic="light"
               />
-              {selectedItem ? <ToolbarButton title="取消选择" systemImage="xmark.circle" onPress={() => setSelectedId(null)} /> : null}
+              {selectedItem ? <ToolbarButton title="取消选择" systemImage="xmark.circle" onPress={() => setSelectedId(null)} haptic="light" /> : null}
             </HStack>
           </GroupBox>
         ) : null}
@@ -715,11 +749,11 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
                 {/* <Text font="footnote">识别结果：{selectedItem.content}</Text> */}
                 <TextField title="编辑" value={editorValue} onChanged={setEditorValue} prompt="编辑文本" />
                 <HStack spacing={8}>
-                  <Button title="应用" action={() => { applyEdit(); showToast('更改已保存') }} />
-                  <Button title="重置" action={() => { resetItem(selectedItem.id); setEditorValue(selectedItem.content) }} />
-                  <Button title="复制" action={copySelected} />
+                  <Button title="应用" action={withHaptic(() => { applyEdit(); showToast('更改已保存') }, 'medium')} />
+                  <Button title="重置" action={withHaptic(() => { resetItem(selectedItem.id); setEditorValue(selectedItem.content) }, 'light')} />
+                  <Button title="复制" action={withHaptic(copySelected, 'medium')} />
                   <Spacer />
-                  <Button title="关闭" action={() => setSelectedId(null)} />
+                  <Button title="关闭" action={withHaptic(() => setSelectedId(null), 'light')} />
                 </HStack>
               </VStack>
             </GroupBox>
