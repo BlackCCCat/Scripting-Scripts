@@ -11,4 +11,4 @@
 
 # 感谢
 - [LoonKissSurge](https://github.com/QingRex/LoonKissSurge/) Surge模块管理中使用
-- [xream/scripts](https://github.com/xream/scripts) Vision OCR由该仓库中的`Vison`修改而来
+- [xream/scripts](https://github.com/xream/scripts) Vision OCR由该仓库中的`Vision`修改而来
