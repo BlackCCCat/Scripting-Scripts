@@ -24,6 +24,7 @@ import {
   DragGesture,
   TapGesture
 } from 'scripting'
+import type { Font } from 'scripting'
 
 type RecognizedItem = {
   id: string
@@ -101,14 +102,14 @@ function ToolbarButton(props: {
   onPress: () => void
   active?: boolean
   layout?: 'horizontal' | 'vertical'
-  font?: string
+  font?: number | Font | { name: string; size: number }
   imageScale?: 'small' | 'medium' | 'large'
   background?: boolean
 }) {
   const isActive = props.active ?? false
   const foreground = isActive ? 'systemBlue' : undefined
   const layout = props.layout ?? 'horizontal'
-  const font = props.font ?? 'subheadline'
+  const font = props.font ?? 15
   const imageScale = props.imageScale ?? 'small'
   const hasBackground = props.background ?? true
   const padding = layout === 'vertical'
@@ -495,10 +496,10 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
           <VStack frame={{ maxWidth: 'infinity', maxHeight: 'infinity' }} alignment="center">
             <Spacer />
             <VStack spacing={10} alignment="center">
-              <ToolbarButton title="相册" systemImage="photo" onPress={pickPhoto} layout="vertical" font="headline" imageScale="medium" background={false} />
-              <ToolbarButton title="文件" systemImage="doc" onPress={pickFile} layout="vertical" font="headline" imageScale="medium" background={false} />
-              <ToolbarButton title="拍照" systemImage="camera" onPress={takePhoto} layout="vertical" font="headline" imageScale="medium" background={false} />
-              <ToolbarButton title="粘贴" systemImage="doc.on.clipboard" onPress={pasteImage} layout="vertical" font="headline" imageScale="medium" background={false} />
+              <ToolbarButton title="相册" systemImage="photo" onPress={pickPhoto} layout="vertical" font={16} imageScale="medium" background={false} />
+              <ToolbarButton title="文件" systemImage="doc" onPress={pickFile} layout="vertical" font={16} imageScale="medium" background={false} />
+              <ToolbarButton title="拍照" systemImage="camera" onPress={takePhoto} layout="vertical" font={16} imageScale="medium" background={false} />
+              <ToolbarButton title="粘贴" systemImage="doc.on.clipboard" onPress={pasteImage} layout="vertical" font={16} imageScale="medium" background={false} />
               <Toggle
                 title="自动读取剪贴板"
                 value={autoPaste}
