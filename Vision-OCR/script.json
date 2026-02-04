@@ -1,0 +1,43 @@
+{
+  "localizedNames": {
+    "pt": "",
+    "ru": "",
+    "de": "",
+    "it": "",
+    "es": "",
+    "ja": "",
+    "en": "",
+    "zh": "",
+    "fr": ""
+  },
+  "name": "Vision OCR",
+  "intentInputTypes": ["Text", "URLs", "Images", "FileURLs"],
+  "color": "rgba(71, 102, 194,1)",
+  "remoteResource": {
+    "autoUpdateInterval": "",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Vision-OCR.zip",
+    "hash": ""
+  },
+  "contributors": [],
+  "author": {
+    "name": "BlackCCCat",
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "email": null
+  },
+  "localizedDescriptions": {
+    "fr": "",
+    "pt": "",
+    "es": "",
+    "ru": "",
+    "it": "",
+    "zh": "",
+    "en": "",
+    "de": "",
+    "ja": ""
+  },
+  "iconImage": "",
+  "icon": "eye.fill",
+  "runInApp": false,
+  "description": "图像文本识别\n配合快捷指令使用：https:\/\/www.icloud.com\/shortcuts\/da0134818d9445d0b445bee597330c6b",
+  "version": ""
+}
