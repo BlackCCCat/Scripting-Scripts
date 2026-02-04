@@ -19,6 +19,7 @@ import {
   ensureStorage,
   loadModules,
   moduleFilePath,
+  detectLinkPrefix,
   renameModuleFile,
   removeModuleFile,
   sortModules,
@@ -62,32 +63,42 @@ export function HomeView() {
   const categories = cfg.categories ?? []
   const filterOptions = ["全部", ...categories]
   const filterIdx = Math.max(0, filterOptions.indexOf(filterCategory))
+  const baseDir = cfg.baseDir
   const dirOptions = useMemo(() => {
     const set = new Set<string>()
-    const base = loadConfig().baseDir
     for (const m of modules) {
       const p = m.filePath ? String(m.filePath) : ""
       if (!p) continue
-      const rel = base ? p.replace(base, "").replace(/^\/+/, "") : p
+      const rel = baseDir ? p.replace(baseDir, "").replace(/^\/+/, "") : p
       const dir = rel.includes("/") ? rel.split("/")[0] : ""
       if (dir) set.add(dir)
     }
     return ["全部", ...Array.from(set)]
-  }, [modules])
+  }, [modules, baseDir])
   const [filterDir, setFilterDir] = useState("全部")
-  const filteredModules = modules.filter((m) => {
+
+  function getTopDir(m: ModuleInfo): string {
+    const p = m.filePath ? String(m.filePath) : ""
+    if (!p) return ""
+    const rel = baseDir ? p.replace(baseDir, "").replace(/^\/+/, "") : p
+    return rel.includes("/") ? rel.split("/")[0] : ""
+  }
+
+  function matchFilters(m: ModuleInfo): boolean {
     const catOk = filterCategory === "全部" ? true : m.category === filterCategory
-    const dirOk = (() => {
-      if (filterDir === "全部") return true
-      const p = m.filePath ? String(m.filePath) : ""
-      if (!p) return false
-      const base = loadConfig().baseDir
-      const rel = base ? p.replace(base, "").replace(/^\/+/, "") : p
-      const dir = rel.includes("/") ? rel.split("/")[0] : ""
-      return dir === filterDir
-    })()
+    const dirOk = filterDir === "全部" ? true : getTopDir(m) === filterDir
     return catOk && dirOk
+  }
+
+  const filteredModules = modules.filter((m) => {
+    return matchFilters(m)
   })
+
+  function inferSaveDir(m: ModuleInfo): string | undefined {
+    if (!m.filePath) return undefined
+    const idx = String(m.filePath).lastIndexOf("/")
+    return idx > 0 ? String(m.filePath).slice(0, idx) : undefined
+  }
 
   async function refreshModules() {
     await ensureStorage()
@@ -304,9 +315,10 @@ export function HomeView() {
         setStage(`下载中 (${i + 1}/${list.length})：${m.name}`)
         const pct = Math.round(((i + 1) / list.length) * 100)
         setProgress(`${pct}%`)
-        const res = await downloadModule(m)
+        const linkPrefix = await detectLinkPrefix(m)
+        const res = await downloadModule({ ...m, saveDir: inferSaveDir(m), linkPrefix })
         if (res.ok) okCount += 1
-        else errors.push(res.message ?? `${m.name} 下载失败`)
+        else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
       }
       if (errors.length) {
         setStage(`下载完成：成功 ${okCount}/${list.length}`)
@@ -318,7 +330,9 @@ export function HomeView() {
         setStage(`下载完成：${okCount}/${list.length}`)
       }
     } catch (e: any) {
-      setStage(`下载失败：${String(e?.message ?? e)}`)
+      const msg = String(e?.message ?? e)
+      setStage(`下载失败：${msg}`)
+      await Dialog.alert({ title: "下载失败", message: msg })
     } finally {
       setBusy(false)
       setProgress("")
@@ -327,10 +341,11 @@ export function HomeView() {
 
   async function downloadAll() {
     const current = await loadModules()
-    const list =
-      filterCategory === "全部"
-        ? current
-        : current.filter((m) => m.category === filterCategory)
+    const list = current.filter((m) => {
+      const catOk = filterCategory === "全部" ? true : m.category === filterCategory
+      const dirOk = filterDir === "全部" ? true : getTopDir(m) === filterDir
+      return catOk && dirOk
+    })
     await downloadBatch(list, "下载全部模块…")
   }
 

@@ -81,7 +81,7 @@ function parseTag(content: string, key: string): string | undefined {
 function getLinkPrefixes(): string[] {
   const cfg = loadConfig()
   const raw = String(cfg.linkPatternsText ?? "").split(/\r?\n/g)
-  return raw.map((s) => s.trim()).filter(Boolean)
+  return raw.filter((s) => s.trim().length > 0)
 }
 
 function parseLinkFromContent(content: string, prefixes: string[]): string {
@@ -95,6 +95,16 @@ function parseLinkFromContent(content: string, prefixes: string[]): string {
     }
   }
   return ""
+}
+
+export function detectLinkPrefixFromContent(content: string, prefixes: string[]): string | undefined {
+  const lines = String(content ?? "").split(/\r?\n/g)
+  for (const lineRaw of lines) {
+    const line = lineRaw.trimStart()
+    const hit = prefixes.find((p) => line.startsWith(p))
+    if (hit) return hit
+  }
+  return undefined
 }
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -140,6 +150,7 @@ export async function loadModules(): Promise<ModuleInfo[]> {
       text = ""
     }
     const link = parseLinkFromContent(text, getLinkPrefixes())
+    if (!link) continue
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
     modules.push({ name, link, category, filePath: path })
   }
@@ -154,6 +165,14 @@ export function moduleFilePath(moduleName: string, dir?: string): string {
 function resolveModulePath(target: ModuleInfo | string): string {
   if (typeof target === "string") return moduleFilePath(target)
   return target.filePath ?? moduleFilePath(target.name)
+}
+
+export async function detectLinkPrefix(target: ModuleInfo | string): Promise<string | undefined> {
+  const fm = fmOrThrow()
+  const path = resolveModulePath(target)
+  if (!(await exists(path))) return undefined
+  const raw = await fm.readAsString(path)
+  return detectLinkPrefixFromContent(String(raw ?? ""), getLinkPrefixes())
 }
 
 export async function removeModuleFile(target: ModuleInfo | string): Promise<void> {
@@ -201,13 +220,16 @@ function upsertTag(content: string, key: string, value?: string): string {
 function upsertLink(content: string, prefixes: string[], value?: string): string {
   const trimmed = String(value ?? "").trim()
   if (!trimmed) return content
-  const first = prefixes[0] ?? "#url="
   const lines = String(content ?? "").split(/\r?\n/g)
+  let matchedPrefix: string | undefined
   const filtered = lines.filter((line) => {
     const t = line.trimStart()
-    return !prefixes.some((p) => t.startsWith(p))
+    const hit = prefixes.find((p) => t.startsWith(p))
+    if (hit && !matchedPrefix) matchedPrefix = hit
+    return !hit
   })
-  return `${first}${trimmed}\n${filtered.join("\n")}`
+  const prefix = matchedPrefix ?? prefixes[0] ?? "#url="
+  return `${prefix}${trimmed}\n${filtered.join("\n")}`
 }
 
 export async function updateModuleMetadata(target: ModuleInfo | string, info: { link?: string; category?: string }) {

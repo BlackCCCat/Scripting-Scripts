@@ -18,15 +18,14 @@ function injectCategory(content: string, category?: string): string {
   return `${line}\n${content}`
 }
 
-function injectUrl(content: string, url?: string): string {
+function injectUrl(content: string, url?: string, preferredPrefix?: string): string {
   const u = String(url ?? "").trim()
   if (!u) return content
   const cfg = loadConfig()
   const prefixes = String(cfg.linkPatternsText ?? "")
     .split(/\r?\n/g)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const first = prefixes[0] ?? "#url="
+    .filter((s) => s.trim().length > 0)
+  const first = preferredPrefix && prefixes.includes(preferredPrefix) ? preferredPrefix : prefixes[0] ?? "#url="
   const lines = String(content ?? "").split(/\r?\n/g)
   const filtered = lines.filter((line) => {
     const t = line.trimStart()
@@ -35,7 +34,7 @@ function injectUrl(content: string, url?: string): string {
   return `${first}${u}\n${filtered.join("\n")}`
 }
 
-export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; message?: string }> {
+export async function downloadModule(info: ModuleInfo & { linkPrefix?: string }): Promise<{ ok: boolean; message?: string }> {
   await ensureStorage()
 
   const fm: any = (globalThis as any).FileManager
@@ -65,7 +64,7 @@ export async function downloadModule(info: ModuleInfo): Promise<{ ok: boolean; m
   }
 
   let content = injectNameFlag(text)
-  content = injectUrl(content, info.link)
+  content = injectUrl(content, info.link, info.linkPrefix)
   content = injectCategory(content, info.category)
 
   const path = moduleFilePath(info.name, targetDir)
