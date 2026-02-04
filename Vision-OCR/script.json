@@ -37,7 +37,7 @@
   },
   "iconImage": "",
   "icon": "eye.fill",
-  "runInApp": false,
-  "description": "图像文本识别\n配合快捷指令使用：https:\/\/www.icloud.com\/shortcuts\/da0134818d9445d0b445bee597330c6b",
+  "runInApp": true,
+  "description": "图像文本识别\n配合快捷指令使用：https://www.icloud.com/shortcuts/36c319c704594cefbfeb2a0e01eea723",
   "version": ""
 }
