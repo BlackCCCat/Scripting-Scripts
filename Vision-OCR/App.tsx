@@ -492,215 +492,217 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
             {loading ? <ProgressView value={0.5} /> : null}
           </HStack>
 
-        {!image ? (
-          <VStack frame={{ maxWidth: 'infinity', maxHeight: 'infinity' }} alignment="center">
-            <Spacer />
-            <VStack spacing={10} alignment="center">
-              <ToolbarButton title="相册" systemImage="photo" onPress={pickPhoto} layout="vertical" font={16} imageScale="medium" background={false} />
-              <ToolbarButton title="文件" systemImage="doc" onPress={pickFile} layout="vertical" font={16} imageScale="medium" background={false} />
-              <ToolbarButton title="拍照" systemImage="camera" onPress={takePhoto} layout="vertical" font={16} imageScale="medium" background={false} />
-              <ToolbarButton title="粘贴" systemImage="doc.on.clipboard" onPress={pasteImage} layout="vertical" font={16} imageScale="medium" background={false} />
-              <Toggle
-                title="自动读取剪贴板"
-                value={autoPaste}
-                onChanged={(v: boolean) => setAutoPaste(v)}
-                toggleStyle="switch"
-              />
+          {!image ? (
+            <VStack frame={{ maxWidth: 'infinity', maxHeight: 'infinity' }} alignment="center">
+              <Spacer />
+              <VStack spacing={10} alignment="center">
+                <ToolbarButton title="相册" systemImage="photo" onPress={pickPhoto} layout="vertical" font={18} imageScale="large" background={false} />
+                <ToolbarButton title="文件" systemImage="doc" onPress={pickFile} layout="vertical" font={18} imageScale="large" background={false} />
+                <ToolbarButton title="拍照" systemImage="camera" onPress={takePhoto} layout="vertical" font={18} imageScale="large" background={false} />
+                <ToolbarButton title="粘贴" systemImage="doc.on.clipboard" onPress={pasteImage} layout="vertical" font={18} imageScale="large" background={false} />
+                <Toggle
+                  title="自动读取剪贴板"
+                  value={autoPaste}
+                  onChanged={(v: boolean) => setAutoPaste(v)}
+                  toggleStyle="switch"
+                />
+              </VStack>
+              <Spacer />
             </VStack>
-            <Spacer />
-          </VStack>
-        ) : null}
+          ) : null}
 
-        {image ? (
-          <GroupBox label={<Label title="操作" systemImage="slider.horizontal.3" />}>
-            <HStack spacing={8}>
-              <ToolbarButton title="重置图片" systemImage="xmark.bin" onPress={resetImage} />
-              <ToolbarButton
-                title={multiSelect ? '合并复制' : '复制全部'}
-                systemImage="doc.on.doc"
-                onPress={multiSelect ? copySelectedMulti : copyAll}
-              />
-              <ToolbarButton
-                title="多选"
-                systemImage={multiSelect ? 'checkmark.circle.fill' : 'checkmark.circle'}
-                onPress={toggleMultiSelect}
-                active={multiSelect}
-              />
-              {selectedItem ? <ToolbarButton title="取消选择" systemImage="xmark.circle" onPress={() => setSelectedId(null)} /> : null}
-            </HStack>
-          </GroupBox>
-        ) : null}
+          {image ? (
+            <GroupBox label={<Label title="操作" systemImage="slider.horizontal.3" />}>
+              <HStack spacing={8}>
+                <ToolbarButton title="重置图片" systemImage="xmark.bin" onPress={resetImage} />
+                <ToolbarButton
+                  title={multiSelect ? '合并复制' : '复制全部'}
+                  systemImage="doc.on.doc"
+                  onPress={multiSelect ? copySelectedMulti : copyAll}
+                />
+                <ToolbarButton
+                  title="多选"
+                  systemImage={multiSelect ? 'checkmark.circle.fill' : 'checkmark.circle'}
+                  onPress={toggleMultiSelect}
+                  active={multiSelect}
+                />
+                {selectedItem ? <ToolbarButton title="取消选择" systemImage="xmark.circle" onPress={() => setSelectedId(null)} /> : null}
+              </HStack>
+            </GroupBox>
+          ) : null}
 
-        {image ? (
-          <GroupBox label={<></>}>
-            <GeometryReader>
-              {({ size }: any) => {
-                const transforms = computeTransforms(size.width, size.height)
-                // Use the original image for display to ensure coordinate system & orientation match the OCR results.
-                // preparingThumbnail may change orientation/scale rounding and lead to mis-aligned boxes.
-                const displayImage = image
+          {image ? (
+            <GroupBox label={<></>}>
+              <GeometryReader>
+                {({ size }: any) => {
+                  const transforms = computeTransforms(size.width, size.height)
+                  // Use the original image for display to ensure coordinate system & orientation match the OCR results.
+                  // preparingThumbnail may change orientation/scale rounding and lead to mis-aligned boxes.
+                  const displayImage = image
 
-              // compute current interactive scale & offset
-              const effectiveScale = scale * gestureScale
-              const effectiveOffset = { x: offset.x + gestureOffset.x, y: offset.y + gestureOffset.y }
+                  // compute current interactive scale & offset
+                  const effectiveScale = scale * gestureScale
+                  const effectiveOffset = { x: offset.x + gestureOffset.x, y: offset.y + gestureOffset.y }
 
-              // compute some bounds for panning when zoomed
-              const effectiveScaleRef = scale * gestureScale
-              const effectiveDispW = transforms.dispW * effectiveScaleRef
-              const effectiveDispH = transforms.dispH * effectiveScaleRef
-              const maxPanX = Math.max(0, (effectiveDispW - size.width) / 2)
-              const maxPanY = Math.max(0, (effectiveDispH - size.height) / 2)
+                  // compute some bounds for panning when zoomed
+                  const effectiveScaleRef = scale * gestureScale
+                  const effectiveDispW = transforms.dispW * effectiveScaleRef
+                  const effectiveDispH = transforms.dispH * effectiveScaleRef
+                  const maxPanX = Math.max(0, (effectiveDispW - size.width) / 2)
+                  const maxPanY = Math.max(0, (effectiveDispH - size.height) / 2)
 
-              const dragG = DragGesture({ minDistance: 10, coordinateSpace: 'local' })
-                .onChanged((g) => {
-                  // compute desired offset and clamp live so the image never drifts offscreen
-                  const desiredX = offset.x + g.translation.width
-                  const desiredY = offset.y + g.translation.height
-                  const clampedX = clamp(desiredX, -maxPanX, maxPanX)
-                  const clampedY = clamp(desiredY, -maxPanY, maxPanY)
-                  // set gestureOffset as delta from base offset
-                  setGestureOffset({ x: clampedX - offset.x, y: clampedY - offset.y })
-                  setTouchPoint({ x: g.location.x, y: g.location.y })
-                })
-                .onEnded((g) => {
-                  // already clamped during change, so commit
-                  const finalX = offset.x + g.translation.width
-                  const finalY = offset.y + g.translation.height
-                  const clampedX = clamp(finalX, -maxPanX, maxPanX)
-                  const clampedY = clamp(finalY, -maxPanY, maxPanY)
-                  setOffset({ x: clampedX, y: clampedY })
-                  setGestureOffset({ x: 0, y: 0 })
-                })
-
-              // double-tap handled via onTapGesture (so we get consistent touch sequence);
-              // implementation moved to onTapGesture below (uses same anchor math)
-
-                return (
-                  <ZStack
-                  frame={{ width: size.width, height: size.height }}
-                  scaleEffect={effectiveScaleRef}
-                  offset={{ x: offset.x + gestureOffset.x, y: offset.y + gestureOffset.y }}
-                  gesture={
-                    MagnifyGesture()
-                      .onChanged((v) => {
-                        // set live magnification and touch anchor
-                        const sOld = scale
-                        const sLive = clamp(sOld * v.magnification, 1, 6)
-                        setGestureScale(v.magnification)
-                        // compute anchor-preserving offset during pinch
-                        const p = { x: v.startLocation.x, y: v.startLocation.y }
-                        setTouchPoint(p)
-                        const center = { x: size.width / 2, y: size.height / 2 }
-                        // offsetLive = offset + (1 - sLive/sOld) * (p - center - offset)
-                        const ratio = sOld > 0 ? (1 - sLive / sOld) : 0
-                        const offsetLiveX = offset.x + ratio * (p.x - center.x - offset.x)
-                        const offsetLiveY = offset.y + ratio * (p.y - center.y - offset.y)
-                        // clamp live offset
-                        const liveMaxPanX = Math.max(0, (transforms.dispW * sLive - size.width) / 2)
-                        const liveMaxPanY = Math.max(0, (transforms.dispH * sLive - size.height) / 2)
-                        const clampedLiveX = clamp(offsetLiveX, -liveMaxPanX, liveMaxPanX)
-                        const clampedLiveY = clamp(offsetLiveY, -liveMaxPanY, liveMaxPanY)
-                        setGestureOffset({ x: clampedLiveX - offset.x, y: clampedLiveY - offset.y })
-                        setToastShown(false)
-                      })
-                      .onEnded((v) => {
-                        const sOld = scale
-                        const sNew = clamp(sOld * v.magnification, 1, 6)
-                        const p = { x: v.startLocation.x, y: v.startLocation.y }
-                        const center = { x: size.width / 2, y: size.height / 2 }
-                        const ratio = sOld > 0 ? (1 - sNew / sOld) : 0
-                        const newOffsetX = offset.x + ratio * (p.x - center.x - offset.x)
-                        const newOffsetY = offset.y + ratio * (p.y - center.y - offset.y)
-                        const newMaxPanX = Math.max(0, (transforms.dispW * sNew - size.width) / 2)
-                        const newMaxPanY = Math.max(0, (transforms.dispH * sNew - size.height) / 2)
-                        const clampedX = clamp(newOffsetX, -newMaxPanX, newMaxPanX)
-                        const clampedY = clamp(newOffsetY, -newMaxPanY, newMaxPanY)
-                        setScale(sNew)
-                        setGestureScale(1)
-                        setOffset({ x: clampedX, y: clampedY })
-                        setGestureOffset({ x: 0, y: 0 })
-                      })
-                  }
-                  simultaneousGesture={dragG}
-                  highPriorityGesture={
-                    TapGesture(2).onEnded(() => {
-                      const p = touchPoint ?? { x: size.width / 2, y: size.height / 2 }
-                      const sCur = scale
-                      const sNew = sCur > 1.05 ? 1 : 2
-                      const center = { x: size.width / 2, y: size.height / 2 }
-                      const ratio = sCur > 0 ? (1 - sNew / sCur) : 0
-                      const newOffsetX = offset.x + ratio * (p.x - center.x - offset.x)
-                      const newOffsetY = offset.y + ratio * (p.y - center.y - offset.y)
-                      const newMaxPanX = Math.max(0, (transforms.dispW * sNew - size.width) / 2)
-                      const newMaxPanY = Math.max(0, (transforms.dispH * sNew - size.height) / 2)
-                      const clampedX = clamp(newOffsetX, -newMaxPanX, newMaxPanX)
-                      const clampedY = clamp(newOffsetY, -newMaxPanY, newMaxPanY)
-                      setScale(sNew)
-                      setGestureScale(1)
+                  const dragG = DragGesture({ minDistance: 10, coordinateSpace: 'local' })
+                    .onChanged((g) => {
+                      // compute desired offset and clamp live so the image never drifts offscreen
+                      const desiredX = offset.x + g.translation.width
+                      const desiredY = offset.y + g.translation.height
+                      const clampedX = clamp(desiredX, -maxPanX, maxPanX)
+                      const clampedY = clamp(desiredY, -maxPanY, maxPanY)
+                      // set gestureOffset as delta from base offset
+                      setGestureOffset({ x: clampedX - offset.x, y: clampedY - offset.y })
+                      setTouchPoint({ x: g.location.x, y: g.location.y })
+                    })
+                    .onEnded((g) => {
+                      // already clamped during change, so commit
+                      const finalX = offset.x + g.translation.width
+                      const finalY = offset.y + g.translation.height
+                      const clampedX = clamp(finalX, -maxPanX, maxPanX)
+                      const clampedY = clamp(finalY, -maxPanY, maxPanY)
                       setOffset({ x: clampedX, y: clampedY })
                       setGestureOffset({ x: 0, y: 0 })
                     })
-                  }
-                  onTapGesture={{ count: 2, coordinateSpace: 'local', perform: () => {
-                    // fallback double-tap perform (in case highPriority doesn't fire)
-                    const p = touchPoint ?? { x: size.width / 2, y: size.height / 2 }
-                    const sCur = scale
-                    const sNew = sCur > 1.05 ? 1 : 2
-                    const center = { x: size.width / 2, y: size.height / 2 }
-                    const ratio = sCur > 0 ? (1 - sNew / sCur) : 0
-                    const newOffsetX = offset.x + ratio * (p.x - center.x - offset.x)
-                    const newOffsetY = offset.y + ratio * (p.y - center.y - offset.y)
-                    const newMaxPanX = Math.max(0, (transforms.dispW * sNew - size.width) / 2)
-                    const newMaxPanY = Math.max(0, (transforms.dispH * sNew - size.height) / 2)
-                    const clampedX = clamp(newOffsetX, -newMaxPanX, newMaxPanX)
-                    const clampedY = clamp(newOffsetY, -newMaxPanY, newMaxPanY)
-                    setScale(sNew)
-                    setGestureScale(1)
-                    setOffset({ x: clampedX, y: clampedY })
-                    setGestureOffset({ x: 0, y: 0 })
-                  } }}
-                >
-                  {displayImage ? (
-                    <Image
-                      image={displayImage}
-                      resizable={true}
-                      frame={{ width: transforms.dispW, height: transforms.dispH }}
-                      position={{ x: transforms.offsetX + transforms.dispW / 2, y: transforms.offsetY + transforms.dispH / 2 }}
+
+                  // double-tap handled via onTapGesture (so we get consistent touch sequence);
+                  // implementation moved to onTapGesture below (uses same anchor math)
+
+                  return (
+                    <ZStack
+                      frame={{ width: size.width, height: size.height }}
+                      scaleEffect={effectiveScaleRef}
+                      offset={{ x: offset.x + gestureOffset.x, y: offset.y + gestureOffset.y }}
                       gesture={
-                        DragGesture({ minDistance: 0, coordinateSpace: 'local' })
-                          .onChanged((g) => setTouchPoint({ x: g.location.x, y: g.location.y }))
+                        MagnifyGesture()
+                          .onChanged((v) => {
+                            // set live magnification and touch anchor
+                            const sOld = scale
+                            const sLive = clamp(sOld * v.magnification, 1, 6)
+                            setGestureScale(v.magnification)
+                            // compute anchor-preserving offset during pinch
+                            const p = { x: v.startLocation.x, y: v.startLocation.y }
+                            setTouchPoint(p)
+                            const center = { x: size.width / 2, y: size.height / 2 }
+                            // offsetLive = offset + (1 - sLive/sOld) * (p - center - offset)
+                            const ratio = sOld > 0 ? (1 - sLive / sOld) : 0
+                            const offsetLiveX = offset.x + ratio * (p.x - center.x - offset.x)
+                            const offsetLiveY = offset.y + ratio * (p.y - center.y - offset.y)
+                            // clamp live offset
+                            const liveMaxPanX = Math.max(0, (transforms.dispW * sLive - size.width) / 2)
+                            const liveMaxPanY = Math.max(0, (transforms.dispH * sLive - size.height) / 2)
+                            const clampedLiveX = clamp(offsetLiveX, -liveMaxPanX, liveMaxPanX)
+                            const clampedLiveY = clamp(offsetLiveY, -liveMaxPanY, liveMaxPanY)
+                            setGestureOffset({ x: clampedLiveX - offset.x, y: clampedLiveY - offset.y })
+                            setToastShown(false)
+                          })
+                          .onEnded((v) => {
+                            const sOld = scale
+                            const sNew = clamp(sOld * v.magnification, 1, 6)
+                            const p = { x: v.startLocation.x, y: v.startLocation.y }
+                            const center = { x: size.width / 2, y: size.height / 2 }
+                            const ratio = sOld > 0 ? (1 - sNew / sOld) : 0
+                            const newOffsetX = offset.x + ratio * (p.x - center.x - offset.x)
+                            const newOffsetY = offset.y + ratio * (p.y - center.y - offset.y)
+                            const newMaxPanX = Math.max(0, (transforms.dispW * sNew - size.width) / 2)
+                            const newMaxPanY = Math.max(0, (transforms.dispH * sNew - size.height) / 2)
+                            const clampedX = clamp(newOffsetX, -newMaxPanX, newMaxPanX)
+                            const clampedY = clamp(newOffsetY, -newMaxPanY, newMaxPanY)
+                            setScale(sNew)
+                            setGestureScale(1)
+                            setOffset({ x: clampedX, y: clampedY })
+                            setGestureOffset({ x: 0, y: 0 })
+                          })
                       }
-                    />
-                  ) : (
-                    <ZStack frame={{ width: size.width, height: size.height }}>
-                      <Rectangle fill={'rgba(0,0,0,0.02)'} stroke={'separator'} frame={{ width: size.width, height: size.height }} />
-                      <Text font="subheadline">未选择图片</Text>
-                    </ZStack>
-                  )}
-
-                    {/* overlays */}
-                    {image && items.map((it) => {
-                      const disp = boxToDisplay(it.boundingBox, transforms)
-                      return (
-                        <RectOverlay
-                          key={it.id}
-                          box={disp}
-                          selected={multiSelect ? selectedIds.includes(it.id) : selectedId === it.id}
-                          onTap={() => selectItem(it.id)}
+                      simultaneousGesture={dragG}
+                      highPriorityGesture={
+                        TapGesture(2).onEnded(() => {
+                          const p = touchPoint ?? { x: size.width / 2, y: size.height / 2 }
+                          const sCur = scale
+                          const sNew = sCur > 1.05 ? 1 : 2
+                          const center = { x: size.width / 2, y: size.height / 2 }
+                          const ratio = sCur > 0 ? (1 - sNew / sCur) : 0
+                          const newOffsetX = offset.x + ratio * (p.x - center.x - offset.x)
+                          const newOffsetY = offset.y + ratio * (p.y - center.y - offset.y)
+                          const newMaxPanX = Math.max(0, (transforms.dispW * sNew - size.width) / 2)
+                          const newMaxPanY = Math.max(0, (transforms.dispH * sNew - size.height) / 2)
+                          const clampedX = clamp(newOffsetX, -newMaxPanX, newMaxPanX)
+                          const clampedY = clamp(newOffsetY, -newMaxPanY, newMaxPanY)
+                          setScale(sNew)
+                          setGestureScale(1)
+                          setOffset({ x: clampedX, y: clampedY })
+                          setGestureOffset({ x: 0, y: 0 })
+                        })
+                      }
+                      onTapGesture={{
+                        count: 2, coordinateSpace: 'local', perform: () => {
+                          // fallback double-tap perform (in case highPriority doesn't fire)
+                          const p = touchPoint ?? { x: size.width / 2, y: size.height / 2 }
+                          const sCur = scale
+                          const sNew = sCur > 1.05 ? 1 : 2
+                          const center = { x: size.width / 2, y: size.height / 2 }
+                          const ratio = sCur > 0 ? (1 - sNew / sCur) : 0
+                          const newOffsetX = offset.x + ratio * (p.x - center.x - offset.x)
+                          const newOffsetY = offset.y + ratio * (p.y - center.y - offset.y)
+                          const newMaxPanX = Math.max(0, (transforms.dispW * sNew - size.width) / 2)
+                          const newMaxPanY = Math.max(0, (transforms.dispH * sNew - size.height) / 2)
+                          const clampedX = clamp(newOffsetX, -newMaxPanX, newMaxPanX)
+                          const clampedY = clamp(newOffsetY, -newMaxPanY, newMaxPanY)
+                          setScale(sNew)
+                          setGestureScale(1)
+                          setOffset({ x: clampedX, y: clampedY })
+                          setGestureOffset({ x: 0, y: 0 })
+                        }
+                      }}
+                    >
+                      {displayImage ? (
+                        <Image
+                          image={displayImage}
+                          resizable={true}
+                          frame={{ width: transforms.dispW, height: transforms.dispH }}
+                          position={{ x: transforms.offsetX + transforms.dispW / 2, y: transforms.offsetY + transforms.dispH / 2 }}
+                          gesture={
+                            DragGesture({ minDistance: 0, coordinateSpace: 'local' })
+                              .onChanged((g) => setTouchPoint({ x: g.location.x, y: g.location.y }))
+                          }
                         />
-                      )
-                    })}
-                  </ZStack>
-                )
-              }}</GeometryReader>
-          </GroupBox>
-        ) : null}
+                      ) : (
+                        <ZStack frame={{ width: size.width, height: size.height }}>
+                          <Rectangle fill={'rgba(0,0,0,0.02)'} stroke={'separator'} frame={{ width: size.width, height: size.height }} />
+                          <Text font="subheadline">未选择图片</Text>
+                        </ZStack>
+                      )}
 
-        {image && multiSelect && selectedIds.length > 0 ? (
-          <GroupBox label={<Label title="多选结果" systemImage="checkmark.circle" />}>
-            <Text frame={{ maxWidth: 'infinity' }}>{multiSelectText}</Text>
-          </GroupBox>
-        ) : null}
+                      {/* overlays */}
+                      {image && items.map((it) => {
+                        const disp = boxToDisplay(it.boundingBox, transforms)
+                        return (
+                          <RectOverlay
+                            key={it.id}
+                            box={disp}
+                            selected={multiSelect ? selectedIds.includes(it.id) : selectedId === it.id}
+                            onTap={() => selectItem(it.id)}
+                          />
+                        )
+                      })}
+                    </ZStack>
+                  )
+                }}</GeometryReader>
+            </GroupBox>
+          ) : null}
+
+          {image && multiSelect && selectedIds.length > 0 ? (
+            <GroupBox label={<Label title="多选结果" systemImage="checkmark.circle" />}>
+              <Text frame={{ maxWidth: 'infinity' }}>{multiSelectText}</Text>
+            </GroupBox>
+          ) : null}
 
           {/* selected editor */}
           {selectedItem ? (
