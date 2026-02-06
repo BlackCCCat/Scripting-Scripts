@@ -7,6 +7,7 @@ import {
   EmptyView,
   List,
   Section,
+  Toggle,
   Text,
   TextField,
   VStack,
@@ -62,6 +63,8 @@ export function EditModuleView(props: {
   const initial = props.initial
   const [name, setName] = useState<string>(initial?.name ?? "")
   const [link, setLink] = useState<string>(initial?.link ?? "")
+  const [isRemote, setIsRemote] = useState<boolean>(initial ? !!initial.link : true)
+  const [content, setContent] = useState<string>("")
   const [libraryItems, setLibraryItems] = useState<ModuleInfo[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [libraryError, setLibraryError] = useState("")
@@ -87,6 +90,18 @@ export function EditModuleView(props: {
     void loadLibrary()
     void loadExistingLinks()
   }, [showLibrary])
+
+  useEffect(() => {
+    if (!initial || initial.link || !initial.filePath) return
+    const fm: any = (globalThis as any).FileManager
+    if (!fm?.readAsString) return
+    void (async () => {
+      try {
+        const text = await fm.readAsString(initial.filePath)
+        setContent(String(text ?? ""))
+      } catch {}
+    })()
+  }, [initial])
 
   async function loadExistingLinks() {
     try {
@@ -202,18 +217,34 @@ export function EditModuleView(props: {
   async function onSave() {
     const trimmedName = name.trim()
     const trimmedLink = link.trim()
+    const trimmedContent = content.trim()
     const cat = categoryOptions[categoryIdx] === "不设置分类" ? undefined : categoryOptions[categoryIdx]
     const saveDir =
       saveDirOptions.length && saveDirIdx > 0 ? saveDirOptions[saveDirIdx] : undefined
 
     if (!trimmedName || !trimmedLink) {
-      await Dialog.alert({ message: "名称和链接不能为空" })
+      if (!trimmedName) {
+        await Dialog.alert({ message: "名称不能为空" })
+        return
+      }
+      if (isRemote) {
+        await Dialog.alert({ message: "链接不能为空" })
+        return
+      }
+      if (!trimmedContent) {
+        await Dialog.alert({ message: "模块内容不能为空" })
+        return
+      }
+    } else if (!isRemote && !trimmedContent) {
+      await Dialog.alert({ message: "模块内容不能为空" })
       return
     }
 
     const result: ModuleInfo = {
       name: trimmedName,
-      link: trimmedLink,
+      link: isRemote ? trimmedLink : "",
+      isLocal: !isRemote,
+      content: isRemote ? undefined : content,
       category: cat,
       saveDir,
     }
@@ -273,12 +304,31 @@ export function EditModuleView(props: {
               onChanged={(v: string) => setName(v)}
               prompt="模块名称"
             />
-            <TextField
-              label={<Text>链接</Text>}
-              value={link}
-              onChanged={(v: string) => setLink(v)}
-              prompt="https://"
+            <Toggle
+              title="远程模块"
+              value={isRemote}
+              onChanged={(value: boolean) => {
+                HapticFeedback.heavyImpact()
+                setIsRemote(value)
+              }}
             />
+            {isRemote ? (
+              <TextField
+                label={<Text>链接</Text>}
+                value={link}
+                onChanged={(v: string) => setLink(v)}
+                prompt="https://"
+              />
+            ) : (
+              <TextField
+                label={<Text>内容</Text>}
+                value={content}
+                axis="vertical"
+                onChanged={(v: string) => setContent(v)}
+                prompt="模块内容"
+                frame={{ height: 140 }}
+              />
+            )}
           </Section>
 
           <Section header={<Text>分类</Text>}>
@@ -404,6 +454,7 @@ export function EditModuleView(props: {
                                 HapticFeedback.mediumImpact()
                                 setName(item.name)
                                 setLink(item.link)
+                                setIsRemote(true)
                               }}
                             />
                           )}

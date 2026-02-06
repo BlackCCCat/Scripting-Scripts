@@ -26,6 +26,7 @@ import {
   type ModuleInfo,
   updateModuleMetadata,
   listDirectSubDirs,
+  saveLocalModule,
 } from "../utils/storage"
 import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
@@ -93,6 +94,8 @@ export function HomeView() {
   const filteredModules = modules.filter((m) => {
     return matchFilters(m)
   })
+  const onlyLocalFiltered =
+    filteredModules.length > 0 && filteredModules.every((m) => m.isLocal || !m.link)
 
   function inferSaveDir(m: ModuleInfo): string | undefined {
     if (!m.filePath) return undefined
@@ -153,7 +156,7 @@ export function HomeView() {
 
     const current = await loadModules()
     const nameExists = current.some((m) => m.name === info.name)
-    const linkExists = current.some((m) => m.link === info.link)
+    const linkExists = info.link ? current.some((m) => m.link === info.link) : false
     if (nameExists) {
       await Dialog.alert({ message: "模块名称已存在" })
       return
@@ -167,13 +170,19 @@ export function HomeView() {
     setStage("添加模块中…")
     setProgress("")
     try {
-      setStage(`下载模块：${info.name}`)
-      const res = await downloadModule(info)
-      if (!res.ok) {
-        await Dialog.alert({ message: res.message ?? "下载失败" })
-        setStage("添加完成（下载失败）")
+      if (info.isLocal) {
+        setStage(`保存模块：${info.name}`)
+        await saveLocalModule(info, info.content ?? "")
+        setStage("添加完成（已保存）")
       } else {
-        setStage("添加完成（已下载）")
+        setStage(`下载模块：${info.name}`)
+        const res = await downloadModule(info)
+        if (!res.ok) {
+          await Dialog.alert({ message: res.message ?? "下载失败" })
+          setStage("添加完成（下载失败）")
+        } else {
+          setStage("添加完成（已下载）")
+        }
       }
       await refreshModules()
     } catch (e: any) {
@@ -295,11 +304,16 @@ export function HomeView() {
   }
 
   async function downloadSingle(target: ModuleInfo) {
+    if (!target.link) {
+      await Dialog.alert({ message: "本地模块无下载链接，无法更新" })
+      return
+    }
     await downloadBatch([target], `下载模块：${target.name}`)
   }
 
   async function downloadBatch(list: ModuleInfo[], title: string) {
-    if (!list.length) {
+    const downloadable = list.filter((m) => !!m.link)
+    if (!downloadable.length) {
       await Dialog.alert({ message: "暂无可下载模块" })
       return
     }
@@ -310,10 +324,10 @@ export function HomeView() {
     const errors: string[] = []
     let okCount = 0
     try {
-      for (let i = 0; i < list.length; i += 1) {
-        const m = list[i]
-        setStage(`下载中 (${i + 1}/${list.length})：${m.name}`)
-        const pct = Math.round(((i + 1) / list.length) * 100)
+      for (let i = 0; i < downloadable.length; i += 1) {
+        const m = downloadable[i]
+        setStage(`下载中 (${i + 1}/${downloadable.length})：${m.name}`)
+        const pct = Math.round(((i + 1) / downloadable.length) * 100)
         setProgress(`${pct}%`)
         const linkPrefix = await detectLinkPrefix(m)
         const res = await downloadModule({ ...m, saveDir: inferSaveDir(m), linkPrefix })
@@ -321,13 +335,13 @@ export function HomeView() {
         else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
       }
       if (errors.length) {
-        setStage(`下载完成：成功 ${okCount}/${list.length}`)
+        setStage(`下载完成：成功 ${okCount}/${downloadable.length}`)
         await Dialog.alert({
           title: "部分下载失败",
           message: errors.slice(0, 6).join("\n"),
         })
       } else {
-        setStage(`下载完成：${okCount}/${list.length}`)
+        setStage(`下载完成：${okCount}/${downloadable.length}`)
       }
     } catch (e: any) {
       const msg = String(e?.message ?? e)
@@ -362,7 +376,11 @@ export function HomeView() {
       >
         <Section header={<Text>操作</Text>}>
           <CenterRowButton title="添加模块" onPress={withButtonHaptic(addModule)} disabled={busy} />
-          <CenterRowButton title="全部更新" onPress={withButtonHaptic(downloadAll)} disabled={busy} />
+          <CenterRowButton
+            title="全部更新"
+            onPress={withButtonHaptic(downloadAll)}
+            disabled={busy || onlyLocalFiltered}
+          />
         </Section>
 
         <Section header={<Text>状态</Text>}>

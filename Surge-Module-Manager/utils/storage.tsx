@@ -7,6 +7,8 @@ export type ModuleInfo = {
   category?: string
   filePath?: string
   saveDir?: string
+  isLocal?: boolean
+  content?: string
 }
 
 const BASE_DIR_NAME = "SurgeModulesManager"
@@ -150,9 +152,14 @@ export async function loadModules(): Promise<ModuleInfo[]> {
       text = ""
     }
     const link = parseLinkFromContent(text, getLinkPrefixes())
-    if (!link) continue
+    const localTag = parseTag(text, "local")
+    const isLocal =
+      localTag != null &&
+      String(localTag).trim() !== "" &&
+      !["0", "false", "no"].includes(String(localTag).trim().toLowerCase())
+    if (!link && !isLocal) continue
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
-    modules.push({ name, link, category, filePath: path })
+    modules.push({ name, link, category, filePath: path, isLocal })
   }
   return modules
 }
@@ -239,6 +246,17 @@ export async function updateModuleMetadata(target: ModuleInfo | string, info: { 
   const raw = await fm.readAsString(path)
   let content = String(raw ?? "")
   content = upsertLink(content, getLinkPrefixes(), info.link)
+  content = upsertTag(content, "category", info.category)
+  await fm.writeAsString(path, content)
+}
+
+export async function saveLocalModule(info: ModuleInfo, rawContent: string): Promise<void> {
+  await ensureStorage()
+  const fm = fmOrThrow()
+  if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
+  const path = moduleFilePath(info.name, info.saveDir)
+  let content = String(rawContent ?? "")
+  content = upsertTag(content, "local", "true")
   content = upsertTag(content, "category", info.category)
   await fm.writeAsString(path, content)
 }
