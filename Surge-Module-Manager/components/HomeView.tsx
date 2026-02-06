@@ -235,10 +235,18 @@ export function HomeView() {
       if (merged.name && merged.name !== target.name) {
         await renameModuleFile(target, merged.name)
       }
-      await updateModuleMetadata(merged, {
-        link: merged.link,
-        category: merged.category,
-      })
+      if (merged.isLocal || !merged.link) {
+        await saveLocalModule(
+          { ...merged, saveDir: inferSaveDir(merged) },
+          merged.content ?? ""
+        )
+      } else {
+        await updateModuleMetadata(merged, {
+          link: merged.link,
+          category: merged.category,
+          local: false,
+        })
+      }
       await refreshModules()
       setStage("修改完成")
     } catch (e: any) {

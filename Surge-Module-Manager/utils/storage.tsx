@@ -239,7 +239,10 @@ function upsertLink(content: string, prefixes: string[], value?: string): string
   return `${prefix}${trimmed}\n${filtered.join("\n")}`
 }
 
-export async function updateModuleMetadata(target: ModuleInfo | string, info: { link?: string; category?: string }) {
+export async function updateModuleMetadata(
+  target: ModuleInfo | string,
+  info: { link?: string; category?: string; local?: boolean }
+) {
   const fm = fmOrThrow()
   const path = resolveModulePath(target)
   if (!(await exists(path))) return
@@ -247,6 +250,9 @@ export async function updateModuleMetadata(target: ModuleInfo | string, info: { 
   let content = String(raw ?? "")
   content = upsertLink(content, getLinkPrefixes(), info.link)
   content = upsertTag(content, "category", info.category)
+  if (info.local !== undefined) {
+    content = upsertTag(content, "local", info.local ? "true" : "")
+  }
   await fm.writeAsString(path, content)
 }
 
