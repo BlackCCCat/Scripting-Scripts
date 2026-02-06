@@ -450,7 +450,12 @@ export function HomeView() {
                 leadingSwipeActions={{
                   allowsFullSwipe: false,
                   actions: [
-                    <Button title="更新" tint="systemGreen" action={withButtonHaptic(() => downloadSingle(m))} />,
+                    <Button
+                      title="更新"
+                      tint={m.link ? "systemGreen" : "systemGray"}
+                      disabled={!m.link}
+                      action={withButtonHaptic(() => downloadSingle(m))}
+                    />,
                   ],
                 }}
                 trailingSwipeActions={{
