@@ -4,7 +4,6 @@
 // - 系统能力（LiveActivity/Notification/Script）
 import {
   Button,
-  EditButton,
   HStack,
   Image,
   List,
@@ -17,6 +16,7 @@ import {
   VStack,
   useEffect,
   useMemo,
+  useObservable,
   useRef,
   useState,
   LiveActivity,
@@ -104,6 +104,12 @@ export function CalendarTimerView() {
   const noteSaveTimerRef = useRef<number | null>(null);
   const tasksLoadedRef = useRef(false);
   const restoreDoneRef = useRef(false);
+  const editMode = useObservable<any>(() => {
+    // 编辑模式依赖系统 EditMode，未提供时保持空值
+    const EditMode = (globalThis as any).EditMode;
+    return EditMode?.inactive ? EditMode.inactive() : null;
+  });
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     // 首次进入：加载任务与设置
@@ -773,7 +779,8 @@ export function CalendarTimerView() {
       setSegmentStartAt(resumeAt);
       setRunning(true);
       setPaused(false);
-      let activityId = activityRef.current?.activityId;
+      let activityId: string | null | undefined =
+        activityRef.current?.activityId;
       if (activityRef.current?.started) {
         await updateLiveActivity(task, resumeAt, accumulatedMs);
       } else {
@@ -975,6 +982,14 @@ export function CalendarTimerView() {
     void persistTasks(next);
   }
 
+  function toggleEditMode() {
+    const EditMode = (globalThis as any).EditMode;
+    if (!EditMode?.active || !EditMode?.inactive) return;
+    const next = !isEditing;
+    setIsEditing(next);
+    editMode.setValue(next ? EditMode.active() : EditMode.inactive());
+  }
+
   async function refreshLiveActivityManually() {
     // 手动刷新 Live Activity（用于修复偶发的 UI 卡住/遮罩）
     const now = new Date();
@@ -1031,6 +1046,7 @@ export function CalendarTimerView() {
         navigationTitle="日历番茄钟"
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
+        environments={{ editMode }}
         toolbar={{
           // 左侧退出，右侧编辑 + 新增
           topBarLeading: (
@@ -1049,7 +1065,11 @@ export function CalendarTimerView() {
           ),
           topBarTrailing: (
             <HStack>
-              <EditButton />
+              <Button
+                title=""
+                systemImage="list.bullet"
+                action={withButtonHaptic(toggleEditMode)}
+              />
               <Button
                 title=""
                 systemImage="plus.circle"
