@@ -35,7 +35,7 @@ export function loadRegexHistory(): RegexHistoryItem[] {
   }
 }
 
-export function saveRegexHistory(items: RegexHistoryItem[]): void {
+function saveRegexHistory(items: RegexHistoryItem[]): void {
   writeStorage(KEY, JSON.stringify(items.slice(0, LIMIT)))
 }
 
@@ -66,4 +66,3 @@ export function formatTime(ts: number): string {
   const min = String(d.getMinutes()).padStart(2, "0")
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`
 }
-

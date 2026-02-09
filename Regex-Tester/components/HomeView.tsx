@@ -9,7 +9,6 @@ import {
   Text,
   TextField,
   VStack,
-  useEffect,
   useState,
 } from "scripting"
 
@@ -18,11 +17,6 @@ import { PatternHighlightPreview } from "./PatternHighlightPreview"
 import { ResultBox } from "./ResultBox"
 import { runLineMatch, type RegexOutputLine } from "../utils/regex"
 import { addRegexHistory, type RegexHistoryItem } from "../utils/history"
-import {
-  loadState,
-  saveState,
-  type RegexTesterState,
-} from "../utils/storage"
 
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
@@ -32,15 +26,12 @@ function withHaptic(action: () => void | Promise<void>) {
 }
 
 export function HomeView() {
-  const [init] = useState<RegexTesterState>(() => loadState())
-  const [pattern, setPattern] = useState<string>(init.pattern)
-  const [text, setText] = useState<string>(init.text)
-  const [result, setResult] = useState<string>(init.result)
-  const [resultLines, setResultLines] = useState<RegexOutputLine[]>(
-    init.result ? String(init.result).split(/\r?\n/g).map((v) => ({ text: v, matched: false })) : []
-  )
-  const [matchedCount, setMatchedCount] = useState<number>(init.matchedCount)
-  const [status, setStatus] = useState<string>(init.result ? "已载入上次结果" : "就绪")
+  const [pattern, setPattern] = useState<string>("")
+  const [text, setText] = useState<string>("")
+  const [result, setResult] = useState<string>("")
+  const [resultLines, setResultLines] = useState<RegexOutputLine[]>([])
+  const [matchedCount, setMatchedCount] = useState<number>(0)
+  const [status, setStatus] = useState<string>("就绪")
 
   function setPending(nextPattern?: string) {
     const p = String(nextPattern ?? pattern).trim()
@@ -112,11 +103,6 @@ export function HomeView() {
     setPending(String(picked.pattern ?? ""))
     setStatus("已从历史记录恢复，点击输出框开始匹配")
   }
-
-  useEffect(() => {
-    const next: RegexTesterState = { pattern, text, result, matchedCount }
-    saveState(next)
-  }, [pattern, text, result, matchedCount])
 
   return (
     <NavigationStack>

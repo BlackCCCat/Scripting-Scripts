@@ -41,7 +41,7 @@ function parsePythonLeadingFlags(pattern: string): {
   }
 }
 
-export function compileRegexPattern(pattern: string): CompiledPattern {
+function compileRegexPattern(pattern: string): CompiledPattern {
   const parsed = parsePythonLeadingFlags(pattern)
   const source = `^(?:${parsed.source})$`
   const regex = new RegExp(source, parsed.jsFlags)
