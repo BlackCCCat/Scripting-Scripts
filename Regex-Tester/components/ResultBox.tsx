@@ -37,22 +37,19 @@ export function ResultBox(props: {
           <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={2}>
             {lines.length ? (
               lines.map((line, idx) => (
-                line.matched ? (
-                  <Text
-                    key={`${idx}-${line.text}`}
-                    frame={{ maxWidth: "infinity", alignment: "leading" }}
-                    multilineTextAlignment="leading"
-                    styledText={{ content: line.text, foregroundColor: "#34C759" }}
-                  />
-                ) : (
-                  <Text
-                    key={`${idx}-${line.text}`}
-                    frame={{ maxWidth: "infinity", alignment: "leading" }}
-                    multilineTextAlignment="leading"
-                  >
-                    {line.text}
-                  </Text>
-                )
+                <Text
+                  key={`${idx}-${line.text}`}
+                  frame={{ maxWidth: "infinity", alignment: "leading" }}
+                  multilineTextAlignment="leading"
+                  styledText={{
+                    content: line.parts.map((part) => {
+                      if (part.matched) {
+                        return { content: part.text, foregroundColor: "#34C759" }
+                      }
+                      return { content: part.text }
+                    }),
+                  }}
+                />
               ))
             ) : (
               <Text frame={{ maxWidth: "infinity", alignment: "leading" }} multilineTextAlignment="leading">

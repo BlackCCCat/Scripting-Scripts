@@ -8,6 +8,7 @@ import {
   Spacer,
   Text,
   TextField,
+  Toggle,
   VStack,
   useState,
 } from "scripting"
@@ -15,7 +16,7 @@ import {
 import { HistoryView } from "./HistoryView"
 import { PatternHighlightPreview } from "./PatternHighlightPreview"
 import { ResultBox } from "./ResultBox"
-import { runLineMatch, type RegexOutputLine } from "../utils/regex"
+import { runLineMatch, type MatchMode, type RegexOutputLine } from "../utils/regex"
 import { addRegexHistory, type RegexHistoryItem } from "../utils/history"
 
 function withHaptic(action: () => void | Promise<void>) {
@@ -32,6 +33,7 @@ export function HomeView() {
   const [resultLines, setResultLines] = useState<RegexOutputLine[]>([])
   const [matchedCount, setMatchedCount] = useState<number>(0)
   const [status, setStatus] = useState<string>("就绪")
+  const [matchMode, setMatchMode] = useState<MatchMode>("search")
 
   function setPending(nextPattern?: string) {
     const p = String(nextPattern ?? pattern).trim()
@@ -70,7 +72,7 @@ export function HomeView() {
       return
     }
     try {
-      const res = runLineMatch(pattern, text)
+      const res = runLineMatch(pattern, text, matchMode)
       setResult(res.output)
       setResultLines(res.lines)
       setMatchedCount(res.matchedCount)
@@ -180,6 +182,19 @@ export function HomeView() {
                 setPending()
               }}
             />
+          </Section>
+
+          <Section header={<Text>匹配模式</Text>}>
+            <Toggle
+              value={matchMode === "full"}
+              onChanged={(v: boolean) => {
+                setMatchMode(v ? "full" : "search")
+                setPending()
+              }}
+              toggleStyle="switch"
+            >
+              <Text>{matchMode === "full" ? "整行完全匹配" : "搜索（命中片段高亮）"}</Text>
+            </Toggle>
           </Section>
 
           <Section header={<Text>输出</Text>} footer={<Text>状态：{status} ｜ 命中：{matchedCount}</Text>}>

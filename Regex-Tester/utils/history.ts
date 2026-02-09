@@ -41,7 +41,8 @@ function saveRegexHistory(items: RegexHistoryItem[]): void {
 
 export function addRegexHistory(item: RegexHistoryItem): RegexHistoryItem[] {
   const current = loadRegexHistory()
-  const next = [item, ...current].slice(0, LIMIT)
+  const deduped = current.filter((v) => !(v.pattern === item.pattern && v.text === item.text))
+  const next = [item, ...deduped].slice(0, LIMIT)
   saveRegexHistory(next)
   return next
 }
