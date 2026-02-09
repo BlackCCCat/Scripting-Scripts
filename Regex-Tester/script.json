@@ -1,47 +1,43 @@
 {
-  "iconImage" : "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/regex.png",
-  "color" : "rgba(233, 123, 199,1)",
-  "version" : "1.0.0",
+  "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/regex-logo.png",
+  "color": "rgba(233, 123, 199,1)",
+  "version": "1.0.0",
   "remoteResource": {
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Regex-Tester.zip",
     "hash": "",
     "autoUpdateInterval": null
   },
-  "icon" : "square.2.layers.3d.fill",
-  "description" : null,
-  "localizedDescriptions" : {
-    "ja" : "",
-    "de" : "",
-    "es" : "",
-    "en" : "",
-    "fr" : "",
-    "ru" : "",
-    "pt" : "",
-    "it" : "",
-    "zh" : ""
+  "icon": "square.2.layers.3d.fill",
+  "description": null,
+  "localizedDescriptions": {
+    "ja": "",
+    "de": "",
+    "es": "",
+    "en": "",
+    "fr": "",
+    "ru": "",
+    "pt": "",
+    "it": "",
+    "zh": ""
   },
-  "name" : "Regex Tester",
-  "runInApp" : false,
-  "intentInputTypes" : [
-
-  ],
-  "localizedNames" : {
-    "ja" : "",
-    "de" : "",
-    "es" : "",
-    "en" : "",
-    "fr" : "",
-    "ru" : "",
-    "pt" : "",
-    "it" : "",
-    "zh" : ""
+  "name": "Regex Tester",
+  "runInApp": false,
+  "intentInputTypes": [],
+  "localizedNames": {
+    "ja": "",
+    "de": "",
+    "es": "",
+    "en": "",
+    "fr": "",
+    "ru": "",
+    "pt": "",
+    "it": "",
+    "zh": ""
   },
-  "author" : {
-    "homepage" : "https:\/\/github.com\/BlackCCCat",
-    "name" : "BlackCCCat",
-    "email" : null
+  "author": {
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat",
+    "email": null
   },
-  "contributors" : [
-
-  ]
+  "contributors": []
 }
