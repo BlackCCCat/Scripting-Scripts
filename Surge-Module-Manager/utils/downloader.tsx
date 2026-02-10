@@ -1,5 +1,5 @@
 import { Path } from "scripting"
-import { moduleFilePath, ensureStorage, type ModuleInfo } from "./storage"
+import { moduleFilePath, ensureStorage, type ModuleInfo, getModulesDirResolved } from "./storage"
 import { loadConfig } from "./config"
 import { downloadWithProgress } from "./stream_downloader"
 
@@ -42,7 +42,7 @@ export async function downloadModule(info: ModuleInfo & { linkPrefix?: string })
     throw new Error("FileManager 读写方法不可用")
   }
 
-  const targetDir = info.saveDir
+  const targetDir = info.saveDir ?? (await getModulesDirResolved())
   const tmpDir = fm.temporaryDirectory ?? Path.join(Path.dirname(moduleFilePath(info.name, targetDir)), ".tmp")
   const tmpPath = Path.join(tmpDir, `${info.name}_${Date.now()}.tmp`)
 

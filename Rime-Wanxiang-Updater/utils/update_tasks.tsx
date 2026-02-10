@@ -191,13 +191,17 @@ function dictPattern(cfg: AppConfig): string {
   return `*${cfg.proSchemeKey}*dicts.zip`
 }
 
-function requireInstallRoot(cfg: AppConfig): string {
-  if (!cfg.hamsterRootPath) throw new Error("未选择安装目录（请到设置选择文件夹）")
-  return cfg.hamsterRootPath
+async function requireInstallRoot(cfg: AppConfig): Promise<string> {
+  if (cfg.hamsterRootPath) return cfg.hamsterRootPath
+  try {
+    const { rimeDir } = await detectRimeDir(cfg)
+    if (rimeDir) return rimeDir
+  } catch {}
+  throw new Error("未选择安装目录（请到设置选择文件夹）")
 }
 
 async function resolveRimeDir(cfg: AppConfig): Promise<string> {
-  const root = requireInstallRoot(cfg)
+  const root = await requireInstallRoot(cfg)
   try {
     const { rimeDir } = await detectRimeDir(cfg)
     return rimeDir || root
@@ -362,7 +366,11 @@ export async function updateDict(
   } catch {}
 
   params.onStage?.("下载中…")
-  await downloadWithProgress(dict.url, zipPath, params.onProgress)
+  await downloadWithProgress(dict.url, zipPath, params.onProgress, (e) => {
+    if (e.type === "retrying") {
+      params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+    }
+  })
 
   params.onStage?.("解压到 dicts 目录中…")
   const exclude = getExcludePatterns(cfg)
@@ -425,7 +433,11 @@ export async function updateModel(
     if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
     else if (typeof fm?.remove === "function") await fm.remove(dstPath)
   } catch {}
-  await downloadWithProgress(model.url, dstPath, params.onProgress)
+  await downloadWithProgress(model.url, dstPath, params.onProgress, (e) => {
+    if (e.type === "retrying") {
+      params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+    }
+  })
 
   await setModelMeta({
     installRoot,

@@ -43,6 +43,19 @@ const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "元书输入法", value: "hamster3" },
 ]
 
+function isPromiseLike(v: any): v is Promise<any> {
+  return !!v && typeof v === "object" && typeof v.then === "function"
+}
+
+async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
+  try {
+    const r = fn.apply(thisArg, args)
+    return isPromiseLike(r) ? await r : r
+  } catch {
+    return undefined
+  }
+}
+
 function CenterRowButton(props: {
   title: string
   role?: "cancel" | "destructive"
@@ -85,6 +98,7 @@ export function SettingsView(props: {
   const initialSchemeEdition = initialCfg.schemeEdition
   const initialProSchemeKey = initialCfg.proSchemeKey
   const initialHamsterRootPath = initialCfg.hamsterRootPath
+  const initialHamsterBookmarkName = initialCfg.hamsterBookmarkName
   const [cfg, setCfg] = useState<AppConfig>(initialCfg)
 
   // ✅ 用 number 承载 Picker 值（与你示例一致）
@@ -174,12 +188,33 @@ export function SettingsView(props: {
       .filter((x: any) => x.name && x.path)
     setBookmarks(cleaned)
 
-    const target = current?.hamsterRootPath ?? cfg.hamsterRootPath
+    const targetName = current?.hamsterBookmarkName ?? cfg.hamsterBookmarkName
+    const targetPath = current?.hamsterRootPath ?? cfg.hamsterRootPath
     if (cleaned.length) {
-      const idx = cleaned.findIndex((b) => b.path === target)
+      let idx = -1
+      if (targetName) idx = cleaned.findIndex((b) => b.name === targetName)
+      if (idx < 0 && targetPath) idx = cleaned.findIndex((b) => b.path === targetPath)
       setBookmarkIdx(idx >= 0 ? idx : 0)
-      if (idx < 0 && !target) {
-        setCfg((c) => ({ ...c, hamsterRootPath: cleaned[0].path }))
+      if (idx >= 0) {
+        const matched = cleaned[idx]
+        const resolved = fm?.bookmarkedPath
+          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? matched.path)
+          : matched.path
+        const pathChanged = resolved !== targetPath || matched.name !== targetName
+        if (pathChanged) {
+          setCfg((c) => ({ ...c, hamsterRootPath: resolved, hamsterBookmarkName: matched.name }))
+          try {
+            const next = { ...loadConfig(), hamsterRootPath: resolved, hamsterBookmarkName: matched.name }
+            saveConfig(next)
+            props.onDone?.(next)
+          } catch {}
+        }
+      } else if (!targetPath) {
+        setCfg((c) => ({
+          ...c,
+          hamsterRootPath: cleaned[0].path,
+          hamsterBookmarkName: cleaned[0].name,
+        }))
       }
     } else {
       setBookmarkIdx(0)
@@ -212,7 +247,9 @@ export function SettingsView(props: {
       const schemeChanged =
         fixed.schemeEdition !== initialSchemeEdition ||
         (fixed.schemeEdition === "pro" && fixed.proSchemeKey !== initialProSchemeKey)
-      const pathChanged = fixed.hamsterRootPath !== initialHamsterRootPath
+      const pathChanged =
+        fixed.hamsterRootPath !== initialHamsterRootPath ||
+        fixed.hamsterBookmarkName !== initialHamsterBookmarkName
       if (schemeChanged && !pathChanged) {
         try {
           const { rimeDir } = await detectRimeDir(fixed)
@@ -252,7 +289,7 @@ export function SettingsView(props: {
             <TextField
               label={<Text>路径</Text>}
               value={cfg.hamsterRootPath}
-              onChanged={(v: string) => setCfg((c) => ({ ...c, hamsterRootPath: v }))}
+              onChanged={(v: string) => setCfg((c) => ({ ...c, hamsterRootPath: v, hamsterBookmarkName: "" }))}
               prompt="粘贴或选择 Hamster 根目录"
               textFieldStyle="roundedBorder"
             />
@@ -269,12 +306,22 @@ export function SettingsView(props: {
                   setBookmarkIdx(idx)
                   const b = bookmarks[idx]
                   if (b?.path) {
-                    const next: AppConfig = { ...cfg, hamsterRootPath: b.path }
-                    setCfg(next)
-                    try {
-                      saveConfig(next)
-                      props.onDone?.(next)
-                    } catch {}
+                    ;(async () => {
+                      const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
+                      const resolved = fm?.bookmarkedPath
+                        ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? b.path)
+                        : b.path
+                      const next: AppConfig = {
+                        ...cfg,
+                        hamsterRootPath: resolved,
+                        hamsterBookmarkName: b.name,
+                      }
+                      setCfg(next)
+                      try {
+                        saveConfig(next)
+                        props.onDone?.(next)
+                      } catch {}
+                    })()
                   }
                 }}
               >

@@ -1,5 +1,6 @@
 export type AppConfig = {
   baseDir: string
+  baseBookmarkName: string
   categories: string[]
   linkPatternsText: string
 }
@@ -8,6 +9,7 @@ const KEY = "surge_modules_manager_cfg_v1"
 
 const DEFAULT_CONFIG: AppConfig = {
   baseDir: "",
+  baseBookmarkName: "",
   categories: [],
   linkPatternsText: "#!url=",
 }
@@ -33,8 +35,9 @@ export function loadConfig(): AppConfig {
     const obj = JSON.parse(raw)
     const categories = normalizeCategories(obj?.categories ?? [])
     const baseDir = String(obj?.baseDir ?? "").trim()
+    const baseBookmarkName = String(obj?.baseBookmarkName ?? "").trim()
     const linkPatternsText = String(obj?.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText)
-    return { ...DEFAULT_CONFIG, ...obj, categories, baseDir, linkPatternsText }
+    return { ...DEFAULT_CONFIG, ...obj, categories, baseDir, baseBookmarkName, linkPatternsText }
   } catch {
     return DEFAULT_CONFIG
   }
@@ -44,6 +47,7 @@ export function saveConfig(cfg: AppConfig): void {
   const st: any = (globalThis as any).Storage
   const fixed: AppConfig = {
     baseDir: String(cfg.baseDir ?? "").trim(),
+    baseBookmarkName: String(cfg.baseBookmarkName ?? "").trim(),
     categories: normalizeCategories(cfg.categories ?? []),
     linkPatternsText: String(cfg.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText),
   }

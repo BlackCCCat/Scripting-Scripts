@@ -88,6 +88,19 @@ export function SettingsView(props: {
     void refreshCounts(props.initial ?? loadConfig())
   }, [])
 
+  function isPromiseLike(v: any): v is Promise<any> {
+    return !!v && typeof v === "object" && typeof v.then === "function"
+  }
+
+  async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
+    try {
+      const r = fn.apply(thisArg, args)
+      return isPromiseLike(r) ? await r : r
+    } catch {
+      return undefined
+    }
+  }
+
   async function refreshBookmarks(current?: AppConfig): Promise<{ name: string; path: string }[]> {
     const fm: any = (globalThis as any).FileManager
     let list: any = []
@@ -105,12 +118,33 @@ export function SettingsView(props: {
       .filter((x: any) => x.name && x.path)
     setBookmarks(cleaned)
 
-    const target = current?.baseDir ?? cfg.baseDir
+    const targetName = current?.baseBookmarkName ?? cfg.baseBookmarkName
+    const targetPath = current?.baseDir ?? cfg.baseDir
     if (cleaned.length) {
-      const idx = cleaned.findIndex((b) => b.path === target)
+      let idx = -1
+      if (targetName) idx = cleaned.findIndex((b) => b.name === targetName)
+      if (idx < 0 && targetPath) idx = cleaned.findIndex((b) => b.path === targetPath)
       setBookmarkIdx(idx >= 0 ? idx : 0)
-      if (idx < 0 && !target) {
-        setCfg((c) => ({ ...c, baseDir: cleaned[0].path }))
+      if (idx >= 0) {
+        const matched = cleaned[idx]
+        const resolved = fm?.bookmarkedPath
+          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? matched.path)
+          : matched.path
+        const pathChanged = resolved !== targetPath || matched.name !== targetName
+        if (pathChanged) {
+          setCfg((c) => ({ ...c, baseDir: resolved, baseBookmarkName: matched.name }))
+          try {
+            const next = { ...loadConfig(), baseDir: resolved, baseBookmarkName: matched.name }
+            saveConfig(next)
+            props.onDone?.(next)
+          } catch {}
+        }
+      } else if (!targetPath) {
+        const first = cleaned[0]
+        const resolved = fm?.bookmarkedPath
+          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
+          : first.path
+        setCfg((c) => ({ ...c, baseDir: resolved, baseBookmarkName: first.name }))
       }
     } else {
       setBookmarkIdx(0)
@@ -225,7 +259,7 @@ function deleteCategoryAt(indices: number[]) {
             <TextField
               label={<Text>路径</Text>}
               value={cfg.baseDir}
-              onChanged={(v: string) => setCfg((c) => ({ ...c, baseDir: v }))}
+              onChanged={(v: string) => setCfg((c) => ({ ...c, baseDir: v, baseBookmarkName: "" }))}
               prompt="粘贴或选择目录"
               textFieldStyle="roundedBorder"
             />
@@ -242,12 +276,18 @@ function deleteCategoryAt(indices: number[]) {
                   setBookmarkIdx(idx)
                   const b = bookmarks[idx]
                   if (b?.path) {
-                    const next: AppConfig = { ...cfg, baseDir: b.path }
-                    setCfg(next)
-                    try {
-                      saveConfig(next)
-                      props.onDone?.(next)
-                    } catch {}
+                    void (async () => {
+                      const fm: any = (globalThis as any).FileManager
+                      const resolved = fm?.bookmarkedPath
+                        ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? b.path)
+                        : b.path
+                      const next: AppConfig = { ...cfg, baseDir: resolved, baseBookmarkName: b.name }
+                      setCfg(next)
+                      try {
+                        saveConfig(next)
+                        props.onDone?.(next)
+                      } catch {}
+                    })()
                   }
                 }}
               >

@@ -27,6 +27,7 @@ import {
   updateModuleMetadata,
   listDirectSubDirs,
   saveLocalModule,
+  getModulesDirResolved,
 } from "../utils/storage"
 import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
@@ -60,11 +61,12 @@ export function HomeView() {
   const [stage, setStage] = useState("就绪")
   const [progress, setProgress] = useState("")
   const [busy, setBusy] = useState(false)
+  const [resolvedBaseDir, setResolvedBaseDir] = useState("")
   const [filterCategory, setFilterCategory] = useState("全部")
   const categories = cfg.categories ?? []
   const filterOptions = ["全部", ...categories]
   const filterIdx = Math.max(0, filterOptions.indexOf(filterCategory))
-  const baseDir = cfg.baseDir
+  const baseDir = resolvedBaseDir || cfg.baseDir
   const dirOptions = useMemo(() => {
     const set = new Set<string>()
     for (const m of modules) {
@@ -105,6 +107,8 @@ export function HomeView() {
 
   async function refreshModules() {
     await ensureStorage()
+    const resolved = await getModulesDirResolved()
+    setResolvedBaseDir(resolved)
     const list = sortModules(await loadModules())
     setModules(list)
   }
@@ -147,8 +151,7 @@ export function HomeView() {
       await Dialog.alert({ message: "请先在设置页添加分类" })
       return
     }
-    const baseDir = loadConfig().baseDir
-    const subDirs = await listDirectSubDirs(baseDir)
+    const subDirs = await listDirectSubDirs()
     const info = await Navigation.present<ModuleInfo>({
       element: <EditModuleView title="添加模块" categories={categories} saveDirs={subDirs} />,
     })

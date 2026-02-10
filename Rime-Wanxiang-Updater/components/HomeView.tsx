@@ -93,7 +93,7 @@ export function HomeView() {
   }
 
   function checkKey(c: AppConfig) {
-    return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.hamsterRootPath].join("|")
+    return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.hamsterRootPath, c.hamsterBookmarkName].join("|")
   }
 
   async function refreshLocal(current: AppConfig) {
@@ -121,6 +121,13 @@ export function HomeView() {
 
     try {
       const fm: any = (globalThis as any).FileManager
+      if (fm?.bookmarkedPath && (current.hamsterBookmarkName || current.hamsterRootPath)) {
+        if (current.hamsterBookmarkName) {
+          const p = fm.bookmarkedPath(current.hamsterBookmarkName)
+          const resolved = p && typeof p.then === "function" ? await p : p
+          if (resolved) candidates.unshift(String(resolved))
+        }
+      }
       if (fm?.getAllFileBookmarks && fm?.bookmarkedPath && current.hamsterRootPath) {
         const r = fm.getAllFileBookmarks()
         const list = r && typeof r.then === "function" ? await r : r
@@ -130,7 +137,7 @@ export function HomeView() {
         const match = arr.find((b: any) => {
           const p = norm(String(b?.path ?? ""))
           const n = String(b?.name ?? "")
-          return (p && p === target) || (n && n === current.hamsterRootPath)
+          return (p && p === target) || (current.hamsterBookmarkName ? n === current.hamsterBookmarkName : false)
         })
         if (match?.name) {
           const p = fm.bookmarkedPath(match.name)
@@ -166,7 +173,7 @@ export function HomeView() {
     const current = loadConfig()
     setCfg(current)
     void refreshLocal(current)
-  }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath])
+  }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
 
   useEffect(() => {
     const current = loadConfig()

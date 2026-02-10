@@ -83,12 +83,11 @@ export async function doUpdate(
     autoDeploy?: boolean
   }
 ) {
-  const installRoot = getInstallRoot(cfg)
-  if (!installRoot) throw new Error("未选择安装路径（请到设置里选择文件夹）")
-
   params.onStage?.("解析目录...")
   const { engine, rimeDir } = await detectRimeDir(cfg)
+  const installRoot = getInstallRoot(cfg)
   const installDir = rimeDir || installRoot
+  if (!installDir) throw new Error("未选择安装路径（请到设置里选择文件夹）")
 
   const latest = await fetchLatestSchemeAsset(cfg)
   if (!latest?.url) throw new Error("未找到可用的远端方案资产（asset）")
@@ -103,7 +102,11 @@ export async function doUpdate(
   } catch {}
 
   params.onStage?.("下载中...")
-  await downloadWithProgress(latest.url, zipPath, params.onProgress)
+  await downloadWithProgress(latest.url, zipPath, params.onProgress, (e) => {
+    if (e.type === "retrying") {
+      params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）...`)
+    }
+  })
 
   params.onStage?.("解压中...")
   const exclude = getExcludePatterns(cfg)

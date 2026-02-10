@@ -6,6 +6,13 @@ export type DownloadProgress = {
   speedBps?: number
 }
 
+export type DownloadStateEvent =
+  | {
+      type: "retrying"
+      attempt: number
+      maxAttempts: number
+    }
+
 declare const BackgroundURLSession: any
 
 const LARGE_FALLBACK_BYTES = 50 * 1024 * 1024
@@ -301,15 +308,17 @@ function readBytes(task: any): { received?: number; total?: number } {
 export async function downloadWithProgress(
   url: string,
   dstPath: string,
-  onProgress?: (p: DownloadProgress) => void
+  onProgress?: (p: DownloadProgress) => void,
+  onState?: (e: DownloadStateEvent) => void
 ) {
-  return downloadWithProgressInternal(url, dstPath, onProgress, 0)
+  return downloadWithProgressInternal(url, dstPath, onProgress, onState, 0)
 }
 
 async function downloadWithProgressInternal(
   url: string,
   dstPath: string,
   onProgress: ((p: DownloadProgress) => void) | undefined,
+  onState: ((e: DownloadStateEvent) => void) | undefined,
   attempt: number
 ) {
   if (!BackgroundURLSession || typeof BackgroundURLSession.startDownload !== "function") {
@@ -438,8 +447,13 @@ async function downloadWithProgressInternal(
     if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
       cancelTask(task)
       if (attempt < MAX_RETRY) {
+        onState?.({
+          type: "retrying",
+          attempt: attempt + 2,
+          maxAttempts: MAX_RETRY + 1,
+        })
         await removeFileLoose(dstPath)
-        return downloadWithProgressInternal(url, dstPath, onProgress, attempt + 1)
+        return downloadWithProgressInternal(url, dstPath, onProgress, onState, attempt + 1)
       }
       throw new Error("下载超时：进度长时间无变化")
     }

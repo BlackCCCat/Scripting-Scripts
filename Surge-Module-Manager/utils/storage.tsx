@@ -20,6 +20,23 @@ function fmOrThrow(): any {
   return fm
 }
 
+function isPromiseLike(v: any): v is Promise<any> {
+  return !!v && typeof v === "object" && typeof v.then === "function"
+}
+
+async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
+  try {
+    const r = fn.apply(thisArg, args)
+    return isPromiseLike(r) ? await r : r
+  } catch {
+    return undefined
+  }
+}
+
+function normalizePath(path: string): string {
+  return String(path ?? "").replace(/\/+$/, "")
+}
+
 function pickRootDir(): string {
   const fm = fmOrThrow()
   if (fm.isiCloudEnabled && fm.iCloudDocumentsDirectory) {
@@ -38,6 +55,47 @@ export function getModulesDir(): string {
   const cfg = loadConfig()
   if (cfg.baseDir) return cfg.baseDir
   return Path.join(getBaseDir(), MODULES_DIR_NAME)
+}
+
+async function resolveBookmarkedPath(rawPath: string, bookmarkName?: string): Promise<string> {
+  const fm = fmOrThrow()
+  const raw = String(rawPath ?? "").trim()
+  if (!raw) return ""
+  if (!fm?.bookmarkedPath) return raw
+
+  if (bookmarkName) {
+    const byName = await callMaybeAsync(fm.bookmarkedPath, fm, [bookmarkName])
+    if (byName) return String(byName)
+  }
+  if (!fm?.getAllFileBookmarks) return raw
+
+  const list = await callMaybeAsync(fm.getAllFileBookmarks, fm, [])
+  const arr = Array.isArray(list) ? list : []
+  const target = normalizePath(raw)
+  const match = arr.find((b: any) => {
+    const p = normalizePath(String(b?.path ?? ""))
+    const n = String(b?.name ?? "")
+    return (p && p === target) || (bookmarkName ? n === bookmarkName : false)
+  })
+  if (!match?.name) return raw
+  const resolved = await callMaybeAsync(fm.bookmarkedPath, fm, [match.name])
+  return resolved ? String(resolved) : raw
+}
+
+export async function getModulesDirResolved(baseDir?: string): Promise<string> {
+  const cfg = loadConfig()
+  const configured = String(cfg.baseDir ?? "").trim()
+  const target = String(baseDir ?? "").trim()
+  if (!configured && !target) return getModulesDir()
+
+  if (!target) {
+    return configured ? await resolveBookmarkedPath(configured, cfg.baseBookmarkName) : getModulesDir()
+  }
+
+  if (configured && normalizePath(target) === normalizePath(configured)) {
+    return await resolveBookmarkedPath(target, cfg.baseBookmarkName)
+  }
+  return target
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -62,8 +120,13 @@ async function ensureDir(dir: string): Promise<void> {
 }
 
 export async function ensureStorage(): Promise<void> {
-  await ensureDir(getBaseDir())
   const cfg = loadConfig()
+  if (cfg.baseDir) {
+    const resolved = await getModulesDirResolved(cfg.baseDir)
+    await ensureDir(resolved)
+    return
+  }
+  await ensureDir(getBaseDir())
   if (!cfg.baseDir) {
     await ensureDir(getModulesDir())
   }
@@ -138,7 +201,7 @@ async function listModuleFilesRecursive(dir: string): Promise<string[]> {
 export async function loadModules(): Promise<ModuleInfo[]> {
   await ensureStorage()
   const fm = fmOrThrow()
-  const dir = getModulesDir()
+  const dir = await getModulesDirResolved()
 
   const modules: ModuleInfo[] = []
   const files = await listModuleFilesRecursive(dir)
@@ -260,7 +323,8 @@ export async function saveLocalModule(info: ModuleInfo, rawContent: string): Pro
   await ensureStorage()
   const fm = fmOrThrow()
   if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
-  const path = moduleFilePath(info.name, info.saveDir)
+  const targetDir = info.saveDir ?? (await getModulesDirResolved())
+  const path = moduleFilePath(info.name, targetDir)
   let content = String(rawContent ?? "")
   content = upsertTag(content, "local", "true")
   content = upsertTag(content, "category", info.category)
@@ -269,7 +333,7 @@ export async function saveLocalModule(info: ModuleInfo, rawContent: string): Pro
 
 export async function listDirectSubDirs(baseDir?: string): Promise<string[]> {
   const fm = fmOrThrow()
-  const root = baseDir ?? getModulesDir()
+  const root = await getModulesDirResolved(baseDir)
   const list = await fm.readDirectory(root)
   if (!Array.isArray(list)) return []
   const dirs: string[] = []
@@ -290,8 +354,8 @@ export async function loadCategoriesFromModules(baseDir?: string): Promise<{
   added: number
 }> {
   const fm = fmOrThrow()
-  const primaryDir = baseDir ?? getModulesDir()
-  const altDir = baseDir ? Path.join(baseDir, MODULES_DIR_NAME) : undefined
+  const primaryDir = await getModulesDirResolved(baseDir)
+  const altDir = baseDir ? Path.join(primaryDir, MODULES_DIR_NAME) : undefined
   let files: string[] = []
   if (await exists(primaryDir)) {
     files = await listModuleFilesRecursive(primaryDir)
@@ -316,8 +380,8 @@ export async function loadCategoriesFromModules(baseDir?: string): Promise<{
 
 export async function renameCategoryInModules(oldName: string, newName: string, baseDir?: string): Promise<void> {
   const fm = fmOrThrow()
-  const primaryDir = baseDir ?? getModulesDir()
-  const altDir = baseDir ? Path.join(baseDir, MODULES_DIR_NAME) : undefined
+  const primaryDir = await getModulesDirResolved(baseDir)
+  const altDir = baseDir ? Path.join(primaryDir, MODULES_DIR_NAME) : undefined
   let files: string[] = []
   if (await exists(primaryDir)) {
     files = await listModuleFilesRecursive(primaryDir)
@@ -341,8 +405,8 @@ export async function renameCategoryInModules(oldName: string, newName: string, 
 
 export async function countModulesByCategory(baseDir?: string): Promise<Record<string, number>> {
   const fm = fmOrThrow()
-  const primaryDir = baseDir ?? getModulesDir()
-  const altDir = baseDir ? Path.join(baseDir, MODULES_DIR_NAME) : undefined
+  const primaryDir = await getModulesDirResolved(baseDir)
+  const altDir = baseDir ? Path.join(primaryDir, MODULES_DIR_NAME) : undefined
   let files: string[] = []
   if (await exists(primaryDir)) {
     files = await listModuleFilesRecursive(primaryDir)
