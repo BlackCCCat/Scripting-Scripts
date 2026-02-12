@@ -15,7 +15,7 @@ import {
   Path,
 } from "scripting"
 
-import { loadConfig, type AppConfig } from "../utils/config"
+import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey } from "../utils/config"
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
 import { detectRimeDir } from "../utils/hamster"
@@ -25,6 +25,31 @@ function pct(p?: number) {
   if (typeof p !== "number") return ""
   const v = Math.max(0, Math.min(1, p))
   return `${Math.round(v * 100)}%`
+}
+
+const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
+function selectedSchemeFromConfig(cfg: AppConfig): string {
+  return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`
+}
+
+function normalizeMetaScheme(metaScheme: MetaBundle["scheme"], fallback: AppConfig): {
+  selected: string
+  schemeEdition?: AppConfig["schemeEdition"]
+  proSchemeKey?: ProSchemeKey
+} {
+  if (!metaScheme) return { selected: selectedSchemeFromConfig(fallback) }
+  const edition = metaScheme.schemeEdition
+  const proKey = metaScheme.proSchemeKey
+  const validProKey = proKey && (PRO_KEYS as string[]).includes(proKey) ? proKey : undefined
+  const selected =
+    metaScheme.selectedScheme ??
+    (edition === "base" ? "base" : edition === "pro" ? `pro (${validProKey ?? fallback.proSchemeKey})` : selectedSchemeFromConfig(fallback))
+  return {
+    selected,
+    schemeEdition: edition,
+    proSchemeKey: edition === "pro" ? (validProKey ?? fallback.proSchemeKey) : undefined,
+  }
 }
 
 function CenterRowButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
@@ -97,7 +122,7 @@ export function HomeView() {
   }
 
   async function refreshLocal(current: AppConfig) {
-    const selected = current.schemeEdition === "base" ? "base" : `pro (${current.proSchemeKey})`
+    const selected = selectedSchemeFromConfig(current)
     setLocalSelectedScheme(selected)
 
     let installRoot = ""
@@ -165,6 +190,33 @@ export function HomeView() {
       setLocalDictMark("暂无法获取")
       setLocalModelMark("暂无法获取")
       return
+    }
+
+    const localScheme = normalizeMetaScheme(meta.scheme, current)
+    setLocalSelectedScheme(localScheme.selected)
+    if (
+      localScheme.schemeEdition &&
+      (
+        current.schemeEdition !== localScheme.schemeEdition ||
+        (
+          localScheme.schemeEdition === "pro" &&
+          localScheme.proSchemeKey &&
+          current.proSchemeKey !== localScheme.proSchemeKey
+        )
+      )
+    ) {
+      try {
+        const next: AppConfig = {
+          ...current,
+          schemeEdition: localScheme.schemeEdition,
+          proSchemeKey:
+            localScheme.schemeEdition === "pro" && localScheme.proSchemeKey
+              ? localScheme.proSchemeKey
+              : current.proSchemeKey,
+        }
+        saveConfig(next)
+        setCfg(next)
+      } catch {}
     }
 
     setLocalSchemeVersion(meta.scheme?.remoteTagOrName ?? "暂无法获取")

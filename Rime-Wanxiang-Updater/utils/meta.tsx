@@ -1,6 +1,6 @@
 // File: utils/meta.tsx
 import { Path } from "scripting"
-import type { ReleaseSource } from "./config"
+import type { ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
 import { ensureDir } from "./fs"
 
 export type SchemeMeta = {
@@ -8,6 +8,9 @@ export type SchemeMeta = {
   remoteIdOrSha: string
   /** HomeView 展示用 */
   remoteTagOrName: string
+  schemeEdition?: SchemeEdition
+  proSchemeKey?: ProSchemeKey
+  selectedScheme?: string
   updatedAt: string
 }
 
@@ -29,6 +32,10 @@ export type MetaBundle = {
 
 type RecordData = {
   scheme_file?: string
+  scheme_type?: string
+  scheme_edition?: string
+  pro_scheme_key?: string
+  selected_scheme?: string
   dict_file?: string
   model_name?: string
   update_time?: string
@@ -182,14 +189,59 @@ function pickRemoteId(rec: RecordData, fallback?: string): string | undefined {
   return rec.sha256 || rec.cnb_id || fallback
 }
 
+const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
+function normalizeSchemeEdition(v?: string): SchemeEdition | undefined {
+  const x = String(v ?? "").trim().toLowerCase()
+  if (x === "base" || x === "pro") return x
+  return undefined
+}
+
+function normalizeProSchemeKey(v?: string): ProSchemeKey | undefined {
+  const x = String(v ?? "").trim().toLowerCase()
+  return (PRO_KEYS as string[]).includes(x) ? (x as ProSchemeKey) : undefined
+}
+
+function inferSchemeFromFile(fileName?: string): { schemeEdition?: SchemeEdition; proSchemeKey?: ProSchemeKey } {
+  const x = String(fileName ?? "").toLowerCase()
+  if (!x) return {}
+  if (x.includes("base")) return { schemeEdition: "base" }
+  for (const key of PRO_KEYS) {
+    if (x.includes(key)) return { schemeEdition: "pro", proSchemeKey: key }
+  }
+  if (x.includes("pro")) return { schemeEdition: "pro" }
+  return {}
+}
+
+function formatSelectedScheme(schemeEdition?: SchemeEdition, proSchemeKey?: ProSchemeKey): string | undefined {
+  if (schemeEdition === "base") return "base"
+  if (schemeEdition === "pro") return proSchemeKey ? `pro (${proSchemeKey})` : "pro"
+  return undefined
+}
+
 function toSchemeMeta(rec?: RecordData): SchemeMeta | undefined {
   if (!rec) return undefined
   const remoteTagOrName = rec.tag || rec.scheme_file
   const remoteIdOrSha = pickRemoteId(rec, remoteTagOrName)
   if (!remoteTagOrName || !remoteIdOrSha) return undefined
+  const inferred = inferSchemeFromFile(rec.scheme_file)
+  const schemeEdition =
+    normalizeSchemeEdition(rec.scheme_edition) ??
+    normalizeSchemeEdition(rec.scheme_type) ??
+    inferred.schemeEdition
+  const proSchemeKey =
+    (schemeEdition === "pro"
+      ? normalizeProSchemeKey(rec.pro_scheme_key) ?? inferred.proSchemeKey
+      : undefined)
+  const selectedScheme =
+    String(rec.selected_scheme ?? "").trim() ||
+    formatSelectedScheme(schemeEdition, proSchemeKey)
   return {
     remoteIdOrSha,
     remoteTagOrName,
+    schemeEdition,
+    proSchemeKey,
+    selectedScheme,
     updatedAt: rec.update_time || rec.apply_time || new Date().toISOString(),
   }
 }
@@ -221,15 +273,8 @@ function splitRemoteId(source: ReleaseSource | undefined, remoteIdOrSha?: string
   return { sha256: remoteIdOrSha, cnb_id: "" }
 }
 
-// 内存缓存：给 loadMeta() 同步返回用
+// 内存缓存
 let CACHE: MetaBundle = {}
-
-/**
- * 同步接口：返回内存缓存（启动时建议先调用 loadMetaAsync 刷新一次）
- */
-export function loadMeta(): MetaBundle {
-  return CACHE
-}
 
 /**
  * 异步接口：从 UpdateCache 读取并刷新缓存
@@ -255,14 +300,21 @@ export async function loadMetaAsync(installRoot: string): Promise<MetaBundle> {
 export async function setSchemeMeta(rec: {
   installRoot: string
   fileName: string
+  schemeEdition: SchemeEdition
+  proSchemeKey?: ProSchemeKey
   tag?: string
   updatedAt?: string
   remoteIdOrSha?: string
   source?: ReleaseSource
 }) {
   const ids = splitRemoteId(rec.source, rec.remoteIdOrSha)
+  const proSchemeKey = rec.schemeEdition === "pro" ? rec.proSchemeKey : undefined
   const data: RecordData = {
     scheme_file: rec.fileName,
+    scheme_type: rec.schemeEdition,
+    scheme_edition: rec.schemeEdition,
+    pro_scheme_key: proSchemeKey ?? "",
+    selected_scheme: formatSelectedScheme(rec.schemeEdition, proSchemeKey) ?? "",
     update_time: rec.updatedAt ?? new Date().toISOString(),
     tag: rec.tag ?? "",
     apply_time: new Date().toISOString(),

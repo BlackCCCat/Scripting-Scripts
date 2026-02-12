@@ -319,6 +319,8 @@ export async function updateScheme(
   await setSchemeMeta({
     installRoot: r?.installRoot ?? "",
     fileName: r?.assetName ?? "",
+    schemeEdition: cfg.schemeEdition,
+    proSchemeKey: cfg.schemeEdition === "pro" ? cfg.proSchemeKey : undefined,
     tag: r?.tag,
     updatedAt: r?.updatedAt ?? new Date().toISOString(),
     remoteIdOrSha,

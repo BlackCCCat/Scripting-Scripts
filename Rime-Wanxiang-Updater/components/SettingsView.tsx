@@ -28,6 +28,7 @@ import {
 } from "../utils/config"
 import { removeDirSafe } from "../utils/fs"
 import { detectRimeDir } from "../utils/hamster"
+import { loadMetaAsync } from "../utils/meta"
 
 type AlertNode = any
 type AlertState = {
@@ -42,6 +43,17 @@ const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "仓输入法", value: "hamster" },
   { label: "元书输入法", value: "hamster3" },
 ]
+
+function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
+  const edition = meta?.scheme?.schemeEdition
+  if (edition !== "base" && edition !== "pro") return undefined
+  const keyRaw = String(meta?.scheme?.proSchemeKey ?? "").toLowerCase()
+  const key = (PRO_KEYS as string[]).includes(keyRaw) ? (keyRaw as ProSchemeKey) : fallback.proSchemeKey
+  return {
+    schemeEdition: edition,
+    proSchemeKey: edition === "pro" ? key : fallback.proSchemeKey,
+  }
+}
 
 function isPromiseLike(v: any): v is Promise<any> {
   return !!v && typeof v === "object" && typeof v.then === "function"
@@ -171,6 +183,42 @@ export function SettingsView(props: {
     })
   }
 
+  async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
+    let installRoot = ""
+    try {
+      const { rimeDir } = await detectRimeDir(base)
+      installRoot = rimeDir || base.hamsterRootPath
+    } catch {
+      installRoot = base.hamsterRootPath
+    }
+    if (!installRoot) return base
+
+    let meta: any
+    try {
+      meta = await loadMetaAsync(installRoot)
+    } catch {
+      return base
+    }
+    const normalized = normalizeSchemeFromMeta(meta, base)
+    if (!normalized) return base
+
+    const changed =
+      base.schemeEdition !== normalized.schemeEdition ||
+      (normalized.schemeEdition === "pro" && base.proSchemeKey !== normalized.proSchemeKey)
+    if (!changed) return base
+
+    const next: AppConfig = {
+      ...base,
+      schemeEdition: normalized.schemeEdition,
+      proSchemeKey: normalized.proSchemeKey,
+    }
+    setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
+    const proIdx = PRO_KEYS.indexOf(next.proSchemeKey)
+    setProKeyIdx(proIdx >= 0 ? proIdx : 0)
+    setCfg(next)
+    return next
+  }
+
   async function refreshBookmarks(current?: AppConfig): Promise<{ name: string; path: string }[]> {
     const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
     let list: any = []
@@ -205,9 +253,10 @@ export function SettingsView(props: {
           : (matched.name ? "" : matched.path)
         const pathChanged = resolved !== targetPath || matched.name !== targetName
         if (pathChanged) {
-          setCfg((c) => ({ ...c, hamsterRootPath: resolved, hamsterBookmarkName: matched.name }))
           try {
-            const next = { ...loadConfig(), hamsterRootPath: resolved, hamsterBookmarkName: matched.name }
+            let next = { ...loadConfig(), hamsterRootPath: resolved, hamsterBookmarkName: matched.name }
+            next = await syncSchemeFromLocal(next)
+            setCfg(next)
             saveConfig(next)
             props.onDone?.(next)
           } catch {}
@@ -232,20 +281,8 @@ export function SettingsView(props: {
     return cleaned
   }
 
-  // ✅ 仅从书签选择
-  async function pickFolder() {
-    try {
-      const list = await refreshBookmarks()
-      if (!list.length) {
-        showInfo("未找到书签", "请先在 工具-文件书签 中添加文件夹后再选择。")
-      }
-    } catch (e: any) {
-      showInfo("选择失败", String(e?.message ?? e))
-    }
-  }
-
   async function saveAndClose() {
-    const fixed: AppConfig = {
+    let fixed: AppConfig = {
       ...cfg,
       // base 时 proKey 也可以保留，不影响；若你想 base 时清空也可以在这里处理
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
@@ -253,13 +290,16 @@ export function SettingsView(props: {
     }
 
     try {
+      const pathChanged =
+        fixed.hamsterRootPath !== initialHamsterRootPath ||
+        fixed.hamsterBookmarkName !== initialHamsterBookmarkName
+      if (pathChanged) {
+        fixed = await syncSchemeFromLocal(fixed)
+      }
       saveConfig(fixed)
       const schemeChanged =
         fixed.schemeEdition !== initialSchemeEdition ||
         (fixed.schemeEdition === "pro" && fixed.proSchemeKey !== initialProSchemeKey)
-      const pathChanged =
-        fixed.hamsterRootPath !== initialHamsterRootPath ||
-        fixed.hamsterBookmarkName !== initialHamsterBookmarkName
       if (schemeChanged && !pathChanged) {
         try {
           const { rimeDir } = await detectRimeDir(fixed)
@@ -328,13 +368,14 @@ export function SettingsView(props: {
                         showInfo("书签不可用", "书签路径不可用，请在设置页重新选择书签文件夹。")
                         return
                       }
-                      const next: AppConfig = {
+                      let next: AppConfig = {
                         ...cfg,
                         hamsterRootPath: resolved,
                         hamsterBookmarkName: b.name,
                       }
-                      setCfg(next)
                       try {
+                        next = await syncSchemeFromLocal(next)
+                        setCfg(next)
                         saveConfig(next)
                         props.onDone?.(next)
                       } catch {}

@@ -240,35 +240,6 @@ export async function removeDirSafe(dir: string) {
   } catch {}
 }
 
-export async function flattenSingleSubdir(
-  parentDir: string,
-  opts?: { excludePatterns?: string[]; namePattern?: RegExp }
-): Promise<boolean> {
-  if (!(await exists(parentDir))) return false
-  const children = await list(parentDir)
-  const isIgnorable = (name: string) =>
-    name === "__MACOSX" || name === ".DS_Store"
-  const visible = children.filter((name) => name && !isIgnorable(name))
-
-  const dirs: string[] = []
-  for (const name of visible) {
-    const full = Path.join(parentDir, name)
-    if (await isDirectory(full)) dirs.push(name)
-  }
-
-  if (dirs.length !== 1) return false
-  if (opts?.namePattern && !opts.namePattern.test(dirs[0])) return false
-
-  const srcRoot = Path.join(parentDir, dirs[0])
-  await copyDirWithPolicy(srcRoot, parentDir, {
-    excludePatterns: opts?.excludePatterns ?? [],
-    overwritePolicy: "overwrite",
-  })
-
-  await removeDirSafe(srcRoot)
-  return true
-}
-
 async function hasExcludedMatch(dir: string, patterns: RegExp[]): Promise<boolean> {
   const items = await list(dir)
   for (const name of items) {
