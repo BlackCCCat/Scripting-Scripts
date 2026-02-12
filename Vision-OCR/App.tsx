@@ -36,6 +36,86 @@ type RecognizedItem = {
 
 const AUTO_PASTE_KEY = 'vision_ocr_auto_paste_clipboard'
 
+type PixelBox = { left: number; top: number; width: number; height: number }
+
+function normalizeTextKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[，。、“”‘’：:；;,.!?！？（）()\[\]{}<>《》'"`~\-_/\\|]/g, '')
+    .trim()
+}
+
+function toPixelBox(
+  box: { x: number; y: number; width: number; height: number },
+  imgW: number,
+  imgH: number
+): PixelBox {
+  const isNormalized = box.x <= 1 && box.y <= 1 && box.width <= 1 && box.height <= 1
+  if (isNormalized) {
+    return {
+      left: box.x * imgW,
+      top: (1 - box.y - box.height) * imgH,
+      width: box.width * imgW,
+      height: box.height * imgH,
+    }
+  }
+  return {
+    left: box.x,
+    top: imgH - (box.y + box.height),
+    width: box.width,
+    height: box.height,
+  }
+}
+
+function boxIou(a: PixelBox, b: PixelBox): number {
+  const ax2 = a.left + a.width
+  const ay2 = a.top + a.height
+  const bx2 = b.left + b.width
+  const by2 = b.top + b.height
+  const interW = Math.max(0, Math.min(ax2, bx2) - Math.max(a.left, b.left))
+  const interH = Math.max(0, Math.min(ay2, by2) - Math.max(a.top, b.top))
+  const inter = interW * interH
+  if (inter <= 0) return 0
+  const union = a.width * a.height + b.width * b.height - inter
+  return union > 0 ? inter / union : 0
+}
+
+function dedupeRecognizedItems(
+  list: RecognizedItem[],
+  imgW: number,
+  imgH: number
+): RecognizedItem[] {
+  const ranked = list
+    .map((item, idx) => ({ item, idx, key: normalizeTextKey(item.content), box: toPixelBox(item.boundingBox, imgW, imgH) }))
+    .sort((a, b) => b.item.confidence - a.item.confidence)
+
+  const kept: typeof ranked = []
+  for (const cur of ranked) {
+    if (cur.key.length === 0) {
+      kept.push(cur)
+      continue
+    }
+    const duplicate = kept.some(prev => {
+      if (prev.key !== cur.key) return false
+      const iou = boxIou(prev.box, cur.box)
+      if (iou >= 0.45) return true
+      const cxA = prev.box.left + prev.box.width / 2
+      const cyA = prev.box.top + prev.box.height / 2
+      const cxB = cur.box.left + cur.box.width / 2
+      const cyB = cur.box.top + cur.box.height / 2
+      const avgW = Math.max(1, (prev.box.width + cur.box.width) / 2)
+      const avgH = Math.max(1, (prev.box.height + cur.box.height) / 2)
+      return Math.abs(cxA - cxB) < avgW * 0.25 && Math.abs(cyA - cyB) < avgH * 0.35
+    })
+    if (!duplicate) kept.push(cur)
+  }
+
+  return kept
+    .sort((a, b) => a.idx - b.idx)
+    .map((row, i) => ({ ...row.item, id: i.toString() }))
+}
+
 function readStoredBool(key: string, fallback = false): boolean {
   const st: any = (globalThis as any).Storage
   if (!st) return fallback
@@ -94,7 +174,7 @@ function RectOverlay({
 }) {
   const stroke = selected ? 'rgba(0,122,255,1)' : 'rgba(0,200,0,1)'
   const fill = selected ? 'rgba(0,122,255,0.18)' : 'rgba(0,200,0,0.06)'
-  const hitPad = 6
+  const hitPad = 3
   const handleTap = () => {
     fireHaptic('light')
     onTap()
@@ -254,8 +334,9 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
         boundingBox: c.boundingBox as { x: number; y: number; width: number; height: number },
         edited: undefined,
       }))
+      const deduped = dedupeRecognizedItems(recognized, clean.width, clean.height)
       if (seq === loadSeqRef.current) {
-        setItems(recognized)
+        setItems(deduped)
       }
     } catch (e) {
       // use global Dialog
