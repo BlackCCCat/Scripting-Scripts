@@ -61,8 +61,3 @@ export function addCategory(cfg: AppConfig, name: string): AppConfig {
   const categories = normalizeCategories([...(cfg.categories ?? []), name])
   return { ...cfg, categories }
 }
-
-export function removeCategory(cfg: AppConfig, name: string): AppConfig {
-  const categories = normalizeCategories((cfg.categories ?? []).filter((c) => c !== name))
-  return { ...cfg, categories }
-}

@@ -451,15 +451,6 @@ export async function countModulesByCategory(baseDir?: string): Promise<Record<s
   return counts
 }
 
-export function uniqueCategories(list: ModuleInfo[]): string[] {
-  const set = new Set<string>()
-  for (const item of list) {
-    const c = String(item.category ?? "").trim()
-    if (c) set.add(c)
-  }
-  return Array.from(set)
-}
-
 export function sortModules(list: ModuleInfo[]): ModuleInfo[] {
   return [...list].sort((a, b) => {
     const ca = String(a.category ?? "")
