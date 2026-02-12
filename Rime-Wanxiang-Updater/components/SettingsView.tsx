@@ -197,9 +197,12 @@ export function SettingsView(props: {
       setBookmarkIdx(idx >= 0 ? idx : 0)
       if (idx >= 0) {
         const matched = cleaned[idx]
-        const resolved = fm?.bookmarkedPath
-          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? matched.path)
-          : matched.path
+        const canUseByName = fm?.bookmarkExists
+          ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [matched.name]))
+          : true
+        const resolved = fm?.bookmarkedPath && canUseByName
+          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? "")
+          : (matched.name ? "" : matched.path)
         const pathChanged = resolved !== targetPath || matched.name !== targetName
         if (pathChanged) {
           setCfg((c) => ({ ...c, hamsterRootPath: resolved, hamsterBookmarkName: matched.name }))
@@ -210,10 +213,17 @@ export function SettingsView(props: {
           } catch {}
         }
       } else if (!targetPath) {
+        const first = cleaned[0]
+        const canUseByName = fm?.bookmarkExists
+          ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [first.name]))
+          : true
+        const resolved = fm?.bookmarkedPath && canUseByName
+          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
+          : first.path
         setCfg((c) => ({
           ...c,
-          hamsterRootPath: cleaned[0].path,
-          hamsterBookmarkName: cleaned[0].name,
+          hamsterRootPath: resolved,
+          hamsterBookmarkName: first.name,
         }))
       }
     } else {
@@ -308,9 +318,16 @@ export function SettingsView(props: {
                   if (b?.path) {
                     ;(async () => {
                       const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
-                      const resolved = fm?.bookmarkedPath
-                        ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? b.path)
-                        : b.path
+                      const canUseByName = fm?.bookmarkExists
+                        ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
+                        : true
+                      const resolved = fm?.bookmarkedPath && canUseByName
+                        ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
+                        : (b.name ? "" : b.path)
+                      if (!resolved) {
+                        showInfo("书签不可用", "书签路径不可用，请在设置页重新选择书签文件夹。")
+                        return
+                      }
                       const next: AppConfig = {
                         ...cfg,
                         hamsterRootPath: resolved,

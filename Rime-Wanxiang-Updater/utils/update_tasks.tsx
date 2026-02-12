@@ -192,11 +192,14 @@ function dictPattern(cfg: AppConfig): string {
 }
 
 async function requireInstallRoot(cfg: AppConfig): Promise<string> {
-  if (cfg.hamsterRootPath) return cfg.hamsterRootPath
   try {
     const { rimeDir } = await detectRimeDir(cfg)
     if (rimeDir) return rimeDir
   } catch {}
+  if (cfg.hamsterBookmarkName) {
+    throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
+  }
+  if (cfg.hamsterRootPath) return cfg.hamsterRootPath
   throw new Error("未选择安装目录（请到设置选择文件夹）")
 }
 

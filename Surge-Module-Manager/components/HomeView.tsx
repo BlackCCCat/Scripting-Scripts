@@ -105,12 +105,21 @@ export function HomeView() {
     return idx > 0 ? String(m.filePath).slice(0, idx) : undefined
   }
 
-  async function refreshModules() {
-    await ensureStorage()
-    const resolved = await getModulesDirResolved()
-    setResolvedBaseDir(resolved)
-    const list = sortModules(await loadModules())
-    setModules(list)
+  async function refreshModules(resetStageOnSuccess = false) {
+    try {
+      await ensureStorage()
+      const resolved = await getModulesDirResolved()
+      setResolvedBaseDir(resolved)
+      const list = sortModules(await loadModules())
+      setModules(list)
+      if (resetStageOnSuccess) {
+        setStage("就绪")
+        setProgress("")
+      }
+    } catch (e: any) {
+      setModules([])
+      setStage(String(e?.message ?? e))
+    }
   }
 
   useEffect(() => {
@@ -137,13 +146,13 @@ export function HomeView() {
           initial={loadConfig()}
           onDone={(next) => {
             setCfg(next)
-            void refreshModules()
+            void refreshModules(true)
           }}
         />
       ),
     })
     setCfg(loadConfig())
-    await refreshModules()
+    await refreshModules(true)
   }
 
   async function addModule() {

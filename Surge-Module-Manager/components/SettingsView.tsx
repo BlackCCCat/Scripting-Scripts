@@ -127,7 +127,10 @@ export function SettingsView(props: {
       setBookmarkIdx(idx >= 0 ? idx : 0)
       if (idx >= 0) {
         const matched = cleaned[idx]
-        const resolved = fm?.bookmarkedPath
+        const canUseByName = fm?.bookmarkExists
+          ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [matched.name]))
+          : true
+        const resolved = fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? matched.path)
           : matched.path
         const pathChanged = resolved !== targetPath || matched.name !== targetName
@@ -141,7 +144,10 @@ export function SettingsView(props: {
         }
       } else if (!targetPath) {
         const first = cleaned[0]
-        const resolved = fm?.bookmarkedPath
+        const canUseByName = fm?.bookmarkExists
+          ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [first.name]))
+          : true
+        const resolved = fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
           : first.path
         setCfg((c) => ({ ...c, baseDir: resolved, baseBookmarkName: first.name }))
@@ -278,7 +284,10 @@ function deleteCategoryAt(indices: number[]) {
                   if (b?.path) {
                     void (async () => {
                       const fm: any = (globalThis as any).FileManager
-                      const resolved = fm?.bookmarkedPath
+                      const canUseByName = fm?.bookmarkExists
+                        ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
+                        : true
+                      const resolved = fm?.bookmarkedPath && canUseByName
                         ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? b.path)
                         : b.path
                       const next: AppConfig = { ...cfg, baseDir: resolved, baseBookmarkName: b.name }

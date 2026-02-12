@@ -86,6 +86,9 @@ export async function doUpdate(
   params.onStage?.("解析目录...")
   const { engine, rimeDir } = await detectRimeDir(cfg)
   const installRoot = getInstallRoot(cfg)
+  if (!rimeDir && cfg.hamsterBookmarkName) {
+    throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
+  }
   const installDir = rimeDir || installRoot
   if (!installDir) throw new Error("未选择安装路径（请到设置里选择文件夹）")
 

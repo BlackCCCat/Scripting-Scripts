@@ -60,12 +60,20 @@ export function getModulesDir(): string {
 async function resolveBookmarkedPath(rawPath: string, bookmarkName?: string): Promise<string> {
   const fm = fmOrThrow()
   const raw = String(rawPath ?? "").trim()
-  if (!raw) return ""
+  const name = String(bookmarkName ?? "").trim()
+  if (!raw && !name) return ""
   if (!fm?.bookmarkedPath) return raw
 
-  if (bookmarkName) {
-    const byName = await callMaybeAsync(fm.bookmarkedPath, fm, [bookmarkName])
-    if (byName) return String(byName)
+  if (name) {
+    let nameExists = true
+    if (fm?.bookmarkExists) {
+      const existed = await callMaybeAsync(fm.bookmarkExists, fm, [name])
+      nameExists = !!existed
+    }
+    if (nameExists) {
+      const byName = await callMaybeAsync(fm.bookmarkedPath, fm, [name])
+      if (byName) return String(byName)
+    }
   }
   if (!fm?.getAllFileBookmarks) return raw
 
@@ -75,25 +83,36 @@ async function resolveBookmarkedPath(rawPath: string, bookmarkName?: string): Pr
   const match = arr.find((b: any) => {
     const p = normalizePath(String(b?.path ?? ""))
     const n = String(b?.name ?? "")
-    return (p && p === target) || (bookmarkName ? n === bookmarkName : false)
+    return (p && p === target) || (name ? n === name : false)
   })
-  if (!match?.name) return raw
-  const resolved = await callMaybeAsync(fm.bookmarkedPath, fm, [match.name])
-  return resolved ? String(resolved) : raw
+  if (match?.name) {
+    const resolved = await callMaybeAsync(fm.bookmarkedPath, fm, [match.name])
+    if (resolved) return String(resolved)
+  }
+
+  // If bookmark name is configured but cannot be resolved, do not trust stale raw path.
+  if (name) return ""
+  return raw
 }
 
 export async function getModulesDirResolved(baseDir?: string): Promise<string> {
   const cfg = loadConfig()
   const configured = String(cfg.baseDir ?? "").trim()
+  const bookmarkName = String(cfg.baseBookmarkName ?? "").trim()
   const target = String(baseDir ?? "").trim()
   if (!configured && !target) return getModulesDir()
 
   if (!target) {
-    return configured ? await resolveBookmarkedPath(configured, cfg.baseBookmarkName) : getModulesDir()
+    if (!configured) return getModulesDir()
+    const resolved = await resolveBookmarkedPath(configured, bookmarkName)
+    if (resolved) return resolved
+    return bookmarkName ? "" : configured
   }
 
   if (configured && normalizePath(target) === normalizePath(configured)) {
-    return await resolveBookmarkedPath(target, cfg.baseBookmarkName)
+    const resolved = await resolveBookmarkedPath(target, bookmarkName)
+    if (resolved) return resolved
+    return bookmarkName ? "" : target
   }
   return target
 }
@@ -123,6 +142,9 @@ export async function ensureStorage(): Promise<void> {
   const cfg = loadConfig()
   if (cfg.baseDir) {
     const resolved = await getModulesDirResolved(cfg.baseDir)
+    if (!resolved) {
+      throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
+    }
     await ensureDir(resolved)
     return
   }

@@ -19,11 +19,19 @@ async function resolveBookmarkPath(rawPath: string, bookmarkName?: string): Prom
   const fm = Runtime.FileManager
   const raw = String(rawPath ?? "").trim()
   const name = String(bookmarkName ?? "").trim()
+  if (!raw && !name) return ""
   if (!fm?.bookmarkedPath) return raw
   try {
     if (name) {
-      const resolvedByName = await callMaybeAsync(fm.bookmarkedPath, fm, [name])
-      if (resolvedByName) return String(resolvedByName)
+      let nameExists = true
+      if (fm?.bookmarkExists) {
+        const existed = await callMaybeAsync(fm.bookmarkExists, fm, [name])
+        nameExists = !!existed
+      }
+      if (nameExists) {
+        const resolvedByName = await callMaybeAsync(fm.bookmarkedPath, fm, [name])
+        if (resolvedByName) return String(resolvedByName)
+      }
     }
   } catch {}
   if (!fm?.getAllFileBookmarks) return raw
@@ -43,6 +51,8 @@ async function resolveBookmarkPath(rawPath: string, bookmarkName?: string): Prom
       if (match?.path) return String(match.path)
     }
   } catch {}
+  // 配置了书签名但无法解引用时，不再回退旧路径（避免用到失效授权路径）
+  if (name) return ""
   return raw
 }
 

@@ -100,18 +100,21 @@ export function HomeView() {
     const selected = current.schemeEdition === "base" ? "base" : `pro (${current.proSchemeKey})`
     setLocalSelectedScheme(selected)
 
-    let installRoot = current.hamsterRootPath
+    let installRoot = ""
     try {
       const { rimeDir } = await detectRimeDir(current)
       if (rimeDir) installRoot = rimeDir
     } catch {}
+    if (!installRoot && !current.hamsterBookmarkName) {
+      installRoot = current.hamsterRootPath
+    }
 
     const candidates: string[] = []
     if (installRoot) candidates.push(installRoot)
-    if (current.hamsterRootPath && current.hamsterRootPath !== installRoot) {
+    if (!current.hamsterBookmarkName && current.hamsterRootPath && current.hamsterRootPath !== installRoot) {
       candidates.push(current.hamsterRootPath)
     }
-    if (current.hamsterRootPath) {
+    if (!current.hamsterBookmarkName && current.hamsterRootPath) {
       candidates.push(
         Path.join(current.hamsterRootPath, "RimeUserData", "wanxiang"),
         Path.join(current.hamsterRootPath, "RIME", "Rime"),
