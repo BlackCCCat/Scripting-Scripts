@@ -22,9 +22,10 @@ import { detectRimeDir } from "../utils/hamster"
 import { checkAllUpdates, updateScheme, updateDict, updateModel, autoUpdateAll, deployInputMethod, type AllUpdateResult } from "../utils/update_tasks"
 
 function pct(p?: number) {
-  if (typeof p !== "number") return ""
+  if (typeof p !== "number" || !Number.isFinite(p)) return ""
   const v = Math.max(0, Math.min(1, p))
-  return `${Math.round(v * 100)}%`
+  const capped = v >= 1 ? 100 : Math.min(99.99, v * 100)
+  return `${capped.toFixed(2)}%`
 }
 
 const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
