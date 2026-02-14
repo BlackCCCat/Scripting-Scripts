@@ -20,6 +20,10 @@ const STALL_TIMEOUT_MS = 2 * 60 * 1000
 const HARD_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_RETRY = 1
 
+// ✅ UI 刷新节流与阈值（你想“减缓频率”就在这里调）
+const UI_MIN_INTERVAL_MS = 1000 // 最多 1 次/秒
+const UI_MIN_DELTA_PERCENT = 0.005 // 0.5% 以上才刷新（1.0 = 100%）
+
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
 }
@@ -27,153 +31,6 @@ function sleep(ms: number) {
 function dirOf(path: string): string {
   const idx = path.lastIndexOf("/")
   return idx > 0 ? path.slice(0, idx) : ""
-}
-
-/**
- * ✅ 关键修复：把任何来源的进度变成“单调累计”的
- * - received 永不倒退（包括不会回到 0）
- * - percent 永不倒退
- * - total 一旦确定就锁定（优先用更大的那个）
- */
-function makeMonotonicOnProgress(onProgress?: (p: DownloadProgress) => void) {
-  if (typeof onProgress !== "function") return undefined
-
-  let maxReceived = 0
-  let lockedTotal: number | undefined
-  let maxPercent: number | undefined
-
-  return (p: DownloadProgress) => {
-    // total：锁定一个稳定值（优先取更大的）
-    if (typeof p.total === "number" && Number.isFinite(p.total) && p.total > 0) {
-      if (typeof lockedTotal !== "number" || p.total > lockedTotal) lockedTotal = p.total
-    }
-
-    // received：永不倒退，避免归零导致 UI 跳回 0%
-    const receivedIn = typeof p.received === "number" && Number.isFinite(p.received) ? p.received : 0
-    if (receivedIn > maxReceived) maxReceived = receivedIn
-
-    // percent：优先用 maxReceived/lockedTotal 算，更稳
-    let percent: number | undefined
-    if (typeof lockedTotal === "number" && lockedTotal > 0) {
-      percent = maxReceived / lockedTotal
-    } else if (typeof p.percent === "number" && Number.isFinite(p.percent)) {
-      percent = p.percent
-    } else {
-      percent = maxPercent
-    }
-
-    if (typeof percent === "number") {
-      // clamp
-      if (percent < 0) percent = 0
-      if (percent > 1) percent = 1
-
-      // percent 永不倒退
-      if (typeof maxPercent === "number" && percent < maxPercent) percent = maxPercent
-      maxPercent = percent
-    }
-
-    onProgress({
-      received: maxReceived,
-      total: lockedTotal,
-      percent,
-      speedBps: p.speedBps, // 你不显示速度也没关系
-    })
-  }
-}
-
-async function downloadWithFetchFallback(
-  url: string,
-  dstPath: string,
-  onProgress?: (p: DownloadProgress) => void
-) {
-  const fetchFn: any = (globalThis as any).fetch
-  if (typeof fetchFn !== "function") throw new Error("fetch 不可用，无法兜底下载")
-
-  const res = await fetchFn(url)
-  if (!res?.ok) throw new Error(`下载失败：${res?.status ?? "unknown"}`)
-
-  const totalHeader = res.headers?.get?.("content-length")
-  const total = totalHeader ? Number(totalHeader) : undefined
-  const fm = (globalThis as any).FileManager
-  const Data = (globalThis as any).Data
-  const reader = res?.body?.getReader?.()
-
-  const canAppend =
-    !!reader &&
-    (typeof fm?.appendData === "function" || typeof fm?.appendDataSync === "function") &&
-    (Data?.fromUint8Array || Data?.fromArrayBuffer)
-
-  if (!canAppend && (!Number.isFinite(total) || (typeof total === "number" && total > LARGE_FALLBACK_BYTES))) {
-    throw new Error("兜底下载已关闭：文件过大或无法获取大小")
-  }
-
-  if (fm?.createDirectory) {
-    const parent = dirOf(dstPath)
-    if (parent) {
-      try {
-        await fm.createDirectory(parent, true)
-      } catch {}
-    }
-  }
-
-  if (canAppend && reader) {
-    await removeFileLoose(dstPath)
-    let received = 0
-    for (;;) {
-      const r = await reader.read()
-      if (r?.done) break
-      if (!r?.value) continue
-
-      const chunk = r.value instanceof Uint8Array ? r.value : new Uint8Array(r.value)
-      const data = Data.fromUint8Array ? Data.fromUint8Array(chunk) : Data.fromArrayBuffer(chunk.buffer)
-      if (data) {
-        if (typeof fm.appendDataSync === "function") fm.appendDataSync(dstPath, data)
-        else await fm.appendData(dstPath, data)
-      }
-
-      received += chunk.length
-      onProgress?.({
-        received,
-        total: Number.isFinite(total) ? total : undefined,
-        percent: Number.isFinite(total) && total && total > 0 ? received / total : undefined,
-      })
-    }
-
-    onProgress?.({
-      received,
-      total: Number.isFinite(total) ? total : undefined,
-      percent: Number.isFinite(total) && total && total > 0 ? received / total : 1,
-    })
-    return
-  }
-
-  const buf = await res.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-
-  if (typeof fm?.writeAsBytes === "function") {
-    await fm.writeAsBytes(dstPath, bytes)
-  } else {
-    const FileEntity = (globalThis as any).FileEntity
-    if (FileEntity?.openNewForWriting && (Data?.fromUint8Array || Data?.fromArrayBuffer)) {
-      const file = FileEntity.openNewForWriting(dstPath)
-      try {
-        const data = Data.fromUint8Array ? Data.fromUint8Array(bytes) : Data.fromArrayBuffer(buf)
-        if (data) file.write(data)
-      } finally {
-        try {
-          file.close()
-        } catch {}
-      }
-    } else {
-      throw new Error("无法写入文件（缺少 FileManager.writeAsBytes 或 FileEntity/Data）")
-    }
-  }
-
-  onProgress?.({
-    received: bytes.length,
-    total: Number.isFinite(total) ? total : undefined,
-    percent: Number.isFinite(total) && total && total > 0 ? bytes.length / total : 1,
-  })
 }
 
 async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
@@ -240,7 +97,7 @@ async function fetchContentLength(url: string): Promise<number | undefined> {
   const fetchFn: any = (globalThis as any).fetch
   if (typeof fetchFn !== "function") return undefined
 
-  // 1) HEAD 优先
+  // 1) HEAD
   try {
     const res = await fetchFn(url, { method: "HEAD" })
     const len = res?.headers?.get?.("content-length")
@@ -248,7 +105,7 @@ async function fetchContentLength(url: string): Promise<number | undefined> {
     if (Number.isFinite(n) && n > 0) return n
   } catch {}
 
-  // 2) Range 兜底
+  // 2) Range
   try {
     const res = await fetchFn(url, { method: "GET", headers: { Range: "bytes=0-0" } })
     const cr = res?.headers?.get?.("content-range") ?? res?.headers?.get?.("Content-Range")
@@ -300,6 +157,196 @@ function getFraction(task: any): number | undefined {
   return undefined
 }
 
+function readBytes(task: any): { received?: number; total?: number } {
+  const p = task?.progress
+  const received =
+    pickNum(task, ["totalBytesWritten", "bytesWritten", "receivedBytes", "completedBytes"]) ??
+    pickNum(p, ["completedUnitCount", "totalBytesWritten"])
+  const total =
+    pickNum(task, ["totalBytesExpectedToWrite", "expectedBytes", "totalBytes", "contentLength"]) ??
+    pickNum(p, ["totalUnitCount", "totalBytesExpectedToWrite"])
+  return { received, total }
+}
+
+// ✅ 统一：单调 + 节流 + 阈值
+function makeSmoothOnProgress(onProgress?: (p: DownloadProgress) => void) {
+  if (typeof onProgress !== "function") return undefined
+
+  let maxReceived = 0
+  let totalLocked: number | undefined
+  let maxPercent: number | undefined
+
+  let lastEmitAt = 0
+  let lastEmitPercent: number | undefined
+  let lastEmitReceived = 0
+
+  function considerTotal(t?: number) {
+    if (typeof t !== "number" || !Number.isFinite(t) || t <= 0) return
+    if (t < maxReceived) return // 不允许 total < received
+    // total 允许更新，但避免抖动：变化>1%才更新
+    if (typeof totalLocked !== "number") {
+      totalLocked = t
+      return
+    }
+    const old = totalLocked
+    if (Math.abs(old - t) > Math.max(1, old * 0.01)) totalLocked = t
+  }
+
+  function shouldEmit(now: number, pct?: number, rcv?: number) {
+    if (now - lastEmitAt < UI_MIN_INTERVAL_MS) return false
+
+    const dr = typeof rcv === "number" ? rcv - lastEmitReceived : 0
+    const dp =
+      typeof pct === "number" && typeof lastEmitPercent === "number"
+        ? Math.abs(pct - lastEmitPercent)
+        : typeof pct === "number" && lastEmitPercent == null
+          ? pct
+          : 0
+
+    // 百分比足够变化 或 字节有变化
+    if (typeof pct === "number" && dp >= UI_MIN_DELTA_PERCENT) return true
+    if (dr > 0) return true
+
+    // 兜底：偶尔也刷新一次（防止 UI 长时间不动）
+    if (now - lastEmitAt > 1500) return true
+    return false
+  }
+
+  return (p: DownloadProgress) => {
+    // total
+    considerTotal(p.total)
+
+    // received 单调不减（防归零/回退）
+    const rIn = typeof p.received === "number" && Number.isFinite(p.received) ? p.received : 0
+    if (rIn > maxReceived) maxReceived = rIn
+    if (rIn === 0 && maxReceived > 0) {
+      // ignore
+    }
+
+    // percent：优先 received/total；否则用 p.percent
+    let pct: number | undefined
+    if (typeof totalLocked === "number" && totalLocked > 0) pct = maxReceived / totalLocked
+    else if (typeof p.percent === "number" && Number.isFinite(p.percent)) pct = p.percent
+
+    if (typeof pct === "number") {
+      pct = Math.max(0, Math.min(1, pct))
+      // percent 单调不减（避免 0↔8）
+      if (typeof maxPercent === "number" && pct < maxPercent) pct = maxPercent
+      maxPercent = pct
+    } else if (typeof maxPercent === "number") {
+      pct = maxPercent
+    }
+
+    const now = Date.now()
+
+    // ✅ 完成强制发 100%（绑定完成与进度）
+    if (typeof p.percent === "number" && p.percent >= 1) {
+      totalLocked = maxReceived > 0 ? maxReceived : totalLocked
+      maxPercent = 1
+      lastEmitAt = now
+      lastEmitPercent = 1
+      lastEmitReceived = maxReceived
+      onProgress({ received: maxReceived, total: totalLocked, percent: 1, speedBps: p.speedBps })
+      return
+    }
+
+    if (!shouldEmit(now, pct, maxReceived)) return
+
+    lastEmitAt = now
+    lastEmitPercent = pct
+    lastEmitReceived = maxReceived
+
+    onProgress({ received: maxReceived, total: totalLocked, percent: pct, speedBps: p.speedBps })
+  }
+}
+
+async function downloadWithFetchFallback(
+  url: string,
+  dstPath: string,
+  onProgress?: (p: DownloadProgress) => void
+) {
+  const fetchFn: any = (globalThis as any).fetch
+  if (typeof fetchFn !== "function") throw new Error("fetch 不可用，无法兜底下载")
+
+  const res = await fetchFn(url)
+  if (!res?.ok) throw new Error(`下载失败：${res?.status ?? "unknown"}`)
+
+  const totalHeader = res.headers?.get?.("content-length")
+  const total = totalHeader ? Number(totalHeader) : undefined
+  const fm = (globalThis as any).FileManager
+  const Data = (globalThis as any).Data
+  const reader = res?.body?.getReader?.()
+
+  const canAppend =
+    !!reader &&
+    (typeof fm?.appendData === "function" || typeof fm?.appendDataSync === "function") &&
+    (Data?.fromUint8Array || Data?.fromArrayBuffer)
+
+  if (!canAppend && (!Number.isFinite(total) || (typeof total === "number" && total > LARGE_FALLBACK_BYTES))) {
+    throw new Error("兜底下载已关闭：文件过大或无法获取大小")
+  }
+
+  if (fm?.createDirectory) {
+    const parent = dirOf(dstPath)
+    if (parent) {
+      try {
+        await fm.createDirectory(parent, true)
+      } catch {}
+    }
+  }
+
+  if (canAppend && reader) {
+    await removeFileLoose(dstPath)
+    let received = 0
+    for (;;) {
+      const r = await reader.read()
+      if (r?.done) break
+      if (!r?.value) continue
+      const chunk = r.value instanceof Uint8Array ? r.value : new Uint8Array(r.value)
+      const data = Data.fromUint8Array ? Data.fromUint8Array(chunk) : Data.fromArrayBuffer(chunk.buffer)
+      if (data) {
+        if (typeof fm.appendDataSync === "function") fm.appendDataSync(dstPath, data)
+        else await fm.appendData(dstPath, data)
+      }
+      received += chunk.length
+      onProgress?.({
+        received,
+        total: Number.isFinite(total) ? total : undefined,
+        percent: Number.isFinite(total) && total && total > 0 ? received / total : undefined,
+      })
+    }
+    onProgress?.({ received, total: Number.isFinite(total) ? total : undefined, percent: 1 })
+    return
+  }
+
+  const buf = await res.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  if (typeof fm?.writeAsBytes === "function") {
+    await fm.writeAsBytes(dstPath, bytes)
+  } else {
+    const FileEntity = (globalThis as any).FileEntity
+    if (FileEntity?.openNewForWriting && (Data?.fromUint8Array || Data?.fromArrayBuffer)) {
+      const file = FileEntity.openNewForWriting(dstPath)
+      try {
+        const data = Data.fromUint8Array ? Data.fromUint8Array(bytes) : Data.fromArrayBuffer(buf)
+        if (data) file.write(data)
+      } finally {
+        try {
+          file.close()
+        } catch {}
+      }
+    } else {
+      throw new Error("无法写入文件（缺少 FileManager.writeAsBytes 或 FileEntity/Data）")
+    }
+  }
+
+  onProgress?.({
+    received: bytes.length,
+    total: Number.isFinite(total) ? total : undefined,
+    percent: 1,
+  })
+}
+
 function attachOnError(task: any, setError: (e: any) => void) {
   if (!task) return
   if ("onError" in task) task.onError = setError
@@ -345,29 +392,14 @@ function startIfNeeded(task: any) {
   } catch {}
 }
 
-function readBytes(task: any): { received?: number; total?: number } {
-  const p = task?.progress
-  const received =
-    pickNum(task, ["totalBytesWritten", "bytesWritten", "receivedBytes", "completedBytes"]) ??
-    pickNum(p, ["completedUnitCount", "totalBytesWritten"])
-  const total =
-    pickNum(task, ["totalBytesExpectedToWrite", "expectedBytes", "totalBytes", "contentLength"]) ??
-    pickNum(p, ["totalUnitCount", "totalBytesExpectedToWrite"])
-  return { received, total }
-}
-
-/**
- * ✅ 系统下载到 dstPath（不需要 FileManager.write*）
- * 保留你原有“轮询兜底 + fetch fallback”，只在入口做单调化，彻底避免 0% ↔ 8% 跳动。
- */
 export async function downloadWithProgress(
   url: string,
   dstPath: string,
   onProgress?: (p: DownloadProgress) => void,
   onState?: (e: DownloadStateEvent) => void
 ) {
-  const mono = makeMonotonicOnProgress(onProgress)
-  return downloadWithProgressInternal(url, dstPath, mono, onState, 0)
+  const smooth = makeSmoothOnProgress(onProgress)
+  return downloadWithProgressInternal(url, dstPath, smooth, onState, 0)
 }
 
 async function downloadWithProgressInternal(
@@ -384,14 +416,8 @@ async function downloadWithProgressInternal(
   let hintedTotal: number | undefined
   void fetchContentLength(url).then((n) => (hintedTotal = n)).catch(() => {})
 
-  const task: any = BackgroundURLSession.startDownload({
-    url,
-    destination: dstPath,
-  })
-
-  if (!task || typeof task !== "object") {
-    throw new Error("startDownload 未返回有效任务对象")
-  }
+  const task: any = BackgroundURLSession.startDownload({ url, destination: dstPath })
+  if (!task || typeof task !== "object") throw new Error("startDownload 未返回有效任务对象")
 
   const startedAt = Date.now()
   let lastTotal: number | undefined
@@ -402,50 +428,36 @@ async function downloadWithProgressInternal(
   let completionSince: number | null = null
   let err: any = null
 
-  function emitProgress(p: DownloadProgress) {
-    // total 兜底
-    let total = typeof p.total === "number" ? p.total : hintedTotal ?? lastTotal
+  function emit(p: DownloadProgress) {
+    const total = typeof p.total === "number" ? p.total : hintedTotal ?? lastTotal
     if (typeof total === "number") lastTotal = total
-
-    // received/percent 直接交给 mono 包装层兜底即可
-    onProgress?.({
-      received: typeof p.received === "number" ? p.received : 0,
-      total,
-      percent: p.percent,
-      speedBps: p.speedBps,
-    })
-
-    // 记录“有变化”的时间戳（用于 stall/兜底）
-    const received = typeof p.received === "number" ? p.received : 0
-    if (received !== lastBytes || p.percent !== lastPercent) {
+    onProgress?.({ ...p, total })
+    const r = typeof p.received === "number" ? p.received : 0
+    if (r !== lastBytes || p.percent !== lastPercent) {
       lastProgressAt = Date.now()
       lastAnySignalAt = Date.now()
     }
-    lastBytes = received
+    lastBytes = r
     lastPercent = p.percent
   }
 
-  attachOnProgress(task, emitProgress)
+  attachOnProgress(task, emit)
   attachOnError(task, (e) => (err = e))
   startIfNeeded(task)
 
   for (;;) {
     if (err) throw (err instanceof Error ? err : new Error(String(err?.message ?? err ?? "下载失败")))
 
-    // 任务完成标记
     if (task?.isCompleted === true || task?.completed === true || task?.finished === true) {
       const ok = await waitForFile(dstPath, 3000)
-      if (!ok) {
-        await downloadWithFetchFallback(url, dstPath, onProgress)
-      }
+      if (!ok) await downloadWithFetchFallback(url, dstPath, onProgress)
       onProgress?.({ received: lastBytes, total: lastTotal ?? hintedTotal, percent: 1 })
       return
     }
 
     const f = getFraction(task)
     const { received, total } = readBytes(task)
-
-    emitProgress({
+    emit({
       received: typeof received === "number" ? received : lastBytes,
       total: typeof total === "number" ? total : undefined,
       percent: typeof f === "number" ? f : undefined,
@@ -471,7 +483,6 @@ async function downloadWithProgressInternal(
       completionSince = null
     }
 
-    // stall 超时重试
     if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
       cancelTask(task)
       if (attempt < MAX_RETRY) {
@@ -482,13 +493,11 @@ async function downloadWithProgressInternal(
       throw new Error("下载超时：进度长时间无变化")
     }
 
-    // 总耗时超限
     if (Date.now() - startedAt > HARD_TIMEOUT_MS) {
       cancelTask(task)
       throw new Error("下载超时：耗时过长")
     }
 
-    // 无信号兜底
     if (Date.now() - lastAnySignalAt > 12000) {
       const ok = await waitForFile(dstPath, 2000)
       if (ok) {
