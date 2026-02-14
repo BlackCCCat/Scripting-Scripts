@@ -32,6 +32,7 @@ export type RemoteAsset = {
   body?: string
   updatedAt?: string
   remoteIdOrSha?: string // GitHub=sha256(digest) / CNB=id
+  size?: number // ✅ 新增：远端资产大小（bytes）
 }
 
 export type AllUpdateResult = {
@@ -60,6 +61,43 @@ async function httpJson(url: string, init?: any) {
 function globToRegExp(glob: string): RegExp {
   const esc = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
   return new RegExp("^" + esc + "$", "i")
+}
+
+// ✅ 统一从 RemoteAsset / 其它结构中提取"期望大小"
+function pickExpectedSize(asset: any): number | undefined {
+  const candidates = [
+    asset?.size,
+    asset?.fileSize,
+    asset?.contentLength,
+    asset?.bytes,
+    asset?.asset?.size,
+    asset?.asset?.fileSize,
+  ]
+  for (const v of candidates) {
+    const n = typeof v === "string" ? Number(v) : v
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) return n
+  }
+  return undefined
+}
+
+// ✅ 获取本地文件大小（用于与 expectedSize 对比）
+async function getFileSize(fm: any, path: string): Promise<number> {
+  if (typeof fm?.fileSizeSync === "function") return Number(fm.fileSizeSync(path) ?? 0)
+  if (typeof fm?.fileSize === "function") return Number((await fm.fileSize(path)) ?? 0)
+
+  if (typeof fm?.statSync === "function") return Number(fm.statSync(path)?.size ?? 0)
+  if (typeof fm?.stat === "function") return Number((await fm.stat(path))?.size ?? 0)
+
+  if (typeof fm?.attributesSync === "function") {
+    const a = fm.attributesSync(path)
+    return Number(a?.size ?? a?.fileSize ?? 0)
+  }
+  if (typeof fm?.attributes === "function") {
+    const a = await fm.attributes(path)
+    return Number(a?.size ?? a?.fileSize ?? 0)
+  }
+
+  throw new Error("无法获取文件大小（FileManager 缺少 fileSize/stat/attributes）")
 }
 
 async function fetchLatestAssetFromGithub(args: {
@@ -99,6 +137,7 @@ async function fetchLatestAssetFromGithub(args: {
         tag: rel.tag_name,
         body: rel.body,
         remoteIdOrSha: pickGithubSha256FromDigest(a?.digest),
+        size: typeof a?.size === "number" ? a.size : undefined, // ✅ GitHub 资产一般带 size
       }
     }
   }
@@ -179,6 +218,12 @@ async function fetchLatestAssetFromCnb(args: {
         tag: rel.tag_name ?? rel.tagName,
         body: rel.body,
         remoteIdOrSha: a?.id != null ? String(a.id) : undefined,
+        size:
+          typeof a?.size === "number"
+            ? a.size
+            : typeof a?.fileSize === "number"
+              ? a.fileSize
+              : undefined, // ✅ CNB 可能是 size 或 fileSize
       }
     }
   }
@@ -429,20 +474,93 @@ export async function updateModel(
 
   if (!model?.url) throw new Error("未找到可用的模型资产")
 
+  // ✅ 期望大小：优先使用远端资产元数据中的 size
+  const expectedSize = pickExpectedSize(model)
+
   // 模型不解压，下载后直接落盘到 installRoot 根目录
   const dstPath = Path.join(installRoot, MODEL_FILE)
+  const cacheDir = Path.join(installRoot, "UpdateCache")
+  const cachePath = Path.join(cacheDir, MODEL_FILE)
 
   params.onStage?.("下载中…")
   const fm = FM()
+
+  // 先确保 UpdateCache 目录存在
   try {
-    if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
-    else if (typeof fm?.remove === "function") await fm.remove(dstPath)
+    if (typeof fm?.createDirectorySync === "function") {
+      fm.createDirectorySync(cacheDir, true)
+    } else if (typeof fm?.createDirectory === "function") {
+      await fm.createDirectory(cacheDir, true)
+    } else if (typeof fm?.mkdirSync === "function") {
+      fm.mkdirSync(cacheDir, true)
+    } else if (typeof fm?.mkdir === "function") {
+      await fm.mkdir(cacheDir, true)
+    }
   } catch {}
-  await downloadWithProgress(model.url, dstPath, params.onProgress, (e) => {
+
+  // 清理旧 cache 文件
+  try {
+    if (typeof fm?.removeSync === "function") fm.removeSync(cachePath)
+    else if (typeof fm?.remove === "function") await fm.remove(cachePath)
+  } catch {}
+
+  // 下载到 cachePath
+  await downloadWithProgress(model.url, cachePath, params.onProgress, (e) => {
     if (e.type === "retrying") {
       params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
     }
   })
+
+  // ✅ 下载完成后先做完整性校验：大小不一致则认为失败，不覆盖 dstPath
+  params.onStage?.("校验中…")
+  {
+    const actualSize = await getFileSize(fm, cachePath)
+    if (expectedSize && expectedSize > 0) {
+      if (actualSize !== expectedSize) {
+        // 保留 cache 便于排查；如果你想失败就删，取消下一行注释
+        // try { if (typeof fm?.removeSync === "function") fm.removeSync(cachePath); else if (typeof fm?.remove === "function") await fm.remove(cachePath) } catch {}
+        throw new Error(`下载不完整：实际 ${actualSize} bytes，期望 ${expectedSize} bytes`)
+      }
+    } else {
+      // 没有远端 size 时，至少保证不是空文件
+      if (actualSize <= 0) throw new Error("下载结果为空文件")
+    }
+  }
+
+  // 校验通过后：原子替换到 dstPath
+  params.onStage?.("写入中…")
+  try {
+    // 先删除旧目标文件（如果存在）
+    try {
+      if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
+      else if (typeof fm?.remove === "function") await fm.remove(dstPath)
+    } catch {}
+
+    // 优先用 move（同盘通常更快且更"原子"）
+    if (typeof fm?.moveSync === "function") {
+      fm.moveSync(cachePath, dstPath)
+    } else if (typeof fm?.move === "function") {
+      await fm.move(cachePath, dstPath)
+    } else if (typeof fm?.renameSync === "function") {
+      fm.renameSync(cachePath, dstPath)
+    } else if (typeof fm?.rename === "function") {
+      await fm.rename(cachePath, dstPath)
+    } else if (typeof fm?.copySync === "function") {
+      // 没有 move/rename：退化为 copy + remove
+      fm.copySync(cachePath, dstPath)
+      if (typeof fm?.removeSync === "function") fm.removeSync(cachePath)
+      else if (typeof fm?.remove === "function") await fm.remove(cachePath)
+    } else if (typeof fm?.copy === "function") {
+      await fm.copy(cachePath, dstPath)
+      if (typeof fm?.removeSync === "function") fm.removeSync(cachePath)
+      else if (typeof fm?.remove === "function") await fm.remove(cachePath)
+    } else {
+      throw new Error("FileManager 不支持 move/rename/copy 操作")
+    }
+  } catch (err) {
+    params.onStage?.("写入失败")
+    throw err
+  }
 
   await setModelMeta({
     installRoot,
