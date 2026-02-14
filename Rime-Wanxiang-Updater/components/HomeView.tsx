@@ -19,13 +19,48 @@ import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey } from "../ut
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
 import { detectRimeDir } from "../utils/hamster"
-import { checkAllUpdates, updateScheme, updateDict, updateModel, autoUpdateAll, deployInputMethod, type AllUpdateResult } from "../utils/update_tasks"
+import {
+  checkAllUpdates,
+  updateScheme,
+  updateDict,
+  updateModel,
+  autoUpdateAll,
+  deployInputMethod,
+  type AllUpdateResult,
+} from "../utils/update_tasks"
 
-function pct(p?: number) {
-  if (typeof p !== "number" || !Number.isFinite(p)) return ""
-  const v = Math.max(0, Math.min(1, p))
-  const capped = v >= 1 ? 100 : Math.min(99.99, v * 100)
-  return `${capped.toFixed(2)}%`
+function clamp01(v: number) {
+  return Math.max(0, Math.min(1, v))
+}
+
+function readFraction(x: any): number | undefined {
+  const toNum = (v: any) => {
+    if (typeof v === "number" && Number.isFinite(v)) return v
+    if (typeof v === "string") {
+      const n = Number(v)
+      if (Number.isFinite(n)) return n
+    }
+    return undefined
+  }
+
+  const direct = toNum(x)
+  if (direct !== undefined) return direct
+
+  const p1 = toNum(x?.percent)
+  if (p1 !== undefined) return p1
+
+  const p2 = toNum(x?.fractionCompleted)
+  if (p2 !== undefined) return p2
+
+  const p3 = toNum(x?.progress?.fractionCompleted)
+  if (p3 !== undefined) return p3
+
+  return undefined
+}
+
+function pctFromFraction(f?: number) {
+  const v = typeof f === "number" && Number.isFinite(f) ? clamp01(f) : 0
+  return `${(v * 100).toFixed(2)}%`
 }
 
 const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
@@ -34,7 +69,10 @@ function selectedSchemeFromConfig(cfg: AppConfig): string {
   return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`
 }
 
-function normalizeMetaScheme(metaScheme: MetaBundle["scheme"], fallback: AppConfig): {
+function normalizeMetaScheme(
+  metaScheme: MetaBundle["scheme"],
+  fallback: AppConfig
+): {
   selected: string
   schemeEdition?: AppConfig["schemeEdition"]
   proSchemeKey?: ProSchemeKey
@@ -45,7 +83,11 @@ function normalizeMetaScheme(metaScheme: MetaBundle["scheme"], fallback: AppConf
   const validProKey = proKey && (PRO_KEYS as string[]).includes(proKey) ? proKey : undefined
   const selected =
     metaScheme.selectedScheme ??
-    (edition === "base" ? "base" : edition === "pro" ? `pro (${validProKey ?? fallback.proSchemeKey})` : selectedSchemeFromConfig(fallback))
+    (edition === "base"
+      ? "base"
+      : edition === "pro"
+        ? `pro (${validProKey ?? fallback.proSchemeKey})`
+        : selectedSchemeFromConfig(fallback))
   return {
     selected,
     schemeEdition: edition,
@@ -55,7 +97,9 @@ function normalizeMetaScheme(metaScheme: MetaBundle["scheme"], fallback: AppConf
 
 function CenterRowButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
   const haptic = () => {
-    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+    try {
+      ;(globalThis as any).HapticFeedback?.mediumImpact?.()
+    } catch {}
   }
   return (
     <Button
@@ -106,7 +150,7 @@ export function HomeView() {
 
   // 状态
   const [stage, setStage] = useState("就绪")
-  const [progressPct, setProgressPct] = useState("")
+  const [progressPct, setProgressPct] = useState("0.00%")
   const [busy, setBusy] = useState(false)
 
   function resetRemote() {
@@ -197,14 +241,10 @@ export function HomeView() {
     setLocalSelectedScheme(localScheme.selected)
     if (
       localScheme.schemeEdition &&
-      (
-        current.schemeEdition !== localScheme.schemeEdition ||
-        (
-          localScheme.schemeEdition === "pro" &&
+      (current.schemeEdition !== localScheme.schemeEdition ||
+        (localScheme.schemeEdition === "pro" &&
           localScheme.proSchemeKey &&
-          current.proSchemeKey !== localScheme.proSchemeKey
-        )
-      )
+          current.proSchemeKey !== localScheme.proSchemeKey))
     ) {
       try {
         const next: AppConfig = {
@@ -260,10 +300,26 @@ export function HomeView() {
     if (checkKey(current) !== beforeKey) resetRemote()
   }
 
+  function applyProgress(tag: "scheme" | "dict" | "model" | "auto", p: any) {
+    // ✅ HomeView 侧日志
+    try {
+      console.log(`[${tag}] progress:`, {
+        percent: p?.percent,
+        received: p?.received,
+        total: p?.total,
+        speedBps: p?.speedBps,
+        _typeof_percent: typeof p?.percent,
+      })
+    } catch {}
+
+    const f = readFraction(p?.percent ?? p?.fractionCompleted ?? p?.progress?.fractionCompleted)
+    setProgressPct(pctFromFraction(f))
+  }
+
   async function onCheckUpdate() {
     setBusy(true)
     setStage("检查更新中…")
-    setProgressPct("")
+    setProgressPct("0.00%")
     setRemoteSchemeVer("检查更新中...")
     setRemoteDictMark("检查更新中...")
     setRemoteModelMark("检查更新中...")
@@ -291,7 +347,7 @@ export function HomeView() {
   async function onAutoUpdate() {
     setBusy(true)
     setStage("自动更新中…")
-    setProgressPct("")
+    setProgressPct("0.00%")
     try {
       const current = loadConfig()
       await refreshLocal(current)
@@ -299,7 +355,6 @@ export function HomeView() {
       const key = checkKey(current)
       let pre = lastCheck
       if (!pre || lastCheckKey !== key) {
-        // ✅ 未检查过或配置变更：先检查更新
         setStage("自动更新：检查更新中…")
         setRemoteSchemeVer("检查更新中...")
         setRemoteDictMark("检查更新中...")
@@ -314,12 +369,11 @@ export function HomeView() {
         setLastCheckKey(key)
       }
 
-      // ✅ 再执行自动更新（复用刚才的检查结果，避免重复请求）
       await autoUpdateAll(
         current,
         {
           onStage: setStage,
-          onProgress: (p) => setProgressPct(pct(p.percent)),
+          onProgress: (p) => applyProgress("auto", p),
         },
         pre
       )
@@ -336,13 +390,13 @@ export function HomeView() {
   async function onUpdateScheme() {
     setBusy(true)
     setStage("更新方案中…")
-    setProgressPct("")
+    setProgressPct("0.00%")
     try {
       const current = loadConfig()
       await updateScheme(current, {
         autoDeploy: false,
         onStage: setStage,
-        onProgress: (p) => setProgressPct(pct(p.percent)),
+        onProgress: (p) => applyProgress("scheme", p),
       })
       await refreshLocal(current)
       setStage("更新方案完成")
@@ -356,13 +410,13 @@ export function HomeView() {
   async function onUpdateDict() {
     setBusy(true)
     setStage("更新词库中…")
-    setProgressPct("")
+    setProgressPct("0.00%")
     try {
       const current = loadConfig()
       await updateDict(current, {
         autoDeploy: false,
         onStage: setStage,
-        onProgress: (p) => setProgressPct(pct(p.percent)),
+        onProgress: (p) => applyProgress("dict", p),
       })
       await refreshLocal(current)
       setStage("更新词库完成")
@@ -376,13 +430,13 @@ export function HomeView() {
   async function onUpdateModel() {
     setBusy(true)
     setStage("更新模型中…")
-    setProgressPct("")
+    setProgressPct("0.00%")
     try {
       const current = loadConfig()
       await updateModel(current, {
         autoDeploy: false,
         onStage: setStage,
-        onProgress: (p) => setProgressPct(pct(p.percent)),
+        onProgress: (p) => applyProgress("model", p),
       })
       await refreshLocal(current)
       setStage("更新模型完成")
@@ -396,7 +450,7 @@ export function HomeView() {
   async function onDeploy() {
     setBusy(true)
     setStage("部署中…")
-    setProgressPct("")
+    setProgressPct("0.00%")
     try {
       const current = loadConfig()
       await deployInputMethod(current, setStage)
@@ -419,7 +473,9 @@ export function HomeView() {
               title=""
               systemImage="gearshape"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+                try {
+                  ;(globalThis as any).HapticFeedback?.mediumImpact?.()
+                } catch {}
                 void openSettings()
               }}
             />
@@ -448,7 +504,6 @@ export function HomeView() {
         <Section header={<Text>操作</Text>}>
           <CenterRowButton title="检查更新" onPress={onCheckUpdate} disabled={busy} />
           <CenterRowButton title="自动更新" onPress={onAutoUpdate} disabled={busy} />
-
           <CenterRowButton title="更新方案" onPress={onUpdateScheme} disabled={busy} />
           <CenterRowButton title="更新词库" onPress={onUpdateDict} disabled={busy} />
           <CenterRowButton title="更新模型" onPress={onUpdateModel} disabled={busy} />
@@ -458,11 +513,10 @@ export function HomeView() {
         <Section header={<Text>状态</Text>}>
           <Text>
             {stage}
-            {stage.includes("UpdateCache") && stage.includes("权限")
-              ? " 请在设置中重新选择Hamster路径"
-              : ""}
+            {stage.includes("UpdateCache") && stage.includes("权限") ? " 请在设置中重新选择Hamster路径" : ""}
           </Text>
-          {progressPct ? <Text>下载进度：{progressPct}</Text> : null}
+
+          {busy ? <Text>下载进度：{progressPct}</Text> : null}
         </Section>
       </List>
     </NavigationStack>

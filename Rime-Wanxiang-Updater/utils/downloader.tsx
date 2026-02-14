@@ -1,6 +1,6 @@
 // File: utils/downloader.tsx
 export type DownloadProgress = {
-  percent?: number
+  percent?: number // 0..1 (fractionCompleted)
   received: number
   total?: number
   speedBps?: number
@@ -20,9 +20,12 @@ const STALL_TIMEOUT_MS = 2 * 60 * 1000
 const HARD_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_RETRY = 1
 
-// ✅ UI 刷新节流与阈值（你想“减缓频率”就在这里调）
-const UI_MIN_INTERVAL_MS = 1000 // 最多 1 次/秒
-const UI_MIN_DELTA_PERCENT = 0.005 // 0.5% 以上才刷新（1.0 = 100%）
+// 轮询频率（用于兜底轮询 task.progress/bytes）
+const POLL_MS = 500
+
+// ✅ 内置日志
+const DEBUG_PROGRESS = true
+const DEBUG_EVERY_MS = 1000
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms))
@@ -31,6 +34,20 @@ function sleep(ms: number) {
 function dirOf(path: string): string {
   const idx = path.lastIndexOf("/")
   return idx > 0 ? path.slice(0, idx) : ""
+}
+
+function num(v: any): number | undefined {
+  const n = typeof v === "number" ? v : Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function pickNum(obj: any, keys: string[]): number | undefined {
+  if (!obj) return undefined
+  for (const k of keys) {
+    const v = num(obj[k])
+    if (v !== undefined) return v
+  }
+  return undefined
 }
 
 async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
@@ -119,147 +136,9 @@ async function fetchContentLength(url: string): Promise<number | undefined> {
   return undefined
 }
 
-function num(v: any): number | undefined {
-  const n = typeof v === "number" ? v : Number(v)
-  return Number.isFinite(n) ? n : undefined
-}
-
-function pickNum(obj: any, keys: string[]): number | undefined {
-  if (!obj) return undefined
-  for (const k of keys) {
-    const v = num(obj[k])
-    if (v !== undefined) return v
-  }
-  return undefined
-}
-
-function getFraction(task: any): number | undefined {
-  const p = task?.progress
-  const f1 = num(p?.fractionCompleted)
-  if (f1 !== undefined) return f1
-
-  const f2 = num(task?.fractionCompleted)
-  if (f2 !== undefined) return f2
-
-  const f3 = num(task?.progressPercent)
-  if (f3 !== undefined) return f3 > 1 ? f3 / 100 : f3
-
-  const written =
-    pickNum(task, ["totalBytesWritten", "bytesWritten", "receivedBytes", "completedBytes"]) ??
-    pickNum(p, ["completedUnitCount", "totalBytesWritten"])
-  const total =
-    pickNum(task, ["totalBytesExpectedToWrite", "expectedBytes", "totalBytes", "contentLength"]) ??
-    pickNum(p, ["totalUnitCount", "totalBytesExpectedToWrite"])
-
-  if (typeof written === "number" && typeof total === "number" && total > 0) {
-    return written / total
-  }
-  return undefined
-}
-
-function readBytes(task: any): { received?: number; total?: number } {
-  const p = task?.progress
-  const received =
-    pickNum(task, ["totalBytesWritten", "bytesWritten", "receivedBytes", "completedBytes"]) ??
-    pickNum(p, ["completedUnitCount", "totalBytesWritten"])
-  const total =
-    pickNum(task, ["totalBytesExpectedToWrite", "expectedBytes", "totalBytes", "contentLength"]) ??
-    pickNum(p, ["totalUnitCount", "totalBytesExpectedToWrite"])
-  return { received, total }
-}
-
-// ✅ 统一：单调 + 节流 + 阈值
-function makeSmoothOnProgress(onProgress?: (p: DownloadProgress) => void) {
-  if (typeof onProgress !== "function") return undefined
-
-  let maxReceived = 0
-  let totalLocked: number | undefined
-  let maxPercent: number | undefined
-
-  let lastEmitAt = 0
-  let lastEmitPercent: number | undefined
-  let lastEmitReceived = 0
-
-  function considerTotal(t?: number) {
-    if (typeof t !== "number" || !Number.isFinite(t) || t <= 0) return
-    if (t < maxReceived) return // 不允许 total < received
-    // total 允许更新，但避免抖动：变化>1%才更新
-    if (typeof totalLocked !== "number") {
-      totalLocked = t
-      return
-    }
-    const old = totalLocked
-    if (Math.abs(old - t) > Math.max(1, old * 0.01)) totalLocked = t
-  }
-
-  function shouldEmit(now: number, pct?: number, rcv?: number) {
-    if (now - lastEmitAt < UI_MIN_INTERVAL_MS) return false
-
-    const dr = typeof rcv === "number" ? rcv - lastEmitReceived : 0
-    const dp =
-      typeof pct === "number" && typeof lastEmitPercent === "number"
-        ? Math.abs(pct - lastEmitPercent)
-        : typeof pct === "number" && lastEmitPercent == null
-          ? pct
-          : 0
-
-    // 百分比足够变化 或 字节有变化
-    if (typeof pct === "number" && dp >= UI_MIN_DELTA_PERCENT) return true
-    if (dr > 0) return true
-
-    // 兜底：偶尔也刷新一次（防止 UI 长时间不动）
-    if (now - lastEmitAt > 1500) return true
-    return false
-  }
-
-  return (p: DownloadProgress) => {
-    // total
-    considerTotal(p.total)
-
-    // received 单调不减（防归零/回退）
-    const rIn = typeof p.received === "number" && Number.isFinite(p.received) ? p.received : 0
-    if (rIn > maxReceived) maxReceived = rIn
-    if (rIn === 0 && maxReceived > 0) {
-      // ignore
-    }
-
-    // percent：优先 received/total；否则用 p.percent
-    let pct: number | undefined
-    if (typeof totalLocked === "number" && totalLocked > 0) pct = maxReceived / totalLocked
-    else if (typeof p.percent === "number" && Number.isFinite(p.percent)) pct = p.percent
-
-    if (typeof pct === "number") {
-      pct = Math.max(0, Math.min(1, pct))
-      // percent 单调不减（避免 0↔8）
-      if (typeof maxPercent === "number" && pct < maxPercent) pct = maxPercent
-      maxPercent = pct
-    } else if (typeof maxPercent === "number") {
-      pct = maxPercent
-    }
-
-    const now = Date.now()
-
-    // ✅ 完成强制发 100%（绑定完成与进度）
-    if (typeof p.percent === "number" && p.percent >= 1) {
-      totalLocked = maxReceived > 0 ? maxReceived : totalLocked
-      maxPercent = 1
-      lastEmitAt = now
-      lastEmitPercent = 1
-      lastEmitReceived = maxReceived
-      onProgress({ received: maxReceived, total: totalLocked, percent: 1, speedBps: p.speedBps })
-      return
-    }
-
-    if (!shouldEmit(now, pct, maxReceived)) return
-
-    lastEmitAt = now
-    lastEmitPercent = pct
-    lastEmitReceived = maxReceived
-
-    onProgress({ received: maxReceived, total: totalLocked, percent: pct, speedBps: p.speedBps })
-  }
-}
-
+/**
+ * ✅ 兜底：用 fetch 下载并写文件（小文件/可获取大小时）
+ */
 async function downloadWithFetchFallback(
   url: string,
   dstPath: string,
@@ -354,35 +233,6 @@ function attachOnError(task: any, setError: (e: any) => void) {
   if ("onFailure" in task) task.onFailure = setError
 }
 
-function attachOnProgress(task: any, onProgress?: (p: DownloadProgress) => void) {
-  if (!task || typeof onProgress !== "function") return
-
-  let lastTs = Date.now()
-  let lastBytes = 0
-
-  task.onProgress = (d: any) => {
-    const received =
-      pickNum(d, ["receivedBytes", "bytesWritten", "totalBytesWritten", "completedBytes", "written"]) ?? 0
-    const total =
-      pickNum(d, ["totalBytes", "expectedBytes", "totalBytesExpected", "totalBytesExpectedToWrite", "contentLength"])
-
-    const now = Date.now()
-    const dt = Math.max(1, now - lastTs)
-    const db = received - lastBytes
-    const speedBps = (db * 1000) / dt
-
-    onProgress({
-      received,
-      total,
-      percent: typeof total === "number" && total > 0 ? received / total : undefined,
-      speedBps,
-    })
-
-    lastTs = now
-    lastBytes = received
-  }
-}
-
 function startIfNeeded(task: any) {
   try {
     if (typeof task?.resume === "function") task.resume()
@@ -392,20 +242,155 @@ function startIfNeeded(task: any) {
   } catch {}
 }
 
+/**
+ * ✅ 从 URLSessionProgress 读取（按文档字段）
+ */
+function readProgressFromURLSession(task: any): {
+  fractionCompleted?: number
+  completedUnitCount?: number
+  totalUnitCount?: number
+  isFinished?: boolean
+  estimatedTimeRemaining?: number | null
+} {
+  const p = task?.progress
+  if (!p || typeof p !== "object") return {}
+  return {
+    fractionCompleted: num(p.fractionCompleted),
+    completedUnitCount: num(p.completedUnitCount),
+    totalUnitCount: num(p.totalUnitCount),
+    isFinished: typeof p.isFinished === "boolean" ? p.isFinished : undefined,
+    estimatedTimeRemaining: p.estimatedTimeRemaining == null ? null : (num(p.estimatedTimeRemaining) ?? null),
+  }
+}
+
+/**
+ * 兼容读取 bytes（当 progress 字段不可用时）
+ */
+function readBytesFallback(task: any): { received?: number; total?: number } {
+  const p = task?.progress
+  const received =
+    pickNum(task, ["totalBytesWritten", "bytesWritten", "receivedBytes", "completedBytes"]) ??
+    pickNum(p, ["completedUnitCount", "totalBytesWritten"])
+  const total =
+    pickNum(task, ["totalBytesExpectedToWrite", "expectedBytes", "totalBytes", "contentLength"]) ??
+    pickNum(p, ["totalUnitCount", "totalBytesExpectedToWrite"])
+  return { received, total }
+}
+
+/**
+ * ✅ 核心：累计化 + 不缩小 total + percent 单调 + 真正调用 onProgress
+ */
+function makeCumulativeEmitter(onProgress?: (p: DownloadProgress) => void) {
+  const cb = typeof onProgress === "function" ? onProgress : undefined
+
+  let maxReceived = 0
+  let totalLocked: number | undefined
+  let maxPercent: number | undefined
+
+  let lastEmitAt = 0
+  let lastDbgAt = 0
+
+  function considerTotal(t?: number) {
+    if (typeof t !== "number" || !Number.isFinite(t) || t <= 0) return
+    // ✅ 不缩小 total：只接受更大的 total 或第一次设置
+    if (typeof totalLocked !== "number" || t > totalLocked) totalLocked = t
+  }
+
+  function considerReceived(r?: number) {
+    if (typeof r !== "number" || !Number.isFinite(r) || r < 0) return
+    if (r > maxReceived) maxReceived = r
+  }
+
+  function emitCore(p: DownloadProgress, dbg?: any) {
+    const now = Date.now()
+
+    // ✅ 节流：避免 UI 刷太频繁
+    if (now - lastEmitAt >= 120) {
+      lastEmitAt = now
+      cb?.(p) // ✅ 关键：把进度回调给 UI
+    }
+
+    if (DEBUG_PROGRESS && now - lastDbgAt >= DEBUG_EVERY_MS) {
+      lastDbgAt = now
+      try {
+        console.log("[dl] progress:", {
+          percent: p.percent,
+          received: p.received,
+          total: p.total,
+          speedBps: p.speedBps,
+          ...dbg,
+        })
+      } catch {}
+    }
+  }
+
+  return (raw: {
+    frac?: number
+    received?: number
+    total?: number
+    finishedHint?: boolean
+    speedBps?: number
+    dbg?: any
+  }) => {
+    considerTotal(raw.total)
+    considerReceived(raw.received)
+
+    let pct: number | undefined
+
+    // ✅ percent 优先用 URLSessionProgress.fractionCompleted（权威）
+    if (typeof raw.frac === "number" && Number.isFinite(raw.frac)) {
+      pct = Math.max(0, Math.min(1, raw.frac))
+    } else if (typeof totalLocked === "number" && totalLocked > 0) {
+      // 其次用累计 received/total
+      pct = maxReceived / totalLocked
+    }
+
+    // ✅ percent 单调不回退
+    if (typeof pct === "number") {
+      if (typeof maxPercent === "number" && pct < maxPercent) pct = maxPercent
+      maxPercent = pct
+    } else if (typeof maxPercent === "number") {
+      pct = maxPercent
+    }
+
+    const finished = raw.finishedHint === true || (typeof pct === "number" && pct >= 1)
+
+    if (finished) {
+      // ✅ 完成时：percent=1 且 received/total 不缩小
+      if (typeof totalLocked === "number" && totalLocked > 0) {
+        emitCore({ received: totalLocked, total: totalLocked, percent: 1, speedBps: raw.speedBps }, raw.dbg)
+      } else {
+        emitCore({ received: maxReceived, total: maxReceived, percent: 1, speedBps: raw.speedBps }, raw.dbg)
+      }
+      return
+    }
+
+    emitCore(
+      {
+        received: maxReceived,
+        total: totalLocked,
+        percent: pct,
+        speedBps: raw.speedBps,
+      },
+      raw.dbg
+    )
+  }
+}
+
 export async function downloadWithProgress(
   url: string,
   dstPath: string,
   onProgress?: (p: DownloadProgress) => void,
   onState?: (e: DownloadStateEvent) => void
 ) {
-  const smooth = makeSmoothOnProgress(onProgress)
-  return downloadWithProgressInternal(url, dstPath, smooth, onState, 0)
+  const emit = makeCumulativeEmitter(onProgress)
+  return downloadWithProgressInternal(url, dstPath, emit, onState, 0)
 }
 
 async function downloadWithProgressInternal(
   url: string,
   dstPath: string,
-  onProgress: ((p: DownloadProgress) => void) | undefined,
+  emit: (raw: any) => void,
   onState: ((e: DownloadStateEvent) => void) | undefined,
   attempt: number
 ) {
@@ -419,94 +404,172 @@ async function downloadWithProgressInternal(
   const task: any = BackgroundURLSession.startDownload({ url, destination: dstPath })
   if (!task || typeof task !== "object") throw new Error("startDownload 未返回有效任务对象")
 
+  if (DEBUG_PROGRESS) {
+    try {
+      const p = readProgressFromURLSession(task)
+      console.log("[dl] task.progress init:", p)
+      console.log("[dl] task keys:", Object.keys(task ?? {}))
+      console.log("[dl] progress keys:", Object.keys((task?.progress as any) ?? {}))
+    } catch {}
+  }
+
   const startedAt = Date.now()
-  let lastTotal: number | undefined
-  let lastBytes = 0
-  let lastPercent: number | undefined
   let lastProgressAt = Date.now()
   let lastAnySignalAt = Date.now()
   let completionSince: number | null = null
   let err: any = null
 
-  function emit(p: DownloadProgress) {
-    const total = typeof p.total === "number" ? p.total : hintedTotal ?? lastTotal
-    if (typeof total === "number") lastTotal = total
-    onProgress?.({ ...p, total })
-    const r = typeof p.received === "number" ? p.received : 0
-    if (r !== lastBytes || p.percent !== lastPercent) {
-      lastProgressAt = Date.now()
-      lastAnySignalAt = Date.now()
-    }
-    lastBytes = r
-    lastPercent = p.percent
-  }
-
-  attachOnProgress(task, emit)
   attachOnError(task, (e) => (err = e))
   startIfNeeded(task)
+
+  // 速度估算：基于 received 的变化
+  let lastSpeedTs = Date.now()
+  let lastSpeedBytes = 0
+
+  // 进度变化判断（不要复用 lastSpeedBytes）
+  let lastObservedReceived = 0
+  let lastObservedFrac = 0
 
   for (;;) {
     if (err) throw (err instanceof Error ? err : new Error(String(err?.message ?? err ?? "下载失败")))
 
-    if (task?.isCompleted === true || task?.completed === true || task?.finished === true) {
+    const pr = readProgressFromURLSession(task)
+    const fb = readBytesFallback(task)
+
+    const total = pr.totalUnitCount ?? fb.total ?? hintedTotal
+    const received = pr.completedUnitCount ?? fb.received
+    const frac = pr.fractionCompleted
+
+    const now = Date.now()
+
+    // 速度
+    let speedBps: number | undefined
+    if (typeof received === "number") {
+      const dt = Math.max(1, now - lastSpeedTs)
+      const db = received - lastSpeedBytes
+      speedBps = (db * 1000) / dt
+      lastSpeedTs = now
+      lastSpeedBytes = received
+    }
+
+    // 推送（累计化 + 不缩小 total）
+    emit({
+      frac,
+      received,
+      total,
+      speedBps,
+      finishedHint: pr.isFinished === true,
+      dbg: DEBUG_PROGRESS
+        ? {
+            _urlSessionProgress: {
+              fractionCompleted: pr.fractionCompleted,
+              completedUnitCount: pr.completedUnitCount,
+              totalUnitCount: pr.totalUnitCount,
+              isFinished: pr.isFinished,
+              estimatedTimeRemaining: pr.estimatedTimeRemaining,
+            },
+          }
+        : undefined,
+    })
+
+    // “有信号”就刷新
+    const hasSignal =
+      (typeof received === "number" && received > 0) ||
+      (typeof frac === "number" && frac > 0) ||
+      (typeof total === "number" && total > 0)
+    if (hasSignal) lastAnySignalAt = now
+
+    // ✅ 只要 received 或 frac 有增长，就认为“有进度”
+    let progressed = false
+    if (typeof received === "number" && received > lastObservedReceived) {
+      lastObservedReceived = received
+      progressed = true
+    }
+    if (typeof frac === "number" && frac > lastObservedFrac) {
+      lastObservedFrac = frac
+      progressed = true
+    }
+    if (progressed) lastProgressAt = now
+
+    // 完成标记（兼容）
+    const completed =
+      task?.isCompleted === true ||
+      task?.completed === true ||
+      task?.finished === true ||
+      pr.isFinished === true
+
+    if (completed) {
       const ok = await waitForFile(dstPath, 3000)
-      if (!ok) await downloadWithFetchFallback(url, dstPath, onProgress)
-      onProgress?.({ received: lastBytes, total: lastTotal ?? hintedTotal, percent: 1 })
+      if (!ok) {
+        await downloadWithFetchFallback(url, dstPath, (p) => {
+          emit({
+            frac: p.percent,
+            received: p.received,
+            total: p.total,
+            speedBps: p.speedBps,
+            finishedHint: p.percent === 1,
+          })
+        })
+      }
+      emit({ frac: 1, received: total, total, finishedHint: true })
       return
     }
 
-    const f = getFraction(task)
-    const { received, total } = readBytes(task)
-    emit({
-      received: typeof received === "number" ? received : lastBytes,
-      total: typeof total === "number" ? total : undefined,
-      percent: typeof f === "number" ? f : undefined,
-    })
+    // 看似完成：确认文件后退出
+    const doneByFrac = typeof frac === "number" && frac >= 0.999
+    const doneByBytes = typeof total === "number" && total > 0 && typeof received === "number" && received >= total
 
-    const doneByBytes = typeof lastTotal === "number" && lastTotal > 0 && lastBytes >= lastTotal
-    const staleMs = Date.now() - lastProgressAt
-    const doneByStale = typeof lastPercent === "number" && lastPercent >= 0.999 && staleMs > 1500
-
-    if (doneByBytes || doneByStale) {
-      if (completionSince == null) completionSince = Date.now()
+    if (doneByFrac || doneByBytes) {
+      if (completionSince == null) completionSince = now
       const ok = await waitForFile(dstPath, 1500)
       if (ok) {
-        onProgress?.({ received: lastBytes, total: lastTotal, percent: 1 })
+        emit({ frac: 1, received: total, total, finishedHint: true })
         return
       }
-      if (completionSince && Date.now() - completionSince > 6000) {
-        await downloadWithFetchFallback(url, dstPath, onProgress)
-        onProgress?.({ received: lastBytes, total: lastTotal, percent: 1 })
+      if (completionSince && now - completionSince > 6000) {
+        await downloadWithFetchFallback(url, dstPath, (p) => {
+          emit({
+            frac: p.percent,
+            received: p.received,
+            total: p.total,
+            speedBps: p.speedBps,
+            finishedHint: p.percent === 1,
+          })
+        })
+        emit({ frac: 1, received: total, total, finishedHint: true })
         return
       }
     } else {
       completionSince = null
     }
 
+    // stall 超时：重试
     if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
       cancelTask(task)
       if (attempt < MAX_RETRY) {
         onState?.({ type: "retrying", attempt: attempt + 2, maxAttempts: MAX_RETRY + 1 })
         await removeFileLoose(dstPath)
-        return downloadWithProgressInternal(url, dstPath, onProgress, onState, attempt + 1)
+        return downloadWithProgressInternal(url, dstPath, emit, onState, attempt + 1)
       }
       throw new Error("下载超时：进度长时间无变化")
     }
 
+    // 总耗时超限
     if (Date.now() - startedAt > HARD_TIMEOUT_MS) {
       cancelTask(task)
       throw new Error("下载超时：耗时过长")
     }
 
+    // 无信号兜底：若文件已出现也可退出
     if (Date.now() - lastAnySignalAt > 12000) {
       const ok = await waitForFile(dstPath, 2000)
       if (ok) {
-        onProgress?.({ received: lastBytes, total: lastTotal, percent: lastPercent ?? 1 })
+        emit({ frac: 1, received: total, total, finishedHint: true })
         return
       }
       lastAnySignalAt = Date.now()
     }
 
-    await sleep(500)
+    await sleep(POLL_MS)
   }
 }
