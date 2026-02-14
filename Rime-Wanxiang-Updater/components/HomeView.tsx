@@ -153,6 +153,9 @@ export function HomeView() {
   const [progressPct, setProgressPct] = useState("0.00%")
   const [busy, setBusy] = useState(false)
 
+  // ✅ 只在“真正下载”时显示进度
+  const [showProgress, setShowProgress] = useState(false)
+
   function resetRemote() {
     setRemoteSchemeVer("请检查更新")
     setRemoteDictMark("请检查更新")
@@ -308,7 +311,6 @@ export function HomeView() {
         received: p?.received,
         total: p?.total,
         speedBps: p?.speedBps,
-        _typeof_percent: typeof p?.percent,
       })
     } catch {}
 
@@ -316,8 +318,11 @@ export function HomeView() {
     setProgressPct(pctFromFraction(f))
   }
 
+  // ===== 操作 =====
+
   async function onCheckUpdate() {
     setBusy(true)
+    setShowProgress(false) // ✅ 检查更新不显示进度
     setStage("检查更新中…")
     setProgressPct("0.00%")
     setRemoteSchemeVer("检查更新中...")
@@ -346,6 +351,7 @@ export function HomeView() {
 
   async function onAutoUpdate() {
     setBusy(true)
+    setShowProgress(true) // ✅ 会下载
     setStage("自动更新中…")
     setProgressPct("0.00%")
     try {
@@ -355,6 +361,8 @@ export function HomeView() {
       const key = checkKey(current)
       let pre = lastCheck
       if (!pre || lastCheckKey !== key) {
+        // 检查阶段也不显示进度（避免误导）
+        setShowProgress(false)
         setStage("自动更新：检查更新中…")
         setRemoteSchemeVer("检查更新中...")
         setRemoteDictMark("检查更新中...")
@@ -367,6 +375,8 @@ export function HomeView() {
         setNotes(pre.scheme?.body ?? "")
         setLastCheck(pre)
         setLastCheckKey(key)
+        // 进入下载阶段再打开进度显示
+        setShowProgress(true)
       }
 
       await autoUpdateAll(
@@ -384,11 +394,13 @@ export function HomeView() {
       setStage(`自动更新失败：${String(e?.message ?? e)}`)
     } finally {
       setBusy(false)
+      setShowProgress(false)
     }
   }
 
   async function onUpdateScheme() {
     setBusy(true)
+    setShowProgress(true) // ✅ 会下载
     setStage("更新方案中…")
     setProgressPct("0.00%")
     try {
@@ -404,11 +416,13 @@ export function HomeView() {
       setStage(`更新方案失败：${String(e?.message ?? e)}`)
     } finally {
       setBusy(false)
+      setShowProgress(false)
     }
   }
 
   async function onUpdateDict() {
     setBusy(true)
+    setShowProgress(true) // ✅ 会下载
     setStage("更新词库中…")
     setProgressPct("0.00%")
     try {
@@ -424,11 +438,13 @@ export function HomeView() {
       setStage(`更新词库失败：${String(e?.message ?? e)}`)
     } finally {
       setBusy(false)
+      setShowProgress(false)
     }
   }
 
   async function onUpdateModel() {
     setBusy(true)
+    setShowProgress(true) // ✅ 会下载
     setStage("更新模型中…")
     setProgressPct("0.00%")
     try {
@@ -444,11 +460,13 @@ export function HomeView() {
       setStage(`更新模型失败：${String(e?.message ?? e)}`)
     } finally {
       setBusy(false)
+      setShowProgress(false)
     }
   }
 
   async function onDeploy() {
     setBusy(true)
+    setShowProgress(false) // ✅ 部署不显示下载进度
     setStage("部署中…")
     setProgressPct("0.00%")
     try {
@@ -516,7 +534,8 @@ export function HomeView() {
             {stage.includes("UpdateCache") && stage.includes("权限") ? " 请在设置中重新选择Hamster路径" : ""}
           </Text>
 
-          {busy ? <Text>下载进度：{progressPct}</Text> : null}
+          {/* ✅ 只有下载更新时才显示 */}
+          {busy && showProgress ? <Text>下载进度：{progressPct}</Text> : null}
         </Section>
       </List>
     </NavigationStack>
