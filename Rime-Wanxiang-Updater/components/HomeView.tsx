@@ -9,6 +9,7 @@ import {
   Text,
   HStack,
   ScrollView,
+  ProgressView,
   useEffect,
   useState,
   Markdown,
@@ -151,6 +152,7 @@ export function HomeView() {
   // 状态
   const [stage, setStage] = useState("就绪")
   const [progressPct, setProgressPct] = useState("0.00%")
+  const [progressValue, setProgressValue] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
 
   // ✅ 只在“真正下载”时显示进度
@@ -314,8 +316,24 @@ export function HomeView() {
       })
     } catch {}
 
+    const toNum = (v: any): number | undefined => {
+      if (typeof v === "number" && Number.isFinite(v)) return v
+      if (typeof v === "string") {
+        const n = Number(v)
+        if (Number.isFinite(n)) return n
+      }
+      return undefined
+    }
+    const received = toNum(p?.received ?? p?.completedUnitCount ?? p?.progress?.completedUnitCount) ?? 0
     const f = readFraction(p?.percent ?? p?.fractionCompleted ?? p?.progress?.fractionCompleted)
-    setProgressPct(pctFromFraction(f))
+    if (received > 0 || (typeof f === "number" && f > 0)) {
+      setShowProgress(true)
+    }
+    if (typeof f === "number") {
+      const v = clamp01(f)
+      setProgressValue(v)
+      setProgressPct(pctFromFraction(v))
+    }
   }
 
   // ===== 操作 =====
@@ -325,6 +343,7 @@ export function HomeView() {
     setShowProgress(false) // ✅ 检查更新不显示进度
     setStage("检查更新中…")
     setProgressPct("0.00%")
+    setProgressValue(undefined)
     setRemoteSchemeVer("检查更新中...")
     setRemoteDictMark("检查更新中...")
     setRemoteModelMark("检查更新中...")
@@ -351,9 +370,10 @@ export function HomeView() {
 
   async function onAutoUpdate() {
     setBusy(true)
-    setShowProgress(true) // ✅ 会下载
+    setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("自动更新中…")
     setProgressPct("0.00%")
+    setProgressValue(undefined)
     try {
       const current = loadConfig()
       await refreshLocal(current)
@@ -375,8 +395,6 @@ export function HomeView() {
         setNotes(pre.scheme?.body ?? "")
         setLastCheck(pre)
         setLastCheckKey(key)
-        // 进入下载阶段再打开进度显示
-        setShowProgress(true)
       }
 
       await autoUpdateAll(
@@ -395,14 +413,16 @@ export function HomeView() {
     } finally {
       setBusy(false)
       setShowProgress(false)
+      setProgressValue(undefined)
     }
   }
 
   async function onUpdateScheme() {
     setBusy(true)
-    setShowProgress(true) // ✅ 会下载
+    setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("更新方案中…")
     setProgressPct("0.00%")
+    setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateScheme(current, {
@@ -417,14 +437,16 @@ export function HomeView() {
     } finally {
       setBusy(false)
       setShowProgress(false)
+      setProgressValue(undefined)
     }
   }
 
   async function onUpdateDict() {
     setBusy(true)
-    setShowProgress(true) // ✅ 会下载
+    setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("更新词库中…")
     setProgressPct("0.00%")
+    setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateDict(current, {
@@ -439,14 +461,16 @@ export function HomeView() {
     } finally {
       setBusy(false)
       setShowProgress(false)
+      setProgressValue(undefined)
     }
   }
 
   async function onUpdateModel() {
     setBusy(true)
-    setShowProgress(true) // ✅ 会下载
+    setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("更新模型中…")
     setProgressPct("0.00%")
+    setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateModel(current, {
@@ -461,6 +485,7 @@ export function HomeView() {
     } finally {
       setBusy(false)
       setShowProgress(false)
+      setProgressValue(undefined)
     }
   }
 
@@ -469,6 +494,7 @@ export function HomeView() {
     setShowProgress(false) // ✅ 部署不显示下载进度
     setStage("部署中…")
     setProgressPct("0.00%")
+    setProgressValue(undefined)
     try {
       const current = loadConfig()
       await deployInputMethod(current, setStage)
@@ -534,8 +560,16 @@ export function HomeView() {
             {stage.includes("UpdateCache") && stage.includes("权限") ? " 请在设置中重新选择Hamster路径" : ""}
           </Text>
 
-          {/* ✅ 只有下载更新时才显示 */}
-          {busy && showProgress ? <Text>下载进度：{progressPct}</Text> : null}
+          {busy && showProgress ? (
+            <HStack alignment="center" spacing={8}>
+              {typeof progressValue === "number" ? (
+                <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+              ) : (
+                <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+              )}
+              <Text>{progressPct}</Text>
+            </HStack>
+          ) : null}
         </Section>
       </List>
     </NavigationStack>

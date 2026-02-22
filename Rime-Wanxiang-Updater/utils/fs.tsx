@@ -5,6 +5,7 @@ import { Runtime } from "./runtime"
 export type CopyOptions = {
   excludePatterns: string[]
   overwritePolicy: "overwrite" | "keepExisting"
+  onCopiedFile?: (dstPath: string, relativePath: string) => void
 }
 
 function fmOrThrow() {
@@ -165,6 +166,9 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
       }
 
       await copy(src, dst)
+      try {
+        opts.onCopiedFile?.(dst, rel)
+      } catch {}
     }
   }
 
@@ -174,7 +178,11 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
 export async function unzipToDirWithOverwrite(
   zipPath: string,
   destDir: string,
-  opts?: { excludePatterns?: string[]; flattenSingleDir?: boolean }
+  opts?: {
+    excludePatterns?: string[]
+    flattenSingleDir?: boolean
+    onCopiedFile?: (dstPath: string, relativePath: string) => void
+  }
 ) {
   const fm = fmOrThrow()
   if (typeof fm.unzip !== "function") throw new Error("FileManager.unzip 不可用")
@@ -212,11 +220,15 @@ export async function unzipToDirWithOverwrite(
           try { await remove(dst) } catch {}
         }
         await copy(src, dst)
+        try {
+          opts?.onCopiedFile?.(dst, name)
+        } catch {}
       }
       const srcRoot = Path.join(tmpDir, dirs[0])
       await copyDirWithPolicy(srcRoot, destDir, {
         excludePatterns: opts?.excludePatterns ?? [],
         overwritePolicy: "overwrite",
+        onCopiedFile: opts?.onCopiedFile,
       })
     } else {
       let srcRoot = tmpDir
@@ -227,6 +239,7 @@ export async function unzipToDirWithOverwrite(
       await copyDirWithPolicy(srcRoot, destDir, {
         excludePatterns: opts?.excludePatterns ?? [],
         overwritePolicy: "overwrite",
+        onCopiedFile: opts?.onCopiedFile,
       })
     }
   } finally {
@@ -258,7 +271,11 @@ async function hasExcludedMatch(dir: string, patterns: RegExp[]): Promise<boolea
 
 export async function mergeSubdirsByName(
   parentDir: string,
-  opts?: { excludePatterns?: string[]; namePattern?: RegExp }
+  opts?: {
+    excludePatterns?: string[]
+    namePattern?: RegExp
+    onCopiedFile?: (dstPath: string, relativePath: string) => void
+  }
 ): Promise<number> {
   if (!(await exists(parentDir))) return 0
   const children = await list(parentDir)
@@ -276,6 +293,7 @@ export async function mergeSubdirsByName(
     await copyDirWithPolicy(full, parentDir, {
       excludePatterns: opts?.excludePatterns ?? [],
       overwritePolicy: "overwrite",
+      onCopiedFile: opts?.onCopiedFile,
     })
 
     const keepDir = patterns.length ? await hasExcludedMatch(full, patterns) : false

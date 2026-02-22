@@ -8,6 +8,7 @@ import { deployHamster } from "./deploy"
 import { detectRimeDir } from "./hamster"
 import { checkUpdate as checkSchemeUpdate, doUpdate as doSchemeUpdate } from "./updater"
 import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
+import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
 
 declare const fetch: any
 
@@ -426,11 +427,24 @@ export async function updateDict(
   const exclude = getExcludePatterns(cfg)
   const dictDir = Path.join(installRoot, "dicts")
   await ensureDir(dictDir)
-  await unzipToDirWithOverwrite(zipPath, dictDir, { excludePatterns: exclude, flattenSingleDir: true })
+  await removeExtractedFiles({
+    installRoot,
+    kind: "dict",
+    compareRoot: dictDir,
+    excludePatterns: exclude,
+  })
+  const copied = new Set<string>()
+  await unzipToDirWithOverwrite(zipPath, dictDir, {
+    excludePatterns: exclude,
+    flattenSingleDir: true,
+    onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+  })
   await mergeSubdirsByName(dictDir, {
     excludePatterns: exclude,
     namePattern: /dict/i,
+    onCopiedFile: (dstPath) => copied.add(String(dstPath)),
   })
+  setExtractedFiles(installRoot, "dict", Array.from(copied))
 
   await setDictMeta({
     installRoot,

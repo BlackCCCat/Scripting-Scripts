@@ -7,6 +7,7 @@ import { fetchLatestSchemeAsset } from "./releases"
 import { downloadWithProgress } from "./downloader"
 import { ensureDir, removeDirSafe, unzipToDirWithOverwrite } from "./fs"
 import { deployHamster } from "./deploy"
+import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
 
 function FM(): any {
   return (globalThis as any).FileManager
@@ -113,7 +114,18 @@ export async function doUpdate(
 
   params.onStage?.("解压中...")
   const exclude = getExcludePatterns(cfg)
-  await unzipToDirWithOverwrite(zipPath, installDir, { excludePatterns: exclude })
+  await removeExtractedFiles({
+    installRoot: installDir,
+    kind: "scheme",
+    compareRoot: installDir,
+    excludePatterns: exclude,
+  })
+  const copied = new Set<string>()
+  await unzipToDirWithOverwrite(zipPath, installDir, {
+    excludePatterns: exclude,
+    onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+  })
+  setExtractedFiles(installDir, "scheme", Array.from(copied))
 
   if (params.autoDeploy) {
     // 这里保留你原本的逻辑：部署前删 build
