@@ -423,16 +423,20 @@ export async function updateDict(
     }
   })
 
-  params.onStage?.("解压到 dicts 目录中…")
   const exclude = getExcludePatterns(cfg)
   const dictDir = Path.join(installRoot, "dicts")
   await ensureDir(dictDir)
-  await removeExtractedFiles({
+  params.onStage?.("清理旧文件中…")
+  const removed = await removeExtractedFiles({
     installRoot,
     kind: "dict",
     compareRoot: dictDir,
     excludePatterns: exclude,
   })
+  if (removed > 0) {
+    params.onStage?.(`已清理旧文件：${removed} 个`)
+  }
+  params.onStage?.("解压到 dicts 目录中…")
   const copied = new Set<string>()
   await unzipToDirWithOverwrite(zipPath, dictDir, {
     excludePatterns: exclude,

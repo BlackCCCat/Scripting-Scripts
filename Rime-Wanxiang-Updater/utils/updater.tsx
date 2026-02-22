@@ -112,14 +112,18 @@ export async function doUpdate(
     }
   })
 
-  params.onStage?.("解压中...")
   const exclude = getExcludePatterns(cfg)
-  await removeExtractedFiles({
+  params.onStage?.("清理旧文件中…")
+  const removed = await removeExtractedFiles({
     installRoot: installDir,
     kind: "scheme",
     compareRoot: installDir,
     excludePatterns: exclude,
   })
+  if (removed > 0) {
+    params.onStage?.(`已清理旧文件：${removed} 个`)
+  }
+  params.onStage?.("解压中...")
   const copied = new Set<string>()
   await unzipToDirWithOverwrite(zipPath, installDir, {
     excludePatterns: exclude,
