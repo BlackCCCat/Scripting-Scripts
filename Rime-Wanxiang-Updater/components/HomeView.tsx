@@ -6,6 +6,7 @@ import {
   NavigationStack,
   Script,
   Section,
+  Divider,
   Spacer,
   Text,
   HStack,
@@ -98,7 +99,7 @@ function normalizeMetaScheme(
   }
 }
 
-function CenterRowButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
+function GridButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
   const haptic = () => {
     try {
       ;(globalThis as any).HapticFeedback?.mediumImpact?.()
@@ -111,15 +112,19 @@ function CenterRowButton(props: { title: string; disabled?: boolean; onPress: ()
         props.onPress()
       }}
       disabled={props.disabled}
+      buttonStyle="plain"
+      tint={props.disabled ? "secondaryLabel" : "systemBlue"}
+      frame={{ maxWidth: "infinity", minHeight: 60 }}
     >
-      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        <Text opacity={0} frame={{ width: 1 }}>
-          .
-        </Text>
-        <Spacer />
-        <Text font="headline">{props.title}</Text>
-        <Spacer />
-      </HStack>
+      <Text
+        font="headline"
+        frame={{ maxWidth: "infinity" }}
+        multilineTextAlignment="center"
+        foregroundStyle={props.disabled ? "secondaryLabel" : "systemBlue"}
+        padding={{ top: 18, bottom: 18 }}
+      >
+        {props.title}
+      </Text>
     </Button>
   )
 }
@@ -643,12 +648,37 @@ export function HomeView() {
         </Section>
 
         <Section header={<Text>操作</Text>}>
-          <CenterRowButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
-          <CenterRowButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
-          <CenterRowButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
-          <CenterRowButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
-          <CenterRowButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
-          <CenterRowButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
+          <VStack spacing={0}>
+            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+              </VStack>
+              <Divider frame={{ height: 48 }} />
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
+              </VStack>
+            </HStack>
+            <Divider />
+            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
+              </VStack>
+              <Divider frame={{ height: 48 }} />
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+              </VStack>
+            </HStack>
+            <Divider />
+            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
+              </VStack>
+              <Divider frame={{ height: 48 }} />
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
+              </VStack>
+            </HStack>
+          </VStack>
         </Section>
 
         <Section header={<Text>状态</Text>}>
