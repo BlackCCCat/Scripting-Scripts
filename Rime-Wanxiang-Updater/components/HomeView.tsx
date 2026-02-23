@@ -4,10 +4,12 @@ import {
   List,
   Navigation,
   NavigationStack,
+  Script,
   Section,
   Spacer,
   Text,
   HStack,
+  VStack,
   ScrollView,
   ProgressView,
   useEffect,
@@ -19,7 +21,7 @@ import {
 import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey } from "../utils/config"
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
-import { detectRimeDir } from "../utils/hamster"
+import { detectRimeDir, verifyInstallPathAccess } from "../utils/hamster"
 import {
   checkAllUpdates,
   updateScheme,
@@ -132,6 +134,14 @@ function RowKV(props: { k: string; v: string }) {
   )
 }
 
+type AlertNode = any
+type AlertState = {
+  title: string
+  isPresented: boolean
+  message: AlertNode
+  actions: AlertNode
+}
+
 export function HomeView() {
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
 
@@ -154,6 +164,13 @@ export function HomeView() {
   const [progressPct, setProgressPct] = useState("0.00%")
   const [progressValue, setProgressValue] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [pathUsable, setPathUsable] = useState(false)
+  const [alert, setAlert] = useState<AlertState>({
+    title: "",
+    isPresented: false,
+    message: <Text>{" "}</Text>,
+    actions: <Text>{" "}</Text>,
+  })
 
   // ✅ 只在“真正下载”时显示进度
   const [showProgress, setShowProgress] = useState(false)
@@ -169,6 +186,49 @@ export function HomeView() {
 
   function checkKey(c: AppConfig) {
     return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.hamsterRootPath, c.hamsterBookmarkName].join("|")
+  }
+
+  function closeAlert() {
+    setAlert((a) => ({ ...a, isPresented: false }))
+  }
+
+  async function guardPathAccess(showPopup: boolean): Promise<boolean> {
+    const current = loadConfig()
+    const r = await verifyInstallPathAccess(current)
+    if (r.ok) {
+      setPathUsable(true)
+      return true
+    }
+    setPathUsable(false)
+    setStage("路径不可用，请在设置中添加或重新添加书签文件夹。")
+    if (showPopup) {
+      const msg = r.reason ? `${r.reason}\n请在设置中添加或重新添加书签文件夹。` : "请在设置中添加或重新添加书签文件夹。"
+      setAlert({
+        title: "路径不可用",
+        isPresented: true,
+        message: <Text>{msg}</Text>,
+        actions: (
+          <HStack>
+            <Button
+              title="取消"
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+                closeAlert()
+              }}
+            />
+            <Button
+              title="确认"
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+                closeAlert()
+                Script.exit()
+              }}
+            />
+          </HStack>
+        ),
+      })
+    }
+    return false
   }
 
   async function refreshLocal(current: AppConfig) {
@@ -273,13 +333,25 @@ export function HomeView() {
   useEffect(() => {
     const current = loadConfig()
     setCfg(current)
-    void refreshLocal(current)
+    void (async () => {
+      const ok = await guardPathAccess(true)
+      if (ok) await refreshLocal(current)
+      else {
+        setLocalSchemeVersion("暂无法获取")
+        setLocalDictMark("暂无法获取")
+        setLocalModelMark("暂无法获取")
+      }
+    })()
   }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
 
   useEffect(() => {
     const current = loadConfig()
     if (current.autoCheckOnLaunch) {
-      void onCheckUpdate()
+      void (async () => {
+        if (await guardPathAccess(false)) {
+          await onCheckUpdate()
+        }
+      })()
     }
   }, [])
 
@@ -293,7 +365,10 @@ export function HomeView() {
           onDone={(newCfg) => {
             const changed = checkKey(newCfg) !== checkKey(cfg)
             setCfg(newCfg)
-            void refreshLocal(newCfg)
+            void (async () => {
+              const ok = await guardPathAccess(false)
+              if (ok) await refreshLocal(newCfg)
+            })()
             if (changed) resetRemote()
           }}
         />
@@ -301,7 +376,13 @@ export function HomeView() {
     })
     const current = loadConfig()
     setCfg(current)
-    await refreshLocal(current)
+    const ok = await guardPathAccess(false)
+    if (ok) await refreshLocal(current)
+    else {
+      setLocalSchemeVersion("暂无法获取")
+      setLocalDictMark("暂无法获取")
+      setLocalModelMark("暂无法获取")
+    }
     if (checkKey(current) !== beforeKey) resetRemote()
   }
 
@@ -339,6 +420,7 @@ export function HomeView() {
   // ===== 操作 =====
 
   async function onCheckUpdate() {
+    if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 检查更新不显示进度
     setStage("检查更新中…")
@@ -369,6 +451,7 @@ export function HomeView() {
   }
 
   async function onAutoUpdate() {
+    if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("自动更新中…")
@@ -418,6 +501,7 @@ export function HomeView() {
   }
 
   async function onUpdateScheme() {
+    if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("更新方案中…")
@@ -442,6 +526,7 @@ export function HomeView() {
   }
 
   async function onUpdateDict() {
+    if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("更新词库中…")
@@ -466,6 +551,7 @@ export function HomeView() {
   }
 
   async function onUpdateModel() {
+    if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
     setStage("更新模型中…")
@@ -490,6 +576,7 @@ export function HomeView() {
   }
 
   async function onDeploy() {
+    if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 部署不显示下载进度
     setStage("部署中…")
@@ -507,6 +594,16 @@ export function HomeView() {
 
   return (
     <NavigationStack>
+      <VStack
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        alert={{
+          title: alert.title,
+          isPresented: alert.isPresented,
+          onChanged: (v) => setAlert((a) => ({ ...a, isPresented: v })),
+          message: alert.message,
+          actions: alert.actions,
+        }}
+      >
       <List
         navigationTitle={"方案更新"}
         navigationBarTitleDisplayMode={"inline"}
@@ -546,19 +643,16 @@ export function HomeView() {
         </Section>
 
         <Section header={<Text>操作</Text>}>
-          <CenterRowButton title="检查更新" onPress={onCheckUpdate} disabled={busy} />
-          <CenterRowButton title="自动更新" onPress={onAutoUpdate} disabled={busy} />
-          <CenterRowButton title="更新方案" onPress={onUpdateScheme} disabled={busy} />
-          <CenterRowButton title="更新词库" onPress={onUpdateDict} disabled={busy} />
-          <CenterRowButton title="更新模型" onPress={onUpdateModel} disabled={busy} />
-          <CenterRowButton title="部署输入法" onPress={onDeploy} disabled={busy} />
+          <CenterRowButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+          <CenterRowButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
+          <CenterRowButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+          <CenterRowButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
+          <CenterRowButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
+          <CenterRowButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
         </Section>
 
         <Section header={<Text>状态</Text>}>
-          <Text>
-            {stage}
-            {stage.includes("UpdateCache") && stage.includes("权限") ? " 请在设置中重新选择Hamster路径" : ""}
-          </Text>
+          <Text>{stage}</Text>
 
           {busy && showProgress ? (
             <HStack alignment="center" spacing={8}>
@@ -572,6 +666,7 @@ export function HomeView() {
           ) : null}
         </Section>
       </List>
+      </VStack>
     </NavigationStack>
   )
 }

@@ -5,7 +5,7 @@ import { getExcludePatterns } from "./config"
 import { downloadWithProgress } from "./downloader"
 import { ensureDir, removeDirSafe, unzipToDirWithOverwrite, mergeSubdirsByName } from "./fs"
 import { deployHamster } from "./deploy"
-import { detectRimeDir } from "./hamster"
+import { assertInstallPathAccess } from "./hamster"
 import { checkUpdate as checkSchemeUpdate, doUpdate as doSchemeUpdate } from "./updater"
 import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
 import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
@@ -44,6 +44,31 @@ export type AllUpdateResult = {
 
 function FM(): any {
   return (globalThis as any).FileManager
+}
+
+async function removePathLoose(path: string) {
+  const fm = FM()
+  try {
+    if (typeof fm?.removeSync === "function") {
+      fm.removeSync(path)
+      return
+    }
+    if (typeof fm?.remove === "function") {
+      await fm.remove(path)
+      return
+    }
+    if (typeof fm?.delete === "function") {
+      await fm.delete(path)
+      return
+    }
+  } catch {}
+}
+
+function tempDownloadPath(fileName: string): string {
+  const fm = FM()
+  const base = String(fm?.temporaryDirectory ?? "/tmp")
+  const safeName = String(fileName ?? "asset.bin").replace(/[\\/]/g, "_")
+  return Path.join(base, `wanxiang_tmp_${Date.now()}_${safeName}`)
 }
 
 function pickGithubSha256FromDigest(digest?: string): string | undefined {
@@ -237,30 +262,8 @@ function dictPattern(cfg: AppConfig): string {
   return `*${cfg.proSchemeKey}*dicts.zip`
 }
 
-async function requireInstallRoot(cfg: AppConfig): Promise<string> {
-  try {
-    const { rimeDir } = await detectRimeDir(cfg)
-    if (rimeDir) return rimeDir
-  } catch {}
-  if (cfg.hamsterBookmarkName) {
-    throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
-  }
-  if (cfg.hamsterRootPath) return cfg.hamsterRootPath
-  throw new Error("未选择安装目录（请到设置选择文件夹）")
-}
-
 async function resolveRimeDir(cfg: AppConfig): Promise<string> {
-  const root = await requireInstallRoot(cfg)
-  try {
-    const { rimeDir } = await detectRimeDir(cfg)
-    return rimeDir || root
-  } catch {
-    return root
-  }
-}
-
-function updateCacheDir(installRoot: string): string {
-  return Path.join(installRoot, "UpdateCache")
+  return await assertInstallPathAccess(cfg)
 }
 
 // ===== 统一检查：方案/词库/模型 =====
@@ -387,6 +390,7 @@ export async function updateDict(
 ) {
   const installRoot = await resolveRimeDir(cfg)
   await ensureDir(installRoot)
+  await removeDirSafe(Path.join(installRoot, "UpdateCache"))
 
   const dict =
     cfg.releaseSource === "github"
@@ -407,48 +411,46 @@ export async function updateDict(
 
   if (!dict?.url) throw new Error("未找到可用的词库资产")
 
-  const cacheDir = updateCacheDir(installRoot)
-  await ensureDir(cacheDir)
-  const zipPath = Path.join(cacheDir, dict.name.replace(/[\\/]/g, "_"))
-  const fm = FM()
+  const zipPath = tempDownloadPath(dict.name)
+  await removePathLoose(zipPath)
+
   try {
-    if (typeof fm?.removeSync === "function") fm.removeSync(zipPath)
-    else if (typeof fm?.remove === "function") await fm.remove(zipPath)
-  } catch {}
+    params.onStage?.("下载中…")
+    await downloadWithProgress(dict.url, zipPath, params.onProgress, (e) => {
+      if (e.type === "retrying") {
+        params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+      }
+    })
 
-  params.onStage?.("下载中…")
-  await downloadWithProgress(dict.url, zipPath, params.onProgress, (e) => {
-    if (e.type === "retrying") {
-      params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+    const exclude = getExcludePatterns(cfg)
+    const dictDir = Path.join(installRoot, "dicts")
+    await ensureDir(dictDir)
+    params.onStage?.("清理旧文件中…")
+    const removed = await removeExtractedFiles({
+      installRoot,
+      kind: "dict",
+      compareRoot: dictDir,
+      excludePatterns: exclude,
+    })
+    if (removed > 0) {
+      params.onStage?.(`已清理旧文件：${removed} 个`)
     }
-  })
-
-  const exclude = getExcludePatterns(cfg)
-  const dictDir = Path.join(installRoot, "dicts")
-  await ensureDir(dictDir)
-  params.onStage?.("清理旧文件中…")
-  const removed = await removeExtractedFiles({
-    installRoot,
-    kind: "dict",
-    compareRoot: dictDir,
-    excludePatterns: exclude,
-  })
-  if (removed > 0) {
-    params.onStage?.(`已清理旧文件：${removed} 个`)
+    params.onStage?.("解压到 dicts 目录中…")
+    const copied = new Set<string>()
+    await unzipToDirWithOverwrite(zipPath, dictDir, {
+      excludePatterns: exclude,
+      flattenSingleDir: true,
+      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+    })
+    await mergeSubdirsByName(dictDir, {
+      excludePatterns: exclude,
+      namePattern: /dict/i,
+      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+    })
+    setExtractedFiles(installRoot, "dict", Array.from(copied))
+  } finally {
+    await removePathLoose(zipPath)
   }
-  params.onStage?.("解压到 dicts 目录中…")
-  const copied = new Set<string>()
-  await unzipToDirWithOverwrite(zipPath, dictDir, {
-    excludePatterns: exclude,
-    flattenSingleDir: true,
-    onCopiedFile: (dstPath) => copied.add(String(dstPath)),
-  })
-  await mergeSubdirsByName(dictDir, {
-    excludePatterns: exclude,
-    namePattern: /dict/i,
-    onCopiedFile: (dstPath) => copied.add(String(dstPath)),
-  })
-  setExtractedFiles(installRoot, "dict", Array.from(copied))
 
   await setDictMeta({
     installRoot,
@@ -473,6 +475,7 @@ export async function updateModel(
 ) {
   const installRoot = await resolveRimeDir(cfg)
   await ensureDir(installRoot)
+  await removeDirSafe(Path.join(installRoot, "UpdateCache"))
 
   const model =
     cfg.releaseSource === "github"
@@ -497,87 +500,64 @@ export async function updateModel(
 
   // 模型不解压，下载后直接落盘到 installRoot 根目录
   const dstPath = Path.join(installRoot, MODEL_FILE)
-  const cacheDir = Path.join(installRoot, "UpdateCache")
-  const cachePath = Path.join(cacheDir, MODEL_FILE)
+  const tempPath = tempDownloadPath(MODEL_FILE)
 
   params.onStage?.("下载中…")
   const fm = FM()
-
-  // 先确保 UpdateCache 目录存在
+  await removePathLoose(tempPath)
   try {
-    if (typeof fm?.createDirectorySync === "function") {
-      fm.createDirectorySync(cacheDir, true)
-    } else if (typeof fm?.createDirectory === "function") {
-      await fm.createDirectory(cacheDir, true)
-    } else if (typeof fm?.mkdirSync === "function") {
-      fm.mkdirSync(cacheDir, true)
-    } else if (typeof fm?.mkdir === "function") {
-      await fm.mkdir(cacheDir, true)
-    }
-  } catch {}
-
-  // 清理旧 cache 文件
-  try {
-    if (typeof fm?.removeSync === "function") fm.removeSync(cachePath)
-    else if (typeof fm?.remove === "function") await fm.remove(cachePath)
-  } catch {}
-
-  // 下载到 cachePath
-  await downloadWithProgress(model.url, cachePath, params.onProgress, (e) => {
-    if (e.type === "retrying") {
-      params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
-    }
-  })
-
-  // ✅ 下载完成后先做完整性校验：大小不一致则认为失败，不覆盖 dstPath
-  params.onStage?.("校验中…")
-  {
-    const actualSize = await getFileSize(fm, cachePath)
-    if (expectedSize && expectedSize > 0) {
-      if (actualSize !== expectedSize) {
-        // 保留 cache 便于排查；如果你想失败就删，取消下一行注释
-        // try { if (typeof fm?.removeSync === "function") fm.removeSync(cachePath); else if (typeof fm?.remove === "function") await fm.remove(cachePath) } catch {}
-        throw new Error(`下载不完整：实际 ${actualSize} bytes，期望 ${expectedSize} bytes`)
+    await downloadWithProgress(model.url, tempPath, params.onProgress, (e) => {
+      if (e.type === "retrying") {
+        params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
       }
-    } else {
-      // 没有远端 size 时，至少保证不是空文件
-      if (actualSize <= 0) throw new Error("下载结果为空文件")
-    }
-  }
+    })
 
-  // 校验通过后：原子替换到 dstPath
-  params.onStage?.("写入中…")
-  try {
-    // 先删除旧目标文件（如果存在）
+    // ✅ 下载完成后先做完整性校验：大小不一致则认为失败，不覆盖 dstPath
+    params.onStage?.("校验中…")
+    {
+      const actualSize = await getFileSize(fm, tempPath)
+      if (expectedSize && expectedSize > 0) {
+        if (actualSize !== expectedSize) {
+          throw new Error(`下载不完整：实际 ${actualSize} bytes，期望 ${expectedSize} bytes`)
+        }
+      } else {
+        if (actualSize <= 0) throw new Error("下载结果为空文件")
+      }
+    }
+
+    // 校验通过后：原子替换到 dstPath
+    params.onStage?.("写入中…")
     try {
-      if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
-      else if (typeof fm?.remove === "function") await fm.remove(dstPath)
-    } catch {}
+      try {
+        if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
+        else if (typeof fm?.remove === "function") await fm.remove(dstPath)
+      } catch {}
 
-    // 优先用 move（同盘通常更快且更"原子"）
-    if (typeof fm?.moveSync === "function") {
-      fm.moveSync(cachePath, dstPath)
-    } else if (typeof fm?.move === "function") {
-      await fm.move(cachePath, dstPath)
-    } else if (typeof fm?.renameSync === "function") {
-      fm.renameSync(cachePath, dstPath)
-    } else if (typeof fm?.rename === "function") {
-      await fm.rename(cachePath, dstPath)
-    } else if (typeof fm?.copySync === "function") {
-      // 没有 move/rename：退化为 copy + remove
-      fm.copySync(cachePath, dstPath)
-      if (typeof fm?.removeSync === "function") fm.removeSync(cachePath)
-      else if (typeof fm?.remove === "function") await fm.remove(cachePath)
-    } else if (typeof fm?.copy === "function") {
-      await fm.copy(cachePath, dstPath)
-      if (typeof fm?.removeSync === "function") fm.removeSync(cachePath)
-      else if (typeof fm?.remove === "function") await fm.remove(cachePath)
-    } else {
-      throw new Error("FileManager 不支持 move/rename/copy 操作")
+      if (typeof fm?.moveSync === "function") {
+        fm.moveSync(tempPath, dstPath)
+      } else if (typeof fm?.move === "function") {
+        await fm.move(tempPath, dstPath)
+      } else if (typeof fm?.renameSync === "function") {
+        fm.renameSync(tempPath, dstPath)
+      } else if (typeof fm?.rename === "function") {
+        await fm.rename(tempPath, dstPath)
+      } else if (typeof fm?.copySync === "function") {
+        fm.copySync(tempPath, dstPath)
+        if (typeof fm?.removeSync === "function") fm.removeSync(tempPath)
+        else if (typeof fm?.remove === "function") await fm.remove(tempPath)
+      } else if (typeof fm?.copy === "function") {
+        await fm.copy(tempPath, dstPath)
+        if (typeof fm?.removeSync === "function") fm.removeSync(tempPath)
+        else if (typeof fm?.remove === "function") await fm.remove(tempPath)
+      } else {
+        throw new Error("FileManager 不支持 move/rename/copy 操作")
+      }
+    } catch (err) {
+      params.onStage?.("写入失败")
+      throw err
     }
-  } catch (err) {
-    params.onStage?.("写入失败")
-    throw err
+  } finally {
+    await removePathLoose(tempPath)
   }
 
   await setModelMeta({

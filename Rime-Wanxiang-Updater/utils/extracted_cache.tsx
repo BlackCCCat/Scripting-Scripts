@@ -129,6 +129,15 @@ export function getExtractedFiles(installRoot: string, kind: TrackKind): string[
   return dedupeFiles(data[root]?.[kind]?.files ?? [])
 }
 
+export function clearExtractedFilesForRoot(installRoot: string) {
+  const root = normalizePath(installRoot)
+  if (!root) return
+  const data = loadStore()
+  if (!data[root]) return
+  delete data[root]
+  saveStore(data)
+}
+
 async function existsPath(fm: any, p: string): Promise<boolean> {
   const fn = fm?.exists ?? fm?.fileExists ?? fm?.existsSync
   if (typeof fn !== "function") return false

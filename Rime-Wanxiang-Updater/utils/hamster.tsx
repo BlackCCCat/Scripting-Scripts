@@ -76,3 +76,100 @@ export async function detectRimeDir(cfg: AppConfig): Promise<{ engine: "仓输�
 
   return { engine: "仓输入法", rimeDir: root }
 }
+
+async function pathExists(path: string): Promise<boolean | undefined> {
+  const fm = Runtime.FileManager
+  if (!fm) return undefined
+  if (typeof fm.exists === "function") return !!(await callMaybeAsync(fm.exists, fm, [path]))
+  if (typeof fm.fileExists === "function") return !!(await callMaybeAsync(fm.fileExists, fm, [path]))
+  if (typeof fm.existsSync === "function") return !!fm.existsSync(path)
+  return undefined
+}
+
+async function mkdir(path: string): Promise<boolean> {
+  const fm = Runtime.FileManager
+  if (!fm) return false
+  if (typeof fm.createDirectorySync === "function") {
+    try {
+      fm.createDirectorySync(path, true)
+      const ok = await pathExists(path)
+      if (ok !== false) return true
+    } catch {}
+  }
+  if (typeof fm.createDirectory === "function") {
+    await callMaybeAsync(fm.createDirectory, fm, [path, true])
+    const ok = await pathExists(path)
+    if (ok !== false) return true
+  }
+  if (typeof fm.mkdirSync === "function") {
+    try {
+      fm.mkdirSync(path, true)
+      const ok = await pathExists(path)
+      if (ok !== false) return true
+    } catch {}
+  }
+  if (typeof fm.mkdir === "function") {
+    await callMaybeAsync(fm.mkdir, fm, [path, true])
+    const ok = await pathExists(path)
+    if (ok !== false) return true
+  }
+  return false
+}
+
+async function removePath(path: string): Promise<boolean> {
+  const fm = Runtime.FileManager
+  if (!fm) return false
+  if (typeof fm.removeSync === "function") {
+    try {
+      fm.removeSync(path)
+      const ok = await pathExists(path)
+      if (ok !== true) return true
+    } catch {}
+  }
+  if (typeof fm.remove === "function") {
+    await callMaybeAsync(fm.remove, fm, [path])
+    const ok = await pathExists(path)
+    if (ok !== true) return true
+  }
+  if (typeof fm.delete === "function") {
+    await callMaybeAsync(fm.delete, fm, [path])
+    const ok = await pathExists(path)
+    if (ok !== true) return true
+  }
+  return false
+}
+
+export async function resolveInstallRoot(cfg: AppConfig): Promise<string> {
+  const { rimeDir } = await detectRimeDir(cfg)
+  return rimeDir || ""
+}
+
+export async function verifyInstallPathAccess(cfg: AppConfig): Promise<{ ok: boolean; installRoot: string; reason?: string }> {
+  const installRoot = await resolveInstallRoot(cfg)
+  if (!installRoot) {
+    return { ok: false, installRoot: "", reason: "未选择路径或书签不可用" }
+  }
+  const exists = await pathExists(installRoot)
+  if (exists === false) {
+    return { ok: false, installRoot, reason: "所选路径不存在或无读取权限" }
+  }
+
+  const marker = `${installRoot}/.wanxiang_perm_check_${Date.now()}`
+  const created = await mkdir(marker)
+  if (!created) {
+    return { ok: false, installRoot, reason: "无法写入所选路径（书签权限不足）" }
+  }
+  const removed = await removePath(marker)
+  if (!removed) {
+    return { ok: false, installRoot, reason: "无法删除测试目录（书签权限不足）" }
+  }
+  return { ok: true, installRoot }
+}
+
+export async function assertInstallPathAccess(cfg: AppConfig): Promise<string> {
+  const result = await verifyInstallPathAccess(cfg)
+  if (!result.ok) {
+    throw new Error("书签路径不可用，请在设置中添加或重新添加书签文件夹。")
+  }
+  return result.installRoot
+}

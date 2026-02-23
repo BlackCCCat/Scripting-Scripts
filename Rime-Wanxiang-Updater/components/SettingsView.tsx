@@ -15,7 +15,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  Path,
 } from "scripting"
 
 import { Runtime } from "../utils/runtime"
@@ -26,9 +25,9 @@ import {
   type ProSchemeKey,
   type InputMethod,
 } from "../utils/config"
-import { removeDirSafe } from "../utils/fs"
 import { detectRimeDir } from "../utils/hamster"
-import { loadMetaAsync } from "../utils/meta"
+import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
+import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 
 type AlertNode = any
 type AlertState = {
@@ -305,7 +304,8 @@ export function SettingsView(props: {
           const { rimeDir } = await detectRimeDir(fixed)
           const installRoot = rimeDir || fixed.hamsterRootPath
           if (installRoot) {
-            await removeDirSafe(Path.join(installRoot, "UpdateCache"))
+            clearMetaForRoot(installRoot)
+            clearExtractedFilesForRoot(installRoot)
           }
         } catch {}
       }

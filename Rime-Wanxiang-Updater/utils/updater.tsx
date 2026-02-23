@@ -2,7 +2,7 @@
 import { Path } from "scripting"
 import type { AppConfig } from "./config"
 import { getExcludePatterns } from "./config"
-import { detectRimeDir } from "./hamster"
+import { assertInstallPathAccess, detectRimeDir } from "./hamster"
 import { fetchLatestSchemeAsset } from "./releases"
 import { downloadWithProgress } from "./downloader"
 import { ensureDir, removeDirSafe, unzipToDirWithOverwrite } from "./fs"
@@ -11,19 +11,6 @@ import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
 
 function FM(): any {
   return (globalThis as any).FileManager
-}
-
-/** 兼容不同配置字段名：选定安装路径 */
-function getInstallRoot(cfg: any): string | undefined {
-  return (
-    cfg?.installPath ??
-    cfg?.installDir ??
-    cfg?.hamsterRootPath ??
-    cfg?.hamsterPath ??
-    cfg?.rootPath ??
-    cfg?.rimeRoot ??
-    cfg?.rimeDir
-  )
 }
 
 /**
@@ -46,17 +33,11 @@ async function fmRemove(path: string) {
   throw new Error("FileManager 缺少 remove/removeSync")
 }
 
-/**
- * 你要求的行为：
- * ✅ 不处理同名冲突
- * ✅ 解压前直接删除旧文件（这里用“删除整个安装目录”来保证不会有同名冲突）
- * ✅ 然后重新创建目录并解压
- *
- * 说明：由于你环境缺 listContents/list，无法逐个删除目录内文件，
- * 因此采用“删除目录本身再重建”的方式来实现“旧文件直接删除”。
- */
-function updateCacheDir(installRoot: string): string {
-  return Path.join(installRoot, "UpdateCache")
+function tempDownloadPath(fileName: string): string {
+  const fm = FM()
+  const base = String(fm?.temporaryDirectory ?? "/tmp")
+  const safeName = String(fileName ?? "asset.zip").replace(/[\\/]/g, "_")
+  return Path.join(base, `wanxiang_tmp_${Date.now()}_${safeName}`)
 }
 
 export type CheckResult = {
@@ -85,51 +66,50 @@ export async function doUpdate(
   }
 ) {
   params.onStage?.("解析目录...")
-  const { engine, rimeDir } = await detectRimeDir(cfg)
-  const installRoot = getInstallRoot(cfg)
-  if (!rimeDir && cfg.hamsterBookmarkName) {
-    throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
-  }
-  const installDir = rimeDir || installRoot
-  if (!installDir) throw new Error("未选择安装路径（请到设置里选择文件夹）")
+  const { engine } = await detectRimeDir(cfg)
+  const installDir = await assertInstallPathAccess(cfg)
 
   const latest = await fetchLatestSchemeAsset(cfg)
   if (!latest?.url) throw new Error("未找到可用的远端方案资产（asset）")
 
   await ensureDir(installDir)
-  const cacheDir = updateCacheDir(installDir)
-  await ensureDir(cacheDir)
-  // 下载 zip 到目标目录的 UpdateCache
-  const zipPath = Path.join(cacheDir, latest.name.replace(/[\\/]/g, "_"))
+  await removeDirSafe(Path.join(installDir, "UpdateCache"))
+  const zipPath = tempDownloadPath(latest.name)
   try {
     await fmRemove(zipPath)
   } catch {}
 
-  params.onStage?.("下载中...")
-  await downloadWithProgress(latest.url, zipPath, params.onProgress, (e) => {
-    if (e.type === "retrying") {
-      params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）...`)
-    }
-  })
+  try {
+    params.onStage?.("下载中...")
+    await downloadWithProgress(latest.url, zipPath, params.onProgress, (e) => {
+      if (e.type === "retrying") {
+        params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）...`)
+      }
+    })
 
-  const exclude = getExcludePatterns(cfg)
-  params.onStage?.("清理旧文件中…")
-  const removed = await removeExtractedFiles({
-    installRoot: installDir,
-    kind: "scheme",
-    compareRoot: installDir,
-    excludePatterns: exclude,
-  })
-  if (removed > 0) {
-    params.onStage?.(`已清理旧文件：${removed} 个`)
+    const exclude = getExcludePatterns(cfg)
+    params.onStage?.("清理旧文件中…")
+    const removed = await removeExtractedFiles({
+      installRoot: installDir,
+      kind: "scheme",
+      compareRoot: installDir,
+      excludePatterns: exclude,
+    })
+    if (removed > 0) {
+      params.onStage?.(`已清理旧文件：${removed} 个`)
+    }
+    params.onStage?.("解压中...")
+    const copied = new Set<string>()
+    await unzipToDirWithOverwrite(zipPath, installDir, {
+      excludePatterns: exclude,
+      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+    })
+    setExtractedFiles(installDir, "scheme", Array.from(copied))
+  } finally {
+    try {
+      await fmRemove(zipPath)
+    } catch {}
   }
-  params.onStage?.("解压中...")
-  const copied = new Set<string>()
-  await unzipToDirWithOverwrite(zipPath, installDir, {
-    excludePatterns: exclude,
-    onCopiedFile: (dstPath) => copied.add(String(dstPath)),
-  })
-  setExtractedFiles(installDir, "scheme", Array.from(copied))
 
   if (params.autoDeploy) {
     // 这里保留你原本的逻辑：部署前删 build

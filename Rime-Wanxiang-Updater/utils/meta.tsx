@@ -1,12 +1,9 @@
 // File: utils/meta.tsx
-import { Path } from "scripting"
 import type { ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
-import { ensureDir } from "./fs"
+import { Runtime } from "./runtime"
 
 export type SchemeMeta = {
-  /** 用于对比的远端标识：GitHub 用 sha256/tag/name；CNB 用 id */
   remoteIdOrSha: string
-  /** HomeView 展示用 */
   remoteTagOrName: string
   schemeEdition?: SchemeEdition
   proSchemeKey?: ProSchemeKey
@@ -47,149 +44,73 @@ type RecordData = {
 
 type RecordKind = "scheme" | "dict" | "model"
 
-function FM(): any {
-  return (globalThis as any).FileManager
+type RootMetaRecords = {
+  scheme?: RecordData
+  dict?: RecordData
+  model?: RecordData
 }
 
-async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
+type MetaStoreData = Record<string, RootMetaRecords>
+
+const STORAGE_KEY = "wanxiang_meta_store_v1"
+const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
+function normalizeRoot(root: string): string {
+  return String(root ?? "").trim().replace(/\/+$/, "")
+}
+
+function storage(): any {
+  return (globalThis as any).Storage ?? Runtime.Storage
+}
+
+function loadStore(): MetaStoreData {
+  const st = storage()
   try {
-    const r = fn.apply(thisArg, args)
-    if (r && typeof r.then === "function") return await r
-    return r
+    const raw = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(String(raw))
+    return obj && typeof obj === "object" ? (obj as MetaStoreData) : {}
   } catch {
-    return undefined
+    return {}
   }
 }
 
-function decodeToString(v: any): string | undefined {
-  if (typeof v === "string") return v
-  try {
-    if (v && typeof v.toRawString === "function") {
-      try {
-        return v.toRawString("utf-8")
-      } catch {
-        return v.toRawString()
-      }
-    }
-  } catch {}
-  try {
-    if (v && typeof v.toString === "function") return v.toString()
-  } catch {}
-  try {
-    const TD: any = (globalThis as any).TextDecoder
-    if (!TD) return undefined
-    if (v instanceof Uint8Array) return new TD("utf-8").decode(v)
-    if (v instanceof ArrayBuffer) return new TD("utf-8").decode(new Uint8Array(v))
-    if (v?.buffer instanceof ArrayBuffer) return new TD("utf-8").decode(new Uint8Array(v.buffer))
-  } catch {}
-  return undefined
+function saveStore(data: MetaStoreData) {
+  const st = storage()
+  const raw = JSON.stringify(data ?? {})
+  if (st?.set) st.set(STORAGE_KEY, raw)
+  else if (st?.setString) st.setString(STORAGE_KEY, raw)
 }
 
-async function readText(path: string): Promise<string | undefined> {
-  const Data = (globalThis as any).Data
-  const FileEntity = (globalThis as any).FileEntity
-
-  if (Data?.fromFile) {
-    try {
-      const data = Data.fromFile(path)
-      const s =
-        data?.toRawString?.("utf-8") ??
-        data?.toDecodedString?.("utf8")
-      if (s) return s
-    } catch {}
-  }
-
-  if (FileEntity?.openForReading) {
-    let file: any
-    try {
-      file = FileEntity.openForReading(path)
-      const chunks: any[] = []
-      const chunkSize = 64 * 1024
-      for (;;) {
-        const part = file.read(chunkSize)
-        if (!part || !part.size) break
-        chunks.push(part)
-        if (part.size < chunkSize) break
-      }
-      if (chunks.length === 1) {
-        const s =
-          chunks[0]?.toRawString?.("utf-8") ??
-          chunks[0]?.toDecodedString?.("utf8")
-        if (s) return s
-      }
-      if (Data?.combine && chunks.length) {
-        const all = Data.combine(chunks)
-        const s =
-          all?.toRawString?.("utf-8") ??
-          all?.toDecodedString?.("utf8")
-        if (s) return s
-      }
-    } catch {
-      // ignore
-    } finally {
-      try { file?.close() } catch {}
-    }
-  }
-
-  const fm = FM()
-  if (!fm) return undefined
-  const fn = fm.readString ?? fm.readText ?? fm.readFile ?? fm.read
-  if (typeof fn !== "function") return undefined
-  const v = await callMaybeAsync(fn, fm, [path])
-  return decodeToString(v)
+function readRecord(installRoot: string, kind: RecordKind): RecordData | undefined {
+  const root = normalizeRoot(installRoot)
+  if (!root) return undefined
+  const data = loadStore()
+  return data[root]?.[kind]
 }
 
-async function writeText(path: string, text: string): Promise<void> {
-  const Data = (globalThis as any).Data
-  const FileEntity = (globalThis as any).FileEntity
-  if (Data?.fromRawString && FileEntity?.openNewForWriting) {
-    const data = Data.fromRawString(String(text), "utf-8")
-    const file = FileEntity.openNewForWriting(path)
-    if (!file?.write || !file?.close) throw new Error("FileEntity 不可用")
-    file.write(data)
-    file.close()
-    return
-  }
-
-  const fm = FM()
-  if (!fm) throw new Error("FileManager 不可用")
-  const fn = fm.writeString ?? fm.writeText ?? fm.writeFile ?? fm.write
-  if (typeof fn !== "function") throw new Error("FileManager 缺少写入方法")
-  await callMaybeAsync(fn, fm, [path, text])
+function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData) {
+  const root = normalizeRoot(installRoot)
+  if (!root) return
+  const data = loadStore()
+  const bucket = data[root] ?? {}
+  bucket[kind] = rec
+  data[root] = bucket
+  saveStore(data)
 }
 
-function updateCacheDir(installRoot: string): string {
-  return Path.join(installRoot, "UpdateCache")
-}
-
-function recordPath(installRoot: string, kind: RecordKind): string {
-  return Path.join(updateCacheDir(installRoot), `${kind}_record.json`)
-}
-
-async function readRecord(installRoot: string, kind: RecordKind): Promise<RecordData | undefined> {
-  if (!installRoot) return undefined
-  const txt = await readText(recordPath(installRoot, kind))
-  if (!txt) return undefined
-  try {
-    const obj = JSON.parse(String(txt))
-    return obj && typeof obj === "object" ? (obj as RecordData) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-async function writeRecord(installRoot: string, kind: RecordKind, data: RecordData) {
-  if (!installRoot) return
-  const dir = updateCacheDir(installRoot)
-  await ensureDir(dir)
-  await writeText(recordPath(installRoot, kind), JSON.stringify(data ?? {}))
+export function clearMetaForRoot(installRoot: string) {
+  const root = normalizeRoot(installRoot)
+  if (!root) return
+  const data = loadStore()
+  if (!data[root]) return
+  delete data[root]
+  saveStore(data)
 }
 
 function pickRemoteId(rec: RecordData, fallback?: string): string | undefined {
   return rec.sha256 || rec.cnb_id || fallback
 }
-
-const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
 
 function normalizeSchemeEdition(v?: string): SchemeEdition | undefined {
   const x = String(v ?? "").trim().toLowerCase()
@@ -230,12 +151,8 @@ function toSchemeMeta(rec?: RecordData): SchemeMeta | undefined {
     normalizeSchemeEdition(rec.scheme_type) ??
     inferred.schemeEdition
   const proSchemeKey =
-    (schemeEdition === "pro"
-      ? normalizeProSchemeKey(rec.pro_scheme_key) ?? inferred.proSchemeKey
-      : undefined)
-  const selectedScheme =
-    String(rec.selected_scheme ?? "").trim() ||
-    formatSelectedScheme(schemeEdition, proSchemeKey)
+    schemeEdition === "pro" ? normalizeProSchemeKey(rec.pro_scheme_key) ?? inferred.proSchemeKey : undefined
+  const selectedScheme = String(rec.selected_scheme ?? "").trim() || formatSelectedScheme(schemeEdition, proSchemeKey)
   return {
     remoteIdOrSha,
     remoteTagOrName,
@@ -273,28 +190,23 @@ function splitRemoteId(source: ReleaseSource | undefined, remoteIdOrSha?: string
   return { sha256: remoteIdOrSha, cnb_id: "" }
 }
 
-// 内存缓存
 let CACHE: MetaBundle = {}
 
-/**
- * 异步接口：从 UpdateCache 读取并刷新缓存
- */
 export async function loadMetaAsync(installRoot: string): Promise<MetaBundle> {
-  if (!installRoot) {
+  const root = normalizeRoot(installRoot)
+  if (!root) {
     CACHE = {}
     return CACHE
   }
-  const schemeRec = await readRecord(installRoot, "scheme")
-  const dictRec = await readRecord(installRoot, "dict")
-  const modelRec = await readRecord(installRoot, "model")
-
-  const bundle: MetaBundle = {
+  const schemeRec = readRecord(root, "scheme")
+  const dictRec = readRecord(root, "dict")
+  const modelRec = readRecord(root, "model")
+  CACHE = {
     scheme: toSchemeMeta(schemeRec),
     dict: toDictMeta(dictRec),
     model: toModelMeta(modelRec),
   }
-  CACHE = bundle
-  return bundle
+  return CACHE
 }
 
 export async function setSchemeMeta(rec: {
@@ -321,7 +233,7 @@ export async function setSchemeMeta(rec: {
     sha256: ids.sha256,
     cnb_id: ids.cnb_id,
   }
-  await writeRecord(rec.installRoot, "scheme", data)
+  writeRecord(rec.installRoot, "scheme", data)
   await loadMetaAsync(rec.installRoot)
 }
 
@@ -342,7 +254,7 @@ export async function setDictMeta(rec: {
     sha256: ids.sha256,
     cnb_id: ids.cnb_id,
   }
-  await writeRecord(rec.installRoot, "dict", data)
+  writeRecord(rec.installRoot, "dict", data)
   await loadMetaAsync(rec.installRoot)
 }
 
@@ -363,6 +275,6 @@ export async function setModelMeta(rec: {
     sha256: ids.sha256,
     cnb_id: ids.cnb_id,
   }
-  await writeRecord(rec.installRoot, "model", data)
+  writeRecord(rec.installRoot, "model", data)
   await loadMetaAsync(rec.installRoot)
 }
