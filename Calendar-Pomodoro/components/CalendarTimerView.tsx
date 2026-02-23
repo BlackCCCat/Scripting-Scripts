@@ -51,6 +51,7 @@ import {
   loadSession,
   saveSession,
   type TimerSession,
+  type TimerSessionSegment,
 } from "../utils/session";
 // 时间格式化工具
 import { formatDateTime, formatDuration } from "../utils/time";
@@ -76,6 +77,10 @@ export function CalendarTimerView() {
   const [accumulatedMs, setAccumulatedMs] = useState(0);
   // 计时显示用的累计毫秒
   const [elapsedMs, setElapsedMs] = useState(0);
+  // 已完成的有效计时分段（暂停会切分）
+  const [completedSegments, setCompletedSegments] = useState<
+    TimerSessionSegment[]
+  >([]);
   // 运行/暂停/保存状态
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -99,6 +104,7 @@ export function CalendarTimerView() {
   const accumulatedMsRef = useRef(0);
   const runningRef = useRef(false);
   const pausedRef = useRef(false);
+  const completedSegmentsRef = useRef<TimerSessionSegment[]>([]);
   const staleRefreshAtRef = useRef(0);
   const stoppingRef = useRef(false);
   const noteSaveTimerRef = useRef<number | null>(null);
@@ -139,6 +145,7 @@ export function CalendarTimerView() {
     accumulatedMsRef.current = accumulatedMs;
     runningRef.current = running;
     pausedRef.current = paused;
+    completedSegmentsRef.current = completedSegments;
   }, [
     activeTask,
     sessionStartAt,
@@ -146,6 +153,7 @@ export function CalendarTimerView() {
     accumulatedMs,
     running,
     paused,
+    completedSegments,
   ]);
 
   // 当前任务的计时模式
@@ -269,6 +277,16 @@ export function CalendarTimerView() {
     }
   }
 
+  function appendCompletedSegment(
+    base: TimerSessionSegment[],
+    startAtMs: number | undefined,
+    endAtMs: number,
+  ): TimerSessionSegment[] {
+    if (!startAtMs) return base;
+    if (endAtMs <= startAtMs) return base;
+    return [...base, { startAt: startAtMs, endAt: endAtMs }];
+  }
+
   async function persistSessionState(next: TimerSession | null) {
     try {
       if (!next) {
@@ -301,6 +319,7 @@ export function CalendarTimerView() {
       if (!session || (!session.running && !session.paused)) {
         await endActivities(activities, null);
         await clearSession();
+        setCompletedSegments([]);
         return;
       }
 
@@ -309,6 +328,7 @@ export function CalendarTimerView() {
       if (!task) {
         await clearSession();
         await endActivities(activities, null);
+        setCompletedSegments([]);
         return;
       }
 
@@ -326,6 +346,7 @@ export function CalendarTimerView() {
       setSessionStartAt(sessionStart);
       setAccumulatedMs(session.accumulatedMs);
       setElapsedMs(elapsed);
+      setCompletedSegments(session.segments ?? []);
       setRunning(session.running);
       setPaused(session.paused);
       setSegmentStartAt(session.running ? segmentStart : null);
@@ -727,6 +748,7 @@ export function CalendarTimerView() {
           segmentStartAt:
             running && segmentStartAt ? segmentStartAt.getTime() : undefined,
           accumulatedMs,
+          segments: completedSegmentsRef.current,
           running,
           paused,
           activityId,
@@ -791,6 +813,7 @@ export function CalendarTimerView() {
         sessionStartAt: sessionStartAt.getTime(),
         segmentStartAt: resumeAt.getTime(),
         accumulatedMs,
+        segments: completedSegments,
         running: true,
         paused: false,
         activityId: activityId ?? undefined,
@@ -814,6 +837,7 @@ export function CalendarTimerView() {
     setSegmentStartAt(start);
     setAccumulatedMs(0);
     setElapsedMs(0);
+    setCompletedSegments([]);
     setRunning(true);
     setPaused(false);
 
@@ -825,6 +849,7 @@ export function CalendarTimerView() {
       sessionStartAt: start.getTime(),
       segmentStartAt: start.getTime(),
       accumulatedMs: 0,
+      segments: [],
       running: true,
       paused: false,
       activityId: activityId ?? undefined,
@@ -835,9 +860,16 @@ export function CalendarTimerView() {
     // 暂停当前计时
     if (!running || !segmentStartAt) return;
     const now = new Date();
+    const nowMs = now.getTime();
+    const nextSegments = appendCompletedSegment(
+      completedSegments,
+      segmentStartAt.getTime(),
+      nowMs,
+    );
     const total = accumulatedMs + (now.getTime() - segmentStartAt.getTime());
     setAccumulatedMs(total);
     setElapsedMs(total);
+    setCompletedSegments(nextSegments);
     setSegmentStartAt(null);
     setRunning(false);
     setPaused(true);
@@ -850,6 +882,7 @@ export function CalendarTimerView() {
           sessionStartAt: sessionStartAt.getTime(),
           segmentStartAt: undefined,
           accumulatedMs: total,
+          segments: nextSegments,
           running: false,
           paused: true,
           activityId: activityRef.current?.activityId,
@@ -872,6 +905,7 @@ export function CalendarTimerView() {
     setSegmentStartAt(null);
     setAccumulatedMs(0);
     setElapsedMs(0);
+    setCompletedSegments([]);
     await clearNotifications();
     await endLiveActivity(activeTask, now, total);
     await persistSessionState(null);
@@ -885,11 +919,30 @@ export function CalendarTimerView() {
 
     stoppingRef.current = true;
     const now = new Date();
+    const nowMs = now.getTime();
     const segmentElapsed =
-      running && segmentStartAt ? now.getTime() - segmentStartAt.getTime() : 0;
-    let total = accumulatedMs + Math.max(0, segmentElapsed);
+      running && segmentStartAt ? nowMs - segmentStartAt.getTime() : 0;
+    const rawTotal = accumulatedMs + Math.max(0, segmentElapsed);
+    let total = rawTotal;
     if (isCountdown && countdownTotalMs > 0) {
       total = Math.min(total, countdownTotalMs);
+    }
+    const overflowMs = Math.max(0, rawTotal - total);
+    let finalSegments = completedSegments;
+    if (running && segmentStartAt) {
+      const segmentEndMs = nowMs - overflowMs;
+      finalSegments = appendCompletedSegment(
+        completedSegments,
+        segmentStartAt.getTime(),
+        segmentEndMs,
+      );
+    }
+    if (!finalSegments.length && total > 0) {
+      finalSegments = appendCompletedSegment(
+        [],
+        sessionStartAt.getTime(),
+        sessionStartAt.getTime() + total,
+      );
     }
     setElapsedMs(total);
     setRunning(false);
@@ -897,33 +950,48 @@ export function CalendarTimerView() {
     clearTimer();
     await clearNotifications();
 
-    const startTime = sessionStartAt;
-    const endTime = new Date(startTime.getTime() + total);
+    const overallStartAt = finalSegments[0]?.startAt ?? sessionStartAt.getTime();
+    const overallEndAt = finalSegments.length
+      ? finalSegments[finalSegments.length - 1]!.endAt
+      : sessionStartAt.getTime() + total;
 
-    // 组合笔记内容：用户笔记 + 时间总结
+    // 组合笔记内容：用户笔记 + 总结信息
     const trimmedNote = noteDraft.trim();
     const summaryLines = [
-      `开始：${formatDateTime(startTime)}`,
-      `结束：${formatDateTime(endTime)}`,
-      `时长：${formatDuration(total)}`,
+      `开始：${formatDateTime(new Date(overallStartAt))}`,
+      `结束：${formatDateTime(new Date(overallEndAt))}`,
+      `累计有效时长：${formatDuration(total)}`,
     ];
-
-    const notes = trimmedNote
-      ? `${trimmedNote}\n\n${summaryLines.join("\n")}`
-      : summaryLines.join("\n");
+    const summaryText = summaryLines.join("\n");
+    const notePrefix = trimmedNote ? `${trimmedNote}\n\n` : "";
 
     setSaving(true);
     try {
-      // 创建并保存日历事件
-      const event = new CalendarEvent();
-      event.title = activeTask.name;
-      event.calendar = activeCalendar;
-      event.startDate = startTime;
-      event.endDate = endTime;
-      event.notes = notes;
-      await event.save();
+      // 按分段写入日历事件（暂停会切分为多段）
+      let savedCount = 0;
+      for (let i = 0; i < finalSegments.length; i += 1) {
+        const segment = finalSegments[i];
+        if (!segment) continue;
+        const startDate = new Date(segment.startAt);
+        const endDate = new Date(segment.endAt);
+        const segmentDuration = Math.max(0, segment.endAt - segment.startAt);
+        if (segmentDuration <= 0) continue;
+
+        const event = new CalendarEvent();
+        event.title = activeTask.name;
+        event.calendar = activeCalendar;
+        event.startDate = startDate;
+        event.endDate = endDate;
+        event.notes = `${notePrefix}分段：${i + 1}/${finalSegments.length}\n开始：${formatDateTime(startDate)}\n结束：${formatDateTime(endDate)}\n时长：${formatDuration(segmentDuration)}\n\n${summaryText}`;
+        await event.save();
+        savedCount += 1;
+      }
       if (!options?.auto) {
-        await Dialog.alert({ message: "已保存到日历" });
+        const message =
+          savedCount > 0
+            ? `已保存到日历（共 ${savedCount} 段）`
+            : "有效计时时长为 0，未写入日历";
+        await Dialog.alert({ message });
       }
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) });
@@ -949,6 +1017,7 @@ export function CalendarTimerView() {
     setSegmentStartAt(null);
     setAccumulatedMs(0);
     setElapsedMs(0);
+    setCompletedSegments([]);
     stoppingRef.current = false;
   }
 
@@ -1019,6 +1088,7 @@ export function CalendarTimerView() {
       segmentStartAt:
         running && segmentStartAt ? segmentStartAt.getTime() : undefined,
       accumulatedMs,
+      segments: completedSegments,
       running,
       paused,
       activityId: activityId ?? undefined,

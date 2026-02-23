@@ -2,11 +2,18 @@ import { Path } from "scripting"
 import { BASE_DIR_NAME } from "../constants"
 
 // 计时会话持久化结构（用于恢复 UI 状态）
+export type TimerSessionSegment = {
+  startAt: number
+  endAt: number
+}
+
+// 计时会话持久化结构（用于恢复 UI 状态）
 export type TimerSession = {
   taskId: string
   sessionStartAt: number
   segmentStartAt?: number
   accumulatedMs: number
+  segments?: TimerSessionSegment[]
   running: boolean
   paused: boolean
   activityId?: string
@@ -81,6 +88,14 @@ export async function loadSession(): Promise<TimerSession | null> {
       sessionStartAt: Number(data.sessionStartAt) || 0,
       segmentStartAt: data.segmentStartAt ? Number(data.segmentStartAt) : undefined,
       accumulatedMs: Number(data.accumulatedMs) || 0,
+      segments: Array.isArray(data.segments)
+        ? data.segments
+            .map((item: any) => ({
+              startAt: Number(item?.startAt) || 0,
+              endAt: Number(item?.endAt) || 0,
+            }))
+            .filter((item: TimerSessionSegment) => item.startAt > 0 && item.endAt > item.startAt)
+        : [],
       running: Boolean(data.running),
       paused: Boolean(data.paused),
       activityId: data.activityId ? String(data.activityId) : undefined,
