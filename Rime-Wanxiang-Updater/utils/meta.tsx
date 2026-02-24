@@ -50,28 +50,74 @@ type RootMetaRecords = {
   model?: RecordData
 }
 
-type MetaStoreData = Record<string, RootMetaRecords>
+type MetaRecordsMap = Record<string, RootMetaRecords>
+type MetaAliasMap = Record<string, string>
+type MetaStoreData = {
+  records: MetaRecordsMap
+  aliases: MetaAliasMap
+}
 
 const STORAGE_KEY = "wanxiang_meta_store_v1"
 const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+const RIME_SUFFIXES = ["/RimeUserData/wanxiang", "/RIME/Rime", "/Rime"]
 
 function normalizeRoot(root: string): string {
   return String(root ?? "").trim().replace(/\/+$/, "")
+}
+
+function pathVariants(root: string): string[] {
+  const n = normalizeRoot(root)
+  if (!n) return []
+  const set = new Set<string>([n])
+  if (n.startsWith("/private/")) set.add(n.slice("/private".length))
+  else if (n.startsWith("/")) set.add(`/private${n}`)
+  return Array.from(set)
+}
+
+function relatedRoots(root: string): string[] {
+  const base = pathVariants(root)
+  const out = new Set<string>(base)
+  for (const p of base) {
+    for (const s of RIME_SUFFIXES) {
+      out.add(normalizeRoot(`${p}${s}`))
+      if (p.endsWith(s)) {
+        out.add(normalizeRoot(p.slice(0, -s.length)))
+      }
+    }
+  }
+  return Array.from(out).filter(Boolean)
 }
 
 function storage(): any {
   return (globalThis as any).Storage ?? Runtime.Storage
 }
 
+function pathKey(p: string): string {
+  return normalizeRoot(p)
+}
+
+function normalizeStore(raw: any): MetaStoreData {
+  if (raw && typeof raw === "object" && raw.records && typeof raw.records === "object") {
+    const records = raw.records && typeof raw.records === "object" ? (raw.records as MetaRecordsMap) : {}
+    const aliases = raw.aliases && typeof raw.aliases === "object" ? (raw.aliases as MetaAliasMap) : {}
+    return { records, aliases }
+  }
+  // 兼容旧结构：直接是 { [root]: records }
+  if (raw && typeof raw === "object") {
+    return { records: raw as MetaRecordsMap, aliases: {} }
+  }
+  return { records: {}, aliases: {} }
+}
+
 function loadStore(): MetaStoreData {
   const st = storage()
   try {
     const raw = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
-    if (!raw) return {}
+    if (!raw) return { records: {}, aliases: {} }
     const obj = JSON.parse(String(raw))
-    return obj && typeof obj === "object" ? (obj as MetaStoreData) : {}
+    return normalizeStore(obj)
   } catch {
-    return {}
+    return { records: {}, aliases: {} }
   }
 }
 
@@ -86,16 +132,44 @@ function readRecord(installRoot: string, kind: RecordKind): RecordData | undefin
   const root = normalizeRoot(installRoot)
   if (!root) return undefined
   const data = loadStore()
-  return data[root]?.[kind]
+  const resolveAlias = (k: string): string => {
+    const key = pathKey(k)
+    return data.aliases[key] ? pathKey(data.aliases[key]) : key
+  }
+  for (const key of relatedRoots(root)) {
+    const rkey = pathKey(key)
+    const recDirect = data.records[rkey]?.[kind]
+    if (recDirect) return recDirect
+    const aliased = resolveAlias(rkey)
+    const rec = data.records[aliased]?.[kind]
+    if (rec) return rec
+  }
+  // 兜底：扫描已有 key，避免旧数据路径形态不一致时漏读
+  for (const k of Object.keys(data.records)) {
+    const key = pathKey(k)
+    for (const cand of relatedRoots(root)) {
+      const c = pathKey(cand)
+      if (key === c || key.endsWith(c) || c.endsWith(key)) {
+        const rec = data.records[key]?.[kind]
+        if (rec) return rec
+      }
+    }
+  }
+  return undefined
 }
 
 function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData) {
   const root = normalizeRoot(installRoot)
   if (!root) return
   const data = loadStore()
-  const bucket = data[root] ?? {}
+  const canonical = pathKey(root)
+  const bucket = data.records[canonical] ?? {}
   bucket[kind] = rec
-  data[root] = bucket
+  data.records[canonical] = bucket
+  // 为同一路径的变体建立别名，便于通过“书签路径/实际rime路径”互相命中
+  for (const key of relatedRoots(canonical)) {
+    data.aliases[pathKey(key)] = canonical
+  }
   saveStore(data)
 }
 
@@ -103,8 +177,27 @@ export function clearMetaForRoot(installRoot: string) {
   const root = normalizeRoot(installRoot)
   if (!root) return
   const data = loadStore()
-  if (!data[root]) return
-  delete data[root]
+  const canonicalSet = new Set<string>()
+  for (const key of relatedRoots(root)) {
+    const k = pathKey(key)
+    const target = data.aliases[k] ? pathKey(data.aliases[k]) : k
+    canonicalSet.add(target)
+  }
+  let changed = false
+  for (const key of canonicalSet) {
+    if (data.records[key]) {
+      delete data.records[key]
+      changed = true
+    }
+  }
+  for (const key of Object.keys(data.aliases)) {
+    const target = pathKey(data.aliases[key])
+    if (canonicalSet.has(target)) {
+      delete data.aliases[key]
+      changed = true
+    }
+  }
+  if (!changed) return
   saveStore(data)
 }
 

@@ -237,6 +237,12 @@ export function HomeView() {
   }
 
   async function refreshLocal(current: AppConfig) {
+    const normPath = (s: string) => String(s ?? "").trim().replace(/\/+$/, "")
+    const pushCandidate = (arr: string[], p?: string) => {
+      const x = normPath(String(p ?? ""))
+      if (x) arr.push(x)
+    }
+
     const selected = selectedSchemeFromConfig(current)
     setLocalSelectedScheme(selected)
 
@@ -250,16 +256,16 @@ export function HomeView() {
     }
 
     const candidates: string[] = []
-    if (installRoot) candidates.push(installRoot)
-    if (current.hamsterRootPath && current.hamsterRootPath !== installRoot) {
-      candidates.push(current.hamsterRootPath)
+    pushCandidate(candidates, installRoot)
+    if (current.hamsterRootPath && normPath(current.hamsterRootPath) !== normPath(installRoot)) {
+      pushCandidate(candidates, current.hamsterRootPath)
     }
     if (current.hamsterRootPath) {
-      candidates.push(
+      pushCandidate(candidates,
         Path.join(current.hamsterRootPath, "RimeUserData", "wanxiang"),
-        Path.join(current.hamsterRootPath, "RIME", "Rime"),
-        Path.join(current.hamsterRootPath, "Rime")
       )
+      pushCandidate(candidates, Path.join(current.hamsterRootPath, "RIME", "Rime"))
+      pushCandidate(candidates, Path.join(current.hamsterRootPath, "Rime"))
     }
 
     try {
@@ -268,29 +274,36 @@ export function HomeView() {
         if (current.hamsterBookmarkName) {
           const p = fm.bookmarkedPath(current.hamsterBookmarkName)
           const resolved = p && typeof p.then === "function" ? await p : p
-          if (resolved) candidates.unshift(String(resolved))
+          if (resolved) pushCandidate(candidates, String(resolved))
         }
       }
-      if (fm?.getAllFileBookmarks && fm?.bookmarkedPath && current.hamsterRootPath) {
+      if (fm?.getAllFileBookmarks) {
         const r = fm.getAllFileBookmarks()
         const list = r && typeof r.then === "function" ? await r : r
         const arr = Array.isArray(list) ? list : []
-        const norm = (s: string) => s.replace(/\/+$/, "")
-        const target = norm(String(current.hamsterRootPath))
-        const match = arr.find((b: any) => {
-          const p = norm(String(b?.path ?? ""))
-          const n = String(b?.name ?? "")
-          return (p && p === target) || (current.hamsterBookmarkName ? n === current.hamsterBookmarkName : false)
-        })
-        if (match?.name) {
-          const p = fm.bookmarkedPath(match.name)
-          const resolved = p && typeof p.then === "function" ? await p : p
-          if (resolved) candidates.unshift(String(resolved))
+        if (current.hamsterBookmarkName) {
+          const byName = arr.find((b: any) => String(b?.name ?? "") === current.hamsterBookmarkName)
+          if (byName?.path) pushCandidate(candidates, String(byName.path))
+          if (byName?.name && fm?.bookmarkedPath) {
+            const p = fm.bookmarkedPath(byName.name)
+            const resolved = p && typeof p.then === "function" ? await p : p
+            if (resolved) pushCandidate(candidates, String(resolved))
+          }
+        }
+        if (current.hamsterRootPath) {
+          const target = normPath(String(current.hamsterRootPath))
+          const byPath = arr.find((b: any) => normPath(String(b?.path ?? "")) === target)
+          if (byPath?.path) pushCandidate(candidates, String(byPath.path))
+          if (byPath?.name && fm?.bookmarkedPath) {
+            const p = fm.bookmarkedPath(byPath.name)
+            const resolved = p && typeof p.then === "function" ? await p : p
+            if (resolved) pushCandidate(candidates, String(resolved))
+          }
         }
       }
     } catch {}
 
-    const uniq = Array.from(new Set(candidates.filter(Boolean)))
+    const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)))
     let meta: MetaBundle | undefined
     for (const root of uniq) {
       const m = await loadMetaAsync(root)
