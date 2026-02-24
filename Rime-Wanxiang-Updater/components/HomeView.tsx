@@ -245,16 +245,16 @@ export function HomeView() {
       const { rimeDir } = await detectRimeDir(current)
       if (rimeDir) installRoot = rimeDir
     } catch {}
-    if (!installRoot && !current.hamsterBookmarkName) {
+    if (!installRoot) {
       installRoot = current.hamsterRootPath
     }
 
     const candidates: string[] = []
     if (installRoot) candidates.push(installRoot)
-    if (!current.hamsterBookmarkName && current.hamsterRootPath && current.hamsterRootPath !== installRoot) {
+    if (current.hamsterRootPath && current.hamsterRootPath !== installRoot) {
       candidates.push(current.hamsterRootPath)
     }
-    if (!current.hamsterBookmarkName && current.hamsterRootPath) {
+    if (current.hamsterRootPath) {
       candidates.push(
         Path.join(current.hamsterRootPath, "RimeUserData", "wanxiang"),
         Path.join(current.hamsterRootPath, "RIME", "Rime"),
@@ -339,13 +339,8 @@ export function HomeView() {
     const current = loadConfig()
     setCfg(current)
     void (async () => {
-      const ok = await guardPathAccess(true)
-      if (ok) await refreshLocal(current)
-      else {
-        setLocalSchemeVersion("暂无法获取")
-        setLocalDictMark("暂无法获取")
-        setLocalModelMark("暂无法获取")
-      }
+      await guardPathAccess(true)
+      await refreshLocal(current)
     })()
   }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
 
@@ -371,8 +366,8 @@ export function HomeView() {
             const changed = checkKey(newCfg) !== checkKey(cfg)
             setCfg(newCfg)
             void (async () => {
-              const ok = await guardPathAccess(false)
-              if (ok) await refreshLocal(newCfg)
+              await guardPathAccess(false)
+              await refreshLocal(newCfg)
             })()
             if (changed) resetRemote()
           }}
@@ -381,13 +376,8 @@ export function HomeView() {
     })
     const current = loadConfig()
     setCfg(current)
-    const ok = await guardPathAccess(false)
-    if (ok) await refreshLocal(current)
-    else {
-      setLocalSchemeVersion("暂无法获取")
-      setLocalDictMark("暂无法获取")
-      setLocalModelMark("暂无法获取")
-    }
+    await guardPathAccess(false)
+    await refreshLocal(current)
     if (checkKey(current) !== beforeKey) resetRemote()
   }
 

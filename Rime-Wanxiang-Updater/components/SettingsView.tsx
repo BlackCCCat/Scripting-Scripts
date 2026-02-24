@@ -15,6 +15,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  Path,
 } from "scripting"
 
 import { Runtime } from "../utils/runtime"
@@ -52,6 +53,27 @@ function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEditio
     schemeEdition: edition,
     proSchemeKey: edition === "pro" ? key : fallback.proSchemeKey,
   }
+}
+
+function normalizePath(p: string): string {
+  return String(p ?? "").trim().replace(/\/+$/, "")
+}
+
+function collectMetaCandidates(base: AppConfig, detected?: string): string[] {
+  const out: string[] = []
+  const push = (p?: string) => {
+    const x = normalizePath(String(p ?? ""))
+    if (x) out.push(x)
+  }
+  push(detected)
+  push(base.hamsterRootPath)
+  const roots = Array.from(new Set(out))
+  for (const r of roots) {
+    push(Path.join(r, "RimeUserData", "wanxiang"))
+    push(Path.join(r, "RIME", "Rime"))
+    push(Path.join(r, "Rime"))
+  }
+  return Array.from(new Set(out))
 }
 
 function isPromiseLike(v: any): v is Promise<any> {
@@ -183,21 +205,27 @@ export function SettingsView(props: {
   }
 
   async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
-    let installRoot = ""
+    let detected = ""
     try {
       const { rimeDir } = await detectRimeDir(base)
-      installRoot = rimeDir || base.hamsterRootPath
+      detected = rimeDir || ""
     } catch {
-      installRoot = base.hamsterRootPath
+      detected = ""
     }
-    if (!installRoot) return base
+    const candidates = collectMetaCandidates(base, detected)
+    if (!candidates.length) return base
 
-    let meta: any
-    try {
-      meta = await loadMetaAsync(installRoot)
-    } catch {
-      return base
+    let meta: any = undefined
+    for (const root of candidates) {
+      try {
+        const m = await loadMetaAsync(root)
+        if (m.scheme || m.dict || m.model) {
+          meta = m
+          break
+        }
+      } catch {}
     }
+    if (!meta) return base
     const normalized = normalizeSchemeFromMeta(meta, base)
     if (!normalized) return base
 
@@ -250,10 +278,11 @@ export function SettingsView(props: {
         const resolved = fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? "")
           : (matched.name ? "" : matched.path)
-        const pathChanged = resolved !== targetPath || matched.name !== targetName
+        const selectedPath = normalizePath(resolved || matched.path)
+        const pathChanged = selectedPath !== normalizePath(targetPath) || matched.name !== targetName
         if (pathChanged) {
           try {
-            let next = { ...loadConfig(), hamsterRootPath: resolved, hamsterBookmarkName: matched.name }
+            let next = { ...loadConfig(), hamsterRootPath: selectedPath, hamsterBookmarkName: matched.name }
             next = await syncSchemeFromLocal(next)
             setCfg(next)
             saveConfig(next)
@@ -364,13 +393,10 @@ export function SettingsView(props: {
                       const resolved = fm?.bookmarkedPath && canUseByName
                         ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
                         : (b.name ? "" : b.path)
-                      if (!resolved) {
-                        showInfo("书签不可用", "书签路径不可用，请在设置页重新选择书签文件夹。")
-                        return
-                      }
+                      const selectedPath = normalizePath(resolved || b.path)
                       let next: AppConfig = {
                         ...cfg,
-                        hamsterRootPath: resolved,
+                        hamsterRootPath: selectedPath,
                         hamsterBookmarkName: b.name,
                       }
                       try {
