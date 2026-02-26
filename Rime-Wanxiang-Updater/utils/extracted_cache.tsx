@@ -15,7 +15,8 @@ type RootTracked = {
 
 type StoreData = Record<string, RootTracked>
 
-const KEY = "wanxiang_extracted_files_v1"
+const STORAGE_KEY = "wanxiang_extracted_files"
+const LEGACY_STORAGE_KEYS = ["wanxiang_extracted_files_v1"]
 
 function storage(): any {
   return (globalThis as any).Storage ?? Runtime.Storage
@@ -89,10 +90,19 @@ async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
 function loadStore(): StoreData {
   const st = storage()
   try {
-    const raw = st?.get?.(KEY) ?? st?.getString?.(KEY)
+    let raw = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
+    if (!raw) {
+      for (const key of LEGACY_STORAGE_KEYS) {
+        raw = st?.get?.(key) ?? st?.getString?.(key)
+        if (raw) break
+      }
+    }
     if (!raw) return {}
     const obj = JSON.parse(String(raw))
-    return obj && typeof obj === "object" ? (obj as StoreData) : {}
+    const data = obj && typeof obj === "object" ? (obj as StoreData) : {}
+    const current = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
+    if (!current) saveStore(data)
+    return data
   } catch {
     return {}
   }
@@ -101,8 +111,8 @@ function loadStore(): StoreData {
 function saveStore(store: StoreData) {
   const st = storage()
   const raw = JSON.stringify(store)
-  if (st?.set) st.set(KEY, raw)
-  else if (st?.setString) st.setString(KEY, raw)
+  if (st?.set) st.set(STORAGE_KEY, raw)
+  else if (st?.setString) st.setString(STORAGE_KEY, raw)
 }
 
 function dedupeFiles(files: string[]): string[] {
@@ -120,13 +130,6 @@ export function setExtractedFiles(installRoot: string, kind: TrackKind, files: s
   }
   data[root] = bucket
   saveStore(data)
-}
-
-export function getExtractedFiles(installRoot: string, kind: TrackKind): string[] {
-  const root = normalizePath(installRoot)
-  if (!root) return []
-  const data = loadStore()
-  return dedupeFiles(data[root]?.[kind]?.files ?? [])
 }
 
 export function clearExtractedFilesForRoot(installRoot: string) {

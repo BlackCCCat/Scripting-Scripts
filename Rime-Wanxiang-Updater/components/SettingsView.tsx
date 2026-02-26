@@ -55,6 +55,34 @@ function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEditio
   }
 }
 
+function normalizeReleaseSourceFromMeta(meta: any): AppConfig["releaseSource"] | undefined {
+  const source = String(
+    meta?.scheme?.releaseSource ??
+      meta?.dict?.releaseSource ??
+      meta?.model?.releaseSource ??
+      ""
+  )
+    .trim()
+    .toLowerCase()
+  if (source === "cnb" || source === "github") return source as AppConfig["releaseSource"]
+  return undefined
+}
+
+function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputMethod | undefined {
+  const input = String(
+    meta?.scheme?.inputMethod ??
+      meta?.dict?.inputMethod ??
+      meta?.model?.inputMethod ??
+      ""
+  )
+    .trim()
+    .toLowerCase()
+  if (input === "hamster" || input === "hamster3") return input
+  if (detectedEngine === "元书输入法") return "hamster3"
+  if (detectedEngine === "仓输入法") return "hamster"
+  return undefined
+}
+
 function normalizePath(p: string): string {
   return String(p ?? "").trim().replace(/\/+$/, "")
 }
@@ -206,11 +234,15 @@ export function SettingsView(props: {
 
   async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
     let detected = ""
+    let detectedEngine = ""
     try {
-      const { rimeDir } = await detectRimeDir(base)
+      const r = await detectRimeDir(base)
+      const { rimeDir } = r
+      detectedEngine = String(r?.engine ?? "")
       detected = rimeDir || ""
     } catch {
       detected = ""
+      detectedEngine = ""
     }
     const candidates = collectMetaCandidates(base, detected)
     if (!candidates.length) return base
@@ -227,21 +259,33 @@ export function SettingsView(props: {
     }
     if (!meta) return base
     const normalized = normalizeSchemeFromMeta(meta, base)
-    if (!normalized) return base
-
-    const changed =
-      base.schemeEdition !== normalized.schemeEdition ||
-      (normalized.schemeEdition === "pro" && base.proSchemeKey !== normalized.proSchemeKey)
-    if (!changed) return base
+    const releaseSource = normalizeReleaseSourceFromMeta(meta)
+    const inputMethod = normalizeInputMethodFromMeta(meta, detectedEngine)
 
     const next: AppConfig = {
       ...base,
-      schemeEdition: normalized.schemeEdition,
-      proSchemeKey: normalized.proSchemeKey,
+      releaseSource: releaseSource ?? base.releaseSource,
+      inputMethod: inputMethod ?? base.inputMethod,
+      schemeEdition: normalized?.schemeEdition ?? base.schemeEdition,
+      proSchemeKey:
+        normalized?.schemeEdition === "pro"
+          ? normalized.proSchemeKey
+          : base.proSchemeKey,
     }
+
+    const changed =
+      base.schemeEdition !== next.schemeEdition ||
+      base.proSchemeKey !== next.proSchemeKey ||
+      base.releaseSource !== next.releaseSource ||
+      base.inputMethod !== next.inputMethod
+    if (!changed) return base
+
     setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
     const proIdx = PRO_KEYS.indexOf(next.proSchemeKey)
     setProKeyIdx(proIdx >= 0 ? proIdx : 0)
+    setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
+    const inputMethodIdx = INPUT_METHODS.findIndex((m) => m.value === next.inputMethod)
+    setInputIdx(inputMethodIdx >= 0 ? inputMethodIdx : 0)
     setCfg(next)
     return next
   }

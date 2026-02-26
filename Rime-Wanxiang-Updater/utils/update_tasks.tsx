@@ -370,6 +370,7 @@ export async function updateScheme(
     fileName: r?.assetName ?? "",
     schemeEdition: cfg.schemeEdition,
     proSchemeKey: cfg.schemeEdition === "pro" ? cfg.proSchemeKey : undefined,
+    inputMethod: cfg.inputMethod,
     tag: r?.tag,
     updatedAt: r?.updatedAt ?? new Date().toISOString(),
     remoteIdOrSha,
@@ -455,6 +456,7 @@ export async function updateDict(
   await setDictMeta({
     installRoot,
     fileName: dict.name,
+    inputMethod: cfg.inputMethod,
     tag: dict.tag,
     updatedAt: dict.updatedAt ?? new Date().toISOString(),
     remoteIdOrSha: dict.remoteIdOrSha,
@@ -563,6 +565,7 @@ export async function updateModel(
   await setModelMeta({
     installRoot,
     fileName: MODEL_FILE,
+    inputMethod: cfg.inputMethod,
     tag: model.tag,
     updatedAt: model.updatedAt ?? new Date().toISOString(),
     remoteIdOrSha: model.remoteIdOrSha ?? model.updatedAt ?? model.url,

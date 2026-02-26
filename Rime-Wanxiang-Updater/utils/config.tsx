@@ -21,7 +21,13 @@ export type AppConfig = {
   autoCheckOnLaunch: boolean
 }
 
-const KEY = "wanxiang_updater_cfg_v2"
+const STORAGE_KEY = "wanxiang_updater_config"
+const LEGACY_STORAGE_KEYS = ["wanxiang_updater_cfg_v2", "wanxiang_updater_cfg_v1"]
+
+function readStorageValue(st: any, key: string): string {
+  const raw = st?.get?.(key) ?? st?.getString?.(key)
+  return typeof raw === "string" ? raw : ""
+}
 
 export const DEFAULT_CONFIG: AppConfig = {
   hamsterRootPath: "",
@@ -39,13 +45,22 @@ export const DEFAULT_CONFIG: AppConfig = {
 export function loadConfig(): AppConfig {
   const st: any = (globalThis as any).Storage ?? Runtime as any
   try {
-    const raw = st?.get?.(KEY) ?? st?.getString?.(KEY)
+    let raw = readStorageValue(st, STORAGE_KEY)
+    if (!raw) {
+      for (const key of LEGACY_STORAGE_KEYS) {
+        raw = readStorageValue(st, key)
+        if (raw) break
+      }
+    }
     if (!raw) return DEFAULT_CONFIG
     const obj = JSON.parse(raw)
     if (obj?.inputMethod === "cang") obj.inputMethod = "hamster"
     if (obj?.inputMethod === "yushu" || obj?.inputMethod === "yuanshu") obj.inputMethod = "hamster3"
     if (typeof obj?.hamsterBookmarkName !== "string") obj.hamsterBookmarkName = ""
-    return { ...DEFAULT_CONFIG, ...obj }
+    const cfg = { ...DEFAULT_CONFIG, ...obj }
+    const currentRaw = readStorageValue(st, STORAGE_KEY)
+    if (!currentRaw) saveConfig(cfg)
+    return cfg
   } catch {
     return DEFAULT_CONFIG
   }
@@ -54,8 +69,8 @@ export function loadConfig(): AppConfig {
 export function saveConfig(cfg: AppConfig) {
   const st: any = (globalThis as any).Storage ?? Runtime as any
   const raw = JSON.stringify(cfg)
-  if (st?.set) st.set(KEY, raw)
-  else if (st?.setString) st.setString(KEY, raw)
+  if (st?.set) st.set(STORAGE_KEY, raw)
+  else if (st?.setString) st.setString(STORAGE_KEY, raw)
   else throw new Error("Storage API 不存在：请确认 Scripting 是否提供 Storage.set/get")
 }
 

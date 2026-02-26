@@ -236,7 +236,7 @@ export function HomeView() {
     return false
   }
 
-  async function refreshLocal(current: AppConfig) {
+  async function refreshLocal(current: AppConfig): Promise<boolean> {
     const normPath = (s: string) => String(s ?? "").trim().replace(/\/+$/, "")
     const pushCandidate = (arr: string[], p?: string) => {
       const x = normPath(String(p ?? ""))
@@ -317,7 +317,7 @@ export function HomeView() {
       setLocalSchemeVersion("暂无法获取")
       setLocalDictMark("暂无法获取")
       setLocalModelMark("暂无法获取")
-      return
+      return false
     }
 
     const localScheme = normalizeMetaScheme(meta.scheme, current)
@@ -346,6 +346,7 @@ export function HomeView() {
     setLocalSchemeVersion(meta.scheme?.remoteTagOrName ?? "暂无法获取")
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取")
     setLocalModelMark(meta.model?.remoteIdOrSha ?? "暂无法获取")
+    return true
   }
 
   useEffect(() => {
@@ -390,8 +391,17 @@ export function HomeView() {
     const current = loadConfig()
     setCfg(current)
     await guardPathAccess(false)
-    await refreshLocal(current)
-    if (checkKey(current) !== beforeKey) resetRemote()
+    const hasLocal = await refreshLocal(current)
+    const afterKey = checkKey(current)
+    if (afterKey !== beforeKey) {
+      resetRemote()
+      const pathChanged =
+        current.hamsterRootPath !== before.hamsterRootPath ||
+        current.hamsterBookmarkName !== before.hamsterBookmarkName
+      if (pathChanged && current.autoCheckOnLaunch && hasLocal) {
+        await onCheckUpdate()
+      }
+    }
   }
 
   function applyProgress(tag: "scheme" | "dict" | "model" | "auto", p: any) {

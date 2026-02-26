@@ -1,5 +1,5 @@
 // File: utils/meta.tsx
-import type { ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
+import type { InputMethod, ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
 import { Runtime } from "./runtime"
 
 export type SchemeMeta = {
@@ -8,16 +8,22 @@ export type SchemeMeta = {
   schemeEdition?: SchemeEdition
   proSchemeKey?: ProSchemeKey
   selectedScheme?: string
+  releaseSource?: ReleaseSource
+  inputMethod?: InputMethod
   updatedAt: string
 }
 
 export type DictMeta = {
   remoteIdOrSha: string
+  releaseSource?: ReleaseSource
+  inputMethod?: InputMethod
   updatedAt: string
 }
 
 export type ModelMeta = {
   remoteIdOrSha: string
+  releaseSource?: ReleaseSource
+  inputMethod?: InputMethod
   updatedAt: string
 }
 
@@ -40,6 +46,8 @@ type RecordData = {
   apply_time?: string
   sha256?: string
   cnb_id?: string
+  release_source?: string
+  input_method?: string
 }
 
 type RecordKind = "scheme" | "dict" | "model"
@@ -57,7 +65,8 @@ type MetaStoreData = {
   aliases: MetaAliasMap
 }
 
-const STORAGE_KEY = "wanxiang_meta_store_v1"
+const STORAGE_KEY = "wanxiang_meta_store"
+const LEGACY_STORAGE_KEYS = ["wanxiang_meta_store_v1"]
 const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
 const RIME_SUFFIXES = ["/RimeUserData/wanxiang", "/RIME/Rime", "/Rime"]
 
@@ -112,10 +121,19 @@ function normalizeStore(raw: any): MetaStoreData {
 function loadStore(): MetaStoreData {
   const st = storage()
   try {
-    const raw = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
+    let raw = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
+    if (!raw) {
+      for (const key of LEGACY_STORAGE_KEYS) {
+        raw = st?.get?.(key) ?? st?.getString?.(key)
+        if (raw) break
+      }
+    }
     if (!raw) return { records: {}, aliases: {} }
     const obj = JSON.parse(String(raw))
-    return normalizeStore(obj)
+    const normalized = normalizeStore(obj)
+    const current = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
+    if (!current) saveStore(normalized)
+    return normalized
   } catch {
     return { records: {}, aliases: {} }
   }
@@ -205,6 +223,29 @@ function pickRemoteId(rec: RecordData, fallback?: string): string | undefined {
   return rec.sha256 || rec.cnb_id || fallback
 }
 
+function normalizeReleaseSource(v?: string): ReleaseSource | undefined {
+  const x = String(v ?? "").trim().toLowerCase()
+  if (x === "cnb" || x === "github") return x
+  return undefined
+}
+
+function inferReleaseSource(rec?: RecordData): ReleaseSource | undefined {
+  if (!rec) return undefined
+  const fromField = normalizeReleaseSource(rec.release_source)
+  if (fromField) return fromField
+  if (rec.sha256) return "github"
+  if (rec.cnb_id) return "cnb"
+  return undefined
+}
+
+function normalizeInputMethod(v?: string): InputMethod | undefined {
+  const x = String(v ?? "").trim().toLowerCase()
+  if (x === "hamster" || x === "hamster3") return x
+  if (x === "cang") return "hamster"
+  if (x === "yushu" || x === "yuanshu") return "hamster3"
+  return undefined
+}
+
 function normalizeSchemeEdition(v?: string): SchemeEdition | undefined {
   const x = String(v ?? "").trim().toLowerCase()
   if (x === "base" || x === "pro") return x
@@ -252,6 +293,8 @@ function toSchemeMeta(rec?: RecordData): SchemeMeta | undefined {
     schemeEdition,
     proSchemeKey,
     selectedScheme,
+    releaseSource: inferReleaseSource(rec),
+    inputMethod: normalizeInputMethod(rec.input_method),
     updatedAt: rec.update_time || rec.apply_time || new Date().toISOString(),
   }
 }
@@ -262,6 +305,8 @@ function toDictMeta(rec?: RecordData): DictMeta | undefined {
   if (!remoteIdOrSha) return undefined
   return {
     remoteIdOrSha,
+    releaseSource: inferReleaseSource(rec),
+    inputMethod: normalizeInputMethod(rec.input_method),
     updatedAt: rec.update_time || rec.apply_time || new Date().toISOString(),
   }
 }
@@ -272,6 +317,8 @@ function toModelMeta(rec?: RecordData): ModelMeta | undefined {
   if (!remoteIdOrSha) return undefined
   return {
     remoteIdOrSha,
+    releaseSource: inferReleaseSource(rec),
+    inputMethod: normalizeInputMethod(rec.input_method),
     updatedAt: rec.update_time || rec.apply_time || new Date().toISOString(),
   }
 }
@@ -307,6 +354,7 @@ export async function setSchemeMeta(rec: {
   fileName: string
   schemeEdition: SchemeEdition
   proSchemeKey?: ProSchemeKey
+  inputMethod?: InputMethod
   tag?: string
   updatedAt?: string
   remoteIdOrSha?: string
@@ -325,6 +373,8 @@ export async function setSchemeMeta(rec: {
     apply_time: new Date().toISOString(),
     sha256: ids.sha256,
     cnb_id: ids.cnb_id,
+    release_source: rec.source ?? "",
+    input_method: rec.inputMethod ?? "",
   }
   writeRecord(rec.installRoot, "scheme", data)
   await loadMetaAsync(rec.installRoot)
@@ -333,6 +383,7 @@ export async function setSchemeMeta(rec: {
 export async function setDictMeta(rec: {
   installRoot: string
   fileName: string
+  inputMethod?: InputMethod
   tag?: string
   updatedAt?: string
   remoteIdOrSha?: string
@@ -346,6 +397,8 @@ export async function setDictMeta(rec: {
     apply_time: new Date().toISOString(),
     sha256: ids.sha256,
     cnb_id: ids.cnb_id,
+    release_source: rec.source ?? "",
+    input_method: rec.inputMethod ?? "",
   }
   writeRecord(rec.installRoot, "dict", data)
   await loadMetaAsync(rec.installRoot)
@@ -354,6 +407,7 @@ export async function setDictMeta(rec: {
 export async function setModelMeta(rec: {
   installRoot: string
   fileName: string
+  inputMethod?: InputMethod
   tag?: string
   updatedAt?: string
   remoteIdOrSha?: string
@@ -367,6 +421,8 @@ export async function setModelMeta(rec: {
     apply_time: new Date().toISOString(),
     sha256: ids.sha256,
     cnb_id: ids.cnb_id,
+    release_source: rec.source ?? "",
+    input_method: rec.inputMethod ?? "",
   }
   writeRecord(rec.installRoot, "model", data)
   await loadMetaAsync(rec.installRoot)
