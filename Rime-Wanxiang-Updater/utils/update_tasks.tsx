@@ -42,6 +42,31 @@ export type AllUpdateResult = {
   model?: RemoteAsset
 }
 
+function normalizeMark(v?: string): string {
+  return String(v ?? "").trim().toLowerCase()
+}
+
+function ensureRemoteMark(asset?: RemoteAsset, kind?: "dict" | "model"): string | undefined {
+  if (!asset) return undefined
+  const direct = String(asset.remoteIdOrSha ?? "").trim()
+  if (direct) return direct
+
+  const name = String(asset.name ?? "").trim()
+  const size = typeof asset.size === "number" && Number.isFinite(asset.size) && asset.size > 0 ? asset.size : undefined
+  if (kind && name && size) return `${kind}:${name}:${size}`
+
+  const updatedAt = String(asset.updatedAt ?? "").trim()
+  if (kind && name && updatedAt) return `${kind}:${name}:${updatedAt}`
+
+  const tag = String(asset.tag ?? "").trim()
+  if (kind && name && tag) return `${kind}:${name}:${tag}`
+
+  const url = String(asset.url ?? "").trim()
+  if (kind && name && url) return `${kind}:${name}:${url}`
+
+  return undefined
+}
+
 function FM(): any {
   return (globalThis as any).FileManager
 }
@@ -313,11 +338,11 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
           needLastPage: true,
         })
 
-  if (dict && !dict.remoteIdOrSha && dict.updatedAt) {
-    dict.remoteIdOrSha = dict.updatedAt
+  if (dict && !dict.remoteIdOrSha) {
+    dict.remoteIdOrSha = ensureRemoteMark(dict, "dict")
   }
-  if (model && !model.remoteIdOrSha && model.updatedAt) {
-    model.remoteIdOrSha = model.updatedAt
+  if (model && !model.remoteIdOrSha) {
+    model.remoteIdOrSha = ensureRemoteMark(model, "model")
   }
 
   return { scheme, dict, model }
@@ -459,7 +484,7 @@ export async function updateDict(
     inputMethod: cfg.inputMethod,
     tag: dict.tag,
     updatedAt: dict.updatedAt ?? new Date().toISOString(),
-    remoteIdOrSha: dict.remoteIdOrSha,
+    remoteIdOrSha: ensureRemoteMark(dict, "dict"),
     source: cfg.releaseSource,
   })
 
@@ -568,7 +593,7 @@ export async function updateModel(
     inputMethod: cfg.inputMethod,
     tag: model.tag,
     updatedAt: model.updatedAt ?? new Date().toISOString(),
-    remoteIdOrSha: model.remoteIdOrSha ?? model.updatedAt ?? model.url,
+    remoteIdOrSha: ensureRemoteMark(model, "model"),
     source: cfg.releaseSource,
   })
 
@@ -591,16 +616,15 @@ export async function autoUpdateAll(
   const meta = await loadMetaAsync(installRoot)
 
   const schemeRemoteMark = r.scheme?.tag ?? r.scheme?.name
-  const needScheme = !!(schemeRemoteMark && (meta.scheme?.remoteTagOrName ?? "") !== schemeRemoteMark)
+  const needScheme = !!(schemeRemoteMark && normalizeMark(meta.scheme?.remoteTagOrName) !== normalizeMark(schemeRemoteMark))
 
-  const needDict = !!(
-    r.dict &&
-    (!r.dict.remoteIdOrSha || (meta.dict?.remoteIdOrSha ?? "") !== r.dict.remoteIdOrSha)
-  )
-  const needModel = !!(
-    r.model &&
-    (!r.model.remoteIdOrSha || (meta.model?.remoteIdOrSha ?? "") !== r.model.remoteIdOrSha)
-  )
+  const remoteDictMark = normalizeMark(ensureRemoteMark(r.dict, "dict"))
+  const localDictMark = normalizeMark(meta.dict?.remoteIdOrSha)
+  const needDict = !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
+
+  const remoteModelMark = normalizeMark(ensureRemoteMark(r.model, "model"))
+  const localModelMark = normalizeMark(meta.model?.remoteIdOrSha)
+  const needModel = !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")
