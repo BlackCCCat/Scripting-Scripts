@@ -1,8 +1,10 @@
 // File: index.tsx
 import { Navigation, Script } from "scripting"
 import { HomeView } from "./components/HomeView"
+import { runStorageMigration } from "./utils/storage_migration"
 
 async function run() {
+  runStorageMigration()
   await Navigation.present({
     element: <HomeView />,
   })

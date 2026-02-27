@@ -111,6 +111,25 @@ function bookmarkKey(name?: string): string {
   return String(name ?? "").trim()
 }
 
+function isRelatedRoot(a: string, b: string): boolean {
+  const x = pathKey(a)
+  const y = pathKey(b)
+  if (!x || !y) return false
+  if (x === y) return true
+  const relX = new Set(relatedRoots(x).map(pathKey))
+  if (relX.has(y)) return true
+  const relY = new Set(relatedRoots(y).map(pathKey))
+  return relY.has(x)
+}
+
+function mergeMissingKinds(target: RootMetaRecords, source?: RootMetaRecords): RootMetaRecords {
+  if (!source) return target
+  if (!target.scheme && source.scheme) target.scheme = source.scheme
+  if (!target.dict && source.dict) target.dict = source.dict
+  if (!target.model && source.model) target.model = source.model
+  return target
+}
+
 function normalizeStore(raw: any): MetaStoreData {
   if (raw && typeof raw === "object" && raw.records && typeof raw.records === "object") {
     const records = raw.records && typeof raw.records === "object" ? (raw.records as MetaRecordsMap) : {}
@@ -212,18 +231,77 @@ function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData, boo
   const root = normalizeRoot(installRoot)
   if (!root) return
   const data = loadStore()
-  const canonical = pathKey(root)
-  const bucket = data.records[canonical] ?? {}
+  const bkey = bookmarkKey(bookmarkName)
+  const canonicalFromPath = pathKey(root)
+  const mappedBookmark = bkey ? pathKey(data.bookmarks[bkey] ?? "") : ""
+
+  let canonical = canonicalFromPath
+  if (mappedBookmark) {
+    if (isRelatedRoot(mappedBookmark, canonicalFromPath)) {
+      canonical = mappedBookmark
+    } else {
+      // 同一书签切到新路径时，旧记录按覆盖语义清理
+      if (data.records[mappedBookmark]) {
+        delete data.records[mappedBookmark]
+      }
+      for (const aliasKey of Object.keys(data.aliases)) {
+        const target = pathKey(data.aliases[aliasKey])
+        if (target === mappedBookmark) delete data.aliases[aliasKey]
+      }
+      canonical = canonicalFromPath
+    }
+  } else {
+    // 无书签名时，优先复用同路径家族已有记录
+    for (const r of relatedRoots(canonicalFromPath)) {
+      const rk = pathKey(r)
+      if (rk && data.records[rk]) {
+        canonical = rk
+        break
+      }
+      const aliased = pathKey(data.aliases[rk] ?? "")
+      if (aliased && data.records[aliased]) {
+        canonical = aliased
+        break
+      }
+    }
+  }
+
+  let bucket: RootMetaRecords = { ...(data.records[canonical] ?? {}) }
+
+  // 合并同一路径家族中的碎片记录，避免仅更新方案/词库后丢失模型信息
+  const candidateKeys = new Set<string>()
+  for (const r of relatedRoots(canonicalFromPath)) {
+    const rk = pathKey(r)
+    if (rk) candidateKeys.add(rk)
+    const aliased = pathKey(data.aliases[rk] ?? "")
+    if (aliased) candidateKeys.add(aliased)
+  }
+  if (mappedBookmark) candidateKeys.add(mappedBookmark)
+  for (const key of candidateKeys) {
+    if (!key || key === canonical) continue
+    if (data.records[key]) {
+      bucket = mergeMissingKinds(bucket, data.records[key])
+      delete data.records[key]
+    }
+  }
+
   bucket[kind] = rec
   data.records[canonical] = bucket
+
+  // 清理失效 alias
+  for (const aliasKey of Object.keys(data.aliases)) {
+    const target = pathKey(data.aliases[aliasKey])
+    if (!target || !data.records[target]) {
+      delete data.aliases[aliasKey]
+    }
+  }
+
   // 为同一路径的变体建立别名，便于通过“书签路径/实际rime路径”互相命中
   for (const key of relatedRoots(canonical)) {
     data.aliases[pathKey(key)] = canonical
   }
-  const bkey = bookmarkKey(bookmarkName)
-  if (bkey) {
-    data.bookmarks[bkey] = canonical
-  }
+  data.aliases[canonicalFromPath] = canonical
+  if (bkey) data.bookmarks[bkey] = canonical
   saveStore(data)
 }
 
