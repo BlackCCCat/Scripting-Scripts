@@ -1,0 +1,43 @@
+{
+  "iconImage": null,
+  "author": {
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat"
+  },
+  "icon": "doc.text",
+  "localizedDescriptions": {
+    "zh": "",
+    "fr": "",
+    "de": "",
+    "en": "",
+    "es": "",
+    "ja": "",
+    "pt": "",
+    "ru": "",
+    "it": ""
+  },
+  "intentInputTypes": [],
+  "description": "图片转PDF、PDF按页选择合并",
+  "name": "PDFHelper",
+  "contributors": [],
+  "localizedNames": {
+    "zh": "",
+    "fr": "",
+    "de": "",
+    "en": "",
+    "es": "",
+    "ja": "",
+    "pt": "",
+    "ru": "",
+    "it": ""
+  },
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/PDFHelper.zip",
+    "hash": "",
+    "autoUpdateInterval": null
+  },
+  "runInApp": true,
+  "color": "rgba(0, 198, 165,1)",
+  "version": ""
+}
