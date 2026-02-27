@@ -498,7 +498,7 @@ export function HomeView() {
         setLastCheckKey(key)
       }
 
-      await autoUpdateAll(
+      const autoResult = await autoUpdateAll(
         current,
         {
           onStage: setStage,
@@ -508,7 +508,13 @@ export function HomeView() {
       )
 
       await refreshLocal(current)
-      setStage(current.autoDeployAfterDownload === false ? "自动更新完成（未自动部署）" : "自动更新完成（已部署）")
+      if (!autoResult.didUpdate) {
+        setStage("自动更新完成（已是最新，无需更新）")
+      } else if (autoResult.didDeploy) {
+        setStage("自动更新完成（已部署）")
+      } else {
+        setStage("自动更新完成（未自动部署）")
+      }
     } catch (e: any) {
       setStage(`自动更新失败：${String(e?.message ?? e)}`)
     } finally {

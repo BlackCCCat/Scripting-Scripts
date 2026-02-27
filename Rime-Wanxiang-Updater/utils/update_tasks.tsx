@@ -42,6 +42,17 @@ export type AllUpdateResult = {
   model?: RemoteAsset
 }
 
+export type AutoUpdateRunResult = {
+  remote: AllUpdateResult
+  updated: {
+    scheme: boolean
+    dict: boolean
+    model: boolean
+  }
+  didUpdate: boolean
+  didDeploy: boolean
+}
+
 function normalizeMark(v?: string): string {
   return String(v ?? "").trim().toLowerCase()
 }
@@ -609,7 +620,7 @@ export async function autoUpdateAll(
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
   },
   prechecked?: AllUpdateResult
-) {
+): Promise<AutoUpdateRunResult> {
   params.onStage?.("自动更新：检查更新中…")
   const r = prechecked ?? (await checkAllUpdates(cfg))
   const installRoot = await resolveRimeDir(cfg)
@@ -628,7 +639,12 @@ export async function autoUpdateAll(
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")
-    return r
+    return {
+      remote: r,
+      updated: { scheme: false, dict: false, model: false },
+      didUpdate: false,
+      didDeploy: false,
+    }
   }
 
   // 自动更新：按需下载三项，最后统一部署一次
@@ -665,5 +681,10 @@ export async function autoUpdateAll(
   await deployIfEnabled(cfg, params.onStage)
 
   params.onStage?.("自动更新：完成")
-  return r
+  return {
+    remote: r,
+    updated: { scheme: needScheme, dict: needDict, model: needModel },
+    didUpdate: true,
+    didDeploy: cfg.autoDeployAfterDownload !== false,
+  }
 }
