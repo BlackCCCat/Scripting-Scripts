@@ -12,3 +12,4 @@
 # 感谢
 - [LoonKissSurge](https://github.com/QingRex/LoonKissSurge/) Surge模块管理中使用
 - [xream/scripts](https://github.com/xream/scripts) Vision OCR由该仓库中的`Vision`修改而来
+- [万象方案下载更新](./Rime-Wanxiang-Updater/)中的文档查看器复用了`Scripting`群组中分享的`Omni Text Viewer`脚本
