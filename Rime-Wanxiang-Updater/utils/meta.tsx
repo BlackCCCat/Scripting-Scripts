@@ -60,9 +60,11 @@ type RootMetaRecords = {
 
 type MetaRecordsMap = Record<string, RootMetaRecords>
 type MetaAliasMap = Record<string, string>
+type MetaBookmarkMap = Record<string, string>
 type MetaStoreData = {
   records: MetaRecordsMap
   aliases: MetaAliasMap
+  bookmarks: MetaBookmarkMap
 }
 
 const STORAGE_KEY = "wanxiang_meta_store"
@@ -105,17 +107,22 @@ function pathKey(p: string): string {
   return normalizeRoot(p)
 }
 
+function bookmarkKey(name?: string): string {
+  return String(name ?? "").trim()
+}
+
 function normalizeStore(raw: any): MetaStoreData {
   if (raw && typeof raw === "object" && raw.records && typeof raw.records === "object") {
     const records = raw.records && typeof raw.records === "object" ? (raw.records as MetaRecordsMap) : {}
     const aliases = raw.aliases && typeof raw.aliases === "object" ? (raw.aliases as MetaAliasMap) : {}
-    return { records, aliases }
+    const bookmarks = raw.bookmarks && typeof raw.bookmarks === "object" ? (raw.bookmarks as MetaBookmarkMap) : {}
+    return { records, aliases, bookmarks }
   }
   // 兼容旧结构：直接是 { [root]: records }
   if (raw && typeof raw === "object") {
-    return { records: raw as MetaRecordsMap, aliases: {} }
+    return { records: raw as MetaRecordsMap, aliases: {}, bookmarks: {} }
   }
-  return { records: {}, aliases: {} }
+  return { records: {}, aliases: {}, bookmarks: {} }
 }
 
 function loadStore(): MetaStoreData {
@@ -128,14 +135,14 @@ function loadStore(): MetaStoreData {
         if (raw) break
       }
     }
-    if (!raw) return { records: {}, aliases: {} }
+    if (!raw) return { records: {}, aliases: {}, bookmarks: {} }
     const obj = JSON.parse(String(raw))
     const normalized = normalizeStore(obj)
     const current = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
     if (!current) saveStore(normalized)
     return normalized
   } catch {
-    return { records: {}, aliases: {} }
+    return { records: {}, aliases: {}, bookmarks: {} }
   }
 }
 
@@ -146,10 +153,26 @@ function saveStore(data: MetaStoreData) {
   else if (st?.setString) st.setString(STORAGE_KEY, raw)
 }
 
-function readRecord(installRoot: string, kind: RecordKind): RecordData | undefined {
+function readRecord(installRoot: string, kind: RecordKind, bookmarkName?: string): RecordData | undefined {
   const root = normalizeRoot(installRoot)
-  if (!root) return undefined
   const data = loadStore()
+  const bkey = bookmarkKey(bookmarkName)
+  const bindBookmark = (targetRoot: string) => {
+    if (!bkey) return
+    const canonical = pathKey(targetRoot)
+    if (!canonical) return
+    if (data.bookmarks[bkey] === canonical) return
+    data.bookmarks[bkey] = canonical
+    saveStore(data)
+  }
+  if (bkey) {
+    const mapped = pathKey(data.bookmarks[bkey] ?? "")
+    if (mapped) {
+      const byBookmark = data.records[mapped]?.[kind]
+      if (byBookmark) return byBookmark
+    }
+  }
+  if (!root) return undefined
   const resolveAlias = (k: string): string => {
     const key = pathKey(k)
     return data.aliases[key] ? pathKey(data.aliases[key]) : key
@@ -157,10 +180,16 @@ function readRecord(installRoot: string, kind: RecordKind): RecordData | undefin
   for (const key of relatedRoots(root)) {
     const rkey = pathKey(key)
     const recDirect = data.records[rkey]?.[kind]
-    if (recDirect) return recDirect
+    if (recDirect) {
+      bindBookmark(rkey)
+      return recDirect
+    }
     const aliased = resolveAlias(rkey)
     const rec = data.records[aliased]?.[kind]
-    if (rec) return rec
+    if (rec) {
+      bindBookmark(aliased)
+      return rec
+    }
   }
   // 兜底：扫描已有 key，避免旧数据路径形态不一致时漏读
   for (const k of Object.keys(data.records)) {
@@ -169,14 +198,17 @@ function readRecord(installRoot: string, kind: RecordKind): RecordData | undefin
       const c = pathKey(cand)
       if (key === c || key.endsWith(c) || c.endsWith(key)) {
         const rec = data.records[key]?.[kind]
-        if (rec) return rec
+        if (rec) {
+          bindBookmark(key)
+          return rec
+        }
       }
     }
   }
   return undefined
 }
 
-function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData) {
+function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData, bookmarkName?: string) {
   const root = normalizeRoot(installRoot)
   if (!root) return
   const data = loadStore()
@@ -187,6 +219,10 @@ function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData) {
   // 为同一路径的变体建立别名，便于通过“书签路径/实际rime路径”互相命中
   for (const key of relatedRoots(canonical)) {
     data.aliases[pathKey(key)] = canonical
+  }
+  const bkey = bookmarkKey(bookmarkName)
+  if (bkey) {
+    data.bookmarks[bkey] = canonical
   }
   saveStore(data)
 }
@@ -212,6 +248,13 @@ export function clearMetaForRoot(installRoot: string) {
     const target = pathKey(data.aliases[key])
     if (canonicalSet.has(target)) {
       delete data.aliases[key]
+      changed = true
+    }
+  }
+  for (const key of Object.keys(data.bookmarks)) {
+    const target = pathKey(data.bookmarks[key])
+    if (canonicalSet.has(target)) {
+      delete data.bookmarks[key]
       changed = true
     }
   }
@@ -332,15 +375,15 @@ function splitRemoteId(source: ReleaseSource | undefined, remoteIdOrSha?: string
 
 let CACHE: MetaBundle = {}
 
-export async function loadMetaAsync(installRoot: string): Promise<MetaBundle> {
+export async function loadMetaAsync(installRoot: string, bookmarkName?: string): Promise<MetaBundle> {
   const root = normalizeRoot(installRoot)
-  if (!root) {
+  if (!root && !bookmarkKey(bookmarkName)) {
     CACHE = {}
     return CACHE
   }
-  const schemeRec = readRecord(root, "scheme")
-  const dictRec = readRecord(root, "dict")
-  const modelRec = readRecord(root, "model")
+  const schemeRec = readRecord(root, "scheme", bookmarkName)
+  const dictRec = readRecord(root, "dict", bookmarkName)
+  const modelRec = readRecord(root, "model", bookmarkName)
   CACHE = {
     scheme: toSchemeMeta(schemeRec),
     dict: toDictMeta(dictRec),
@@ -351,6 +394,7 @@ export async function loadMetaAsync(installRoot: string): Promise<MetaBundle> {
 
 export async function setSchemeMeta(rec: {
   installRoot: string
+  bookmarkName?: string
   fileName: string
   schemeEdition: SchemeEdition
   proSchemeKey?: ProSchemeKey
@@ -376,12 +420,13 @@ export async function setSchemeMeta(rec: {
     release_source: rec.source ?? "",
     input_method: rec.inputMethod ?? "",
   }
-  writeRecord(rec.installRoot, "scheme", data)
-  await loadMetaAsync(rec.installRoot)
+  writeRecord(rec.installRoot, "scheme", data, rec.bookmarkName)
+  await loadMetaAsync(rec.installRoot, rec.bookmarkName)
 }
 
 export async function setDictMeta(rec: {
   installRoot: string
+  bookmarkName?: string
   fileName: string
   inputMethod?: InputMethod
   tag?: string
@@ -400,12 +445,13 @@ export async function setDictMeta(rec: {
     release_source: rec.source ?? "",
     input_method: rec.inputMethod ?? "",
   }
-  writeRecord(rec.installRoot, "dict", data)
-  await loadMetaAsync(rec.installRoot)
+  writeRecord(rec.installRoot, "dict", data, rec.bookmarkName)
+  await loadMetaAsync(rec.installRoot, rec.bookmarkName)
 }
 
 export async function setModelMeta(rec: {
   installRoot: string
+  bookmarkName?: string
   fileName: string
   inputMethod?: InputMethod
   tag?: string
@@ -424,6 +470,6 @@ export async function setModelMeta(rec: {
     release_source: rec.source ?? "",
     input_method: rec.inputMethod ?? "",
   }
-  writeRecord(rec.installRoot, "model", data)
-  await loadMetaAsync(rec.installRoot)
+  writeRecord(rec.installRoot, "model", data, rec.bookmarkName)
+  await loadMetaAsync(rec.installRoot, rec.bookmarkName)
 }

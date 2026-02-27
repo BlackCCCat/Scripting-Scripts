@@ -403,6 +403,7 @@ export async function updateScheme(
   const remoteIdOrSha = r?.remoteIdOrSha ?? r?.tag ?? r?.assetName
   await setSchemeMeta({
     installRoot: r?.installRoot ?? "",
+    bookmarkName: cfg.hamsterBookmarkName,
     fileName: r?.assetName ?? "",
     schemeEdition: cfg.schemeEdition,
     proSchemeKey: cfg.schemeEdition === "pro" ? cfg.proSchemeKey : undefined,
@@ -491,6 +492,7 @@ export async function updateDict(
 
   await setDictMeta({
     installRoot,
+    bookmarkName: cfg.hamsterBookmarkName,
     fileName: dict.name,
     inputMethod: cfg.inputMethod,
     tag: dict.tag,
@@ -600,6 +602,7 @@ export async function updateModel(
 
   await setModelMeta({
     installRoot,
+    bookmarkName: cfg.hamsterBookmarkName,
     fileName: MODEL_FILE,
     inputMethod: cfg.inputMethod,
     tag: model.tag,
@@ -624,7 +627,7 @@ export async function autoUpdateAll(
   params.onStage?.("自动更新：检查更新中…")
   const r = prechecked ?? (await checkAllUpdates(cfg))
   const installRoot = await resolveRimeDir(cfg)
-  const meta = await loadMetaAsync(installRoot)
+  const meta = await loadMetaAsync(installRoot, cfg.hamsterBookmarkName)
 
   const schemeRemoteMark = r.scheme?.tag ?? r.scheme?.name
   const needScheme = !!(schemeRemoteMark && normalizeMark(meta.scheme?.remoteTagOrName) !== normalizeMark(schemeRemoteMark))

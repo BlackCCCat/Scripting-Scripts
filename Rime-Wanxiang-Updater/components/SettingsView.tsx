@@ -245,15 +245,23 @@ export function SettingsView(props: {
       detectedEngine = ""
     }
     const candidates = collectMetaCandidates(base, detected)
-    if (!candidates.length) return base
+    if (!candidates.length && !base.hamsterBookmarkName) return base
 
     let meta: any = undefined
     for (const root of candidates) {
       try {
-        const m = await loadMetaAsync(root)
+        const m = await loadMetaAsync(root, base.hamsterBookmarkName)
         if (m.scheme || m.dict || m.model) {
           meta = m
           break
+        }
+      } catch {}
+    }
+    if (!meta && base.hamsterBookmarkName) {
+      try {
+        const byBookmark = await loadMetaAsync("", base.hamsterBookmarkName)
+        if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
+          meta = byBookmark
         }
       } catch {}
     }

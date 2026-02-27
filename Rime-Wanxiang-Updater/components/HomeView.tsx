@@ -306,11 +306,19 @@ export function HomeView() {
     const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)))
     let meta: MetaBundle | undefined
     for (const root of uniq) {
-      const m = await loadMetaAsync(root)
+      const m = await loadMetaAsync(root, current.hamsterBookmarkName)
       if (m.scheme || m.dict || m.model) {
         meta = m
         break
       }
+    }
+    if (!meta && current.hamsterBookmarkName) {
+      try {
+        const byBookmark = await loadMetaAsync("", current.hamsterBookmarkName)
+        if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
+          meta = byBookmark
+        }
+      } catch {}
     }
 
     if (!uniq.length || !meta) {
@@ -401,6 +409,55 @@ export function HomeView() {
       if (pathChanged && current.autoCheckOnLaunch && hasLocal) {
         await onCheckUpdate()
       }
+    }
+  }
+
+  async function openTextEditor() {
+    try {
+      const current = loadConfig()
+      const fm: any = (globalThis as any).FileManager
+      let initialDirectory = String(current.hamsterRootPath ?? "").trim()
+      if (current.hamsterBookmarkName && fm?.bookmarkedPath) {
+        try {
+          const canUseByName = fm?.bookmarkExists
+            ? !!(await fm.bookmarkExists(current.hamsterBookmarkName))
+            : true
+          if (canUseByName) {
+            const resolved = await fm.bookmarkedPath(current.hamsterBookmarkName)
+            if (resolved) initialDirectory = String(resolved).trim()
+          }
+        } catch {}
+      }
+
+      const files = await DocumentPicker.pickFiles({
+        types: ["public.text"],
+        initialDirectory: initialDirectory || undefined,
+      })
+      if (!Array.isArray(files) || files.length === 0) return
+
+      const filePath = String(files[0] ?? "")
+      if (!filePath) return
+
+      const ext = Path.extname(filePath).slice(1) || "md"
+      const content = await FileManager.readAsString(filePath, "utf-8")
+
+      const editor = new EditorController({
+        ext: ext as any,
+      })
+      editor.content = content
+      editor.onContentChanged = async (newContent: string) => {
+        try {
+          await FileManager.writeAsString(filePath, newContent, "utf-8")
+        } catch (error: any) {
+          console.error("保存文件失败：", error)
+          setStage(`保存文件失败：${String(error?.message ?? error)}`)
+        }
+      }
+
+      await editor.present()
+      editor.dispose()
+    } catch (error: any) {
+      setStage(`打开编辑器失败：${String(error?.message ?? error)}`)
     }
   }
 
@@ -633,6 +690,18 @@ export function HomeView() {
         navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}
         toolbar={{
+          topBarLeading: (
+            <Button
+              title=""
+              systemImage="square.and.pencil"
+              action={() => {
+                try {
+                  ;(globalThis as any).HapticFeedback?.mediumImpact?.()
+                } catch {}
+                void openTextEditor()
+              }}
+            />
+          ),
           topBarTrailing: (
             <Button
               title=""
