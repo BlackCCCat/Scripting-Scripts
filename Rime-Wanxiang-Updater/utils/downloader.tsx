@@ -1,4 +1,7 @@
 // File: utils/downloader.tsx
+import { Runtime } from "./runtime"
+import { callMaybeAsync, sleep } from "./common"
+
 export type DownloadProgress = {
   percent?: number // 0..1 (fractionCompleted)
   received: number
@@ -8,12 +11,10 @@ export type DownloadProgress = {
 
 export type DownloadStateEvent =
   | {
-      type: "retrying"
-      attempt: number
-      maxAttempts: number
-    }
-
-declare const BackgroundURLSession: any
+    type: "retrying"
+    attempt: number
+    maxAttempts: number
+  }
 
 const LARGE_FALLBACK_BYTES = 50 * 1024 * 1024
 const STALL_TIMEOUT_MS = 2 * 60 * 1000
@@ -24,12 +25,8 @@ const MAX_RETRY = 1
 const POLL_MS = 500
 
 // ✅ 内置日志
-const DEBUG_PROGRESS = true
+const DEBUG_PROGRESS = false
 const DEBUG_EVERY_MS = 1000
-
-function sleep(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms))
-}
 
 function dirOf(path: string): string {
   const idx = path.lastIndexOf("/")
@@ -48,16 +45,6 @@ function pickNum(obj: any, keys: string[]): number | undefined {
     if (v !== undefined) return v
   }
   return undefined
-}
-
-async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
-  try {
-    const r = fn.apply(thisArg, args)
-    if (r && typeof r.then === "function") return await r
-    return r
-  } catch {
-    return undefined
-  }
 }
 
 async function fileExistsLoose(path: string): Promise<boolean | undefined> {
@@ -85,19 +72,19 @@ async function removeFileLoose(path: string) {
       await fm.delete(path)
       return
     }
-  } catch {}
+  } catch { }
 }
 
 function cancelTask(task: any) {
   try {
     if (typeof task?.cancel === "function") task.cancel()
-  } catch {}
+  } catch { }
   try {
     if (typeof task?.stop === "function") task.stop()
-  } catch {}
+  } catch { }
   try {
     if (typeof task?.suspend === "function") task.suspend()
-  } catch {}
+  } catch { }
 }
 
 async function waitForFile(path: string, timeoutMs: number) {
@@ -120,7 +107,7 @@ async function fetchContentLength(url: string): Promise<number | undefined> {
     const len = res?.headers?.get?.("content-length")
     const n = len != null ? Number(len) : NaN
     if (Number.isFinite(n) && n > 0) return n
-  } catch {}
+  } catch { }
 
   // 2) Range
   try {
@@ -131,7 +118,7 @@ async function fetchContentLength(url: string): Promise<number | undefined> {
       const n = m ? Number(m[1]) : NaN
       if (Number.isFinite(n) && n > 0) return n
     }
-  } catch {}
+  } catch { }
 
   return undefined
 }
@@ -170,14 +157,14 @@ async function downloadWithFetchFallback(
     if (parent) {
       try {
         await fm.createDirectory(parent, true)
-      } catch {}
+      } catch { }
     }
   }
 
   if (canAppend && reader) {
     await removeFileLoose(dstPath)
     let received = 0
-    for (;;) {
+    for (; ;) {
       const r = await reader.read()
       if (r?.done) break
       if (!r?.value) continue
@@ -212,7 +199,7 @@ async function downloadWithFetchFallback(
       } finally {
         try {
           file.close()
-        } catch {}
+        } catch { }
       }
     } else {
       throw new Error("无法写入文件（缺少 FileManager.writeAsBytes 或 FileEntity/Data）")
@@ -236,10 +223,10 @@ function attachOnError(task: any, setError: (e: any) => void) {
 function startIfNeeded(task: any) {
   try {
     if (typeof task?.resume === "function") task.resume()
-  } catch {}
+  } catch { }
   try {
     if (typeof task?.start === "function") task.start()
-  } catch {}
+  } catch { }
 }
 
 /**
@@ -320,7 +307,7 @@ function makeCumulativeEmitter(onProgress?: (p: DownloadProgress) => void) {
           speedBps: p.speedBps,
           ...dbg,
         })
-      } catch {}
+      } catch { }
     }
   }
 
@@ -394,12 +381,13 @@ async function downloadWithProgressInternal(
   onState: ((e: DownloadStateEvent) => void) | undefined,
   attempt: number
 ) {
+  const BackgroundURLSession = Runtime.BackgroundURLSession
   if (!BackgroundURLSession || typeof BackgroundURLSession.startDownload !== "function") {
     throw new Error("BackgroundURLSession 不可用：无法执行后台落盘下载")
   }
 
   let hintedTotal: number | undefined
-  void fetchContentLength(url).then((n) => (hintedTotal = n)).catch(() => {})
+  void fetchContentLength(url).then((n) => (hintedTotal = n)).catch(() => { })
 
   const task: any = BackgroundURLSession.startDownload({ url, destination: dstPath })
   if (!task || typeof task !== "object") throw new Error("startDownload 未返回有效任务对象")
@@ -410,7 +398,7 @@ async function downloadWithProgressInternal(
       console.log("[dl] task.progress init:", p)
       console.log("[dl] task keys:", Object.keys(task ?? {}))
       console.log("[dl] progress keys:", Object.keys((task?.progress as any) ?? {}))
-    } catch {}
+    } catch { }
   }
 
   const startedAt = Date.now()
@@ -430,7 +418,7 @@ async function downloadWithProgressInternal(
   let lastObservedReceived = 0
   let lastObservedFrac = 0
 
-  for (;;) {
+  for (; ;) {
     if (err) throw (err instanceof Error ? err : new Error(String(err?.message ?? err ?? "下载失败")))
 
     const pr = readProgressFromURLSession(task)
@@ -461,14 +449,14 @@ async function downloadWithProgressInternal(
       finishedHint: pr.isFinished === true,
       dbg: DEBUG_PROGRESS
         ? {
-            _urlSessionProgress: {
-              fractionCompleted: pr.fractionCompleted,
-              completedUnitCount: pr.completedUnitCount,
-              totalUnitCount: pr.totalUnitCount,
-              isFinished: pr.isFinished,
-              estimatedTimeRemaining: pr.estimatedTimeRemaining,
-            },
-          }
+          _urlSessionProgress: {
+            fractionCompleted: pr.fractionCompleted,
+            completedUnitCount: pr.completedUnitCount,
+            totalUnitCount: pr.totalUnitCount,
+            isFinished: pr.isFinished,
+            estimatedTimeRemaining: pr.estimatedTimeRemaining,
+          },
+        }
         : undefined,
     })
 

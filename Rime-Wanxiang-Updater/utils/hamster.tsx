@@ -2,6 +2,7 @@
 import { Path } from "scripting"
 import { Runtime } from "./runtime"
 import type { AppConfig } from "./config"
+import { callMaybeAsync } from "./common"
 
 // Base RIME suffixes (without RimeUserData children, those are detected dynamically)
 export const RIME_SUFFIXES_BASE = ["/RIME/Rime", "/Rime"]
@@ -87,18 +88,7 @@ export async function getRimeSuffixes(root: string): Promise<string[]> {
   return suffixes
 }
 
-function isPromiseLike(v: any): v is Promise<any> {
-  return !!v && typeof v === "object" && typeof v.then === "function"
-}
 
-async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
-  try {
-    const r = fn.apply(thisArg, args)
-    return isPromiseLike(r) ? await r : r
-  } catch {
-    return undefined
-  }
-}
 
 async function resolveBookmarkPath(rawPath: string, bookmarkName?: string): Promise<string> {
   const fm = Runtime.FileManager

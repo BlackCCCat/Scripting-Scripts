@@ -25,7 +25,9 @@ import {
   type AppConfig,
   type ProSchemeKey,
   type InputMethod,
+  PRO_KEYS,
 } from "../utils/config"
+import { callMaybeAsync, normalizePath } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
 import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
@@ -38,7 +40,7 @@ type AlertState = {
   actions: AlertNode
 }
 
-const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
 const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "仓输入法", value: "hamster" },
   { label: "元书输入法", value: "hamster3" },
@@ -83,9 +85,7 @@ function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputM
   return undefined
 }
 
-function normalizePath(p: string): string {
-  return String(p ?? "").trim().replace(/\/+$/, "")
-}
+
 
 async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): Promise<string[]> {
   const out: string[] = []
@@ -103,18 +103,7 @@ async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): P
   return Array.from(new Set(out))
 }
 
-function isPromiseLike(v: any): v is Promise<any> {
-  return !!v && typeof v === "object" && typeof v.then === "function"
-}
 
-async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
-  try {
-    const r = fn.apply(thisArg, args)
-    return isPromiseLike(r) ? await r : r
-  } catch {
-    return undefined
-  }
-}
 
 function CenterRowButton(props: {
   title: string

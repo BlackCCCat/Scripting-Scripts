@@ -1,5 +1,5 @@
 // File: utils/extracted_cache.tsx
-import { Runtime } from "./runtime"
+import { callMaybeAsync, FM, storage, normalizePath, basename, dirname, compilePatterns, matchAny } from "./common"
 
 export type TrackKind = "scheme" | "dict"
 
@@ -18,56 +18,6 @@ type StoreData = Record<string, RootTracked>
 const STORAGE_KEY = "wanxiang_extracted_files"
 const LEGACY_STORAGE_KEYS = ["wanxiang_extracted_files_v1"]
 
-function storage(): any {
-  return (globalThis as any).Storage ?? Runtime.Storage
-}
-
-function FM(): any {
-  return (globalThis as any).FileManager ?? Runtime.FileManager
-}
-
-function normalizePath(p: string): string {
-  return String(p ?? "").trim().replace(/\/+$/, "")
-}
-
-function basename(p: string): string {
-  const x = String(p ?? "")
-  const i = x.lastIndexOf("/")
-  return i >= 0 ? x.slice(i + 1) : x
-}
-
-function dirname(p: string): string {
-  const x = String(p ?? "")
-  const i = x.lastIndexOf("/")
-  if (i <= 0) return ""
-  return x.slice(0, i)
-}
-
-function escapeRe(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-function compilePatterns(patterns: string[]): RegExp[] {
-  const list: RegExp[] = []
-  for (const raw of patterns ?? []) {
-    const p = String(raw ?? "").trim()
-    if (!p) continue
-    try {
-      list.push(new RegExp(p))
-      continue
-    } catch {}
-    list.push(new RegExp("^" + p.split("*").map(escapeRe).join(".*") + "$", "i"))
-  }
-  return list
-}
-
-function matchAny(v: string, patterns: RegExp[]): boolean {
-  for (const re of patterns) {
-    if (re.test(v)) return true
-  }
-  return false
-}
-
 function shouldSkip(path: string, root: string, patterns: RegExp[]): boolean {
   if (!patterns.length) return false
   const full = String(path ?? "")
@@ -75,16 +25,6 @@ function shouldSkip(path: string, root: string, patterns: RegExp[]): boolean {
   const name = basename(full)
   const rel = rootNorm && full.startsWith(rootNorm + "/") ? full.slice(rootNorm.length + 1) : full
   return matchAny(name, patterns) || matchAny(rel, patterns) || matchAny(full, patterns)
-}
-
-async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
-  try {
-    const r = fn.apply(thisArg, args)
-    if (r && typeof r.then === "function") return await r
-    return r
-  } catch {
-    return undefined
-  }
 }
 
 function loadStore(): StoreData {
@@ -162,7 +102,7 @@ async function removePath(fm: any, p: string): Promise<boolean> {
       await fm.delete(p)
       return true
     }
-  } catch {}
+  } catch { }
   return false
 }
 

@@ -2,19 +2,15 @@
 import { Path } from "scripting"
 import type { AppConfig } from "./config"
 import { getExcludePatterns } from "./config"
+import { Runtime } from "./runtime"
+import { sleep, FM, removePathLoose, tempDownloadPath, pickGithubSha256FromDigest, globToRegExp, pickExpectedSize, getFileSize } from "./common"
 import { downloadWithProgress } from "./downloader"
 import { ensureDir, removeDirSafe, unzipToDirWithOverwrite, mergeSubdirsByName } from "./fs"
 import { deployHamster } from "./deploy"
-import { assertInstallPathAccess } from "./hamster"
-import { checkUpdate as checkSchemeUpdate, doUpdate as doSchemeUpdate } from "./updater"
+import { assertInstallPathAccess, detectRimeDir } from "./hamster"
+
 import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
 import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
-
-declare const fetch: any
-
-function sleep(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms))
-}
 
 const OWNER = "amzxyz"
 const GH_REPO = "rime_wanxiang"
@@ -24,7 +20,8 @@ const DICT_TAG = "dict-nightly"
 const MODEL_REPO = "RIME-LMDG"
 const MODEL_TAG = "LTS"
 const MODEL_FILE = "wanxiang-lts-zh-hans.gram"
-const CNB_DICT_TITLE = "词库"
+const CNB_DICT_TITLE = "\u8bcd\u5e93"
+const CNB_SCHEME_TITLE = "\u4e07\u8c61\u62fc\u97f3\u8f93\u5165\u65b9\u6848"
 
 export type RemoteAsset = {
   name: string
@@ -32,8 +29,8 @@ export type RemoteAsset = {
   tag?: string
   body?: string
   updatedAt?: string
-  remoteIdOrSha?: string // GitHub=sha256(digest) / CNB=id
-  size?: number // ✅ 新增：远端资产大小（bytes）
+  remoteIdOrSha?: string
+  size?: number
 }
 
 export type AllUpdateResult = {
@@ -78,89 +75,15 @@ function ensureRemoteMark(asset?: RemoteAsset, kind?: "dict" | "model"): string 
   return undefined
 }
 
-function FM(): any {
-  return (globalThis as any).FileManager
-}
-
-async function removePathLoose(path: string) {
-  const fm = FM()
-  try {
-    if (typeof fm?.removeSync === "function") {
-      fm.removeSync(path)
-      return
-    }
-    if (typeof fm?.remove === "function") {
-      await fm.remove(path)
-      return
-    }
-    if (typeof fm?.delete === "function") {
-      await fm.delete(path)
-      return
-    }
-  } catch {}
-}
-
-function tempDownloadPath(fileName: string): string {
-  const fm = FM()
-  const base = String(fm?.temporaryDirectory ?? "/tmp")
-  const safeName = String(fileName ?? "asset.bin").replace(/[\\/]/g, "_")
-  return Path.join(base, `wanxiang_tmp_${Date.now()}_${safeName}`)
-}
-
-function pickGithubSha256FromDigest(digest?: string): string | undefined {
-  if (!digest) return undefined
-  const m = String(digest).match(/sha256\s*:\s*([0-9a-fA-F]{32,})/i)
-  return m?.[1]
-}
-
 async function httpJson(url: string, init?: any) {
-  const res = await fetch(url, init)
-  if (!res.ok) throw new Error(`请求失败：${res.status} ${res.statusText}`)
+  const fetchFn = Runtime.fetch
+  if (!fetchFn) throw new Error("\u8fd0\u884c\u65f6\u6ca1\u6709 fetch")
+  const res = await fetchFn(url, init)
+  if (!res.ok) throw new Error(`\u8bf7\u6c42\u5931\u8d25\uff1a${res.status} ${res.statusText}`)
   const json = await res.json()
   return { json, headers: res.headers }
 }
 
-function globToRegExp(glob: string): RegExp {
-  const esc = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
-  return new RegExp("^" + esc + "$", "i")
-}
-
-// ✅ 统一从 RemoteAsset / 其它结构中提取"期望大小"
-function pickExpectedSize(asset: any): number | undefined {
-  const candidates = [
-    asset?.size,
-    asset?.fileSize,
-    asset?.contentLength,
-    asset?.bytes,
-    asset?.asset?.size,
-    asset?.asset?.fileSize,
-  ]
-  for (const v of candidates) {
-    const n = typeof v === "string" ? Number(v) : v
-    if (typeof n === "number" && Number.isFinite(n) && n > 0) return n
-  }
-  return undefined
-}
-
-// ✅ 获取本地文件大小（用于与 expectedSize 对比）
-async function getFileSize(fm: any, path: string): Promise<number> {
-  if (typeof fm?.fileSizeSync === "function") return Number(fm.fileSizeSync(path) ?? 0)
-  if (typeof fm?.fileSize === "function") return Number((await fm.fileSize(path)) ?? 0)
-
-  if (typeof fm?.statSync === "function") return Number(fm.statSync(path)?.size ?? 0)
-  if (typeof fm?.stat === "function") return Number((await fm.stat(path))?.size ?? 0)
-
-  if (typeof fm?.attributesSync === "function") {
-    const a = fm.attributesSync(path)
-    return Number(a?.size ?? a?.fileSize ?? 0)
-  }
-  if (typeof fm?.attributes === "function") {
-    const a = await fm.attributes(path)
-    return Number(a?.size ?? a?.fileSize ?? 0)
-  }
-
-  throw new Error("无法获取文件大小（FileManager 缺少 fileSize/stat/attributes）")
-}
 
 async function fetchLatestAssetFromGithub(args: {
   owner: string
@@ -277,7 +200,7 @@ async function fetchLatestAssetFromCnb(args: {
         name,
         url: url2,
         updatedAt: a.updated_at ?? a.updatedAt,
-        tag: rel.tag_name ?? rel.tagName,
+        tag: String(rel?.tag_ref ?? rel?.tag_name ?? rel?.tagName ?? "").split("/").pop() || undefined,
         body: rel.body,
         remoteIdOrSha: a?.id != null ? String(a.id) : undefined,
         size:
@@ -298,56 +221,71 @@ function dictPattern(cfg: AppConfig): string {
   return `*${cfg.proSchemeKey}*dicts.zip`
 }
 
+function schemePattern(cfg: AppConfig): string {
+  return cfg.schemeEdition === "base" ? "*base.zip" : `*${cfg.proSchemeKey}*fuzhu.zip`
+}
+
+async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | undefined> {
+  const glob = schemePattern(cfg)
+  if (cfg.releaseSource === "github") {
+    return fetchLatestAssetFromGithub({
+      owner: OWNER,
+      repo: GH_REPO,
+      assetNameGlob: glob,
+      token: cfg.githubToken,
+    })
+  }
+  return fetchLatestAssetFromCnb({
+    owner: OWNER,
+    repo: CNB_REPO,
+    assetNameGlob: glob,
+    releaseTitleIncludes: [CNB_SCHEME_TITLE],
+  })
+}
+
 async function resolveRimeDir(cfg: AppConfig): Promise<string> {
   return await assertInstallPathAccess(cfg)
 }
 
 // ===== 统一检查：方案/词库/模型 =====
 export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> {
-  const schemeCheck = await checkSchemeUpdate(cfg).catch(() => ({} as any))
-  const scheme = schemeCheck?.latest
-    ? {
-        name: schemeCheck.latest.name,
-        url: schemeCheck.latest.url,
-        tag: schemeCheck.latest.tag,
-        body: schemeCheck.latest.body,
-        updatedAt: schemeCheck.latest.updatedAt,
-        remoteIdOrSha: schemeCheck.latest.idOrSha ?? schemeCheck.latest.tag ?? schemeCheck.latest.name,
-      }
-    : undefined
+  const scheme = await fetchLatestSchemeAsset(cfg).catch(() => undefined)
+  if (scheme && !scheme.remoteIdOrSha) {
+    scheme.remoteIdOrSha = scheme.tag ?? scheme.name
+  }
 
   const dict =
     cfg.releaseSource === "github"
       ? await fetchLatestAssetFromGithub({
-          owner: OWNER,
-          repo: GH_REPO,
-          tag: DICT_TAG,
-          assetNameGlob: dictPattern(cfg),
-          token: cfg.githubToken,
-        })
+        owner: OWNER,
+        repo: GH_REPO,
+        tag: DICT_TAG,
+        assetNameGlob: dictPattern(cfg),
+        token: cfg.githubToken,
+      })
       : await fetchLatestAssetFromCnb({
-          owner: OWNER,
-          repo: CNB_REPO,
-          assetNameGlob: dictPattern(cfg),
-          needLastPage: false,
-          releaseTitleIncludes: [CNB_DICT_TITLE],
-        })
+        owner: OWNER,
+        repo: CNB_REPO,
+        assetNameGlob: dictPattern(cfg),
+        needLastPage: false,
+        releaseTitleIncludes: [CNB_DICT_TITLE],
+      })
 
   const model =
     cfg.releaseSource === "github"
       ? await fetchLatestAssetFromGithub({
-          owner: OWNER,
-          repo: MODEL_REPO,
-          tag: MODEL_TAG,
-          assetNameExact: MODEL_FILE,
-          token: cfg.githubToken,
-        })
+        owner: OWNER,
+        repo: MODEL_REPO,
+        tag: MODEL_TAG,
+        assetNameExact: MODEL_FILE,
+        token: cfg.githubToken,
+      })
       : await fetchLatestAssetFromCnb({
-          owner: OWNER,
-          repo: CNB_REPO,
-          assetNameExact: MODEL_FILE,
-          needLastPage: true,
-        })
+        owner: OWNER,
+        repo: CNB_REPO,
+        assetNameExact: MODEL_FILE,
+        needLastPage: true,
+      })
 
   if (dict && !dict.remoteIdOrSha) {
     dict.remoteIdOrSha = ensureRemoteMark(dict, "dict")
@@ -393,29 +331,75 @@ export async function updateScheme(
     autoDeploy?: boolean
   }
 ) {
-  const r: any = await doSchemeUpdate(cfg, {
-    onStage: params.onStage,
-    onProgress: params.onProgress,
-    autoDeploy: false, // 这里不在 updater 内部部署，统一在外部处理
-  })
+  params.onStage?.("解析目录...")
+  const { engine } = await detectRimeDir(cfg)
+  const installDir = await assertInstallPathAccess(cfg)
 
-  // ✅ 记录方案版本（成功后记录）
-  const remoteIdOrSha = r?.remoteIdOrSha ?? r?.tag ?? r?.assetName
+  const latest = await fetchLatestSchemeAsset(cfg)
+  if (!latest?.url) throw new Error("\u672A\u627E\u5230\u53EF\u7528\u7684\u8FDC\u7AEF\u65B9\u6848\u8D44\u4EA7")
+
+  await ensureDir(installDir)
+  await removeDirSafe(Path.join(installDir, "UpdateCache"))
+  const zipPath = tempDownloadPath(latest.name)
+  await removePathLoose(zipPath)
+
+  try {
+    params.onStage?.("下载中...")
+    await downloadWithProgress(latest.url, zipPath, params.onProgress, (e) => {
+      if (e.type === "retrying") {
+        params.onStage?.(`\u4E0B\u8F7D\u4E2D\uFF08\u91CD\u8BD5 ${e.attempt}/${e.maxAttempts}\uFF09...`)
+      }
+    })
+
+    // \u6587\u4EF6\u5927\u5C0F\u6821\u9A8C
+    const expectedSize = pickExpectedSize(latest)
+    if (expectedSize) {
+      const fm = FM()
+      const actualSize = await getFileSize(fm, zipPath)
+      if (actualSize > 0 && Math.abs(actualSize - expectedSize) > expectedSize * 0.05) {
+        throw new Error(`\u65B9\u6848\u4E0B\u8F7D\u6587\u4EF6\u5927\u5C0F\u4E0D\u5339\u914D\uFF08\u671F\u671B ${expectedSize} \u5B57\u8282\uFF0C\u5B9E\u9645 ${actualSize} \u5B57\u8282\uFF09`)
+      }
+    }
+
+    const exclude = getExcludePatterns(cfg)
+    params.onStage?.("清理旧文件中…")
+    const removed = await removeExtractedFiles({
+      installRoot: installDir,
+      kind: "scheme",
+      compareRoot: installDir,
+      excludePatterns: exclude,
+    })
+    if (removed > 0) {
+      params.onStage?.(`\u5DF2\u6E05\u7406\u65E7\u6587\u4EF6\uFF1A${removed} \u4E2A`)
+    }
+    params.onStage?.("解压中...")
+    const copied = new Set<string>()
+    await unzipToDirWithOverwrite(zipPath, installDir, {
+      excludePatterns: exclude,
+      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+    })
+    setExtractedFiles(installDir, "scheme", Array.from(copied))
+  } finally {
+    await removePathLoose(zipPath)
+  }
+
+  // \u8BB0\u5F55\u65B9\u6848\u7248\u672C
+  const remoteIdOrSha = latest.remoteIdOrSha ?? latest.tag ?? latest.name
   await setSchemeMeta({
-    installRoot: r?.installRoot ?? "",
+    installRoot: installDir,
     bookmarkName: cfg.hamsterBookmarkName,
-    fileName: r?.assetName ?? "",
+    fileName: latest.name,
     schemeEdition: cfg.schemeEdition,
     proSchemeKey: cfg.schemeEdition === "pro" ? cfg.proSchemeKey : undefined,
     inputMethod: cfg.inputMethod,
-    tag: r?.tag,
-    updatedAt: r?.updatedAt ?? new Date().toISOString(),
+    tag: latest.tag,
+    updatedAt: latest.updatedAt ?? new Date().toISOString(),
     remoteIdOrSha,
     source: cfg.releaseSource,
   })
 
   if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage)
-  return r
+  return { engine, installRoot: installDir, assetName: latest.name, tag: latest.tag, updatedAt: latest.updatedAt, remoteIdOrSha }
 }
 
 export async function updateDict(
@@ -433,19 +417,19 @@ export async function updateDict(
   const dict =
     cfg.releaseSource === "github"
       ? await fetchLatestAssetFromGithub({
-          owner: OWNER,
-          repo: GH_REPO,
-          tag: DICT_TAG,
-          assetNameGlob: dictPattern(cfg),
-          token: cfg.githubToken,
-        })
+        owner: OWNER,
+        repo: GH_REPO,
+        tag: DICT_TAG,
+        assetNameGlob: dictPattern(cfg),
+        token: cfg.githubToken,
+      })
       : await fetchLatestAssetFromCnb({
-          owner: OWNER,
-          repo: CNB_REPO,
-          assetNameGlob: dictPattern(cfg),
-          needLastPage: false,
-          releaseTitleIncludes: [CNB_DICT_TITLE],
-        })
+        owner: OWNER,
+        repo: CNB_REPO,
+        assetNameGlob: dictPattern(cfg),
+        needLastPage: false,
+        releaseTitleIncludes: [CNB_DICT_TITLE],
+      })
 
   if (!dict?.url) throw new Error("未找到可用的词库资产")
 
@@ -459,6 +443,16 @@ export async function updateDict(
         params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
       }
     })
+
+    // 文件大小校验
+    const expectedSize = pickExpectedSize(dict)
+    if (expectedSize) {
+      const fm = FM()
+      const actualSize = await getFileSize(fm, zipPath)
+      if (actualSize > 0 && Math.abs(actualSize - expectedSize) > expectedSize * 0.05) {
+        throw new Error(`词库下载文件大小不匹配（期望 ${expectedSize} 字节，实际 ${actualSize} 字节）`)
+      }
+    }
 
     const exclude = getExcludePatterns(cfg)
     const dictDir = Path.join(installRoot, "dicts")
@@ -520,18 +514,18 @@ export async function updateModel(
   const model =
     cfg.releaseSource === "github"
       ? await fetchLatestAssetFromGithub({
-          owner: OWNER,
-          repo: MODEL_REPO,
-          tag: MODEL_TAG,
-          assetNameExact: MODEL_FILE,
-          token: cfg.githubToken,
-        })
+        owner: OWNER,
+        repo: MODEL_REPO,
+        tag: MODEL_TAG,
+        assetNameExact: MODEL_FILE,
+        token: cfg.githubToken,
+      })
       : await fetchLatestAssetFromCnb({
-          owner: OWNER,
-          repo: CNB_REPO,
-          assetNameExact: MODEL_FILE,
-          needLastPage: true,
-        })
+        owner: OWNER,
+        repo: CNB_REPO,
+        assetNameExact: MODEL_FILE,
+        needLastPage: true,
+      })
 
   if (!model?.url) throw new Error("未找到可用的模型资产")
 
@@ -571,7 +565,7 @@ export async function updateModel(
       try {
         if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
         else if (typeof fm?.remove === "function") await fm.remove(dstPath)
-      } catch {}
+      } catch { }
 
       if (typeof fm?.moveSync === "function") {
         fm.moveSync(tempPath, dstPath)

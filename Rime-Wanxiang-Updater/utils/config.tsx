@@ -6,6 +6,8 @@ export type SchemeEdition = "base" | "pro"
 export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou"
 export type InputMethod = "hamster" | "hamster3"
 
+export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
 export type AppConfig = {
   hamsterRootPath: string
   hamsterBookmarkName: string

@@ -19,7 +19,7 @@ import {
   Path,
 } from "scripting"
 
-import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey } from "../utils/config"
+import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey, PRO_KEYS } from "../utils/config"
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
 import { detectRimeDir, verifyInstallPathAccess, collectRimeCandidates } from "../utils/hamster"
@@ -67,7 +67,7 @@ function pctFromFraction(f?: number) {
   return `${(v * 100).toFixed(2)}%`
 }
 
-const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
 
 function selectedSchemeFromConfig(cfg: AppConfig): string {
   return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`

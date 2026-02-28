@@ -1,6 +1,7 @@
 // File: utils/fs.ts
 import { Path } from "scripting"
 import { Runtime } from "./runtime"
+import { escapeRe, compilePatterns, matchAny } from "./common"
 
 export type CopyOptions = {
   excludePatterns: string[]
@@ -55,13 +56,13 @@ async function isDirectory(p: string): Promise<boolean> {
     try {
       const st = await fm.stat(p)
       if (st && typeof st.type === "string") return st.type === "directory"
-    } catch {}
+    } catch { }
   }
   if (typeof fm.statSync === "function") {
     try {
       const st = fm.statSync(p)
       if (st && typeof st.type === "string") return st.type === "directory"
-    } catch {}
+    } catch { }
   }
   return false
 }
@@ -91,36 +92,13 @@ async function copy(src: string, dst: string) {
   throw new Error("FileManager 缺少 copyFile")
 }
 
-function escapeRe(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-function compilePatterns(patterns: string[]): RegExp[] {
-  const list: RegExp[] = []
-  for (const raw of patterns) {
-    const p = String(raw ?? "").trim()
-    if (!p) continue
-    try {
-      list.push(new RegExp(p))
-      continue
-    } catch {}
-    const re = new RegExp("^" + p.split("*").map(escapeRe).join(".*") + "$", "i")
-    list.push(re)
-  }
-  return list
-}
 
-function matchAny(pathOrName: string, patterns: RegExp[]) {
-  for (const re of patterns) {
-    if (re.test(pathOrName)) return true
-  }
-  return false
-}
 
 export async function ensureDir(dir: string) {
   if (await exists(dir)) return
   try {
     await mkdir(dir)
-  } catch {}
+  } catch { }
 }
 
 export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: CopyOptions) {
@@ -148,7 +126,7 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
         if (await exists(dst)) {
           const dstIsDir = await isDirectory(dst)
           if (!dstIsDir) {
-            try { await remove(dst) } catch {}
+            try { await remove(dst) } catch { }
           }
         }
         await walk(src, dst)
@@ -162,13 +140,13 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
 
       await ensureDir(Path.dirname(dst))
       if (dstExists) {
-        try { await remove(dst) } catch {}
+        try { await remove(dst) } catch { }
       }
 
       await copy(src, dst)
       try {
         opts.onCopiedFile?.(dst, rel)
-      } catch {}
+      } catch { }
     }
   }
 
@@ -217,12 +195,12 @@ export async function unzipToDirWithOverwrite(
         if (shouldSkip(name, name, src)) continue
         await ensureDir(Path.dirname(dst))
         if (await exists(dst)) {
-          try { await remove(dst) } catch {}
+          try { await remove(dst) } catch { }
         }
         await copy(src, dst)
         try {
           opts?.onCopiedFile?.(dst, name)
-        } catch {}
+        } catch { }
       }
       const srcRoot = Path.join(tmpDir, dirs[0])
       await copyDirWithPolicy(srcRoot, destDir, {
@@ -250,7 +228,7 @@ export async function unzipToDirWithOverwrite(
 export async function removeDirSafe(dir: string) {
   try {
     if (await exists(dir)) await remove(dir)
-  } catch {}
+  } catch { }
 }
 
 async function hasExcludedMatch(dir: string, patterns: RegExp[]): Promise<boolean> {

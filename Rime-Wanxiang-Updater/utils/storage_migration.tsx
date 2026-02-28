@@ -1,4 +1,4 @@
-import { Runtime } from "./runtime"
+import { storage, normalizePath } from "./common"
 import { RIME_SUFFIXES_BASE } from "./hamster"
 
 const CONFIG_KEY = "wanxiang_updater_config"
@@ -16,9 +16,7 @@ const RIME_SUFFIXES = [...RIME_SUFFIXES_BASE, "/RimeUserData"]
 
 type AnyObj = Record<string, any>
 
-function storage(): any {
-  return (globalThis as any).Storage ?? Runtime.Storage
-}
+
 
 function getRaw(st: any, key: string): string {
   const v = st?.get?.(key) ?? st?.getString?.(key)
@@ -36,9 +34,7 @@ function removeKey(st: any, key: string) {
   } catch { }
 }
 
-function normalizePath(p: string): string {
-  return String(p ?? "").trim().replace(/\/+$/, "")
-}
+
 
 function pathVariants(root: string): string[] {
   const n = normalizePath(root)

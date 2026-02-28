@@ -1,6 +1,7 @@
 // File: utils/meta.tsx
 import type { InputMethod, ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
-import { Runtime } from "./runtime"
+import { PRO_KEYS } from "./config"
+import { storage } from "./common"
 import { RIME_SUFFIXES_BASE } from "./hamster"
 
 export type SchemeMeta = {
@@ -70,7 +71,7 @@ type MetaStoreData = {
 
 const STORAGE_KEY = "wanxiang_meta_store"
 const LEGACY_STORAGE_KEYS = ["wanxiang_meta_store_v1"]
-const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+
 // 静态后缀列表（动态 RimeUserData 子目录名由 relatedRoots 自动推导）
 const RIME_SUFFIXES = [...RIME_SUFFIXES_BASE, "/RimeUserData"]
 
@@ -123,9 +124,7 @@ function relatedRoots(root: string): string[] {
   return Array.from(out).filter(Boolean)
 }
 
-function storage(): any {
-  return (globalThis as any).Storage ?? Runtime.Storage
-}
+
 
 function pathKey(p: string): string {
   return normalizeRoot(p)
