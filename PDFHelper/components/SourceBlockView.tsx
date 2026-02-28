@@ -45,7 +45,7 @@ function rowSwipeDelete(onDelete: () => void) {
 }
 
 function PdfPreview(props: { page: PageItem }) {
-  if (props.page.kind !== "pdf") return null
+  if (props.page.kind === "image") return null
 
   if (props.page.previewImage) {
     return (
@@ -147,6 +147,37 @@ function PdfRow(props: {
   )
 }
 
+function PdfWholeRow(props: {
+  source: SourceItem
+  page: PageItem
+  onTogglePage: (sourceId: string, pageId: string) => void
+  onDeletePage: (sourceId: string, pageId: string) => void
+}) {
+  if (props.page.kind !== "pdf-whole") return null
+  const onToggle = () => props.onTogglePage(props.source.id, props.page.id)
+
+  return (
+    <HStack
+      key={props.page.id}
+      spacing={10}
+      padding={{ top: 8, bottom: 8 }}
+      frame={{ maxWidth: "infinity", alignment: "leading" }}
+      background={"rgba(0,0,0,0.001)"}
+      onTapGesture={onToggle}
+      trailingSwipeActions={rowSwipeDelete(() => props.onDeletePage(props.source.id, props.page.id))}
+    >
+      <PdfPreview page={props.page} />
+      <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+        <Text>{props.page.title}</Text>
+        <Text font="footnote" foregroundStyle="secondaryLabel">
+          {props.source.name}
+        </Text>
+      </VStack>
+      <SelectionMark selected={props.page.selected} selectedOrder={props.page.selectedOrder} />
+    </HStack>
+  )
+}
+
 export function SourceBlockView(props: {
   source: SourceItem
   onTogglePage: (sourceId: string, pageId: string) => void
@@ -164,8 +195,16 @@ export function SourceBlockView(props: {
       )}
     >
       {props.source.pages.map((page) =>
-        props.source.kind === "image" ? (
+        page.kind === "image" ? (
           <ImageRow
+            key={page.id}
+            source={props.source}
+            page={page}
+            onTogglePage={props.onTogglePage}
+            onDeletePage={props.onDeletePage}
+          />
+        ) : page.kind === "pdf-whole" ? (
+          <PdfWholeRow
             key={page.id}
             source={props.source}
             page={page}

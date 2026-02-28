@@ -1,4 +1,4 @@
-export type PageItem = ImagePageItem | PdfPageItem
+export type PageItem = ImagePageItem | PdfPageItem | PdfWholeItem
 
 export type SourceItem = {
   id: string
@@ -27,6 +27,19 @@ export type PdfPageItem = {
   selectedOrder?: number
   pdfPath: string
   pageIndex: number
+  previewImage: UIImage | null
+  previewFilePath: string | null
+}
+
+export type PdfWholeItem = {
+  id: string
+  kind: "pdf-whole"
+  title: string
+  sourceName: string
+  selected: boolean
+  selectedOrder?: number
+  pdfPath: string
+  pageCount: number
   previewImage: UIImage | null
   previewFilePath: string | null
 }

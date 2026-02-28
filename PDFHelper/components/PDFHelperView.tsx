@@ -115,6 +115,17 @@ export function PDFHelperView() {
     () => selectedPages.filter((page) => page.kind === "image").length,
     [selectedPages]
   )
+  const selectedTotalPageCount = useMemo(() => {
+    let count = 0
+    for (const page of selectedPages) {
+      if (page.kind === "pdf-whole") {
+        count += page.pageCount
+      } else {
+        count += 1
+      }
+    }
+    return count
+  }, [selectedPages])
 
   const isBusy = processing || loadingMessage !== null
   const canConvert = selectedImageCount > 0 && !isBusy
@@ -332,7 +343,7 @@ export function PDFHelperView() {
             <VStack spacing={8} padding={24}>
               <Text>点右上角「+」添加文件或照片</Text>
               <Text foregroundStyle="secondaryLabel">
-                图片将显示整图，PDF 将按页展示缩略图，可逐页勾选后执行转换或合并
+                图片将显示整图；PDF 可选择按页展示缩略图(文件页数较大时不显示缩略图)或作为整体导入，支持自定义导入页码范围
               </Text>
             </VStack>
           ) : (
@@ -352,7 +363,7 @@ export function PDFHelperView() {
         <VStack spacing={8} padding={12}>
           <HStack>
             <Text foregroundStyle="secondaryLabel">
-              已选择 {selectedPages.length} 页（图片 {selectedImageCount}）
+              已选择 {selectedPages.length} 项 · 共 {selectedTotalPageCount} 页（图片 {selectedImageCount}）
             </Text>
             <Spacer />
             {loadingMessage ? (

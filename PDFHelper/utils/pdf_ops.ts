@@ -1,3 +1,4 @@
+import { Path } from "scripting"
 import type { PageItem, SourceItem } from "../types"
 
 export function getSelectedPages(sources: SourceItem[]): PageItem[] {
@@ -104,48 +105,100 @@ function getPageCount(doc: any): number {
   return 0
 }
 
-async function buildDocumentFromPages(pages: PageItem[]): Promise<{ document: PDFDocument; pageCount: number }> {
-  let outputDocument: PDFDocument | null = null
-  let insertedPageCount = 0
-  const sourceCache = new Map<string, PDFDocument>()
+async function addAllPagesFromWhole(
+  outputDocument: PDFDocument,
+  pdfPath: string,
+  pageCount: number
+): Promise<number> {
+  const sourceDocument = PDFDocument.fromFilePath(pdfPath)
+  if (!sourceDocument || sourceDocument.isLocked) return 0
 
-  for (const pageItem of pages) {
-    let page: PDFPage | null = null
-
-    if (pageItem.kind === "image") {
-      page = PDFPage.fromImage(pageItem.image)
-    } else {
-      const cached = sourceCache.get(pageItem.pdfPath)
-      const sourceDocument = cached ?? PDFDocument.fromFilePath(pageItem.pdfPath)
-      if (!sourceDocument || sourceDocument.isLocked) continue
-      if (!cached) sourceCache.set(pageItem.pdfPath, sourceDocument)
-      page = sourceDocument.pageAt(pageItem.pageIndex)
-    }
-
+  let added = 0
+  const total = Math.min(sourceDocument.pageCount, pageCount)
+  for (let i = 0; i < total; i++) {
+    const page = sourceDocument.pageAt(i)
     if (!page) continue
-
-    if (!outputDocument) {
-      const firstPage = await clonePage(page)
-      if (!firstPage) continue
-      const firstData = await firstPage.data
-      if (!firstData) continue
-      outputDocument = PDFDocument.fromData(firstData)
-      if (!outputDocument) continue
-      insertedPageCount += 1
-      continue
-    }
-
     const copiedPage = await clonePage(page)
     if (!copiedPage) continue
     appendPage(outputDocument, copiedPage)
-    insertedPageCount += 1
+    added++
   }
+  return added
+}
 
-  if (!outputDocument || insertedPageCount === 0) {
-    throw new Error("未能生成 PDF，请检查已选页面是否可读取")
-  }
+async function buildDocumentFromPages(pages: PageItem[]): Promise<{ document: PDFDocument; pageCount: number }> {
+  return Thread.runInBackground(async () => {
+    let outputDocument: PDFDocument | null = null
+    let insertedPageCount = 0
+    const sourceCache = new Map<string, PDFDocument>()
 
-  return { document: outputDocument, pageCount: insertedPageCount }
+    for (const pageItem of pages) {
+      if (pageItem.kind === "pdf-whole") {
+        if (!outputDocument) {
+          const sourceDocument = PDFDocument.fromFilePath(pageItem.pdfPath)
+          if (!sourceDocument || sourceDocument.isLocked) continue
+          const firstPage = sourceDocument.pageAt(0)
+          if (!firstPage) continue
+          const firstClone = await clonePage(firstPage)
+          if (!firstClone) continue
+          const firstData = await firstClone.data
+          if (!firstData) continue
+          outputDocument = PDFDocument.fromData(firstData)
+          if (!outputDocument) continue
+          insertedPageCount += 1
+
+          for (let i = 1; i < Math.min(sourceDocument.pageCount, pageItem.pageCount); i++) {
+            const p = sourceDocument.pageAt(i)
+            if (!p) continue
+            const cp = await clonePage(p)
+            if (!cp) continue
+            appendPage(outputDocument, cp)
+            insertedPageCount++
+          }
+        } else {
+          const added = await addAllPagesFromWhole(outputDocument, pageItem.pdfPath, pageItem.pageCount)
+          insertedPageCount += added
+        }
+        continue
+      }
+
+      let page: PDFPage | null = null
+
+      if (pageItem.kind === "image") {
+        page = PDFPage.fromImage(pageItem.image)
+      } else {
+        const cached = sourceCache.get(pageItem.pdfPath)
+        const sourceDocument = cached ?? PDFDocument.fromFilePath(pageItem.pdfPath)
+        if (!sourceDocument || sourceDocument.isLocked) continue
+        if (!cached) sourceCache.set(pageItem.pdfPath, sourceDocument)
+        page = sourceDocument.pageAt(pageItem.pageIndex)
+      }
+
+      if (!page) continue
+
+      if (!outputDocument) {
+        const firstPage = await clonePage(page)
+        if (!firstPage) continue
+        const firstData = await firstPage.data
+        if (!firstData) continue
+        outputDocument = PDFDocument.fromData(firstData)
+        if (!outputDocument) continue
+        insertedPageCount += 1
+        continue
+      }
+
+      const copiedPage = await clonePage(page)
+      if (!copiedPage) continue
+      appendPage(outputDocument, copiedPage)
+      insertedPageCount += 1
+    }
+
+    if (!outputDocument || insertedPageCount === 0) {
+      throw new Error("未能生成 PDF，请检查已选页面是否可读取")
+    }
+
+    return { document: outputDocument, pageCount: insertedPageCount }
+  })
 }
 
 async function documentToData(document: PDFDocument): Promise<Data> {
