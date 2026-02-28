@@ -22,7 +22,7 @@ import {
 import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey } from "../utils/config"
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
-import { detectRimeDir, verifyInstallPathAccess } from "../utils/hamster"
+import { detectRimeDir, verifyInstallPathAccess, collectRimeCandidates } from "../utils/hamster"
 import {
   checkAllUpdates,
   updateScheme,
@@ -102,8 +102,8 @@ function normalizeMetaScheme(
 function GridButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
   const haptic = () => {
     try {
-      ;(globalThis as any).HapticFeedback?.mediumImpact?.()
-    } catch {}
+      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+    } catch { }
   }
   return (
     <Button
@@ -217,14 +217,14 @@ export function HomeView() {
             <Button
               title="取消"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
                 closeAlert()
               }}
             />
             <Button
               title="确认"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
                 closeAlert()
                 Script.exit()
               }}
@@ -250,7 +250,7 @@ export function HomeView() {
     try {
       const { rimeDir } = await detectRimeDir(current)
       if (rimeDir) installRoot = rimeDir
-    } catch {}
+    } catch { }
     if (!installRoot) {
       installRoot = current.hamsterRootPath
     }
@@ -261,11 +261,8 @@ export function HomeView() {
       pushCandidate(candidates, current.hamsterRootPath)
     }
     if (current.hamsterRootPath) {
-      pushCandidate(candidates,
-        Path.join(current.hamsterRootPath, "RimeUserData", "wanxiang"),
-      )
-      pushCandidate(candidates, Path.join(current.hamsterRootPath, "RIME", "Rime"))
-      pushCandidate(candidates, Path.join(current.hamsterRootPath, "Rime"))
+      const rimeCandidates = await collectRimeCandidates(current.hamsterRootPath)
+      for (const c of rimeCandidates) pushCandidate(candidates, c)
     }
 
     try {
@@ -301,7 +298,7 @@ export function HomeView() {
           }
         }
       }
-    } catch {}
+    } catch { }
 
     const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)))
     let meta: MetaBundle | undefined
@@ -318,7 +315,7 @@ export function HomeView() {
         if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
           meta = byBookmark
         }
-      } catch {}
+      } catch { }
     }
 
     if (!uniq.length || !meta) {
@@ -348,7 +345,7 @@ export function HomeView() {
         }
         saveConfig(next)
         setCfg(next)
-      } catch {}
+      } catch { }
     }
 
     setLocalSchemeVersion(meta.scheme?.remoteTagOrName ?? "暂无法获取")
@@ -426,7 +423,7 @@ export function HomeView() {
             const resolved = await fm.bookmarkedPath(current.hamsterBookmarkName)
             if (resolved) initialDirectory = String(resolved).trim()
           }
-        } catch {}
+        } catch { }
       }
 
       const files = await DocumentPicker.pickFiles({
@@ -470,7 +467,7 @@ export function HomeView() {
         total: p?.total,
         speedBps: p?.speedBps,
       })
-    } catch {}
+    } catch { }
 
     const toNum = (v: any): number | undefined => {
       if (typeof v === "number" && Number.isFinite(v)) return v
@@ -685,105 +682,105 @@ export function HomeView() {
           actions: alert.actions,
         }}
       >
-      <List
-        navigationTitle={"方案更新"}
-        navigationBarTitleDisplayMode={"inline"}
-        listStyle={"insetGroup"}
-        toolbar={{
-          topBarLeading: (
-            <Button
-              title=""
-              systemImage="square.and.pencil"
-              action={() => {
-                try {
-                  ;(globalThis as any).HapticFeedback?.mediumImpact?.()
-                } catch {}
-                void openTextEditor()
-              }}
-            />
-          ),
-          topBarTrailing: (
-            <Button
-              title=""
-              systemImage="gearshape"
-              action={() => {
-                try {
-                  ;(globalThis as any).HapticFeedback?.mediumImpact?.()
-                } catch {}
-                void openSettings()
-              }}
-            />
-          ),
-        }}
-      >
-        <Section header={<Text>本地信息</Text>}>
-          <RowKV k="当前选择的方案" v={localSelectedScheme} />
-          <RowKV k="本地方案版本" v={localSchemeVersion} />
-          <RowKV k="本地词库" v={localDictMark} />
-          <RowKV k="本地模型" v={localModelMark} />
-        </Section>
+        <List
+          navigationTitle={"方案更新"}
+          navigationBarTitleDisplayMode={"inline"}
+          listStyle={"insetGroup"}
+          toolbar={{
+            topBarLeading: (
+              <Button
+                title=""
+                systemImage="square.and.pencil"
+                action={() => {
+                  try {
+                    ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+                  } catch { }
+                  void openTextEditor()
+                }}
+              />
+            ),
+            topBarTrailing: (
+              <Button
+                title=""
+                systemImage="gearshape"
+                action={() => {
+                  try {
+                    ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+                  } catch { }
+                  void openSettings()
+                }}
+              />
+            ),
+          }}
+        >
+          <Section header={<Text>本地信息</Text>}>
+            <RowKV k="当前选择的方案" v={localSelectedScheme} />
+            <RowKV k="本地方案版本" v={localSchemeVersion} />
+            <RowKV k="本地词库" v={localDictMark} />
+            <RowKV k="本地模型" v={localModelMark} />
+          </Section>
 
-        <Section header={<Text>远程信息</Text>}>
-          <RowKV k="远程方案版本" v={remoteSchemeVer} />
-          <RowKV k="远程词库" v={remoteDictMark} />
-          <RowKV k="远程模型" v={remoteModelMark} />
-        </Section>
+          <Section header={<Text>远程信息</Text>}>
+            <RowKV k="远程方案版本" v={remoteSchemeVer} />
+            <RowKV k="远程词库" v={remoteDictMark} />
+            <RowKV k="远程模型" v={remoteModelMark} />
+          </Section>
 
-        <Section header={<Text>更新说明</Text>}>
-          <ScrollView frame={{ height: 220 }} padding>
-            <Markdown content={notes} />
-          </ScrollView>
-        </Section>
+          <Section header={<Text>更新说明</Text>}>
+            <ScrollView frame={{ height: 220 }} padding>
+              <Markdown content={notes} />
+            </ScrollView>
+          </Section>
 
-        <Section header={<Text>操作</Text>}>
-          <VStack spacing={0}>
-            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
-              </VStack>
-              <Divider frame={{ height: 48 }} />
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
-              </VStack>
-            </HStack>
-            <Divider />
-            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
-              </VStack>
-              <Divider frame={{ height: 48 }} />
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
-              </VStack>
-            </HStack>
-            <Divider />
-            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
-              </VStack>
-              <Divider frame={{ height: 48 }} />
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
-              </VStack>
-            </HStack>
-          </VStack>
-        </Section>
+          <Section header={<Text>操作</Text>}>
+            <VStack spacing={0}>
+              <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+                <VStack frame={{ maxWidth: "infinity" }}>
+                  <GridButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+                </VStack>
+                <Divider frame={{ height: 48 }} />
+                <VStack frame={{ maxWidth: "infinity" }}>
+                  <GridButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
+                </VStack>
+              </HStack>
+              <Divider />
+              <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+                <VStack frame={{ maxWidth: "infinity" }}>
+                  <GridButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
+                </VStack>
+                <Divider frame={{ height: 48 }} />
+                <VStack frame={{ maxWidth: "infinity" }}>
+                  <GridButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+                </VStack>
+              </HStack>
+              <Divider />
+              <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+                <VStack frame={{ maxWidth: "infinity" }}>
+                  <GridButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
+                </VStack>
+                <Divider frame={{ height: 48 }} />
+                <VStack frame={{ maxWidth: "infinity" }}>
+                  <GridButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
+                </VStack>
+              </HStack>
+            </VStack>
+          </Section>
 
-        <Section header={<Text>状态</Text>}>
-          <Text>{stage}</Text>
+          <Section header={<Text>状态</Text>}>
+            <Text>{stage}</Text>
 
-          {busy && showProgress ? (
-            <HStack alignment="center" spacing={8}>
-              {typeof progressValue === "number" ? (
-                <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
-              ) : (
-                <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
-              )}
-              <Text>{progressPct}</Text>
-            </HStack>
-          ) : null}
-        </Section>
-      </List>
+            {busy && showProgress ? (
+              <HStack alignment="center" spacing={8}>
+                {typeof progressValue === "number" ? (
+                  <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                ) : (
+                  <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                )}
+                <Text>{progressPct}</Text>
+              </HStack>
+            ) : null}
+          </Section>
+        </List>
       </VStack>
     </NavigationStack>
   )

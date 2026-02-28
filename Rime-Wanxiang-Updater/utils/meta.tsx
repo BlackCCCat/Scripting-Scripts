@@ -1,6 +1,7 @@
 // File: utils/meta.tsx
 import type { InputMethod, ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
 import { Runtime } from "./runtime"
+import { RIME_SUFFIXES_BASE } from "./hamster"
 
 export type SchemeMeta = {
   remoteIdOrSha: string
@@ -70,7 +71,8 @@ type MetaStoreData = {
 const STORAGE_KEY = "wanxiang_meta_store"
 const LEGACY_STORAGE_KEYS = ["wanxiang_meta_store_v1"]
 const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
-const RIME_SUFFIXES = ["/RimeUserData/wanxiang", "/RIME/Rime", "/Rime"]
+// 静态后缀列表（动态 RimeUserData 子目录名由 relatedRoots 自动推导）
+const RIME_SUFFIXES = [...RIME_SUFFIXES_BASE, "/RimeUserData"]
 
 function normalizeRoot(root: string): string {
   return String(root ?? "").trim().replace(/\/+$/, "")
@@ -88,8 +90,30 @@ function pathVariants(root: string): string[] {
 function relatedRoots(root: string): string[] {
   const base = pathVariants(root)
   const out = new Set<string>(base)
+
+  // 静态后缀 + 从路径中动态推导的后缀
+  const allSuffixes = [...RIME_SUFFIXES]
+
+  // 从输入路径中动态推导 RimeUserData 子目录名
+  // 例如路径 /root/RimeUserData/myscheme → 推导出后缀 /RimeUserData/myscheme
   for (const p of base) {
-    for (const s of RIME_SUFFIXES) {
+    const rimeUserDataIdx = p.indexOf("/RimeUserData/")
+    if (rimeUserDataIdx >= 0) {
+      const afterRimeUserData = p.slice(rimeUserDataIdx)
+      // afterRimeUserData 形如 /RimeUserData/myscheme 或 /RimeUserData/myscheme/sub
+      // 取到子目录名级别
+      const parts = afterRimeUserData.split("/").filter(Boolean) // ["RimeUserData", "myscheme", ...]
+      if (parts.length >= 2) {
+        const dynamicSuffix = `/${parts[0]}/${parts[1]}`
+        if (!allSuffixes.includes(dynamicSuffix)) {
+          allSuffixes.push(dynamicSuffix)
+        }
+      }
+    }
+  }
+
+  for (const p of base) {
+    for (const s of allSuffixes) {
       out.add(normalizeRoot(`${p}${s}`))
       if (p.endsWith(s)) {
         out.add(normalizeRoot(p.slice(0, -s.length)))
@@ -191,7 +215,18 @@ function readRecord(installRoot: string, kind: RecordKind, bookmarkName?: string
       if (byBookmark) return byBookmark
     }
   }
-  if (!root) return undefined
+  if (!root) {
+    // 路径为空但有书签名时，尝试通过书签映射反查记录
+    if (bkey) {
+      for (const rk of Object.keys(data.records)) {
+        if (data.records[rk]?.[kind]) {
+          bindBookmark(rk)
+          return data.records[rk][kind]
+        }
+      }
+    }
+    return undefined
+  }
   const resolveAlias = (k: string): string => {
     const key = pathKey(k)
     return data.aliases[key] ? pathKey(data.aliases[key]) : key
@@ -224,6 +259,13 @@ function readRecord(installRoot: string, kind: RecordKind, bookmarkName?: string
       }
     }
   }
+  // 最终兜底：通过书签名映射查找（权限重新授予后路径可能完全变化）
+  if (bkey) {
+    const mapped = pathKey(data.bookmarks[bkey] ?? "")
+    if (mapped && data.records[mapped]?.[kind]) {
+      return data.records[mapped][kind]
+    }
+  }
   return undefined
 }
 
@@ -240,14 +282,9 @@ function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData, boo
     if (isRelatedRoot(mappedBookmark, canonicalFromPath)) {
       canonical = mappedBookmark
     } else {
-      // 同一书签切到新路径时，旧记录按覆盖语义清理
-      if (data.records[mappedBookmark]) {
-        delete data.records[mappedBookmark]
-      }
-      for (const aliasKey of Object.keys(data.aliases)) {
-        const target = pathKey(data.aliases[aliasKey])
-        if (target === mappedBookmark) delete data.aliases[aliasKey]
-      }
+      // 同一书签切到新路径时：不提前删除旧记录，
+      // 让下方 candidateKeys 循环统一合并后再清理，
+      // 避免丢失其他 kind（如 scheme/model）的数据。
       canonical = canonicalFromPath
     }
   } else {

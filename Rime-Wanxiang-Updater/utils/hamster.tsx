@@ -1,6 +1,91 @@
 // File: utils/hamster.ts
+import { Path } from "scripting"
 import { Runtime } from "./runtime"
 import type { AppConfig } from "./config"
+
+// Base RIME suffixes (without RimeUserData children, those are detected dynamically)
+export const RIME_SUFFIXES_BASE = ["/RIME/Rime", "/Rime"]
+
+/**
+ * Scan RimeUserData directory for all subdirectories.
+ * Returns full paths like ["/root/RimeUserData/wanxiang", "/root/RimeUserData/other"]
+ */
+async function scanRimeUserDataSubdirs(root: string): Promise<string[]> {
+  const fm = Runtime.FileManager
+  if (!fm) return []
+  const rimeUserData = `${root}/RimeUserData`
+  try {
+    const exists = fm.exists ? await fm.exists(rimeUserData) : false
+    if (!exists) return []
+    let children: string[] = []
+    if (typeof fm.readDirectory === "function") {
+      const raw = await fm.readDirectory(rimeUserData)
+      if (Array.isArray(raw)) {
+        const base = rimeUserData.endsWith("/") ? rimeUserData : rimeUserData + "/"
+        children = raw.map(String).map((p) => (p.startsWith(base) ? p.slice(base.length) : p)).filter((p) => p && p !== "." && p !== "..")
+      }
+    } else if (typeof fm.readDirectorySync === "function") {
+      const raw = fm.readDirectorySync(rimeUserData)
+      if (Array.isArray(raw)) {
+        const base = rimeUserData.endsWith("/") ? rimeUserData : rimeUserData + "/"
+        children = raw.map(String).map((p) => (p.startsWith(base) ? p.slice(base.length) : p)).filter((p) => p && p !== "." && p !== "..")
+      }
+    } else if (typeof fm.listContents === "function") {
+      children = await fm.listContents(rimeUserData)
+    }
+    const results: string[] = []
+    for (const name of children) {
+      if (name === ".DS_Store" || name === "__MACOSX") continue
+      const full = `${rimeUserData}/${name}`
+      let isDir = false
+      if (typeof fm.isDirectory === "function") isDir = !!(await fm.isDirectory(full))
+      else if (typeof fm.isDir === "function") isDir = !!(await fm.isDir(full))
+      if (isDir) results.push(full)
+    }
+    return results
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Collect all candidate rime paths from a root directory.
+ * Used by HomeView/SettingsView for meta lookup.
+ */
+export async function collectRimeCandidates(root: string): Promise<string[]> {
+  const normPath = (s: string) => String(s ?? "").trim().replace(/\/+$/, "")
+  const out: string[] = []
+  const push = (p?: string) => {
+    const x = normPath(String(p ?? ""))
+    if (x) out.push(x)
+  }
+  push(root)
+  for (const suffix of RIME_SUFFIXES_BASE) {
+    push(root + suffix)
+  }
+  // Dynamic: scan RimeUserData subdirs
+  const subdirs = await scanRimeUserDataSubdirs(root)
+  for (const sd of subdirs) {
+    push(sd)
+  }
+  // Fallback: also include /RimeUserData itself
+  push(`${root}/RimeUserData`)
+  return Array.from(new Set(out))
+}
+
+/**
+ * Get all RIME_SUFFIXES including dynamically detected RimeUserData children.
+ * Used by meta.tsx for path variant resolution.
+ */
+export async function getRimeSuffixes(root: string): Promise<string[]> {
+  const suffixes = [...RIME_SUFFIXES_BASE]
+  const subdirs = await scanRimeUserDataSubdirs(root)
+  for (const sd of subdirs) {
+    const relative = sd.startsWith(root) ? sd.slice(root.length) : ""
+    if (relative) suffixes.push(relative)
+  }
+  return suffixes
+}
 
 function isPromiseLike(v: any): v is Promise<any> {
   return !!v && typeof v === "object" && typeof v.then === "function"
@@ -33,7 +118,7 @@ async function resolveBookmarkPath(rawPath: string, bookmarkName?: string): Prom
         if (resolvedByName) return String(resolvedByName)
       }
     }
-  } catch {}
+  } catch { }
   if (!fm?.getAllFileBookmarks) return raw
   try {
     const list = await callMaybeAsync(fm.getAllFileBookmarks, fm, [])
@@ -50,13 +135,13 @@ async function resolveBookmarkPath(rawPath: string, bookmarkName?: string): Prom
       if (resolved) return String(resolved)
       if (match?.path) return String(match.path)
     }
-  } catch {}
+  } catch { }
   // 配置了书签名但无法解引用时，不再回退旧路径（避免用到失效授权路径）
   if (name) return ""
   return raw
 }
 
-// 这里按你之前的逻辑：从 hamsterRootPath 推断实际 rime 目录
+// 从 hamsterRootPath 推断实际 rime 目录
 export async function detectRimeDir(cfg: AppConfig): Promise<{ engine: "仓输入法" | "元书输入法"; rimeDir: string }> {
   const fm = Runtime.FileManager
   const rawRoot = cfg.hamsterRootPath?.trim()
@@ -65,9 +150,20 @@ export async function detectRimeDir(cfg: AppConfig): Promise<{ engine: "仓输�
   if (!root) return { engine: "仓输入法", rimeDir: "" }
   if (!fm?.exists) return { engine: "仓输入法", rimeDir: root }
 
-  const yushu = `${root}/RimeUserData/wanxiang`
-  if (await fm.exists(yushu)) return { engine: "元书输入法", rimeDir: yushu }
+  // 元书输入法：动态扫描 RimeUserData 下的所有子目录
+  const subdirs = await scanRimeUserDataSubdirs(root)
+  if (subdirs.length > 0) {
+    // 优先使用 wanxiang 子目录（如果存在）
+    const wanxiang = subdirs.find((d) => d.endsWith("/wanxiang"))
+    return { engine: "元书输入法", rimeDir: wanxiang ?? subdirs[0] }
+  }
+  // 检查 RimeUserData 目录本身是否存在（没有子目录的情况）
+  const rimeUserData = `${root}/RimeUserData`
+  if (await fm.exists(rimeUserData)) {
+    return { engine: "元书输入法", rimeDir: rimeUserData }
+  }
 
+  // 仓输入法
   const cang1 = `${root}/RIME/Rime`
   if (await fm.exists(cang1)) return { engine: "仓输入法", rimeDir: cang1 }
 
@@ -94,7 +190,7 @@ async function mkdir(path: string): Promise<boolean> {
       fm.createDirectorySync(path, true)
       const ok = await pathExists(path)
       if (ok !== false) return true
-    } catch {}
+    } catch { }
   }
   if (typeof fm.createDirectory === "function") {
     await callMaybeAsync(fm.createDirectory, fm, [path, true])
@@ -106,7 +202,7 @@ async function mkdir(path: string): Promise<boolean> {
       fm.mkdirSync(path, true)
       const ok = await pathExists(path)
       if (ok !== false) return true
-    } catch {}
+    } catch { }
   }
   if (typeof fm.mkdir === "function") {
     await callMaybeAsync(fm.mkdir, fm, [path, true])
@@ -124,7 +220,7 @@ async function removePath(path: string): Promise<boolean> {
       fm.removeSync(path)
       const ok = await pathExists(path)
       if (ok !== true) return true
-    } catch {}
+    } catch { }
   }
   if (typeof fm.remove === "function") {
     await callMaybeAsync(fm.remove, fm, [path])

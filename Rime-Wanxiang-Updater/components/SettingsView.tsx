@@ -26,7 +26,7 @@ import {
   type ProSchemeKey,
   type InputMethod,
 } from "../utils/config"
-import { detectRimeDir } from "../utils/hamster"
+import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
 import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 
@@ -58,9 +58,9 @@ function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEditio
 function normalizeReleaseSourceFromMeta(meta: any): AppConfig["releaseSource"] | undefined {
   const source = String(
     meta?.scheme?.releaseSource ??
-      meta?.dict?.releaseSource ??
-      meta?.model?.releaseSource ??
-      ""
+    meta?.dict?.releaseSource ??
+    meta?.model?.releaseSource ??
+    ""
   )
     .trim()
     .toLowerCase()
@@ -71,9 +71,9 @@ function normalizeReleaseSourceFromMeta(meta: any): AppConfig["releaseSource"] |
 function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputMethod | undefined {
   const input = String(
     meta?.scheme?.inputMethod ??
-      meta?.dict?.inputMethod ??
-      meta?.model?.inputMethod ??
-      ""
+    meta?.dict?.inputMethod ??
+    meta?.model?.inputMethod ??
+    ""
   )
     .trim()
     .toLowerCase()
@@ -87,7 +87,7 @@ function normalizePath(p: string): string {
   return String(p ?? "").trim().replace(/\/+$/, "")
 }
 
-function collectMetaCandidates(base: AppConfig, detected?: string): string[] {
+async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): Promise<string[]> {
   const out: string[] = []
   const push = (p?: string) => {
     const x = normalizePath(String(p ?? ""))
@@ -95,11 +95,10 @@ function collectMetaCandidates(base: AppConfig, detected?: string): string[] {
   }
   push(detected)
   push(base.hamsterRootPath)
-  const roots = Array.from(new Set(out))
+  const roots = Array.from(new Set(out.filter(Boolean)))
   for (const r of roots) {
-    push(Path.join(r, "RimeUserData", "wanxiang"))
-    push(Path.join(r, "RIME", "Rime"))
-    push(Path.join(r, "Rime"))
+    const candidates = await collectRimeCandidates(r)
+    for (const c of candidates) push(c)
   }
   return Array.from(new Set(out))
 }
@@ -124,7 +123,7 @@ function CenterRowButton(props: {
   onPress: () => void
 }) {
   const haptic = () => {
-    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
   }
   return (
     <Button
@@ -206,9 +205,9 @@ export function SettingsView(props: {
     setProKeyIdx(i >= 0 ? i : 0)
     const im = INPUT_METHODS.findIndex((m) => m.value === latest.inputMethod)
     setInputIdx(im >= 0 ? im : 0)
-    ;(async () => {
-      await refreshBookmarks(latest)
-    })()
+      ; (async () => {
+        await refreshBookmarks(latest)
+      })()
   }, [])
 
   function closeAlert() {
@@ -224,7 +223,7 @@ export function SettingsView(props: {
         <Button
           title="OK"
           action={() => {
-            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
             closeAlert()
           }}
         />
@@ -244,7 +243,7 @@ export function SettingsView(props: {
       detected = ""
       detectedEngine = ""
     }
-    const candidates = collectMetaCandidates(base, detected)
+    const candidates = await collectMetaCandidatesAsync(base, detected)
     if (!candidates.length && !base.hamsterBookmarkName) return base
 
     let meta: any = undefined
@@ -255,7 +254,7 @@ export function SettingsView(props: {
           meta = m
           break
         }
-      } catch {}
+      } catch { }
     }
     if (!meta && base.hamsterBookmarkName) {
       try {
@@ -263,7 +262,7 @@ export function SettingsView(props: {
         if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
           meta = byBookmark
         }
-      } catch {}
+      } catch { }
     }
     if (!meta) return base
     const normalized = normalizeSchemeFromMeta(meta, base)
@@ -339,7 +338,7 @@ export function SettingsView(props: {
             setCfg(next)
             saveConfig(next)
             props.onDone?.(next)
-          } catch {}
+          } catch { }
         }
       } else if (!targetPath) {
         const first = cleaned[0]
@@ -388,7 +387,7 @@ export function SettingsView(props: {
             clearMetaForRoot(installRoot)
             clearExtractedFilesForRoot(installRoot)
           }
-        } catch {}
+        } catch { }
       }
       props.onDone?.(fixed)
       dismiss()
@@ -433,11 +432,11 @@ export function SettingsView(props: {
                 pickerStyle="menu"
                 value={bookmarkIdx}
                 onChanged={(idx: number) => {
-                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                   setBookmarkIdx(idx)
                   const b = bookmarks[idx]
                   if (b?.path) {
-                    ;(async () => {
+                    ; (async () => {
                       const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
                       const canUseByName = fm?.bookmarkExists
                         ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
@@ -456,7 +455,7 @@ export function SettingsView(props: {
                         setCfg(next)
                         saveConfig(next)
                         props.onDone?.(next)
-                      } catch {}
+                      } catch { }
                     })()
                   }
                 }}
@@ -477,7 +476,7 @@ export function SettingsView(props: {
               pickerStyle="menu"
               value={releaseIdx}
               onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                 setReleaseIdx(v)
               }}
             >
@@ -505,7 +504,7 @@ export function SettingsView(props: {
               pickerStyle="menu"
               value={schemeIdx}
               onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                 setSchemeIdx(v)
               }}
             >
@@ -522,7 +521,7 @@ export function SettingsView(props: {
                 pickerStyle="menu"
                 value={proKeyIdx}
                 onChanged={(v: number) => {
-                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                   setProKeyIdx(v)
                 }}
               >
@@ -541,7 +540,7 @@ export function SettingsView(props: {
               pickerStyle="menu"
               value={inputIdx}
               onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                 setInputIdx(v)
               }}
             >
@@ -558,7 +557,7 @@ export function SettingsView(props: {
               title={"启动时自动检查更新"}
               value={cfg.autoCheckOnLaunch}
               onChanged={(v: boolean) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch {}
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                 setCfg((c) => ({ ...c, autoCheckOnLaunch: v }))
               }}
               toggleStyle="switch"

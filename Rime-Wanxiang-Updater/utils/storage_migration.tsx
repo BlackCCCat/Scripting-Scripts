@@ -1,4 +1,5 @@
 import { Runtime } from "./runtime"
+import { RIME_SUFFIXES_BASE } from "./hamster"
 
 const CONFIG_KEY = "wanxiang_updater_config"
 const META_KEY = "wanxiang_meta_store"
@@ -11,7 +12,7 @@ const LEGACY_KEYS = [
   "wanxiang_extracted_files_v1",
 ]
 
-const RIME_SUFFIXES = ["/RimeUserData/wanxiang", "/RIME/Rime", "/Rime"]
+const RIME_SUFFIXES = [...RIME_SUFFIXES_BASE, "/RimeUserData"]
 
 type AnyObj = Record<string, any>
 
@@ -32,7 +33,7 @@ function setRaw(st: any, key: string, value: string) {
 function removeKey(st: any, key: string) {
   try {
     if (st?.remove) st.remove(key)
-  } catch {}
+  } catch { }
 }
 
 function normalizePath(p: string): string {
@@ -50,9 +51,22 @@ function pathVariants(root: string): string[] {
 
 function relatedRoots(root: string): string[] {
   const out = new Set<string>()
-  for (const p of pathVariants(root)) {
+  const base = pathVariants(root)
+  const allSuffixes = [...RIME_SUFFIXES]
+  // 动态推导 RimeUserData 子目录名
+  for (const p of base) {
+    const idx = p.indexOf("/RimeUserData/")
+    if (idx >= 0) {
+      const parts = p.slice(idx).split("/").filter(Boolean)
+      if (parts.length >= 2) {
+        const ds = `/${parts[0]}/${parts[1]}`
+        if (!allSuffixes.includes(ds)) allSuffixes.push(ds)
+      }
+    }
+  }
+  for (const p of base) {
     out.add(p)
-    for (const s of RIME_SUFFIXES) {
+    for (const s of allSuffixes) {
       out.add(normalizePath(`${p}${s}`))
       if (p.endsWith(s)) out.add(normalizePath(p.slice(0, -s.length)))
     }
