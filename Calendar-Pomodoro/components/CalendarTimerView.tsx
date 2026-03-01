@@ -88,6 +88,8 @@ export function CalendarTimerView() {
   // 笔记草稿与 Markdown 预览开关
   const [noteDraft, setNoteDraft] = useState("");
   const [showMarkdown, setShowMarkdown] = useState(true);
+  // 当前环境是否支持脚本最小化
+  const [supportsMinimization, setSupportsMinimization] = useState(false);
   // 定时器、设置与 Live Activity 的引用
   const timerIdRef = useRef<number | null>(null);
   const settingsLoadedRef = useRef(false);
@@ -121,6 +123,15 @@ export function CalendarTimerView() {
     // 首次进入：加载任务与设置
     void refreshTasks();
     void loadAppSettings();
+  }, []);
+
+  useEffect(() => {
+    // 最小化能力与运行环境相关，进入页面时检测一次即可
+    try {
+      setSupportsMinimization(Boolean(Script.supportsMinimization?.()));
+    } catch {
+      setSupportsMinimization(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -276,6 +287,78 @@ export function CalendarTimerView() {
       timerIdRef.current = null;
     }
   }
+
+  function buildCurrentSessionSnapshot(now = new Date()): TimerSession | null {
+    // 将当前内存中的计时状态整理成可持久化的会话快照
+    const task = activeTaskRef.current;
+    const sessionStart = sessionStartAtRef.current;
+    if (!task || !sessionStart) return null;
+
+    const isRunning = runningRef.current;
+    const segmentStart = segmentStartAtRef.current;
+    const segmentElapsed =
+      isRunning && segmentStart ? now.getTime() - segmentStart.getTime() : 0;
+
+    return {
+      taskId: task.id,
+      sessionStartAt: sessionStart.getTime(),
+      // 运行中时将当前片段推进到 now，避免恢复后重复累加这一段
+      segmentStartAt: isRunning ? now.getTime() : undefined,
+      accumulatedMs: accumulatedMsRef.current + Math.max(0, segmentElapsed),
+      segments: completedSegmentsRef.current,
+      running: isRunning,
+      paused: pausedRef.current,
+      activityId: activityRef.current?.activityId,
+    };
+  }
+
+  useEffect(() => {
+    // 最小化前后补一次状态同步，避免 UI 收起/恢复后会话与灵动岛漂移
+    const removeMinimize = Script.onMinimize(() => {
+      void (async () => {
+        const task = activeTaskRef.current;
+        const snapshot = buildCurrentSessionSnapshot();
+        if (snapshot) {
+          await persistSessionState(snapshot);
+        }
+        if (!task || !snapshot) return;
+        await updateLiveActivity(
+          task,
+          new Date(),
+          snapshot.accumulatedMs,
+          snapshot.paused ? new Date() : undefined,
+        );
+      })();
+    });
+
+    const removeResume = Script.onResume((details) => {
+      void (async () => {
+        if (!details?.resumeFromMinimized) return;
+
+        const task = activeTaskRef.current;
+        const snapshot = buildCurrentSessionSnapshot();
+        if (task && snapshot) {
+          await persistSessionState(snapshot);
+          await updateLiveActivity(
+            task,
+            new Date(),
+            snapshot.accumulatedMs,
+            snapshot.paused ? new Date() : undefined,
+          );
+          return;
+        }
+
+        if (tasksLoadedRef.current) {
+          await restoreSessionIfNeeded();
+        }
+      })();
+    });
+
+    return () => {
+      removeMinimize?.();
+      removeResume?.();
+    };
+  }, []);
 
   function appendCompletedSegment(
     base: TimerSessionSegment[],
@@ -1095,6 +1178,16 @@ export function CalendarTimerView() {
     });
   }
 
+  async function minimizeScript() {
+    // 仅在当前环境支持时才执行最小化
+    if (!supportsMinimization) return;
+    try {
+      await Script.minimize();
+    } catch (e: any) {
+      await Dialog.alert({ message: String(e?.message ?? e) });
+    }
+  }
+
   // 按钮统一触觉反馈：mediumImpact
   const withButtonHaptic = (action: () => void | Promise<void>) => () => {
     HapticFeedback.mediumImpact();
@@ -1126,6 +1219,13 @@ export function CalendarTimerView() {
                 systemImage="xmark.circle"
                 action={withButtonHaptic(() => Script.exit())}
               />
+              {supportsMinimization ? (
+                <Button
+                  title=""
+                  systemImage="minus.circle"
+                  action={withButtonHaptic(minimizeScript)}
+                />
+              ) : null}
               <Button
                 title=""
                 systemImage="arrow.clockwise"
