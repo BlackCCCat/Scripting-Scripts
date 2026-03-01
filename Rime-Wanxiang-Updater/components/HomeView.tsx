@@ -147,6 +147,27 @@ type AlertState = {
   actions: AlertNode
 }
 
+type RemoteSessionState = {
+  remoteSchemeVer: string
+  remoteDictMark: string
+  remoteModelMark: string
+  notes: string
+  lastCheck: AllUpdateResult | null
+  lastCheckKey: string
+}
+
+const DEFAULT_REMOTE_SESSION_STATE: RemoteSessionState = {
+  remoteSchemeVer: "请检查更新",
+  remoteDictMark: "请检查更新",
+  remoteModelMark: "请检查更新",
+  notes: "请检查更新",
+  lastCheck: null,
+  lastCheckKey: "",
+}
+
+let remoteSessionState: RemoteSessionState = { ...DEFAULT_REMOTE_SESSION_STATE }
+let launchAutoCheckHandled = false
+
 export function HomeView() {
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
 
@@ -157,12 +178,12 @@ export function HomeView() {
   const [localModelMark, setLocalModelMark] = useState("暂无法获取")
 
   // 远程信息
-  const [remoteSchemeVer, setRemoteSchemeVer] = useState("请检查更新")
-  const [remoteDictMark, setRemoteDictMark] = useState("请检查更新")
-  const [remoteModelMark, setRemoteModelMark] = useState("请检查更新")
-  const [notes, setNotes] = useState("请检查更新")
-  const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(null)
-  const [lastCheckKey, setLastCheckKey] = useState("")
+  const [remoteSchemeVer, setRemoteSchemeVer] = useState(() => remoteSessionState.remoteSchemeVer)
+  const [remoteDictMark, setRemoteDictMark] = useState(() => remoteSessionState.remoteDictMark)
+  const [remoteModelMark, setRemoteModelMark] = useState(() => remoteSessionState.remoteModelMark)
+  const [notes, setNotes] = useState(() => remoteSessionState.notes)
+  const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(() => remoteSessionState.lastCheck)
+  const [lastCheckKey, setLastCheckKey] = useState(() => remoteSessionState.lastCheckKey)
 
   // 状态
   const [stage, setStage] = useState("就绪")
@@ -181,12 +202,12 @@ export function HomeView() {
   const [showProgress, setShowProgress] = useState(false)
 
   function resetRemote() {
-    setRemoteSchemeVer("请检查更新")
-    setRemoteDictMark("请检查更新")
-    setRemoteModelMark("请检查更新")
-    setNotes("请检查更新")
-    setLastCheck(null)
-    setLastCheckKey("")
+    setRemoteSchemeVer(DEFAULT_REMOTE_SESSION_STATE.remoteSchemeVer)
+    setRemoteDictMark(DEFAULT_REMOTE_SESSION_STATE.remoteDictMark)
+    setRemoteModelMark(DEFAULT_REMOTE_SESSION_STATE.remoteModelMark)
+    setNotes(DEFAULT_REMOTE_SESSION_STATE.notes)
+    setLastCheck(DEFAULT_REMOTE_SESSION_STATE.lastCheck)
+    setLastCheckKey(DEFAULT_REMOTE_SESSION_STATE.lastCheckKey)
   }
 
   function checkKey(c: AppConfig) {
@@ -355,6 +376,17 @@ export function HomeView() {
   }
 
   useEffect(() => {
+    remoteSessionState = {
+      remoteSchemeVer,
+      remoteDictMark,
+      remoteModelMark,
+      notes,
+      lastCheck,
+      lastCheckKey,
+    }
+  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckKey])
+
+  useEffect(() => {
     const current = loadConfig()
     setCfg(current)
     void (async () => {
@@ -365,7 +397,8 @@ export function HomeView() {
 
   useEffect(() => {
     const current = loadConfig()
-    if (current.autoCheckOnLaunch) {
+    if (current.autoCheckOnLaunch && !launchAutoCheckHandled) {
+      launchAutoCheckHandled = true
       void (async () => {
         if (await guardPathAccess(false)) {
           await onCheckUpdate()
@@ -456,6 +489,13 @@ export function HomeView() {
     } catch (error: any) {
       setStage(`打开编辑器失败：${String(error?.message ?? error)}`)
     }
+  }
+
+  function closeScript() {
+    try {
+      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+    } catch { }
+    Script.exit()
   }
 
   function applyProgress(tag: "scheme" | "dict" | "model" | "auto", p: any) {
@@ -690,26 +730,35 @@ export function HomeView() {
             topBarLeading: (
               <Button
                 title=""
-                systemImage="square.and.pencil"
-                action={() => {
-                  try {
-                    ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-                  } catch { }
-                  void openTextEditor()
-                }}
+                systemImage="xmark.circle.fill"
+                buttonStyle="plain"
+                foregroundStyle="systemRed"
+                action={closeScript}
               />
             ),
             topBarTrailing: (
-              <Button
-                title=""
-                systemImage="gearshape"
-                action={() => {
-                  try {
-                    ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-                  } catch { }
-                  void openSettings()
-                }}
-              />
+              <HStack spacing={8}>
+                <Button
+                  title=""
+                  systemImage="square.and.pencil"
+                  action={() => {
+                    try {
+                      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+                    } catch { }
+                    void openTextEditor()
+                  }}
+                />
+                <Button
+                  title=""
+                  systemImage="gearshape"
+                  action={() => {
+                    try {
+                      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+                    } catch { }
+                    void openSettings()
+                  }}
+                />
+              </HStack>
             ),
           }}
         >
