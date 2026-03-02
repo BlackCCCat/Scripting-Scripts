@@ -325,8 +325,6 @@ export function SettingsView(props: {
             let next = { ...loadConfig(), hamsterRootPath: selectedPath, hamsterBookmarkName: matched.name }
             next = await syncSchemeFromLocal(next)
             setCfg(next)
-            saveConfig(next)
-            props.onDone?.(next)
           } catch { }
         }
       } else if (!targetPath) {
@@ -442,8 +440,6 @@ export function SettingsView(props: {
                       try {
                         next = await syncSchemeFromLocal(next)
                         setCfg(next)
-                        saveConfig(next)
-                        props.onDone?.(next)
                       } catch { }
                     })()
                   }
