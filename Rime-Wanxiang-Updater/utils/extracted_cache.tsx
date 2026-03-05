@@ -106,12 +106,41 @@ async function removePath(fm: any, p: string): Promise<boolean> {
   return false
 }
 
+async function listDirectoryEntries(fm: any, dir: string): Promise<string[] | undefined> {
+  try {
+    if (typeof fm?.readDirectory === "function") {
+      const raw = await callMaybeAsync(fm.readDirectory, fm, [dir])
+      if (!Array.isArray(raw)) return []
+      const base = dir.endsWith("/") ? dir : dir + "/"
+      return raw
+        .map(String)
+        .map((p) => (p.startsWith(base) ? p.slice(base.length) : p))
+        .filter((p) => p && p !== "." && p !== "..")
+    }
+    if (typeof fm?.readDirectorySync === "function") {
+      const raw = fm.readDirectorySync(dir)
+      if (!Array.isArray(raw)) return []
+      const base = dir.endsWith("/") ? dir : dir + "/"
+      return raw
+        .map(String)
+        .map((p) => (p.startsWith(base) ? p.slice(base.length) : p))
+        .filter((p) => p && p !== "." && p !== "..")
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 async function cleanupParents(path: string, stopRoot: string): Promise<void> {
   const fm = FM()
   if (!fm) return
   const root = normalizePath(stopRoot)
   let cur = dirname(path)
   while (cur && root && cur.startsWith(root + "/")) {
+    const entries = await listDirectoryEntries(fm, cur)
+    // 保守处理：无法判断目录内容时不做目录删除，避免误删排除文件
+    if (!entries || entries.length > 0) break
     const ok = await removePath(fm, cur)
     if (!ok) break
     cur = dirname(cur)
