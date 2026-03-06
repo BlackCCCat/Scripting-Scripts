@@ -88,8 +88,10 @@ export function CalendarTimerView() {
   // 笔记草稿与 Markdown 预览开关
   const [noteDraft, setNoteDraft] = useState("");
   const [showMarkdown, setShowMarkdown] = useState(true);
-  // 当前环境是否支持脚本最小化
-  const [supportsMinimization, setSupportsMinimization] = useState(false);
+  // 当前环境是否支持脚本最小化。这里同步判断，避免首帧后再插入按钮导致导航栏抖动。
+  const supportsMinimization =
+    typeof Script.supportsMinimization === "function" &&
+    Script.supportsMinimization();
   // 定时器、设置与 Live Activity 的引用
   const timerIdRef = useRef<number | null>(null);
   const settingsLoadedRef = useRef(false);
@@ -123,15 +125,6 @@ export function CalendarTimerView() {
     // 首次进入：加载任务与设置
     void refreshTasks();
     void loadAppSettings();
-  }, []);
-
-  useEffect(() => {
-    // 最小化能力与运行环境相关，进入页面时检测一次即可
-    try {
-      setSupportsMinimization(Boolean(Script.supportsMinimization?.()));
-    } catch {
-      setSupportsMinimization(false);
-    }
   }, []);
 
   useEffect(() => {
