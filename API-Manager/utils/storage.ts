@@ -1,5 +1,5 @@
 import type { ApiCheckResult, ApiEntry, ManagerState } from "../types"
-import { normalizeBaseUrl, normalizeWidgetRefreshHours } from "./common"
+import { normalizeBaseUrl, normalizeCompatibilityMode, normalizeWidgetRefreshHours } from "./common"
 
 const STORAGE_KEY = "api_manager_state_v1"
 const STORAGE_DIRECTORY_NAME = "API Manager"
@@ -75,6 +75,7 @@ function sanitizeEntry(raw: any): ApiEntry | null {
   return {
     id,
     name,
+    compatibilityMode: normalizeCompatibilityMode(raw?.compatibilityMode),
     baseUrl,
     apiKey,
     updatedAt: Number(raw?.updatedAt ?? Date.now()) || Date.now(),

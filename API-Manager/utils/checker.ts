@@ -6,7 +6,12 @@ import {
 } from "scripting"
 
 import type { ApiCheckResult, ApiEntry, CheckStatus } from "../types"
-import { isLikelyHttpUrl, joinBaseUrl, normalizeBaseUrl } from "./common"
+import {
+  defaultBaseUrlForMode,
+  isLikelyHttpUrl,
+  joinBaseUrl,
+  normalizeBaseUrl,
+} from "./common"
 
 const REQUEST_TIMEOUT_MS = 8000
 
@@ -89,6 +94,161 @@ async function probeModels(baseUrl: string, apiKey: string): Promise<ProbeResult
   }
 }
 
+async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
+  const baseUrl = normalizeBaseUrl(entry.baseUrl || defaultBaseUrlForMode("openai"))
+  const apiKey = String(entry.apiKey ?? "").trim()
+  const checkedAt = Date.now()
+
+  if (!apiKey) {
+    return {
+      status: "red",
+      baseAvailable: false,
+      modelsAvailable: false,
+      checkedAt,
+      message: "API Key 为空",
+    }
+  }
+
+  if (!isLikelyHttpUrl(baseUrl)) {
+    return {
+      status: "red",
+      baseAvailable: false,
+      modelsAvailable: false,
+      checkedAt,
+      message: "链接格式无效，请填写 http(s) 基础地址",
+    }
+  }
+
+  try {
+    const response = await fetchWithTimeout(joinBaseUrl(baseUrl, "/v1/models"), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    })
+    let payload: any = null
+    try {
+      payload = await response.json()
+    } catch {}
+
+    const count = readModelCount(payload)
+    if (response.ok && count > 0) {
+      return {
+        status: "green",
+        baseAvailable: true,
+        modelsAvailable: true,
+        checkedAt,
+        message: `OpenAI 兼容接口可用，发现 ${count} 个模型`,
+      }
+    }
+
+    const invalidApiKey = payload?.code === "INVALID_API_KEY"
+    if (invalidApiKey || payload?.error || !response.ok) {
+      return {
+        status: "yellow",
+        baseAvailable: true,
+        modelsAvailable: false,
+        checkedAt,
+        message: invalidApiKey
+          ? "OpenAI 兼容地址可用，但 API Key 无效"
+          : "OpenAI 兼容地址可用，但模型接口不可用或没有可用模型",
+      }
+    }
+
+    return {
+      status: "yellow",
+      baseAvailable: true,
+      modelsAvailable: false,
+      checkedAt,
+      message: "OpenAI 兼容地址可用，但模型列表为空",
+    }
+  } catch (error: any) {
+    return {
+      status: "red",
+      baseAvailable: false,
+      modelsAvailable: false,
+      checkedAt,
+      message: String(error?.message ?? error),
+    }
+  }
+}
+
+async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
+  const baseUrl = normalizeBaseUrl(entry.baseUrl || defaultBaseUrlForMode("gemini"))
+  const apiKey = String(entry.apiKey ?? "").trim()
+  const checkedAt = Date.now()
+
+  if (!apiKey) {
+    return {
+      status: "red",
+      baseAvailable: false,
+      modelsAvailable: false,
+      checkedAt,
+      message: "API Key 为空",
+    }
+  }
+
+  if (!isLikelyHttpUrl(baseUrl)) {
+    return {
+      status: "red",
+      baseAvailable: false,
+      modelsAvailable: false,
+      checkedAt,
+      message: "链接格式无效，请填写 http(s) 基础地址",
+    }
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      `${joinBaseUrl(baseUrl, "/v1beta/models")}?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "GET",
+      }
+    )
+    let payload: any = null
+    try {
+      payload = await response.json()
+    } catch {}
+
+    const count = readModelCount(payload)
+    if (response.ok && count > 0) {
+      return {
+        status: "green",
+        baseAvailable: true,
+        modelsAvailable: true,
+        checkedAt,
+        message: `Gemini 接口可用，发现 ${count} 个模型`,
+      }
+    }
+
+    if (payload?.error || !response.ok) {
+      return {
+        status: "yellow",
+        baseAvailable: true,
+        modelsAvailable: false,
+        checkedAt,
+        message: "Gemini 地址可用，但 API Key 无效或模型接口不可用",
+      }
+    }
+
+    return {
+      status: "yellow",
+      baseAvailable: true,
+      modelsAvailable: false,
+      checkedAt,
+      message: "Gemini 地址可用，但模型列表为空",
+    }
+  } catch (error: any) {
+    return {
+      status: "red",
+      baseAvailable: false,
+      modelsAvailable: false,
+      checkedAt,
+      message: String(error?.message ?? error),
+    }
+  }
+}
+
 function resolveStatus(baseAvailable: boolean, modelsAvailable: boolean): CheckStatus {
   if (baseAvailable && modelsAvailable) return "green"
   if (!baseAvailable && !modelsAvailable) return "red"
@@ -109,6 +269,13 @@ function buildMessage(base: ProbeResult, models: ProbeResult, status: CheckStatu
 }
 
 export async function checkApiEntry(entry: ApiEntry): Promise<ApiCheckResult> {
+  if (entry.compatibilityMode === "openai") {
+    return checkOpenAICompatible(entry)
+  }
+  if (entry.compatibilityMode === "gemini") {
+    return checkGeminiCompatible(entry)
+  }
+
   const baseUrl = normalizeBaseUrl(entry.baseUrl)
   const apiKey = String(entry.apiKey ?? "").trim()
   const checkedAt = Date.now()

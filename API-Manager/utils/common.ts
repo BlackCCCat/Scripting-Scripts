@@ -1,12 +1,29 @@
+import type { CompatibilityMode } from "../types"
+
 export function normalizeBaseUrl(input: string): string {
   return String(input ?? "").trim().replace(/\/+$/, "")
 }
 
 export const WIDGET_REFRESH_HOUR_OPTIONS = [1, 3, 6, 12, 24] as const
+export const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com"
+export const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 
 export function normalizeWidgetRefreshHours(input: unknown): number {
   const value = Number(input)
   return WIDGET_REFRESH_HOUR_OPTIONS.includes(value as any) ? value : 3
+}
+
+export function normalizeCompatibilityMode(input: unknown): CompatibilityMode {
+  if (input === "newapi") return "newapi"
+  if (input === "openai") return "openai"
+  if (input === "gemini") return "gemini"
+  return "newapi"
+}
+
+export function defaultBaseUrlForMode(mode: CompatibilityMode): string {
+  if (mode === "openai") return OPENAI_DEFAULT_BASE_URL
+  if (mode === "gemini") return GEMINI_DEFAULT_BASE_URL
+  return ""
 }
 
 export function isLikelyHttpUrl(input: string): boolean {

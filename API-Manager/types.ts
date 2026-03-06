@@ -1,4 +1,5 @@
 export type CheckStatus = "unknown" | "checking" | "green" | "yellow" | "red"
+export type CompatibilityMode = "newapi" | "openai" | "gemini"
 
 export type ApiCheckResult = {
   status: CheckStatus
@@ -11,6 +12,7 @@ export type ApiCheckResult = {
 export type ApiEntry = {
   id: string
   name: string
+  compatibilityMode: CompatibilityMode
   baseUrl: string
   apiKey: string
   updatedAt: number

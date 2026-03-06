@@ -77,11 +77,36 @@ function buildCheckingResult(): ApiCheckResult {
   }
 }
 
+function baseUrlCopyOptions(entry: ApiEntry): Array<{
+  label: string
+  suffix: string
+}> {
+  if (entry.compatibilityMode === "gemini") {
+    return [
+      { label: "Base URL（/v1beta）", suffix: "/v1beta" },
+      { label: "Base URL（/v1beta/openai/chat/completions）", suffix: "/v1beta/openai/chat/completions" },
+    ]
+  }
+  if (entry.compatibilityMode === "openai") {
+    return [
+      { label: "Base URL（/v1/models）", suffix: "/v1/models" },
+      { label: "Base URL（/v1/chat/completions）", suffix: "/v1/chat/completions" },
+      { label: "Base URL（/v1/chat/responses）", suffix: "/v1/chat/responses" },
+    ]
+  }
+  return [
+    { label: "Base URL（/v1/chat）", suffix: "/v1/chat" },
+    { label: "Base URL（/v1/chat/completions）", suffix: "/v1/chat/completions" },
+  ]
+}
+
 function buildMenuItems(props: {
+  baseUrlOptions: Array<{
+    label: string
+    onCopy: () => void
+  }>
   onCopyOriginalUrl: () => void
   onCopyApiKey: () => void
-  onCopyBaseUrlChat: () => void
-  onCopyBaseUrlCompletions: () => void
   onCheckNow: () => void
   onEdit: () => void
   onDelete: () => void
@@ -90,8 +115,9 @@ function buildMenuItems(props: {
     <Group>
       <Button title="复制原链接" action={props.onCopyOriginalUrl} />
       <Button title="复制 API Key" action={props.onCopyApiKey} />
-      <Button title="复制 Base URL（/v1/chat）" action={props.onCopyBaseUrlChat} />
-      <Button title="复制 Base URL（/v1/chat/completions）" action={props.onCopyBaseUrlCompletions} />
+      {props.baseUrlOptions.map((item) => (
+        <Button key={item.label} title={`复制 ${item.label}`} action={item.onCopy} />
+      ))}
       <Button title="立即检测" action={props.onCheckNow} />
       <Button title="编辑" action={props.onEdit} />
       <Button title="删除" role="destructive" action={props.onDelete} />
@@ -260,6 +286,7 @@ export function HomeView() {
     const next: ApiEntry = {
       id: makeId(),
       name: result.name,
+      compatibilityMode: result.compatibilityMode ?? "newapi",
       baseUrl: normalizeBaseUrl(result.baseUrl),
       apiKey: result.apiKey,
       updatedAt: now,
@@ -321,10 +348,13 @@ export function HomeView() {
     }
 
     const shouldResetCheck =
-      entry.baseUrl !== fixedBaseUrl || entry.apiKey !== result.apiKey
+      entry.baseUrl !== fixedBaseUrl ||
+      entry.apiKey !== result.apiKey ||
+      (result.compatibilityMode ?? entry.compatibilityMode) !== entry.compatibilityMode
     const updatedEntry: ApiEntry = {
       ...entry,
       name: result.name,
+      compatibilityMode: result.compatibilityMode ?? entry.compatibilityMode,
       baseUrl: fixedBaseUrl,
       apiKey: result.apiKey,
       updatedAt: Date.now(),
@@ -347,14 +377,14 @@ export function HomeView() {
   }
 
   async function showEntryMenu(entry: ApiEntry) {
+    const copyOptions = baseUrlCopyOptions(entry)
     const index = await Dialog.actionSheet({
       title: entry.name,
       message: "选择你要执行的操作",
       actions: [
         { label: "复制原链接" },
         { label: "复制 API Key" },
-        { label: "复制 Base URL（/v1/chat）" },
-        { label: "复制 Base URL（/v1/chat/completions）" },
+        ...copyOptions.map((item) => ({ label: `复制 ${item.label}` })),
         { label: "立即检测" },
         { label: "编辑" },
         { label: "删除", destructive: true },
@@ -363,11 +393,12 @@ export function HomeView() {
 
     if (index === 0) await copyText(entry.baseUrl, `已复制 ${entry.name} 的原链接`)
     else if (index === 1) await copyText(entry.apiKey, `已复制 ${entry.name} 的 API Key`)
-    else if (index === 2) await copyBaseUrl(entry, "/v1/chat", "Base URL（/v1/chat）")
-    else if (index === 3) await copyBaseUrl(entry, "/v1/chat/completions", "Base URL（/v1/chat/completions）")
-    else if (index === 4) await runCheck(entry)
-    else if (index === 5) await editEntry(entry)
-    else if (index === 6) await deleteEntry(entry)
+    else if (index >= 2 && index < 2 + copyOptions.length) {
+      const target = copyOptions[index - 2]
+      if (target) await copyBaseUrl(entry, target.suffix, target.label)
+    } else if (index === 2 + copyOptions.length) await runCheck(entry)
+    else if (index === 3 + copyOptions.length) await editEntry(entry)
+    else if (index === 4 + copyOptions.length) await deleteEntry(entry)
   }
 
   return (
@@ -525,6 +556,7 @@ export function HomeView() {
         >
           {sortedEntries.length ? (
             sortedEntries.map((entry) => {
+              const copyOptions = baseUrlCopyOptions(entry)
               const checkedAtLabel = formatDateTime(entry.check.checkedAt)
               return (
                 <Button
@@ -533,11 +565,12 @@ export function HomeView() {
                   action={withHaptic(() => showEntryMenu(entry))}
                   contextMenu={{
                     menuItems: buildMenuItems({
+                      baseUrlOptions: copyOptions.map((item) => ({
+                        label: item.label,
+                        onCopy: () => void copyBaseUrl(entry, item.suffix, item.label),
+                      })),
                       onCopyOriginalUrl: () => void copyText(entry.baseUrl, `已复制 ${entry.name} 的原链接`),
                       onCopyApiKey: () => void copyText(entry.apiKey, `已复制 ${entry.name} 的 API Key`),
-                      onCopyBaseUrlChat: () => void copyBaseUrl(entry, "/v1/chat", "Base URL（/v1/chat）"),
-                      onCopyBaseUrlCompletions: () =>
-                        void copyBaseUrl(entry, "/v1/chat/completions", "Base URL（/v1/chat/completions）"),
                       onCheckNow: () => void runCheck(entry),
                       onEdit: () => void editEntry(entry),
                       onDelete: () => void deleteEntry(entry),

@@ -4,6 +4,7 @@ import {
   HStack,
   Navigation,
   NavigationStack,
+  Picker,
   Section,
   Spacer,
   Text,
@@ -12,10 +13,18 @@ import {
   useState,
 } from "scripting"
 
-import { isLikelyHttpUrl, normalizeBaseUrl } from "../utils/common"
+import type { CompatibilityMode } from "../types"
+import {
+  defaultBaseUrlForMode,
+  GEMINI_DEFAULT_BASE_URL,
+  isLikelyHttpUrl,
+  normalizeBaseUrl,
+  OPENAI_DEFAULT_BASE_URL,
+} from "../utils/common"
 
 export type EditEntryResult = {
   name: string
+  compatibilityMode?: CompatibilityMode
   baseUrl: string
   apiKey: string
 }
@@ -71,13 +80,46 @@ export function EditEntryView(props: {
   initial?: Partial<EditEntryResult>
 }) {
   const dismiss = Navigation.useDismiss()
+  const [compatibilityMode, setCompatibilityMode] = useState<CompatibilityMode>(
+    props.initial?.compatibilityMode === "openai" || props.initial?.compatibilityMode === "gemini"
+      ? props.initial.compatibilityMode
+      : "newapi"
+  )
   const [name, setName] = useState(String(props.initial?.name ?? ""))
   const [baseUrl, setBaseUrl] = useState(String(props.initial?.baseUrl ?? ""))
   const [apiKey, setApiKey] = useState(String(props.initial?.apiKey ?? ""))
 
+  const modeOptions: CompatibilityMode[] = ["newapi", "openai", "gemini"]
+  const modeIndex = compatibilityMode === "openai" ? 1 : compatibilityMode === "gemini" ? 2 : 0
+  const basePrompt = compatibilityMode === "gemini"
+      ? `base url，如 ${GEMINI_DEFAULT_BASE_URL}`
+      : compatibilityMode === "openai"
+        ? `base url，如 ${OPENAI_DEFAULT_BASE_URL}`
+        : "base url，如 https://example.com"
+  const descriptionLines = compatibilityMode === "newapi"
+    ? [
+        "链接请填写 API 的基础地址，不要填写 /api/status 或 /v1/models。",
+        "可填写示例：https://example.com",
+        "也可以填写带前缀路径的地址：https://example.com/proxy",
+      ]
+    : compatibilityMode === "gemini"
+      ? [
+          "Gemini 模式可留空链接，留空时默认使用 Gemini 官方地址。",
+          `默认地址：${GEMINI_DEFAULT_BASE_URL}`,
+          "检测时会请求 /v1beta/models?key=你的 API Key。",
+        ]
+      : [
+          "OpenAI 模式可留空链接，留空时默认使用 OpenAI 官方地址。",
+          `默认地址：${OPENAI_DEFAULT_BASE_URL}`,
+          "检测时会请求 /v1/models，并使用 Authorization: Bearer API Key。",
+        ]
+
   async function onSave() {
     const fixedName = String(name ?? "").trim()
-    const fixedBaseUrl = normalizeBaseUrl(baseUrl)
+    const rawBaseUrl = normalizeBaseUrl(baseUrl)
+    const fixedBaseUrl = compatibilityMode !== "newapi" && !rawBaseUrl
+      ? defaultBaseUrlForMode(compatibilityMode)
+      : rawBaseUrl
     const fixedApiKey = String(apiKey ?? "").trim()
 
     if (!fixedName) {
@@ -102,6 +144,7 @@ export function EditEntryView(props: {
 
     dismiss({
       name: fixedName,
+      compatibilityMode,
       baseUrl: fixedBaseUrl,
       apiKey: fixedApiKey,
     } satisfies EditEntryResult)
@@ -118,27 +161,28 @@ export function EditEntryView(props: {
           header={<Text>基础信息</Text>}
           footer={
             <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={4}>
-              <Text
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                multilineTextAlignment="leading"
-              >
-                链接请填写 API 的基础地址，不要填写 /api/status 或 /v1/models。
-              </Text>
-              <Text
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                multilineTextAlignment="leading"
-              >
-                可填写示例：https://example.com
-              </Text>
-              <Text
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                multilineTextAlignment="leading"
-              >
-                也可以填写带前缀路径的地址：https://example.com/proxy
-              </Text>
+              {descriptionLines.map((line) => (
+                <Text
+                  key={line}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                  multilineTextAlignment="leading"
+                >
+                  {line}
+                </Text>
+              ))}
             </VStack>
           }
         >
+          <Picker
+            title="兼容模式"
+            pickerStyle="menu"
+            value={modeIndex}
+            onChanged={(index: number) => setCompatibilityMode(modeOptions[index] ?? "newapi")}
+          >
+            <Text tag={0}>New API</Text>
+            <Text tag={1}>OpenAI</Text>
+            <Text tag={2}>Gemini</Text>
+          </Picker>
           <LabeledInputRow
             value={name}
             prompt="名称，如OpenAI中转"
@@ -146,7 +190,7 @@ export function EditEntryView(props: {
           />
           <LabeledInputRow
             value={baseUrl}
-            prompt="base url，如 https://example.com"
+            prompt={basePrompt}
             onChanged={setBaseUrl}
           />
           <LabeledInputRow
