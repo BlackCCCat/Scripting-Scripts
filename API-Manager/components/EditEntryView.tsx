@@ -98,18 +98,18 @@ export function EditEntryView(props: {
         : "base url，如 https://example.com"
   const descriptionLines = compatibilityMode === "newapi"
     ? [
-        "链接请填写 API 的基础地址，不要填写 /api/status 或 /v1/models。",
+        "New API 平台请填写 API 的基础地址，不要填写 /api/status 或 /v1/models。",
         "可填写示例：https://example.com",
         "也可以填写带前缀路径的地址：https://example.com/proxy",
       ]
     : compatibilityMode === "gemini"
       ? [
-          "Gemini 模式可留空链接，留空时默认使用 Gemini 官方地址。",
+          "Gemini 接口可留空链接，留空时默认使用 Gemini 官方地址。",
           `默认地址：${GEMINI_DEFAULT_BASE_URL}`,
           "检测时会请求 /v1beta/models?key=你的 API Key。",
         ]
       : [
-          "OpenAI 模式可留空链接，留空时默认使用 OpenAI 官方地址。",
+          "OpenAI 兼容接口可留空链接，留空时默认使用 OpenAI 官方地址。",
           `默认地址：${OPENAI_DEFAULT_BASE_URL}`,
           "检测时会请求 /v1/models，并使用 Authorization: Bearer API Key。",
         ]
@@ -174,14 +174,14 @@ export function EditEntryView(props: {
           }
         >
           <Picker
-            title="兼容模式"
+            title="服务类型"
             pickerStyle="menu"
             value={modeIndex}
             onChanged={(index: number) => setCompatibilityMode(modeOptions[index] ?? "newapi")}
           >
-            <Text tag={0}>New API</Text>
-            <Text tag={1}>OpenAI</Text>
-            <Text tag={2}>Gemini</Text>
+            <Text tag={0}>New API 平台</Text>
+            <Text tag={1}>OpenAI 兼容接口</Text>
+            <Text tag={2}>Gemini 接口</Text>
           </Picker>
           <LabeledInputRow
             value={name}

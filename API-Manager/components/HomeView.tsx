@@ -78,31 +78,36 @@ function buildCheckingResult(): ApiCheckResult {
 }
 
 function baseUrlCopyOptions(entry: ApiEntry): Array<{
-  label: string
+  title: string
+  copiedLabel: string
   suffix: string
 }> {
   if (entry.compatibilityMode === "gemini") {
     return [
-      { label: "Base URL（/v1beta）", suffix: "/v1beta" },
-      { label: "Base URL（/v1beta/openai/chat/completions）", suffix: "/v1beta/openai/chat/completions" },
+      { title: "复制原生地址", copiedLabel: "/v1beta", suffix: "/v1beta" },
+      {
+        title: "复制 OpenAI 地址",
+        copiedLabel: "/v1beta/openai/chat/completions",
+        suffix: "/v1beta/openai/chat/completions",
+      },
     ]
   }
   if (entry.compatibilityMode === "openai") {
     return [
-      { label: "Base URL（/v1/models）", suffix: "/v1/models" },
-      { label: "Base URL（/v1/chat/completions）", suffix: "/v1/chat/completions" },
-      { label: "Base URL（/v1/chat/responses）", suffix: "/v1/chat/responses" },
+      { title: "复制模型地址", copiedLabel: "/v1/models", suffix: "/v1/models" },
+      { title: "复制对话地址", copiedLabel: "/v1/chat/completions", suffix: "/v1/chat/completions" },
+      { title: "复制响应地址", copiedLabel: "/v1/chat/responses", suffix: "/v1/chat/responses" },
     ]
   }
   return [
-    { label: "Base URL（/v1/chat）", suffix: "/v1/chat" },
-    { label: "Base URL（/v1/chat/completions）", suffix: "/v1/chat/completions" },
+    { title: "复制对话地址", copiedLabel: "/v1/chat", suffix: "/v1/chat" },
+    { title: "复制补全地址", copiedLabel: "/v1/chat/completions", suffix: "/v1/chat/completions" },
   ]
 }
 
 function buildMenuItems(props: {
   baseUrlOptions: Array<{
-    label: string
+    title: string
     onCopy: () => void
   }>
   onCopyOriginalUrl: () => void
@@ -116,7 +121,7 @@ function buildMenuItems(props: {
       <Button title="复制原链接" action={props.onCopyOriginalUrl} />
       <Button title="复制 API Key" action={props.onCopyApiKey} />
       {props.baseUrlOptions.map((item) => (
-        <Button key={item.label} title={`复制 ${item.label}`} action={item.onCopy} />
+        <Button key={item.title} title={item.title} action={item.onCopy} />
       ))}
       <Button title="立即检测" action={props.onCheckNow} />
       <Button title="编辑" action={props.onEdit} />
@@ -384,7 +389,7 @@ export function HomeView() {
       actions: [
         { label: "复制原链接" },
         { label: "复制 API Key" },
-        ...copyOptions.map((item) => ({ label: `复制 ${item.label}` })),
+        ...copyOptions.map((item) => ({ label: item.title })),
         { label: "立即检测" },
         { label: "编辑" },
         { label: "删除", destructive: true },
@@ -395,7 +400,7 @@ export function HomeView() {
     else if (index === 1) await copyText(entry.apiKey, `已复制 ${entry.name} 的 API Key`)
     else if (index >= 2 && index < 2 + copyOptions.length) {
       const target = copyOptions[index - 2]
-      if (target) await copyBaseUrl(entry, target.suffix, target.label)
+      if (target) await copyBaseUrl(entry, target.suffix, target.copiedLabel)
     } else if (index === 2 + copyOptions.length) await runCheck(entry)
     else if (index === 3 + copyOptions.length) await editEntry(entry)
     else if (index === 4 + copyOptions.length) await deleteEntry(entry)
@@ -538,9 +543,6 @@ export function HomeView() {
                 ))}
               </VStack>
             </VStack>
-            <Text foregroundStyle="secondaryLabel" font="footnote">
-              可用表示地址和模型都通过；API失效表示地址可用但模型不可用；失效表示地址和模型都不可用；检测中表示请求尚未完成。
-            </Text>
           </VStack>
         </Section>
 
@@ -566,8 +568,8 @@ export function HomeView() {
                   contextMenu={{
                     menuItems: buildMenuItems({
                       baseUrlOptions: copyOptions.map((item) => ({
-                        label: item.label,
-                        onCopy: () => void copyBaseUrl(entry, item.suffix, item.label),
+                        title: item.title,
+                        onCopy: () => void copyBaseUrl(entry, item.suffix, item.copiedLabel),
                       })),
                       onCopyOriginalUrl: () => void copyText(entry.baseUrl, `已复制 ${entry.name} 的原链接`),
                       onCopyApiKey: () => void copyText(entry.apiKey, `已复制 ${entry.name} 的 API Key`),
