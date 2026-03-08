@@ -90,14 +90,6 @@ export function SettingsView(props: {
             <HStack frame={{ width: "100%" as any }} spacing={8}>
               <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={4}>
                 <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>运行时自动检测</Text>
-                <Text
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  font="footnote"
-                  foregroundStyle="secondaryLabel"
-                  multilineTextAlignment="leading"
-                >
-                  打开脚本后自动检查 /api/status 和 /v1/models
-                </Text>
               </VStack>
               <Spacer />
             </HStack>
@@ -110,28 +102,13 @@ export function SettingsView(props: {
             <HStack frame={{ width: "100%" as any }} spacing={8}>
               <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={4}>
                 <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>新增后自动检测</Text>
-                <Text
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  font="footnote"
-                  foregroundStyle="secondaryLabel"
-                  multilineTextAlignment="leading"
-                >
-                  保存新增 API 后，自动检测地址和模型是否可用
-                </Text>
               </VStack>
               <Spacer />
             </HStack>
           </Toggle>
         </Section>
 
-        <Section
-          header={<Text>小组件</Text>}
-          footer={
-            <Text>
-              使用 Widget 的 after reload policy 定时请求新时间线；检测中会额外使用短周期刷新，以便尽快显示最终结果。
-            </Text>
-          }
-        >
+        <Section header={<Text>小组件</Text>}>
           <Picker
             title="自动刷新间隔"
             pickerStyle="menu"
