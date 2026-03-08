@@ -22,6 +22,7 @@ const MODEL_TAG = "LTS"
 const MODEL_FILE = "wanxiang-lts-zh-hans.gram"
 const CNB_DICT_TITLE = "\u8bcd\u5e93"
 const CNB_SCHEME_TITLE = "\u4e07\u8c61\u62fc\u97f3\u8f93\u5165\u65b9\u6848"
+const HTTP_TIMEOUT_MS = 30 * 1000
 
 export type RemoteAsset = {
   name: string
@@ -94,7 +95,24 @@ function emitProgress(
 async function httpJson(url: string, init?: any) {
   const fetchFn = Runtime.fetch
   if (!fetchFn) throw new Error("\u8fd0\u884c\u65f6\u6ca1\u6709 fetch")
-  const res = await fetchFn(url, init)
+  const controller = typeof AbortController === "function" ? new AbortController() : null
+  const timer = setTimeout(() => {
+    try {
+      controller?.abort()
+    } catch { }
+  }, HTTP_TIMEOUT_MS)
+  let res: any
+  try {
+    res = await fetchFn(url, controller ? { ...(init ?? {}), signal: controller.signal } : init)
+  } catch (error: any) {
+    const raw = String(error?.message ?? error ?? "")
+    if (raw.includes("AbortError") || raw.includes("aborted")) {
+      throw new Error(`请求超时：${Math.round(HTTP_TIMEOUT_MS / 1000)} 秒内未完成`)
+    }
+    throw new Error(`网络请求失败：${raw || "未知错误"}`)
+  } finally {
+    clearTimeout(timer)
+  }
   if (!res.ok) throw new Error(`\u8bf7\u6c42\u5931\u8d25\uff1a${res.status} ${res.statusText}`)
   const json = await res.json()
   return { json, headers: res.headers }
@@ -371,13 +389,19 @@ export async function updateScheme(
   try {
     params.onStage?.("下载中...")
     emitProgress(params.onProgress, 0)
-    await downloadWithProgress(latest.url, zipPath, (p) => {
-      emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
-    }, (e) => {
-      if (e.type === "retrying") {
-        params.onStage?.(`\u4E0B\u8F7D\u4E2D\uFF08\u91CD\u8BD5 ${e.attempt}/${e.maxAttempts}\uFF09...`)
-      }
-    })
+    try {
+      await downloadWithProgress(latest.url, zipPath, (p) => {
+        emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+      }, (e) => {
+        if (e.type === "retrying") {
+          params.onStage?.(`\u4E0B\u8F7D\u4E2D\uFF08\u91CD\u8BD5 ${e.attempt}/${e.maxAttempts}\uFF09...`)
+          params.onLog?.(`下载出现波动，准备重试：${e.attempt}/${e.maxAttempts}`)
+        }
+      })
+    } catch (error: any) {
+      params.onLog?.(`下载失败：${String(error?.message ?? error)}`)
+      throw error
+    }
 
     // \u6587\u4EF6\u5927\u5C0F\u6821\u9A8C
     const expectedSize = pickExpectedSize(latest)
@@ -486,13 +510,19 @@ export async function updateDict(
   try {
     params.onStage?.("下载中…")
     emitProgress(params.onProgress, 0)
-    await downloadWithProgress(dict.url, zipPath, (p) => {
-      emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
-    }, (e) => {
-      if (e.type === "retrying") {
-        params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
-      }
-    })
+    try {
+      await downloadWithProgress(dict.url, zipPath, (p) => {
+        emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+      }, (e) => {
+        if (e.type === "retrying") {
+          params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+          params.onLog?.(`下载出现波动，准备重试：${e.attempt}/${e.maxAttempts}`)
+        }
+      })
+    } catch (error: any) {
+      params.onLog?.(`下载失败：${String(error?.message ?? error)}`)
+      throw error
+    }
 
     // 文件大小校验
     const expectedSize = pickExpectedSize(dict)
@@ -620,13 +650,19 @@ export async function updateModel(
   await removePathLoose(tempPath)
   try {
     emitProgress(params.onProgress, 0)
-    await downloadWithProgress(model.url, tempPath, (p) => {
-      emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
-    }, (e) => {
-      if (e.type === "retrying") {
-        params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
-      }
-    })
+    try {
+      await downloadWithProgress(model.url, tempPath, (p) => {
+        emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+      }, (e) => {
+        if (e.type === "retrying") {
+          params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+          params.onLog?.(`下载出现波动，准备重试：${e.attempt}/${e.maxAttempts}`)
+        }
+      })
+    } catch (error: any) {
+      params.onLog?.(`下载失败：${String(error?.message ?? error)}`)
+      throw error
+    }
 
     // ✅ 下载完成后先做完整性校验：大小不一致则认为失败，不覆盖 dstPath
     params.onStage?.("校验中…")

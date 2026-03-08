@@ -247,6 +247,23 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
   }
 }
 
+function decorateLogMessage(message: string): string {
+  const text = String(message ?? "").trim()
+  if (!text) return text
+  if (/^(🟢|⬇️|🗑️|📝|⏭️|🚀|⏱️|❌|✅|🔎|ℹ️)\s/u.test(text)) return text
+  if (text.includes("可更新") || text.includes("有可用更新")) return `🟢 ${text}`
+  if (text.includes("下载地址") || text.includes("下载中") || text.includes("远程") || text.includes("资产")) return `⬇️ ${text}`
+  if (text.includes("删除") || text.includes("清理")) return `🗑️ ${text}`
+  if (text.includes("写入") || text.includes("整理")) return `📝 ${text}`
+  if (text.includes("跳过排除文件")) return `⏭️ ${text}`
+  if (text.includes("部署")) return `🚀 ${text}`
+  if (text.includes("超时")) return `⏱️ ${text}`
+  if (text.includes("失败") || text.includes("错误")) return `❌ ${text}`
+  if (text.includes("完成")) return `✅ ${text}`
+  if (text.includes("检查")) return `🔎 ${text}`
+  return `ℹ️ ${text}`
+}
+
 function logLevelColor(level: LogLevel) {
   if (level === "SUCCESS") return "systemGreen"
   if (level === "WARN") return "systemOrange"
@@ -267,6 +284,8 @@ function logScopeColor(scope: LogScope) {
 
 function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
   const insetLeft = Math.max(0, Number(props.insetLeft ?? 0))
+  const highlightUpdate = props.entry.message.endsWith("可更新")
+  const updatePrefix = highlightUpdate ? props.entry.message.slice(0, -3).trimEnd() : props.entry.message
   return (
     <HStack key={props.entry.id} spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
       {insetLeft > 0 ? (
@@ -289,14 +308,35 @@ function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
           </Text>
           <Spacer />
         </HStack>
-        <Text
-          font="body"
-          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-          multilineTextAlignment="leading"
-          selectionDisabled={false}
-        >
-          {props.entry.message}
-        </Text>
+        {highlightUpdate ? (
+          <HStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            <Text
+              font="body"
+              frame={{ alignment: "leading" as any }}
+              multilineTextAlignment="leading"
+              selectionDisabled={false}
+            >
+              {updatePrefix}
+            </Text>
+            <Text
+              font="body"
+              foregroundStyle="systemGreen"
+              frame={{ alignment: "leading" as any }}
+            >
+              可更新
+            </Text>
+            <Spacer />
+          </HStack>
+        ) : (
+          <Text
+            font="body"
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            multilineTextAlignment="leading"
+            selectionDisabled={false}
+          >
+            {props.entry.message}
+          </Text>
+        )}
       </VStack>
     </HStack>
   )
@@ -426,6 +466,7 @@ export function HomeView() {
     if (!currentCfg.showVerboseLog) return
     let normalizedMessage = String(message ?? "").trim()
     normalizedMessage = replacePathPrefix(normalizedMessage, currentCfg.hamsterRootPath)
+    normalizedMessage = decorateLogMessage(normalizedMessage)
     const entry = makeLogEntry(level, scope, normalizedMessage)
     setLogs((prev) => {
       const next = prev.concat(entry)
