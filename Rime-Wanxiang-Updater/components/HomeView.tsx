@@ -166,12 +166,19 @@ type LogEntry = {
   message: string
 }
 
+type UpdateDecision = {
+  scheme: boolean
+  dict: boolean
+  model: boolean
+}
+
 type HomeSessionState = {
   remoteSchemeVer: string
   remoteDictMark: string
   remoteModelMark: string
   notes: string
   lastCheck: AllUpdateResult | null
+  lastCheckDecision: UpdateDecision | null
   lastCheckKey: string
   logs: LogEntry[]
 }
@@ -182,6 +189,7 @@ const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
   remoteModelMark: "请检查更新",
   notes: "请检查更新",
   lastCheck: null,
+  lastCheckDecision: null,
   lastCheckKey: "",
   logs: [],
 }
@@ -222,6 +230,21 @@ function replacePathPrefix(message: string, rootPath: string): string {
     out = out.split(variant).join(rootName)
   }
   return out
+}
+
+function normalizeMark(value: string | undefined): string {
+  return String(value ?? "").trim().toLowerCase()
+}
+
+function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult): UpdateDecision {
+  const schemeRemoteMark = normalizeMark(remote.scheme?.tag ?? remote.scheme?.name)
+  const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
+  const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
+  return {
+    scheme: !!(schemeRemoteMark && normalizeMark(localMeta?.scheme?.remoteTagOrName) !== schemeRemoteMark),
+    dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
+    model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
+  }
 }
 
 function logLevelColor(level: LogLevel) {
@@ -313,7 +336,7 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
           ),
         }}
       >
-        <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding={{ top: 8, bottom: 8, left: 18, right: 14 }}>
+        <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding={{ top: 8, bottom: 8, leading: 18, trailing: 14 }}>
           <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
             {props.logs.length ? props.logs.map((entry) => <LogEntryRow key={entry.id} entry={entry} insetLeft={18} />) : (
               <HStack spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
@@ -360,6 +383,7 @@ export function HomeView() {
   const [remoteModelMark, setRemoteModelMark] = useState(() => homeSessionState.remoteModelMark)
   const [notes, setNotes] = useState(() => homeSessionState.notes)
   const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(() => homeSessionState.lastCheck)
+  const [lastCheckDecision, setLastCheckDecision] = useState<UpdateDecision | null>(() => homeSessionState.lastCheckDecision)
   const [lastCheckKey, setLastCheckKey] = useState(() => homeSessionState.lastCheckKey)
   const [logs, setLogs] = useState<LogEntry[]>(() => homeSessionState.logs)
 
@@ -385,6 +409,7 @@ export function HomeView() {
     setRemoteModelMark(DEFAULT_HOME_SESSION_STATE.remoteModelMark)
     setNotes(DEFAULT_HOME_SESSION_STATE.notes)
     setLastCheck(DEFAULT_HOME_SESSION_STATE.lastCheck)
+    setLastCheckDecision(DEFAULT_HOME_SESSION_STATE.lastCheckDecision)
     setLastCheckKey(DEFAULT_HOME_SESSION_STATE.lastCheckKey)
   }
 
@@ -430,16 +455,8 @@ export function HomeView() {
     }
   }
 
-  function pushCheckDiffLog(label: string, localMark: string, remoteMark: string) {
-    const local = String(localMark ?? "").trim()
-    const remote = String(remoteMark ?? "").trim()
-    const localKnown = local && local !== "暂无法获取" && local !== "请检查更新" && local !== "检查更新中..."
-    const remoteKnown = remote && remote !== "暂无法获取" && remote !== "请检查更新" && remote !== "检查更新中..."
-    if (localKnown && remoteKnown && local !== remote) {
-      pushLog("SUCCESS", "CHECK", `${label}：有可用更新（本地 ${local} -> 远程 ${remote}）`)
-      return
-    }
-    pushLog("INFO", "CHECK", `${label}：当前已是最新`)
+  function pushCheckResultLog(label: string, remoteMark: string, needUpdate: boolean) {
+    pushLog(needUpdate ? "SUCCESS" : "INFO", "CHECK", `远程${label}：${remoteMark}${needUpdate ? "  可更新" : ""}`)
   }
 
   async function guardPathAccess(showPopup: boolean): Promise<boolean> {
@@ -481,15 +498,12 @@ export function HomeView() {
     return false
   }
 
-  async function refreshLocal(current: AppConfig): Promise<boolean> {
+  async function findLocalMeta(current: AppConfig): Promise<{ meta?: MetaBundle; candidates: string[] }> {
     const normPath = (s: string) => String(s ?? "").trim().replace(/\/+$/, "")
     const pushCandidate = (arr: string[], p?: string) => {
       const x = normPath(String(p ?? ""))
       if (x) arr.push(x)
     }
-
-    const selected = selectedSchemeFromConfig(current)
-    setLocalSelectedScheme(selected)
 
     let installRoot = ""
     try {
@@ -546,24 +560,29 @@ export function HomeView() {
     } catch { }
 
     const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)))
-    let meta: MetaBundle | undefined
     for (const root of uniq) {
       const m = await loadMetaAsync(root, current.hamsterBookmarkName)
       if (m.scheme || m.dict || m.model) {
-        meta = m
-        break
+        return { meta: m, candidates: uniq }
       }
     }
-    if (!meta && current.hamsterBookmarkName) {
+    if (current.hamsterBookmarkName) {
       try {
         const byBookmark = await loadMetaAsync("", current.hamsterBookmarkName)
         if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
-          meta = byBookmark
+          return { meta: byBookmark, candidates: uniq }
         }
       } catch { }
     }
+    return { meta: undefined, candidates: uniq }
+  }
 
-    if (!uniq.length || !meta) {
+  async function refreshLocal(current: AppConfig): Promise<boolean> {
+    const selected = selectedSchemeFromConfig(current)
+    setLocalSelectedScheme(selected)
+
+    const { meta, candidates } = await findLocalMeta(current)
+    if (!candidates.length || !meta) {
       setLocalSchemeVersion("暂无法获取")
       setLocalDictMark("暂无法获取")
       setLocalModelMark("暂无法获取")
@@ -606,10 +625,11 @@ export function HomeView() {
       remoteModelMark,
       notes,
       lastCheck,
+      lastCheckDecision,
       lastCheckKey,
       logs,
     }
-  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckKey, logs])
+  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckDecision, lastCheckKey, logs])
 
   useEffect(() => {
     if (!cfg.showVerboseLog) return
@@ -619,10 +639,10 @@ export function HomeView() {
       } catch { }
     }
     scrollLatest()
-    const intervalId = busy ? setInterval(scrollLatest, 100) : undefined
+    const intervalId = busy ? (globalThis as any).setInterval?.(scrollLatest, 100) : undefined
     const finalTimer = setTimeout(scrollLatest, 120)
     return () => {
-      if (intervalId !== undefined) clearInterval(intervalId)
+      if (intervalId !== undefined) (globalThis as any).clearInterval?.(intervalId)
       clearTimeout(finalTimer)
     }
   }, [cfg.showVerboseLog, busy, logs.length])
@@ -781,22 +801,22 @@ export function HomeView() {
     setNotes("检查更新中...")
     try {
       const current = loadConfig()
+      const { meta: localMeta } = await findLocalMeta(current)
       await refreshLocal(current)
 
       const r = await checkAllUpdates(current)
+      const decision = buildUpdateDecision(localMeta, r)
       setRemoteSchemeVer(r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取")
       setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取")
       setRemoteModelMark(r.model?.remoteIdOrSha ?? "暂无法获取")
       setNotes(r.scheme?.body ?? "")
       setLastCheck(r)
+      setLastCheckDecision(decision)
       setLastCheckKey(checkKey(current))
 
-      pushLog("SUCCESS", "CHECK", `远程方案：${r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取"}`)
-      pushLog("SUCCESS", "CHECK", `远程词库：${r.dict?.remoteIdOrSha ?? "暂无法获取"}`)
-      pushLog("SUCCESS", "CHECK", `远程模型：${r.model?.remoteIdOrSha ?? "暂无法获取"}`)
-      pushCheckDiffLog("方案", localSchemeVersion, r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取")
-      pushCheckDiffLog("词库", localDictMark, r.dict?.remoteIdOrSha ?? "暂无法获取")
-      pushCheckDiffLog("模型", localModelMark, r.model?.remoteIdOrSha ?? "暂无法获取")
+      pushCheckResultLog("方案", r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取", decision.scheme)
+      pushCheckResultLog("词库", r.dict?.remoteIdOrSha ?? "暂无法获取", decision.dict)
+      pushCheckResultLog("模型", r.model?.remoteIdOrSha ?? "暂无法获取", decision.model)
       setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true)
     } catch (e: any) {
       setStageAndMaybeLog(`检查失败：${String(e?.message ?? e)}`, "CHECK", "ERROR", true)
@@ -814,10 +834,12 @@ export function HomeView() {
     setProgressValue(undefined)
     try {
       const current = loadConfig()
+      const { meta: localMeta } = await findLocalMeta(current)
       await refreshLocal(current)
 
       const key = checkKey(current)
       let pre = lastCheck
+      let decision = lastCheckDecision
       if (!pre || lastCheckKey !== key) {
         // 检查阶段也不显示进度（避免误导）
         setShowProgress(false)
@@ -832,7 +854,21 @@ export function HomeView() {
         setRemoteModelMark(pre.model?.remoteIdOrSha ?? "暂无法获取")
         setNotes(pre.scheme?.body ?? "")
         setLastCheck(pre)
+        decision = buildUpdateDecision(localMeta, pre)
+        setLastCheckDecision(decision)
         setLastCheckKey(key)
+      }
+      if (pre && !decision) {
+        decision = buildUpdateDecision(localMeta, pre)
+        setLastCheckDecision(decision)
+      }
+
+      if (decision?.scheme) pushLog("SUCCESS", "AUTO", "方案有可用更新")
+      if (decision?.dict) pushLog("SUCCESS", "AUTO", "词库有可用更新")
+      if (decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新")
+      if (decision && !decision.scheme && !decision.dict && !decision.model) {
+        setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
+        return
       }
 
       const autoResult = await autoUpdateAll(
@@ -842,7 +878,8 @@ export function HomeView() {
           onLog: wrapDetailLogger("AUTO"),
           onProgress: (p) => applyProgress(p),
         },
-        pre
+        pre,
+        decision ?? undefined
       )
 
       await refreshLocal(current)
@@ -1058,7 +1095,7 @@ export function HomeView() {
                 logProxyRef.current = proxy
                 return (
                   <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
-                    <ScrollView frame={{ height: 152, maxWidth: "infinity" as any }} padding={{ top: 2, bottom: 2, left: 0, right: 0 }}>
+                    <ScrollView frame={{ height: 152, maxWidth: "infinity" as any }} padding={{ top: 2, bottom: 2, leading: 0, trailing: 0 }}>
                       <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
                         {logs.length ? logs.map(renderLogEntry) : (
                           <Text
@@ -1072,7 +1109,6 @@ export function HomeView() {
                         )}
                         <Rectangle
                           key="bottomView"
-                          id="bottomView"
                           foregroundStyle="clear"
                           frame={{ maxWidth: "infinity", alignment: "leading" as any, height: 1 }}
                         />

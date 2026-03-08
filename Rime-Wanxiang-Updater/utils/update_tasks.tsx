@@ -50,6 +50,12 @@ export type AutoUpdateRunResult = {
   didDeploy: boolean
 }
 
+export type UpdateDecision = {
+  scheme: boolean
+  dict: boolean
+  model: boolean
+}
+
 function normalizeMark(v?: string): string {
   return String(v ?? "").trim().toLowerCase()
 }
@@ -698,7 +704,8 @@ export async function autoUpdateAll(
     onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
   },
-  prechecked?: AllUpdateResult
+  prechecked?: AllUpdateResult,
+  preDecision?: UpdateDecision
 ): Promise<AutoUpdateRunResult> {
   params.onStage?.("自动更新：检查更新中…")
   const r = prechecked ?? (await checkAllUpdates(cfg))
@@ -706,16 +713,21 @@ export async function autoUpdateAll(
   const meta = await loadMetaAsync(installRoot, cfg.hamsterBookmarkName)
 
   const schemeRemoteMark = r.scheme?.tag ?? r.scheme?.name
-  const needScheme = !!(schemeRemoteMark && normalizeMark(meta.scheme?.remoteTagOrName) !== normalizeMark(schemeRemoteMark))
+  const needScheme = typeof preDecision?.scheme === "boolean"
+    ? preDecision.scheme
+    : !!(schemeRemoteMark && normalizeMark(meta.scheme?.remoteTagOrName) !== normalizeMark(schemeRemoteMark))
 
   const remoteDictMark = normalizeMark(ensureRemoteMark(r.dict, "dict"))
   const localDictMark = normalizeMark(meta.dict?.remoteIdOrSha)
-  const needDict = !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
+  const needDict = typeof preDecision?.dict === "boolean"
+    ? preDecision.dict
+    : !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
 
   const remoteModelMark = normalizeMark(ensureRemoteMark(r.model, "model"))
   const localModelMark = normalizeMark(meta.model?.remoteIdOrSha)
-  const needModel = !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
-  params.onLog?.(`更新判定：方案=${needScheme ? "需要" : "无需"}，词库=${needDict ? "需要" : "无需"}，模型=${needModel ? "需要" : "无需"}`)
+  const needModel = typeof preDecision?.model === "boolean"
+    ? preDecision.model
+    : !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")
