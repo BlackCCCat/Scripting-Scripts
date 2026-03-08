@@ -1,7 +1,10 @@
 import { AppIntentManager, AppIntentProtocol, Widget } from "scripting"
 
-import { checkEntries } from "./utils/checker"
+import type { ApiCheckResult, ApiEntry } from "./types"
+import { checkApiEntry } from "./utils/checker"
 import { loadManagerState, saveManagerState } from "./utils/storage"
+
+const RELOAD_THROTTLE_MS = 600
 
 function reloadWidgets() {
   try {
@@ -15,6 +18,16 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
+function buildFailedResult(error: unknown): ApiCheckResult {
+  return {
+    status: "red",
+    baseAvailable: false,
+    modelsAvailable: false,
+    checkedAt: Date.now(),
+    message: String((error as any)?.message ?? error ?? "检测失败"),
+  }
+}
+
 export const RefreshApiAvailabilityIntent = AppIntentManager.register({
   name: "RefreshApiAvailabilityIntent",
   protocol: AppIntentProtocol.AppIntent,
@@ -22,22 +35,47 @@ export const RefreshApiAvailabilityIntent = AppIntentManager.register({
     const state = loadManagerState()
     if (!state.entries.length) return
 
-    const resultMap = await checkEntries(state.entries)
-    const finishedAt = Date.now()
+    let currentEntries: ApiEntry[] = [...state.entries]
+    let lastReloadAt = 0
 
-    saveManagerState({
-      ...state,
-      entries: state.entries.map((entry) => {
-        const result = resultMap.get(entry.id)
-        if (!result) return entry
-        return {
-          ...entry,
-          check: result,
-          updatedAt: finishedAt,
+    const saveEntries = () => {
+      saveManagerState({
+        ...state,
+        entries: currentEntries,
+      })
+    }
+
+    const maybeReloadWidgets = (force = false) => {
+      const now = Date.now()
+      if (!force && now - lastReloadAt < RELOAD_THROTTLE_MS) return
+      lastReloadAt = now
+      reloadWidgets()
+    }
+
+    await Promise.allSettled(
+      state.entries.map(async (entry) => {
+        let result: ApiCheckResult
+        try {
+          result = await checkApiEntry(entry)
+        } catch (error) {
+          result = buildFailedResult(error)
         }
-      }),
-    })
-    reloadWidgets()
+
+        currentEntries = currentEntries.map((item) =>
+          item.id === entry.id
+            ? {
+                ...item,
+                check: result,
+                updatedAt: Date.now(),
+              }
+            : item
+        )
+        saveEntries()
+        maybeReloadWidgets()
+      })
+    )
+
+    maybeReloadWidgets(true)
     await sleep(500)
     reloadWidgets()
   },

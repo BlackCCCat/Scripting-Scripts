@@ -23,15 +23,32 @@ type ProbeResult = {
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  try {
-    return await fetch(url, {
+  return await new Promise<Response>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      controller.abort()
+      reject(new Error(`请求超时（${REQUEST_TIMEOUT_MS}ms）`))
+    }, REQUEST_TIMEOUT_MS)
+
+    fetch(url, {
       ...init,
       signal: controller.signal,
     })
-  } finally {
-    clearTimeout(timer)
-  }
+      .then((response) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(response)
+      })
+      .catch((error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(error)
+      })
+  })
 }
 
 async function probeBase(baseUrl: string): Promise<ProbeResult> {
@@ -316,11 +333,30 @@ export async function checkApiEntry(entry: ApiEntry): Promise<ApiCheckResult> {
 }
 
 export async function checkEntries(entries: ApiEntry[]): Promise<Map<string, ApiCheckResult>> {
-  const results = await Promise.all(
-    entries.map(async (entry) => ({
-      id: entry.id,
-      result: await checkApiEntry(entry),
-    }))
+  const results = await Promise.allSettled(
+    entries.map(async (entry) => {
+      const result = await checkApiEntry(entry)
+      return {
+        id: entry.id,
+        result,
+      }
+    })
   )
-  return new Map(results.map((item) => [item.id, item.result]))
+  return new Map(
+    results.map((item, index) => {
+      if (item.status === "fulfilled") {
+        return [item.value.id, item.value.result] as const
+      }
+      return [
+        entries[index].id,
+        {
+          status: "red",
+          baseAvailable: false,
+          modelsAvailable: false,
+          checkedAt: Date.now(),
+          message: String((item as PromiseRejectedResult).reason?.message ?? (item as PromiseRejectedResult).reason ?? "检测失败"),
+        } satisfies ApiCheckResult,
+      ] as const
+    })
+  )
 }

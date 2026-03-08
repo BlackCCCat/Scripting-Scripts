@@ -24,7 +24,7 @@ import {
 import type { ApiCheckResult, ApiEntry, CheckStatus, ManagerSettings } from "../types"
 import { EditEntryView, type EditEntryResult } from "./EditEntryView"
 import { SettingsView } from "./SettingsView"
-import { checkApiEntry, checkEntries } from "../utils/checker"
+import { checkApiEntry } from "../utils/checker"
 import { formatDateTime, joinBaseUrl, makeId, maskApiKey, normalizeBaseUrl } from "../utils/common"
 import { buildOverviewItems, buildOverviewSummary, chartColorScale } from "../utils/overview"
 import { clearMinimizeRequested, markMinimizeRequested } from "../utils/runtime"
@@ -74,6 +74,16 @@ function buildCheckingResult(): ApiCheckResult {
     modelsAvailable: false,
     checkedAt: null,
     message: "正在检测地址和模型列表…",
+  }
+}
+
+function buildFailedResult(error: unknown): ApiCheckResult {
+  return {
+    status: "red",
+    baseAvailable: false,
+    modelsAvailable: false,
+    checkedAt: Date.now(),
+    message: String((error as any)?.message ?? error ?? "检测失败"),
   }
 }
 
@@ -251,16 +261,30 @@ export function HomeView() {
         )
       )
 
-      const resultMap = await checkEntries(snapshot)
-      const finishedAt = Date.now()
-      setEntries((current) =>
-        current.map((entry) => {
-          const result = resultMap.get(entry.id)
-          if (!result) return entry
-          return {
-            ...entry,
-            check: result,
-            updatedAt: finishedAt,
+      let completed = 0
+      await Promise.allSettled(
+        snapshot.map(async (entry) => {
+          let result: ApiCheckResult
+          try {
+            result = await checkApiEntry(entry)
+          } catch (error) {
+            result = buildFailedResult(error)
+          }
+
+          completed += 1
+          setEntries((current) =>
+            current.map((item) =>
+              item.id === entry.id
+                ? {
+                    ...item,
+                    check: result,
+                    updatedAt: Date.now(),
+                  }
+                : item
+            )
+          )
+          if (completed < snapshot.length) {
+            setStatusText(`正在检测全部 API… ${completed}/${snapshot.length}`)
           }
         })
       )
