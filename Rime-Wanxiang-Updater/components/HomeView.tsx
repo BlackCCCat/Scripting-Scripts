@@ -12,14 +12,23 @@ import {
   HStack,
   VStack,
   ScrollView,
+  ScrollViewReader,
   ProgressView,
   useEffect,
+  useRef,
   useState,
   Markdown,
   Path,
 } from "scripting"
 
-import { loadConfig, saveConfig, type AppConfig, type ProSchemeKey, PRO_KEYS } from "../utils/config"
+import {
+  loadConfig,
+  saveConfig,
+  type AppConfig,
+  type HomeSectionKey,
+  type ProSchemeKey,
+  PRO_KEYS,
+} from "../utils/config"
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
 import { detectRimeDir, verifyInstallPathAccess, collectRimeCandidates } from "../utils/hamster"
@@ -66,8 +75,6 @@ function pctFromFraction(f?: number) {
   const v = typeof f === "number" && Number.isFinite(f) ? clamp01(f) : 0
   return `${(v * 100).toFixed(2)}%`
 }
-
-
 
 function selectedSchemeFromConfig(cfg: AppConfig): string {
   return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`
@@ -147,29 +154,74 @@ type AlertState = {
   actions: AlertNode
 }
 
-type RemoteSessionState = {
+type LogLevel = "INFO" | "WARN" | "ERROR" | "SUCCESS"
+type LogScope = "SYSTEM" | "CHECK" | "SCHEME" | "DICT" | "MODEL" | "AUTO" | "DEPLOY" | "PATH"
+
+type LogEntry = {
+  id: string
+  at: string
+  level: LogLevel
+  scope: LogScope
+  message: string
+}
+
+type HomeSessionState = {
   remoteSchemeVer: string
   remoteDictMark: string
   remoteModelMark: string
   notes: string
   lastCheck: AllUpdateResult | null
   lastCheckKey: string
+  logs: LogEntry[]
 }
 
-const DEFAULT_REMOTE_SESSION_STATE: RemoteSessionState = {
+const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
   remoteSchemeVer: "请检查更新",
   remoteDictMark: "请检查更新",
   remoteModelMark: "请检查更新",
   notes: "请检查更新",
   lastCheck: null,
   lastCheckKey: "",
+  logs: [],
 }
 
-let remoteSessionState: RemoteSessionState = { ...DEFAULT_REMOTE_SESSION_STATE }
+let homeSessionState: HomeSessionState = { ...DEFAULT_HOME_SESSION_STATE }
 let launchAutoCheckHandled = false
+
+function nowTimeLabel(date = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function makeLogEntry(level: LogLevel, scope: LogScope, message: string): LogEntry {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    at: nowTimeLabel(),
+    level,
+    scope,
+    message: String(message ?? "").trim(),
+  }
+}
+
+function replacePathPrefix(message: string, rootPath: string): string {
+  const root = String(rootPath ?? "").trim().replace(/\/+$/, "")
+  if (!root) return message
+  const slash = root.lastIndexOf("/")
+  const rootName = slash >= 0 ? root.slice(slash + 1) : root
+  if (!rootName) return message
+  const variants = new Set<string>([root])
+  if (root.startsWith("/private/")) variants.add(root.slice("/private".length))
+  else if (root.startsWith("/")) variants.add(`/private${root}`)
+  let out = message
+  for (const variant of variants) {
+    out = out.split(variant).join(rootName)
+  }
+  return out
+}
 
 export function HomeView() {
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
+  const logProxyRef = useRef<any>()
 
   // 本地信息
   const [localSelectedScheme, setLocalSelectedScheme] = useState("暂无法获取")
@@ -178,12 +230,13 @@ export function HomeView() {
   const [localModelMark, setLocalModelMark] = useState("暂无法获取")
 
   // 远程信息
-  const [remoteSchemeVer, setRemoteSchemeVer] = useState(() => remoteSessionState.remoteSchemeVer)
-  const [remoteDictMark, setRemoteDictMark] = useState(() => remoteSessionState.remoteDictMark)
-  const [remoteModelMark, setRemoteModelMark] = useState(() => remoteSessionState.remoteModelMark)
-  const [notes, setNotes] = useState(() => remoteSessionState.notes)
-  const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(() => remoteSessionState.lastCheck)
-  const [lastCheckKey, setLastCheckKey] = useState(() => remoteSessionState.lastCheckKey)
+  const [remoteSchemeVer, setRemoteSchemeVer] = useState(() => homeSessionState.remoteSchemeVer)
+  const [remoteDictMark, setRemoteDictMark] = useState(() => homeSessionState.remoteDictMark)
+  const [remoteModelMark, setRemoteModelMark] = useState(() => homeSessionState.remoteModelMark)
+  const [notes, setNotes] = useState(() => homeSessionState.notes)
+  const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(() => homeSessionState.lastCheck)
+  const [lastCheckKey, setLastCheckKey] = useState(() => homeSessionState.lastCheckKey)
+  const [logs, setLogs] = useState<LogEntry[]>(() => homeSessionState.logs)
 
   // 状态
   const [stage, setStage] = useState("就绪")
@@ -202,12 +255,12 @@ export function HomeView() {
   const [showProgress, setShowProgress] = useState(false)
 
   function resetRemote() {
-    setRemoteSchemeVer(DEFAULT_REMOTE_SESSION_STATE.remoteSchemeVer)
-    setRemoteDictMark(DEFAULT_REMOTE_SESSION_STATE.remoteDictMark)
-    setRemoteModelMark(DEFAULT_REMOTE_SESSION_STATE.remoteModelMark)
-    setNotes(DEFAULT_REMOTE_SESSION_STATE.notes)
-    setLastCheck(DEFAULT_REMOTE_SESSION_STATE.lastCheck)
-    setLastCheckKey(DEFAULT_REMOTE_SESSION_STATE.lastCheckKey)
+    setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer)
+    setRemoteDictMark(DEFAULT_HOME_SESSION_STATE.remoteDictMark)
+    setRemoteModelMark(DEFAULT_HOME_SESSION_STATE.remoteModelMark)
+    setNotes(DEFAULT_HOME_SESSION_STATE.notes)
+    setLastCheck(DEFAULT_HOME_SESSION_STATE.lastCheck)
+    setLastCheckKey(DEFAULT_HOME_SESSION_STATE.lastCheckKey)
   }
 
   function checkKey(c: AppConfig) {
@@ -218,6 +271,35 @@ export function HomeView() {
     setAlert((a) => ({ ...a, isPresented: false }))
   }
 
+  function pushLog(level: LogLevel, scope: LogScope, message: string, targetCfg?: AppConfig) {
+    const currentCfg = targetCfg ?? cfg
+    if (!currentCfg.showVerboseLog) return
+    let normalizedMessage = String(message ?? "").trim()
+    normalizedMessage = replacePathPrefix(normalizedMessage, currentCfg.hamsterRootPath)
+    const entry = makeLogEntry(level, scope, normalizedMessage)
+    setLogs((prev) => {
+      const next = prev.concat(entry)
+      return next.length > 200 ? next.slice(next.length - 200) : next
+    })
+  }
+
+  function setStageAndMaybeLog(message: string, scope: LogScope = "SYSTEM", level: LogLevel = "INFO", logIt = false) {
+    setStage(message)
+    if (logIt) pushLog(level, scope, message)
+  }
+
+  function wrapStageReporter(scope: LogScope) {
+    return (message: string) => {
+      setStageAndMaybeLog(message, scope, "INFO", true)
+    }
+  }
+
+  function wrapDetailLogger(scope: LogScope, level: LogLevel = "INFO") {
+    return (message: string) => {
+      pushLog(level, scope, message)
+    }
+  }
+
   async function guardPathAccess(showPopup: boolean): Promise<boolean> {
     const current = loadConfig()
     const r = await verifyInstallPathAccess(current)
@@ -226,7 +308,7 @@ export function HomeView() {
       return true
     }
     setPathUsable(false)
-    setStage("路径不可用，请在设置中添加或重新添加书签文件夹。")
+    setStageAndMaybeLog("路径不可用，请在设置中添加或重新添加书签文件夹。", "PATH", "WARN", true)
     if (showPopup) {
       const msg = r.reason ? `${r.reason}\n请在设置中添加或重新添加书签文件夹。` : "请在设置中添加或重新添加书签文件夹。"
       setAlert({
@@ -376,15 +458,32 @@ export function HomeView() {
   }
 
   useEffect(() => {
-    remoteSessionState = {
+    homeSessionState = {
       remoteSchemeVer,
       remoteDictMark,
       remoteModelMark,
       notes,
       lastCheck,
       lastCheckKey,
+      logs,
     }
-  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckKey])
+  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckKey, logs])
+
+  useEffect(() => {
+    if (!cfg.showVerboseLog) return
+    const scrollLatest = () => {
+      try {
+        logProxyRef.current?.scrollTo?.("log-bottom", "bottom")
+      } catch { }
+    }
+    scrollLatest()
+    const intervalId = busy ? setInterval(scrollLatest, 100) : undefined
+    const finalTimer = setTimeout(scrollLatest, 120)
+    return () => {
+      if (intervalId !== undefined) clearInterval(intervalId)
+      clearTimeout(finalTimer)
+    }
+  }, [cfg.showVerboseLog, busy, logs.length])
 
   useEffect(() => {
     const current = loadConfig()
@@ -480,14 +579,14 @@ export function HomeView() {
           await FileManager.writeAsString(filePath, newContent, "utf-8")
         } catch (error: any) {
           console.error("保存文件失败：", error)
-          setStage(`保存文件失败：${String(error?.message ?? error)}`)
+          setStageAndMaybeLog(`保存文件失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
         }
       }
 
       await editor.present()
       editor.dispose()
     } catch (error: any) {
-      setStage(`打开编辑器失败：${String(error?.message ?? error)}`)
+      setStageAndMaybeLog(`打开编辑器失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
     }
   }
 
@@ -535,7 +634,7 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 检查更新不显示进度
-    setStage("检查更新中…")
+    setStageAndMaybeLog("检查更新中…", "CHECK", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     setRemoteSchemeVer("检查更新中...")
@@ -554,9 +653,12 @@ export function HomeView() {
       setLastCheck(r)
       setLastCheckKey(checkKey(current))
 
-      setStage("检查完成")
+      pushLog("SUCCESS", "CHECK", `远程方案：${r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取"}`)
+      pushLog("SUCCESS", "CHECK", `远程词库：${r.dict?.remoteIdOrSha ?? "暂无法获取"}`)
+      pushLog("SUCCESS", "CHECK", `远程模型：${r.model?.remoteIdOrSha ?? "暂无法获取"}`)
+      setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true)
     } catch (e: any) {
-      setStage(`检查失败：${String(e?.message ?? e)}`)
+      setStageAndMaybeLog(`检查失败：${String(e?.message ?? e)}`, "CHECK", "ERROR", true)
     } finally {
       setBusy(false)
     }
@@ -566,7 +668,7 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStage("自动更新中…")
+    setStageAndMaybeLog("自动更新中…", "AUTO", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     try {
@@ -578,7 +680,7 @@ export function HomeView() {
       if (!pre || lastCheckKey !== key) {
         // 检查阶段也不显示进度（避免误导）
         setShowProgress(false)
-        setStage("自动更新：检查更新中…")
+        setStageAndMaybeLog("自动更新：检查更新中…", "AUTO", "INFO", true)
         setRemoteSchemeVer("检查更新中...")
         setRemoteDictMark("检查更新中...")
         setRemoteModelMark("检查更新中...")
@@ -595,7 +697,8 @@ export function HomeView() {
       const autoResult = await autoUpdateAll(
         current,
         {
-          onStage: setStage,
+          onStage: wrapStageReporter("AUTO"),
+          onLog: wrapDetailLogger("AUTO"),
           onProgress: (p) => applyProgress("auto", p),
         },
         pre
@@ -603,14 +706,14 @@ export function HomeView() {
 
       await refreshLocal(current)
       if (!autoResult.didUpdate) {
-        setStage("自动更新完成（已是最新，无需更新）")
+        setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
       } else if (autoResult.didDeploy) {
-        setStage("自动更新完成（已部署）")
+        setStageAndMaybeLog("自动更新完成（已部署）", "AUTO", "SUCCESS", true)
       } else {
-        setStage("自动更新完成（未自动部署）")
+        setStageAndMaybeLog("自动更新完成（未自动部署）", "AUTO", "SUCCESS", true)
       }
     } catch (e: any) {
-      setStage(`自动更新失败：${String(e?.message ?? e)}`)
+      setStageAndMaybeLog(`自动更新失败：${String(e?.message ?? e)}`, "AUTO", "ERROR", true)
     } finally {
       setBusy(false)
       setShowProgress(false)
@@ -622,20 +725,21 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStage("更新方案中…")
+    setStageAndMaybeLog("更新方案中…", "SCHEME", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateScheme(current, {
         autoDeploy: false,
-        onStage: setStage,
+        onStage: wrapStageReporter("SCHEME"),
+        onLog: wrapDetailLogger("SCHEME"),
         onProgress: (p) => applyProgress("scheme", p),
       })
       await refreshLocal(current)
-      setStage("更新方案完成")
+      setStageAndMaybeLog("更新方案完成", "SCHEME", "SUCCESS", true)
     } catch (e: any) {
-      setStage(`更新方案失败：${String(e?.message ?? e)}`)
+      setStageAndMaybeLog(`更新方案失败：${String(e?.message ?? e)}`, "SCHEME", "ERROR", true)
     } finally {
       setBusy(false)
       setShowProgress(false)
@@ -647,20 +751,21 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStage("更新词库中…")
+    setStageAndMaybeLog("更新词库中…", "DICT", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateDict(current, {
         autoDeploy: false,
-        onStage: setStage,
+        onStage: wrapStageReporter("DICT"),
+        onLog: wrapDetailLogger("DICT"),
         onProgress: (p) => applyProgress("dict", p),
       })
       await refreshLocal(current)
-      setStage("更新词库完成")
+      setStageAndMaybeLog("更新词库完成", "DICT", "SUCCESS", true)
     } catch (e: any) {
-      setStage(`更新词库失败：${String(e?.message ?? e)}`)
+      setStageAndMaybeLog(`更新词库失败：${String(e?.message ?? e)}`, "DICT", "ERROR", true)
     } finally {
       setBusy(false)
       setShowProgress(false)
@@ -672,20 +777,21 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStage("更新模型中…")
+    setStageAndMaybeLog("更新模型中…", "MODEL", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateModel(current, {
         autoDeploy: false,
-        onStage: setStage,
+        onStage: wrapStageReporter("MODEL"),
+        onLog: wrapDetailLogger("MODEL"),
         onProgress: (p) => applyProgress("model", p),
       })
       await refreshLocal(current)
-      setStage("更新模型完成")
+      setStageAndMaybeLog("更新模型完成", "MODEL", "SUCCESS", true)
     } catch (e: any) {
-      setStage(`更新模型失败：${String(e?.message ?? e)}`)
+      setStageAndMaybeLog(`更新模型失败：${String(e?.message ?? e)}`, "MODEL", "ERROR", true)
     } finally {
       setBusy(false)
       setShowProgress(false)
@@ -697,17 +803,181 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 部署不显示下载进度
-    setStage("部署中…")
+    setStageAndMaybeLog("部署中…", "DEPLOY", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     try {
       const current = loadConfig()
-      await deployInputMethod(current, setStage)
+      await deployInputMethod(current, wrapStageReporter("DEPLOY"))
     } catch (e: any) {
-      setStage(`部署失败：${String(e?.message ?? e)}`)
+      setStageAndMaybeLog(`部署失败：${String(e?.message ?? e)}`, "DEPLOY", "ERROR", true)
     } finally {
       setBusy(false)
     }
+  }
+
+  function logLevelColor(level: LogLevel) {
+    if (level === "SUCCESS") return "systemGreen"
+    if (level === "WARN") return "systemOrange"
+    if (level === "ERROR") return "systemRed"
+    return "systemBlue"
+  }
+
+  function logScopeColor(scope: LogScope) {
+    if (scope === "CHECK") return "systemBlue"
+    if (scope === "AUTO") return "systemPurple"
+    if (scope === "SCHEME") return "systemGreen"
+    if (scope === "DICT") return "systemOrange"
+    if (scope === "MODEL") return "systemPink"
+    if (scope === "DEPLOY") return "systemPink"
+    if (scope === "PATH") return "systemOrange"
+    return "secondaryLabel"
+  }
+
+  function renderLogEntry(entry: LogEntry) {
+    return (
+      <VStack
+        key={entry.id}
+        spacing={2}
+        padding={{ top: 1, bottom: 2 }}
+        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+      >
+        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <Text font="caption2" foregroundStyle="secondaryLabel" frame={{ alignment: "leading" as any }}>
+            {entry.at}
+          </Text>
+          <Text font="caption2" foregroundStyle={logLevelColor(entry.level)} frame={{ alignment: "leading" as any }}>
+            [{entry.level}]
+          </Text>
+          <Text font="caption2" foregroundStyle={logScopeColor(entry.scope)} frame={{ alignment: "leading" as any }}>
+            [{entry.scope}]
+          </Text>
+          <Spacer />
+        </HStack>
+        <Text
+          font="caption"
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          multilineTextAlignment="leading"
+        >
+          {entry.message}
+        </Text>
+      </VStack>
+    )
+  }
+
+  function renderSection(key: HomeSectionKey) {
+    if (key === "local") {
+      return (
+        <Section key={key} header={<Text>本地信息</Text>}>
+          <RowKV k="当前选择的方案" v={localSelectedScheme} />
+          <RowKV k="本地方案版本" v={localSchemeVersion} />
+          <RowKV k="本地词库" v={localDictMark} />
+          <RowKV k="本地模型" v={localModelMark} />
+        </Section>
+      )
+    }
+    if (key === "remote") {
+      return (
+        <Section key={key} header={<Text>远程信息</Text>}>
+          <RowKV k="远程方案版本" v={remoteSchemeVer} />
+          <RowKV k="远程词库" v={remoteDictMark} />
+          <RowKV k="远程模型" v={remoteModelMark} />
+        </Section>
+      )
+    }
+    if (key === "notes") {
+      return (
+        <Section key={key} header={<Text>更新说明</Text>}>
+          <ScrollView frame={{ height: 220 }} padding>
+            <Markdown content={notes} />
+          </ScrollView>
+        </Section>
+      )
+    }
+    if (key === "actions") {
+      return (
+        <Section key={key} header={<Text>操作</Text>}>
+          <VStack spacing={0}>
+            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+              </VStack>
+              <Divider frame={{ height: 48 }} />
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
+              </VStack>
+            </HStack>
+            <Divider />
+            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
+              </VStack>
+              <Divider frame={{ height: 48 }} />
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+              </VStack>
+            </HStack>
+            <Divider />
+            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
+              </VStack>
+              <Divider frame={{ height: 48 }} />
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
+              </VStack>
+            </HStack>
+          </VStack>
+        </Section>
+      )
+    }
+    return (
+      <Section key={key} header={<Text>状态</Text>}>
+        <Text>{stage}</Text>
+
+        {busy && showProgress ? (
+          <HStack alignment="center" spacing={8}>
+            {typeof progressValue === "number" ? (
+              <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+            ) : (
+              <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+            )}
+            <Text>{progressPct}</Text>
+          </HStack>
+        ) : null}
+
+        {cfg.showVerboseLog ? (
+          <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
+            <ScrollViewReader>
+              {(proxy: any) => {
+                logProxyRef.current = proxy
+                return (
+                  <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
+                    <ScrollView frame={{ height: 108, maxWidth: "infinity" as any }} padding={{ top: 2, bottom: 2, left: 0, right: 0 }}>
+                      <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+                        {logs.length ? logs.map(renderLogEntry) : (
+                          <Text
+                            font="caption"
+                            foregroundStyle="secondaryLabel"
+                            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                            multilineTextAlignment="leading"
+                          >
+                            暂无详细日志
+                          </Text>
+                        )}
+                        <Text key="log-bottom" opacity={0} font="caption2" frame={{ maxWidth: "infinity", alignment: "leading" as any, height: 1 }}>
+                          .
+                        </Text>
+                      </VStack>
+                    </ScrollView>
+                  </VStack>
+                )
+              }}
+            </ScrollViewReader>
+          </VStack>
+        ) : null}
+      </Section>
+    )
   }
 
   return (
@@ -762,73 +1032,7 @@ export function HomeView() {
             ),
           }}
         >
-          <Section header={<Text>本地信息</Text>}>
-            <RowKV k="当前选择的方案" v={localSelectedScheme} />
-            <RowKV k="本地方案版本" v={localSchemeVersion} />
-            <RowKV k="本地词库" v={localDictMark} />
-            <RowKV k="本地模型" v={localModelMark} />
-          </Section>
-
-          <Section header={<Text>远程信息</Text>}>
-            <RowKV k="远程方案版本" v={remoteSchemeVer} />
-            <RowKV k="远程词库" v={remoteDictMark} />
-            <RowKV k="远程模型" v={remoteModelMark} />
-          </Section>
-
-          <Section header={<Text>更新说明</Text>}>
-            <ScrollView frame={{ height: 220 }} padding>
-              <Markdown content={notes} />
-            </ScrollView>
-          </Section>
-
-          <Section header={<Text>操作</Text>}>
-            <VStack spacing={0}>
-              <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
-                <VStack frame={{ maxWidth: "infinity" }}>
-                  <GridButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
-                </VStack>
-                <Divider frame={{ height: 48 }} />
-                <VStack frame={{ maxWidth: "infinity" }}>
-                  <GridButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
-                </VStack>
-              </HStack>
-              <Divider />
-              <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
-                <VStack frame={{ maxWidth: "infinity" }}>
-                  <GridButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
-                </VStack>
-                <Divider frame={{ height: 48 }} />
-                <VStack frame={{ maxWidth: "infinity" }}>
-                  <GridButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
-                </VStack>
-              </HStack>
-              <Divider />
-              <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
-                <VStack frame={{ maxWidth: "infinity" }}>
-                  <GridButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
-                </VStack>
-                <Divider frame={{ height: 48 }} />
-                <VStack frame={{ maxWidth: "infinity" }}>
-                  <GridButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
-                </VStack>
-              </HStack>
-            </VStack>
-          </Section>
-
-          <Section header={<Text>状态</Text>}>
-            <Text>{stage}</Text>
-
-            {busy && showProgress ? (
-              <HStack alignment="center" spacing={8}>
-                {typeof progressValue === "number" ? (
-                  <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
-                ) : (
-                  <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
-                )}
-                <Text>{progressPct}</Text>
-              </HStack>
-            ) : null}
-          </Section>
+          {cfg.homeSectionOrder.map(renderSection)}
         </List>
       </VStack>
     </NavigationStack>

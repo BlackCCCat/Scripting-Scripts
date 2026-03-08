@@ -152,6 +152,8 @@ export async function removeExtractedFiles(args: {
   kind: TrackKind
   compareRoot?: string
   excludePatterns?: string[]
+  onRemovedFile?: (path: string) => void
+  onSkippedFile?: (path: string, reason: "excluded" | "remove_failed") => void
 }): Promise<number> {
   const root = normalizePath(args.installRoot)
   if (!root) return 0
@@ -170,6 +172,7 @@ export async function removeExtractedFiles(args: {
   for (const file of tracked) {
     if (shouldSkip(file, compareRoot, patterns)) {
       kept.push(file)
+      try { args.onSkippedFile?.(file, "excluded") } catch { }
       continue
     }
     const exists = await existsPath(fm, file)
@@ -177,9 +180,11 @@ export async function removeExtractedFiles(args: {
     const ok = await removePath(fm, file)
     if (ok) {
       removed += 1
+      try { args.onRemovedFile?.(file) } catch { }
       await cleanupParents(file, compareRoot)
     } else {
       kept.push(file)
+      try { args.onSkippedFile?.(file, "remove_failed") } catch { }
     }
   }
 

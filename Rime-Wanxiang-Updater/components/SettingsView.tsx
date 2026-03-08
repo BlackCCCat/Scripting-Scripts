@@ -15,7 +15,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  Path,
 } from "scripting"
 
 import { Runtime } from "../utils/runtime"
@@ -23,14 +22,17 @@ import {
   loadConfig,
   saveConfig,
   type AppConfig,
+  type HomeSectionKey,
   type ProSchemeKey,
   type InputMethod,
   PRO_KEYS,
+  HOME_SECTION_LABELS,
 } from "../utils/config"
 import { callMaybeAsync, normalizePath } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
 import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
+import { HomeSectionOrderView } from "./HomeSectionOrderView"
 
 type AlertNode = any
 type AlertState = {
@@ -39,7 +41,6 @@ type AlertState = {
   message: AlertNode
   actions: AlertNode
 }
-
 
 const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "仓输入法", value: "hamster" },
@@ -85,8 +86,6 @@ function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputM
   return undefined
 }
 
-
-
 async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): Promise<string[]> {
   const out: string[] = []
   const push = (p?: string) => {
@@ -103,11 +102,9 @@ async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): P
   return Array.from(new Set(out))
 }
 
-
-
 function CenterRowButton(props: {
   title: string
-  role?: "cancel" | "destructive"
+  role?: "cancel"
   disabled?: boolean
   onPress: () => void
 }) {
@@ -124,11 +121,9 @@ function CenterRowButton(props: {
       disabled={props.disabled}
     >
       <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        {/* ✅ 同样加 leading 锚点 */}
         <Text opacity={0} frame={{ width: 1 }}>
           .
         </Text>
-
         <Spacer />
         <Text font="headline">{props.title}</Text>
         <Spacer />
@@ -214,6 +209,19 @@ export function SettingsView(props: {
           action={() => {
             try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
             closeAlert()
+          }}
+        />
+      ),
+    })
+  }
+
+  async function openHomeSectionOrderSettings() {
+    await Navigation.present({
+      element: (
+        <HomeSectionOrderView
+          initialOrder={cfg.homeSectionOrder}
+          onDone={(order: HomeSectionKey[]) => {
+            setCfg((c) => ({ ...c, homeSectionOrder: order }))
           }}
         />
       ),
@@ -547,6 +555,33 @@ export function SettingsView(props: {
               }}
               toggleStyle="switch"
             />
+            <Toggle
+              title={"更新时显示详细日志"}
+              value={cfg.showVerboseLog}
+              onChanged={(v: boolean) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+                setCfg((c) => ({ ...c, showVerboseLog: v }))
+              }}
+              toggleStyle="switch"
+            />
+          </Section>
+
+          <Section header={<Text>页面显示设置</Text>}>
+            <Button
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                void openHomeSectionOrderSettings()
+              }}
+            >
+              <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 10 }}>
+                <VStack spacing={4} frame={{ maxWidth: "infinity" }}>
+                  <Text>主页区块排序</Text>
+                  <Text font="caption" foregroundStyle="secondaryLabel">
+                    {cfg.homeSectionOrder.map((key) => HOME_SECTION_LABELS[key]).join(" / ")}
+                  </Text>
+                </VStack>
+              </HStack>
+            </Button>
           </Section>
 
           <Section header={<Text>排除文件（按行）</Text>}>

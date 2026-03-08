@@ -327,6 +327,7 @@ export async function updateScheme(
   cfg: AppConfig,
   params: {
     onStage?: (s: string) => void
+    onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
     autoDeploy?: boolean
   }
@@ -337,6 +338,8 @@ export async function updateScheme(
 
   const latest = await fetchLatestSchemeAsset(cfg)
   if (!latest?.url) throw new Error("\u672A\u627E\u5230\u53EF\u7528\u7684\u8FDC\u7AEF\u65B9\u6848\u8D44\u4EA7")
+  params.onLog?.(`远程方案资产：${latest.name}`)
+  params.onLog?.(`下载地址：${latest.url}`)
 
   await ensureDir(installDir)
   await removeDirSafe(Path.join(installDir, "UpdateCache"))
@@ -368,6 +371,10 @@ export async function updateScheme(
       kind: "scheme",
       compareRoot: installDir,
       excludePatterns: exclude,
+      onRemovedFile: (path) => params.onLog?.(`删除旧文件：${path}`),
+      onSkippedFile: (path, reason) => {
+        if (reason === "excluded") params.onLog?.(`跳过排除文件：${path}`)
+      },
     })
     if (removed > 0) {
       params.onStage?.(`\u5DF2\u6E05\u7406\u65E7\u6587\u4EF6\uFF1A${removed} \u4E2A`)
@@ -376,9 +383,13 @@ export async function updateScheme(
     const copied = new Set<string>()
     await unzipToDirWithOverwrite(zipPath, installDir, {
       excludePatterns: exclude,
-      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+      onCopiedFile: (dstPath) => {
+        copied.add(String(dstPath))
+        params.onLog?.(`写入文件：${String(dstPath)}`)
+      },
     })
     setExtractedFiles(installDir, "scheme", Array.from(copied))
+    params.onLog?.(`方案写入完成：${copied.size} 个文件`)
   } finally {
     await removePathLoose(zipPath)
   }
@@ -406,6 +417,7 @@ export async function updateDict(
   cfg: AppConfig,
   params: {
     onStage?: (s: string) => void
+    onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
     autoDeploy?: boolean
   }
@@ -432,6 +444,8 @@ export async function updateDict(
       })
 
   if (!dict?.url) throw new Error("未找到可用的词库资产")
+  params.onLog?.(`远程词库资产：${dict.name}`)
+  params.onLog?.(`下载地址：${dict.url}`)
 
   const zipPath = tempDownloadPath(dict.name)
   await removePathLoose(zipPath)
@@ -463,6 +477,10 @@ export async function updateDict(
       kind: "dict",
       compareRoot: dictDir,
       excludePatterns: exclude,
+      onRemovedFile: (path) => params.onLog?.(`删除旧文件：${path}`),
+      onSkippedFile: (path, reason) => {
+        if (reason === "excluded") params.onLog?.(`跳过排除文件：${path}`)
+      },
     })
     if (removed > 0) {
       params.onStage?.(`已清理旧文件：${removed} 个`)
@@ -472,14 +490,22 @@ export async function updateDict(
     await unzipToDirWithOverwrite(zipPath, dictDir, {
       excludePatterns: exclude,
       flattenSingleDir: true,
-      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+      onCopiedFile: (dstPath) => {
+        copied.add(String(dstPath))
+        params.onLog?.(`写入文件：${String(dstPath)}`)
+      },
     })
-    await mergeSubdirsByName(dictDir, {
+    const merged = await mergeSubdirsByName(dictDir, {
       excludePatterns: exclude,
       namePattern: /dict/i,
-      onCopiedFile: (dstPath) => copied.add(String(dstPath)),
+      onCopiedFile: (dstPath) => {
+        copied.add(String(dstPath))
+        params.onLog?.(`整理词库文件：${String(dstPath)}`)
+      },
     })
     setExtractedFiles(installRoot, "dict", Array.from(copied))
+    if (merged > 0) params.onLog?.(`已整理嵌套词库目录：${merged} 个`)
+    params.onLog?.(`词库写入完成：${copied.size} 个文件`)
   } finally {
     await removePathLoose(zipPath)
   }
@@ -503,6 +529,7 @@ export async function updateModel(
   cfg: AppConfig,
   params: {
     onStage?: (s: string) => void
+    onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
     autoDeploy?: boolean
   }
@@ -528,6 +555,8 @@ export async function updateModel(
       })
 
   if (!model?.url) throw new Error("未找到可用的模型资产")
+  params.onLog?.(`远程模型资产：${MODEL_FILE}`)
+  params.onLog?.(`下载地址：${model.url}`)
 
   // ✅ 期望大小：优先使用远端资产元数据中的 size
   const expectedSize = pickExpectedSize(model)
@@ -565,6 +594,7 @@ export async function updateModel(
       try {
         if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
         else if (typeof fm?.remove === "function") await fm.remove(dstPath)
+        params.onLog?.(`删除旧模型：${dstPath}`)
       } catch { }
 
       if (typeof fm?.moveSync === "function") {
@@ -586,6 +616,7 @@ export async function updateModel(
       } else {
         throw new Error("FileManager 不支持 move/rename/copy 操作")
       }
+      params.onLog?.(`写入模型文件：${dstPath}`)
     } catch (err) {
       params.onStage?.("写入失败")
       throw err
@@ -614,6 +645,7 @@ export async function autoUpdateAll(
   cfg: AppConfig,
   params: {
     onStage?: (s: string) => void
+    onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
   },
   prechecked?: AllUpdateResult
@@ -633,6 +665,7 @@ export async function autoUpdateAll(
   const remoteModelMark = normalizeMark(ensureRemoteMark(r.model, "model"))
   const localModelMark = normalizeMark(meta.model?.remoteIdOrSha)
   const needModel = !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
+  params.onLog?.(`更新判定：方案=${needScheme ? "需要" : "无需"}，词库=${needDict ? "需要" : "无需"}，模型=${needModel ? "需要" : "无需"}`)
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")
@@ -648,6 +681,7 @@ export async function autoUpdateAll(
   if (needScheme) {
     await updateScheme(cfg, {
       onStage: (s) => params.onStage?.(`方案：${s}`),
+      onLog: (s) => params.onLog?.(`[方案] ${s}`),
       onProgress: params.onProgress,
       autoDeploy: false,
     })
@@ -655,6 +689,7 @@ export async function autoUpdateAll(
   if (needDict) {
     await updateDict(cfg, {
       onStage: (s) => params.onStage?.(`词库：${s}`),
+      onLog: (s) => params.onLog?.(`[词库] ${s}`),
       onProgress: params.onProgress,
       autoDeploy: false,
     })
@@ -662,6 +697,7 @@ export async function autoUpdateAll(
   if (needModel) {
     await updateModel(cfg, {
       onStage: (s) => params.onStage?.(`模型：${s}`),
+      onLog: (s) => params.onLog?.(`[模型] ${s}`),
       onProgress: params.onProgress,
       autoDeploy: false,
     })
@@ -669,10 +705,12 @@ export async function autoUpdateAll(
 
   // 自动更新后统一清理 dicts 下残留的词库子文件夹
   const exclude = getExcludePatterns(cfg)
-  await mergeSubdirsByName(Path.join(installRoot, "dicts"), {
+  const merged = await mergeSubdirsByName(Path.join(installRoot, "dicts"), {
     excludePatterns: exclude,
     namePattern: /dict/i,
+    onCopiedFile: (dstPath) => params.onLog?.(`[自动整理] ${String(dstPath)}`),
   })
+  if (merged > 0) params.onLog?.(`自动更新后整理词库目录：${merged} 个`)
 
   // 统一部署（你指定：安装目录/build）
   await deployIfEnabled(cfg, params.onStage)
