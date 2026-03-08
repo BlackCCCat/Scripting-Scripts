@@ -75,6 +75,16 @@ function ensureRemoteMark(asset?: RemoteAsset, kind?: "dict" | "model"): string 
   return undefined
 }
 
+function emitProgress(
+  onProgress: ((p: { percent?: number; received: number; total?: number; speedBps?: number }) => void) | undefined,
+  fraction: number
+) {
+  const value = typeof fraction === "number" && Number.isFinite(fraction)
+    ? Math.max(0, Math.min(1, fraction))
+    : 0
+  onProgress?.({ percent: value, received: value > 0 ? 1 : 0, total: 1 })
+}
+
 async function httpJson(url: string, init?: any) {
   const fetchFn = Runtime.fetch
   if (!fetchFn) throw new Error("\u8fd0\u884c\u65f6\u6ca1\u6709 fetch")
@@ -298,11 +308,13 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
 }
 
 // ===== 部署（删 build 再 URL scheme）=====
-async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void) {
+async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
   if (cfg.autoDeployAfterDownload === false) return
   const installRoot = await resolveRimeDir(cfg)
+  const buildDir = Path.join(installRoot, "build")
   onStage?.("部署前清理 build…")
-  await removeDirSafe(Path.join(installRoot, "build"))
+  onLog?.(`删除 build 目录：${buildDir}`)
+  await removeDirSafe(buildDir)
   for (let i = 3; i >= 1; i--) {
     onStage?.(`部署倒计时：${i}s`)
     await sleep(1000)
@@ -311,7 +323,11 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void) {
   await deployHamster(cfg.inputMethod)
 }
 
-export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) => void) {
+export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
+  const installRoot = await resolveRimeDir(cfg)
+  const buildDir = Path.join(installRoot, "build")
+  onLog?.(`删除 build 目录：${buildDir}`)
+  await removeDirSafe(buildDir)
   for (let i = 3; i >= 1; i--) {
     onStage?.(`部署倒计时：${i}s`)
     await sleep(1000)
@@ -348,7 +364,10 @@ export async function updateScheme(
 
   try {
     params.onStage?.("下载中...")
-    await downloadWithProgress(latest.url, zipPath, params.onProgress, (e) => {
+    emitProgress(params.onProgress, 0)
+    await downloadWithProgress(latest.url, zipPath, (p) => {
+      emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+    }, (e) => {
       if (e.type === "retrying") {
         params.onStage?.(`\u4E0B\u8F7D\u4E2D\uFF08\u91CD\u8BD5 ${e.attempt}/${e.maxAttempts}\uFF09...`)
       }
@@ -366,6 +385,7 @@ export async function updateScheme(
 
     const exclude = getExcludePatterns(cfg)
     params.onStage?.("清理旧文件中…")
+    emitProgress(params.onProgress, 0)
     const removed = await removeExtractedFiles({
       installRoot: installDir,
       kind: "scheme",
@@ -375,11 +395,13 @@ export async function updateScheme(
       onSkippedFile: (path, reason) => {
         if (reason === "excluded") params.onLog?.(`跳过排除文件：${path}`)
       },
+      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
     })
     if (removed > 0) {
       params.onStage?.(`\u5DF2\u6E05\u7406\u65E7\u6587\u4EF6\uFF1A${removed} \u4E2A`)
     }
     params.onStage?.("解压中...")
+    emitProgress(params.onProgress, 0)
     const copied = new Set<string>()
     await unzipToDirWithOverwrite(zipPath, installDir, {
       excludePatterns: exclude,
@@ -387,9 +409,14 @@ export async function updateScheme(
         copied.add(String(dstPath))
         params.onLog?.(`写入文件：${String(dstPath)}`)
       },
+      onSkippedFile: (srcPath) => {
+        params.onLog?.(`跳过排除文件：${String(srcPath)}`)
+      },
+      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
     })
     setExtractedFiles(installDir, "scheme", Array.from(copied))
     params.onLog?.(`方案写入完成：${copied.size} 个文件`)
+    emitProgress(params.onProgress, 1)
   } finally {
     await removePathLoose(zipPath)
   }
@@ -409,7 +436,7 @@ export async function updateScheme(
     source: cfg.releaseSource,
   })
 
-  if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage)
+  if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
   return { engine, installRoot: installDir, assetName: latest.name, tag: latest.tag, updatedAt: latest.updatedAt, remoteIdOrSha }
 }
 
@@ -452,7 +479,10 @@ export async function updateDict(
 
   try {
     params.onStage?.("下载中…")
-    await downloadWithProgress(dict.url, zipPath, params.onProgress, (e) => {
+    emitProgress(params.onProgress, 0)
+    await downloadWithProgress(dict.url, zipPath, (p) => {
+      emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+    }, (e) => {
       if (e.type === "retrying") {
         params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
       }
@@ -472,6 +502,7 @@ export async function updateDict(
     const dictDir = Path.join(installRoot, "dicts")
     await ensureDir(dictDir)
     params.onStage?.("清理旧文件中…")
+    emitProgress(params.onProgress, 0)
     const removed = await removeExtractedFiles({
       installRoot,
       kind: "dict",
@@ -481,11 +512,13 @@ export async function updateDict(
       onSkippedFile: (path, reason) => {
         if (reason === "excluded") params.onLog?.(`跳过排除文件：${path}`)
       },
+      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
     })
     if (removed > 0) {
       params.onStage?.(`已清理旧文件：${removed} 个`)
     }
     params.onStage?.("解压到 dicts 目录中…")
+    emitProgress(params.onProgress, 0)
     const copied = new Set<string>()
     await unzipToDirWithOverwrite(zipPath, dictDir, {
       excludePatterns: exclude,
@@ -494,7 +527,13 @@ export async function updateDict(
         copied.add(String(dstPath))
         params.onLog?.(`写入文件：${String(dstPath)}`)
       },
+      onSkippedFile: (srcPath) => {
+        params.onLog?.(`跳过排除文件：${String(srcPath)}`)
+      },
+      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
     })
+    params.onStage?.("整理词库文件中…")
+    emitProgress(params.onProgress, 0)
     const merged = await mergeSubdirsByName(dictDir, {
       excludePatterns: exclude,
       namePattern: /dict/i,
@@ -502,10 +541,15 @@ export async function updateDict(
         copied.add(String(dstPath))
         params.onLog?.(`整理词库文件：${String(dstPath)}`)
       },
+      onSkippedFile: (srcPath) => {
+        params.onLog?.(`跳过排除文件：${String(srcPath)}`)
+      },
+      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
     })
     setExtractedFiles(installRoot, "dict", Array.from(copied))
     if (merged > 0) params.onLog?.(`已整理嵌套词库目录：${merged} 个`)
     params.onLog?.(`词库写入完成：${copied.size} 个文件`)
+    emitProgress(params.onProgress, 1)
   } finally {
     await removePathLoose(zipPath)
   }
@@ -521,7 +565,7 @@ export async function updateDict(
     source: cfg.releaseSource,
   })
 
-  if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage)
+  if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
   return dict
 }
 
@@ -569,7 +613,10 @@ export async function updateModel(
   const fm = FM()
   await removePathLoose(tempPath)
   try {
-    await downloadWithProgress(model.url, tempPath, params.onProgress, (e) => {
+    emitProgress(params.onProgress, 0)
+    await downloadWithProgress(model.url, tempPath, (p) => {
+      emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+    }, (e) => {
       if (e.type === "retrying") {
         params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
       }
@@ -577,6 +624,7 @@ export async function updateModel(
 
     // ✅ 下载完成后先做完整性校验：大小不一致则认为失败，不覆盖 dstPath
     params.onStage?.("校验中…")
+    emitProgress(params.onProgress, 0)
     {
       const actualSize = await getFileSize(fm, tempPath)
       if (expectedSize && expectedSize > 0) {
@@ -590,6 +638,7 @@ export async function updateModel(
 
     // 校验通过后：原子替换到 dstPath
     params.onStage?.("写入中…")
+    emitProgress(params.onProgress, 0)
     try {
       try {
         if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
@@ -617,6 +666,7 @@ export async function updateModel(
         throw new Error("FileManager 不支持 move/rename/copy 操作")
       }
       params.onLog?.(`写入模型文件：${dstPath}`)
+      emitProgress(params.onProgress, 1)
     } catch (err) {
       params.onStage?.("写入失败")
       throw err
@@ -636,7 +686,7 @@ export async function updateModel(
     source: cfg.releaseSource,
   })
 
-  if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage)
+  if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
   return model
 }
 
@@ -709,11 +759,12 @@ export async function autoUpdateAll(
     excludePatterns: exclude,
     namePattern: /dict/i,
     onCopiedFile: (dstPath) => params.onLog?.(`[自动整理] ${String(dstPath)}`),
+    onSkippedFile: (srcPath) => params.onLog?.(`跳过排除文件：${String(srcPath)}`),
   })
   if (merged > 0) params.onLog?.(`自动更新后整理词库目录：${merged} 个`)
 
   // 统一部署（你指定：安装目录/build）
-  await deployIfEnabled(cfg, params.onStage)
+  await deployIfEnabled(cfg, params.onStage, params.onLog)
 
   params.onStage?.("自动更新：完成")
   return {

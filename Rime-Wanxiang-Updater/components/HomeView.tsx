@@ -5,6 +5,7 @@ import {
   Navigation,
   NavigationStack,
   Script,
+  Rectangle,
   Section,
   Divider,
   Spacer,
@@ -203,6 +204,10 @@ function makeLogEntry(level: LogLevel, scope: LogScope, message: string): LogEnt
   }
 }
 
+function formatLogEntry(entry: LogEntry): string {
+  return `${entry.at} [${entry.level}] [${entry.scope}] ${entry.message}`
+}
+
 function replacePathPrefix(message: string, rootPath: string): string {
   const root = String(rootPath ?? "").trim().replace(/\/+$/, "")
   if (!root) return message
@@ -217,6 +222,126 @@ function replacePathPrefix(message: string, rootPath: string): string {
     out = out.split(variant).join(rootName)
   }
   return out
+}
+
+function logLevelColor(level: LogLevel) {
+  if (level === "SUCCESS") return "systemGreen"
+  if (level === "WARN") return "systemOrange"
+  if (level === "ERROR") return "systemRed"
+  return "systemBlue"
+}
+
+function logScopeColor(scope: LogScope) {
+  if (scope === "CHECK") return "systemBlue"
+  if (scope === "AUTO") return "systemPurple"
+  if (scope === "SCHEME") return "systemGreen"
+  if (scope === "DICT") return "systemOrange"
+  if (scope === "MODEL") return "systemPink"
+  if (scope === "DEPLOY") return "systemPink"
+  if (scope === "PATH") return "systemOrange"
+  return "secondaryLabel"
+}
+
+function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
+  const insetLeft = Math.max(0, Number(props.insetLeft ?? 0))
+  return (
+    <HStack key={props.entry.id} spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+      {insetLeft > 0 ? (
+        <Rectangle foregroundStyle="clear" frame={{ width: insetLeft, height: 1 }} />
+      ) : null}
+      <VStack
+        spacing={2}
+        padding={{ top: 1, bottom: 2 }}
+        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+      >
+        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <Text font="footnote" foregroundStyle="secondaryLabel" frame={{ alignment: "leading" as any }}>
+            {props.entry.at}
+          </Text>
+          <Text font="footnote" foregroundStyle={logLevelColor(props.entry.level)} frame={{ alignment: "leading" as any }}>
+            [{props.entry.level}]
+          </Text>
+          <Text font="footnote" foregroundStyle={logScopeColor(props.entry.scope)} frame={{ alignment: "leading" as any }}>
+            [{props.entry.scope}]
+          </Text>
+          <Spacer />
+        </HStack>
+        <Text
+          font="body"
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          multilineTextAlignment="leading"
+          selectionDisabled={false}
+        >
+          {props.entry.message}
+        </Text>
+      </VStack>
+    </HStack>
+  )
+}
+
+function FullscreenLogView(props: { logs: LogEntry[] }) {
+  const dismiss = Navigation.useDismiss()
+  const copyAllLogs = () => {
+    try {
+      ;(globalThis as any).Clipboard?.copyText?.(props.logs.map(formatLogEntry).join("\n"))
+      ;(globalThis as any).HapticFeedback?.mediumImpact?.()
+    } catch { }
+  }
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={"详细日志"}
+        navigationBarTitleDisplayMode={"inline"}
+        toolbar={{
+          topBarLeading: (
+            <Button
+              title=""
+              systemImage="xmark"
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                dismiss()
+              }}
+            />
+          ),
+          topBarTrailing: (
+            <Button
+              title=""
+              systemImage="doc.on.doc"
+              action={copyAllLogs}
+            />
+          ),
+        }}
+      >
+        <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding={{ top: 8, bottom: 8, left: 18, right: 14 }}>
+          <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+            {props.logs.length ? props.logs.map((entry) => <LogEntryRow key={entry.id} entry={entry} insetLeft={18} />) : (
+              <HStack spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+                <Rectangle foregroundStyle="clear" frame={{ width: 18, height: 1 }} />
+                <Text
+                  font="footnote"
+                  foregroundStyle="secondaryLabel"
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                  multilineTextAlignment="leading"
+                  selectionDisabled={false}
+                >
+                  暂无详细日志
+                </Text>
+              </HStack>
+            )}
+          </VStack>
+        </ScrollView>
+      </VStack>
+    </NavigationStack>
+  )
+}
+
+function progressStageLabel(stage: string): string {
+  const text = String(stage ?? "")
+  if (text.includes("下载中")) return "下载中"
+  if (text.includes("清理旧文件")) return "删除中"
+  if (text.includes("解压") || text.includes("整理") || text.includes("写入") || text.includes("校验")) return "写入中"
+  return "处理中"
 }
 
 export function HomeView() {
@@ -279,7 +404,12 @@ export function HomeView() {
     const entry = makeLogEntry(level, scope, normalizedMessage)
     setLogs((prev) => {
       const next = prev.concat(entry)
-      return next.length > 200 ? next.slice(next.length - 200) : next
+      const trimmed = next.length > 200 ? next.slice(next.length - 200) : next
+      homeSessionState = {
+        ...homeSessionState,
+        logs: trimmed,
+      }
+      return trimmed
     })
   }
 
@@ -298,6 +428,18 @@ export function HomeView() {
     return (message: string) => {
       pushLog(level, scope, message)
     }
+  }
+
+  function pushCheckDiffLog(label: string, localMark: string, remoteMark: string) {
+    const local = String(localMark ?? "").trim()
+    const remote = String(remoteMark ?? "").trim()
+    const localKnown = local && local !== "暂无法获取" && local !== "请检查更新" && local !== "检查更新中..."
+    const remoteKnown = remote && remote !== "暂无法获取" && remote !== "请检查更新" && remote !== "检查更新中..."
+    if (localKnown && remoteKnown && local !== remote) {
+      pushLog("SUCCESS", "CHECK", `${label}：有可用更新（本地 ${local} -> 远程 ${remote}）`)
+      return
+    }
+    pushLog("INFO", "CHECK", `${label}：当前已是最新`)
   }
 
   async function guardPathAccess(showPopup: boolean): Promise<boolean> {
@@ -473,7 +615,7 @@ export function HomeView() {
     if (!cfg.showVerboseLog) return
     const scrollLatest = () => {
       try {
-        logProxyRef.current?.scrollTo?.("log-bottom", "bottom")
+        logProxyRef.current?.scrollTo?.("bottomView", "bottom")
       } catch { }
     }
     scrollLatest()
@@ -597,17 +739,13 @@ export function HomeView() {
     Script.exit()
   }
 
-  function applyProgress(tag: "scheme" | "dict" | "model" | "auto", p: any) {
-    // ✅ HomeView 侧日志
-    try {
-      console.log(`[${tag}] progress:`, {
-        percent: p?.percent,
-        received: p?.received,
-        total: p?.total,
-        speedBps: p?.speedBps,
-      })
-    } catch { }
+  async function openFullscreenLogs() {
+    await Navigation.present({
+      element: <FullscreenLogView logs={logs} />,
+    })
+  }
 
+  function applyProgress(p: any) {
     const toNum = (v: any): number | undefined => {
       if (typeof v === "number" && Number.isFinite(v)) return v
       if (typeof v === "string") {
@@ -656,6 +794,9 @@ export function HomeView() {
       pushLog("SUCCESS", "CHECK", `远程方案：${r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取"}`)
       pushLog("SUCCESS", "CHECK", `远程词库：${r.dict?.remoteIdOrSha ?? "暂无法获取"}`)
       pushLog("SUCCESS", "CHECK", `远程模型：${r.model?.remoteIdOrSha ?? "暂无法获取"}`)
+      pushCheckDiffLog("方案", localSchemeVersion, r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取")
+      pushCheckDiffLog("词库", localDictMark, r.dict?.remoteIdOrSha ?? "暂无法获取")
+      pushCheckDiffLog("模型", localModelMark, r.model?.remoteIdOrSha ?? "暂无法获取")
       setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true)
     } catch (e: any) {
       setStageAndMaybeLog(`检查失败：${String(e?.message ?? e)}`, "CHECK", "ERROR", true)
@@ -699,7 +840,7 @@ export function HomeView() {
         {
           onStage: wrapStageReporter("AUTO"),
           onLog: wrapDetailLogger("AUTO"),
-          onProgress: (p) => applyProgress("auto", p),
+          onProgress: (p) => applyProgress(p),
         },
         pre
       )
@@ -734,7 +875,7 @@ export function HomeView() {
         autoDeploy: false,
         onStage: wrapStageReporter("SCHEME"),
         onLog: wrapDetailLogger("SCHEME"),
-        onProgress: (p) => applyProgress("scheme", p),
+        onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
       setStageAndMaybeLog("更新方案完成", "SCHEME", "SUCCESS", true)
@@ -760,7 +901,7 @@ export function HomeView() {
         autoDeploy: false,
         onStage: wrapStageReporter("DICT"),
         onLog: wrapDetailLogger("DICT"),
-        onProgress: (p) => applyProgress("dict", p),
+        onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
       setStageAndMaybeLog("更新词库完成", "DICT", "SUCCESS", true)
@@ -786,7 +927,7 @@ export function HomeView() {
         autoDeploy: false,
         onStage: wrapStageReporter("MODEL"),
         onLog: wrapDetailLogger("MODEL"),
-        onProgress: (p) => applyProgress("model", p),
+        onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
       setStageAndMaybeLog("更新模型完成", "MODEL", "SUCCESS", true)
@@ -808,7 +949,7 @@ export function HomeView() {
     setProgressValue(undefined)
     try {
       const current = loadConfig()
-      await deployInputMethod(current, wrapStageReporter("DEPLOY"))
+      await deployInputMethod(current, wrapStageReporter("DEPLOY"), wrapDetailLogger("DEPLOY"))
     } catch (e: any) {
       setStageAndMaybeLog(`部署失败：${String(e?.message ?? e)}`, "DEPLOY", "ERROR", true)
     } finally {
@@ -816,53 +957,8 @@ export function HomeView() {
     }
   }
 
-  function logLevelColor(level: LogLevel) {
-    if (level === "SUCCESS") return "systemGreen"
-    if (level === "WARN") return "systemOrange"
-    if (level === "ERROR") return "systemRed"
-    return "systemBlue"
-  }
-
-  function logScopeColor(scope: LogScope) {
-    if (scope === "CHECK") return "systemBlue"
-    if (scope === "AUTO") return "systemPurple"
-    if (scope === "SCHEME") return "systemGreen"
-    if (scope === "DICT") return "systemOrange"
-    if (scope === "MODEL") return "systemPink"
-    if (scope === "DEPLOY") return "systemPink"
-    if (scope === "PATH") return "systemOrange"
-    return "secondaryLabel"
-  }
-
   function renderLogEntry(entry: LogEntry) {
-    return (
-      <VStack
-        key={entry.id}
-        spacing={2}
-        padding={{ top: 1, bottom: 2 }}
-        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
-      >
-        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="caption2" foregroundStyle="secondaryLabel" frame={{ alignment: "leading" as any }}>
-            {entry.at}
-          </Text>
-          <Text font="caption2" foregroundStyle={logLevelColor(entry.level)} frame={{ alignment: "leading" as any }}>
-            [{entry.level}]
-          </Text>
-          <Text font="caption2" foregroundStyle={logScopeColor(entry.scope)} frame={{ alignment: "leading" as any }}>
-            [{entry.scope}]
-          </Text>
-          <Spacer />
-        </HStack>
-        <Text
-          font="caption"
-          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-          multilineTextAlignment="leading"
-        >
-          {entry.message}
-        </Text>
-      </VStack>
-    )
+    return <LogEntryRow key={entry.id} entry={entry} />
   }
 
   function renderSection(key: HomeSectionKey) {
@@ -932,20 +1028,29 @@ export function HomeView() {
       )
     }
     return (
-      <Section key={key} header={<Text>状态</Text>}>
-        <Text>{stage}</Text>
-
-        {busy && showProgress ? (
-          <HStack alignment="center" spacing={8}>
-            {typeof progressValue === "number" ? (
-              <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
-            ) : (
-              <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
-            )}
-            <Text>{progressPct}</Text>
+      <Section
+        key={key}
+        header={(
+          <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+            <Text>状态</Text>
+            <Spacer />
+            {cfg.showVerboseLog ? (
+              <Button
+                buttonStyle="plain"
+                disabled={busy}
+                action={() => {
+                  try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                  void openFullscreenLogs()
+                }}
+              >
+                <Text foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}>
+                  全屏
+                </Text>
+              </Button>
+            ) : null}
           </HStack>
-        ) : null}
-
+        )}
+      >
         {cfg.showVerboseLog ? (
           <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
             <ScrollViewReader>
@@ -953,11 +1058,11 @@ export function HomeView() {
                 logProxyRef.current = proxy
                 return (
                   <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
-                    <ScrollView frame={{ height: 108, maxWidth: "infinity" as any }} padding={{ top: 2, bottom: 2, left: 0, right: 0 }}>
+                    <ScrollView frame={{ height: 152, maxWidth: "infinity" as any }} padding={{ top: 2, bottom: 2, left: 0, right: 0 }}>
                       <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
                         {logs.length ? logs.map(renderLogEntry) : (
                           <Text
-                            font="caption"
+                            font="footnote"
                             foregroundStyle="secondaryLabel"
                             frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                             multilineTextAlignment="leading"
@@ -965,17 +1070,52 @@ export function HomeView() {
                             暂无详细日志
                           </Text>
                         )}
-                        <Text key="log-bottom" opacity={0} font="caption2" frame={{ maxWidth: "infinity", alignment: "leading" as any, height: 1 }}>
-                          .
-                        </Text>
+                        <Rectangle
+                          key="bottomView"
+                          id="bottomView"
+                          foregroundStyle="clear"
+                          frame={{ maxWidth: "infinity", alignment: "leading" as any, height: 1 }}
+                        />
                       </VStack>
                     </ScrollView>
                   </VStack>
                 )
               }}
             </ScrollViewReader>
+
+            {busy && showProgress ? (
+              <VStack spacing={8} padding={{ top: 8 }}>
+                <Divider />
+                <HStack alignment="center" spacing={8}>
+                  <Text frame={{ alignment: "leading" as any }}>
+                    {progressStageLabel(stage)}
+                  </Text>
+                  {typeof progressValue === "number" ? (
+                    <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                  ) : (
+                    <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                  )}
+                  <Text>{progressPct}</Text>
+                </HStack>
+              </VStack>
+            ) : null}
           </VStack>
-        ) : null}
+        ) : (
+          <VStack spacing={8}>
+            <Text>{stage}</Text>
+
+            {busy && showProgress ? (
+              <HStack alignment="center" spacing={8}>
+                {typeof progressValue === "number" ? (
+                  <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                ) : (
+                  <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                )}
+                <Text>{progressPct}</Text>
+              </HStack>
+            ) : null}
+          </VStack>
+        )}
       </Section>
     )
   }

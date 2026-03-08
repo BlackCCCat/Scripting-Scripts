@@ -154,6 +154,7 @@ export async function removeExtractedFiles(args: {
   excludePatterns?: string[]
   onRemovedFile?: (path: string) => void
   onSkippedFile?: (path: string, reason: "excluded" | "remove_failed") => void
+  onProgress?: (done: number, total: number) => void
 }): Promise<number> {
   const root = normalizePath(args.installRoot)
   if (!root) return 0
@@ -168,15 +169,25 @@ export async function removeExtractedFiles(args: {
   const patterns = compilePatterns(args.excludePatterns ?? [])
   const kept: string[] = []
   let removed = 0
+  let done = 0
+  const total = tracked.length
+
+  try { args.onProgress?.(done, total) } catch { }
 
   for (const file of tracked) {
     if (shouldSkip(file, compareRoot, patterns)) {
       kept.push(file)
       try { args.onSkippedFile?.(file, "excluded") } catch { }
+      done += 1
+      try { args.onProgress?.(done, total) } catch { }
       continue
     }
     const exists = await existsPath(fm, file)
-    if (!exists) continue
+    if (!exists) {
+      done += 1
+      try { args.onProgress?.(done, total) } catch { }
+      continue
+    }
     const ok = await removePath(fm, file)
     if (ok) {
       removed += 1
@@ -186,6 +197,8 @@ export async function removeExtractedFiles(args: {
       kept.push(file)
       try { args.onSkippedFile?.(file, "remove_failed") } catch { }
     }
+    done += 1
+    try { args.onProgress?.(done, total) } catch { }
   }
 
   const bucket = data[root] ?? {}

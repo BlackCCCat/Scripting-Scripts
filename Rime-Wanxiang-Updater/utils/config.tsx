@@ -53,7 +53,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   autoDeployAfterDownload: true,
   inputMethod: "hamster",
   autoCheckOnLaunch: false,
-  showVerboseLog: true,
+  showVerboseLog: false,
   homeSectionOrder: HOME_SECTION_KEYS.slice(),
 }
 

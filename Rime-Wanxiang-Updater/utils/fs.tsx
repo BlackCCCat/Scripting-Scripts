@@ -7,6 +7,8 @@ export type CopyOptions = {
   excludePatterns: string[]
   overwritePolicy: "overwrite" | "keepExisting"
   onCopiedFile?: (dstPath: string, relativePath: string) => void
+  onSkippedFile?: (srcPath: string, relativePath: string) => void
+  onProgress?: (done: number, total: number) => void
 }
 
 function fmOrThrow() {
@@ -101,9 +103,35 @@ export async function ensureDir(dir: string) {
   } catch { }
 }
 
+async function countCopyableFiles(srcDir: string, patterns: RegExp[], srcRoot = srcDir): Promise<number> {
+  let total = 0
+  const children = await list(srcDir)
+  for (const name of children) {
+    const src = Path.join(srcDir, name)
+    const rel = src.startsWith(srcRoot) ? src.slice(srcRoot.length + 1) : name
+    const excluded =
+      matchAny(name, patterns) ||
+      matchAny(rel, patterns) ||
+      matchAny(src, patterns)
+    if (excluded) continue
+    if (await isDirectory(src)) {
+      total += await countCopyableFiles(src, patterns, srcRoot)
+    } else {
+      total += 1
+    }
+  }
+  return total
+}
+
 export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: CopyOptions) {
   const patterns = compilePatterns(opts.excludePatterns ?? [])
   const srcRoot = srcDir
+  const total = await countCopyableFiles(srcDir, patterns, srcRoot)
+  let done = 0
+
+  try {
+    opts.onProgress?.(done, total)
+  } catch { }
 
   async function walk(curSrc: string, curDst: string) {
     await ensureDir(curDst)
@@ -119,6 +147,9 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
         matchAny(rel, patterns) ||
         matchAny(src, patterns)
       if (excluded) {
+        try {
+          opts.onSkippedFile?.(src, rel)
+        } catch { }
         continue
       }
 
@@ -147,6 +178,10 @@ export async function copyDirWithPolicy(srcDir: string, dstDir: string, opts: Co
       try {
         opts.onCopiedFile?.(dst, rel)
       } catch { }
+      done += 1
+      try {
+        opts.onProgress?.(done, total)
+      } catch { }
     }
   }
 
@@ -160,6 +195,8 @@ export async function unzipToDirWithOverwrite(
     excludePatterns?: string[]
     flattenSingleDir?: boolean
     onCopiedFile?: (dstPath: string, relativePath: string) => void
+    onSkippedFile?: (srcPath: string, relativePath: string) => void
+    onProgress?: (done: number, total: number) => void
   }
 ) {
   const fm = fmOrThrow()
@@ -189,10 +226,25 @@ export async function unzipToDirWithOverwrite(
     }
 
     if (opts?.flattenSingleDir && dirs.length === 1) {
+      const rootFileTotal = files.filter((name) => {
+        const src = Path.join(tmpDir, name)
+        return !shouldSkip(name, name, src)
+      }).length
+      const dirCopyTotal = await countCopyableFiles(Path.join(tmpDir, dirs[0]), patterns, Path.join(tmpDir, dirs[0]))
+      const total = rootFileTotal + dirCopyTotal
+      let done = 0
+      try {
+        opts?.onProgress?.(done, total)
+      } catch { }
       for (const name of files) {
         const src = Path.join(tmpDir, name)
         const dst = Path.join(destDir, name)
-        if (shouldSkip(name, name, src)) continue
+        if (shouldSkip(name, name, src)) {
+          try {
+            opts?.onSkippedFile?.(src, name)
+          } catch { }
+          continue
+        }
         await ensureDir(Path.dirname(dst))
         if (await exists(dst)) {
           try { await remove(dst) } catch { }
@@ -201,12 +253,24 @@ export async function unzipToDirWithOverwrite(
         try {
           opts?.onCopiedFile?.(dst, name)
         } catch { }
+        done += 1
+        try {
+          opts?.onProgress?.(done, total)
+        } catch { }
       }
       const srcRoot = Path.join(tmpDir, dirs[0])
       await copyDirWithPolicy(srcRoot, destDir, {
         excludePatterns: opts?.excludePatterns ?? [],
         overwritePolicy: "overwrite",
         onCopiedFile: opts?.onCopiedFile,
+        onSkippedFile: opts?.onSkippedFile,
+        onProgress: (childDone, childTotal) => {
+          const combinedDone = rootFileTotal > 0 ? done + childDone : childDone
+          const combinedTotal = total > 0 ? total : childTotal
+          try {
+            opts?.onProgress?.(combinedDone, combinedTotal)
+          } catch { }
+        },
       })
     } else {
       let srcRoot = tmpDir
@@ -218,6 +282,8 @@ export async function unzipToDirWithOverwrite(
         excludePatterns: opts?.excludePatterns ?? [],
         overwritePolicy: "overwrite",
         onCopiedFile: opts?.onCopiedFile,
+        onSkippedFile: opts?.onSkippedFile,
+        onProgress: opts?.onProgress,
       })
     }
   } finally {
@@ -253,6 +319,8 @@ export async function mergeSubdirsByName(
     excludePatterns?: string[]
     namePattern?: RegExp
     onCopiedFile?: (dstPath: string, relativePath: string) => void
+    onSkippedFile?: (srcPath: string, relativePath: string) => void
+    onProgress?: (done: number, total: number) => void
   }
 ): Promise<number> {
   if (!(await exists(parentDir))) return 0
@@ -262,22 +330,46 @@ export async function mergeSubdirsByName(
   const patterns = compilePatterns(opts?.excludePatterns ?? [])
 
   let merged = 0
+  const mergeTargets: { full: string; total: number }[] = []
   for (const name of children) {
     if (!name || isIgnorable(name)) continue
     const full = Path.join(parentDir, name)
     if (!(await isDirectory(full))) continue
     if (opts?.namePattern && !opts.namePattern.test(name)) continue
+    const itemTotal = await countCopyableFiles(full, patterns, full)
+    mergeTargets.push({ full, total: itemTotal })
+  }
+  let total = 0
+  for (const item of mergeTargets) total += item.total
+  let done = 0
+  try {
+    opts?.onProgress?.(done, total)
+  } catch { }
 
+  for (const item of mergeTargets) {
+    const full = item.full
     await copyDirWithPolicy(full, parentDir, {
       excludePatterns: opts?.excludePatterns ?? [],
       overwritePolicy: "overwrite",
       onCopiedFile: opts?.onCopiedFile,
+      onSkippedFile: opts?.onSkippedFile,
+      onProgress: (childDone, childTotal) => {
+        const before = done
+        const combinedTotal = total > 0 ? total : childTotal
+        try {
+          opts?.onProgress?.(before + childDone, combinedTotal)
+        } catch { }
+      },
     })
 
     const keepDir = patterns.length ? await hasExcludedMatch(full, patterns) : false
     if (!keepDir) {
       await removeDirSafe(full)
     }
+    done += item.total
+    try {
+      opts?.onProgress?.(done, total)
+    } catch { }
     merged += 1
   }
   return merged
