@@ -1,6 +1,7 @@
 // File: components/HomeView.tsx
 import {
   Button,
+  Image,
   List,
   Navigation,
   NavigationStack,
@@ -42,6 +43,8 @@ import {
   deployInputMethod,
   type AllUpdateResult,
 } from "../utils/update_tasks"
+
+const FULLSCREEN_SYMBOL = "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
 
 function clamp01(v: number) {
   return Math.max(0, Math.min(1, v))
@@ -394,6 +397,34 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
               </HStack>
             )}
           </VStack>
+        </ScrollView>
+      </VStack>
+    </NavigationStack>
+  )
+}
+
+function FullscreenNotesView(props: { content: string }) {
+  const dismiss = Navigation.useDismiss()
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={"更新说明"}
+        navigationBarTitleDisplayMode={"inline"}
+        toolbar={{
+          topBarLeading: (
+            <Button
+              title=""
+              systemImage="xmark"
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                dismiss()
+              }}
+            />
+          ),
+        }}
+      >
+        <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding>
+          <Markdown content={props.content} />
         </ScrollView>
       </VStack>
     </NavigationStack>
@@ -807,6 +838,12 @@ export function HomeView() {
     })
   }
 
+  async function openFullscreenNotes() {
+    await Navigation.present({
+      element: <FullscreenNotesView content={notes} />,
+    })
+  }
+
   function applyProgress(p: any) {
     const toNum = (v: any): number | undefined => {
       if (typeof v === "number" && Number.isFinite(v)) return v
@@ -1062,7 +1099,24 @@ export function HomeView() {
     }
     if (key === "notes") {
       return (
-        <Section key={key} header={<Text>更新说明</Text>}>
+        <Section
+          key={key}
+          header={(
+            <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+              <Text>更新说明</Text>
+              <Spacer />
+              <Button
+                buttonStyle="plain"
+                action={() => {
+                  try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                  void openFullscreenNotes()
+                }}
+              >
+                <Image systemName={FULLSCREEN_SYMBOL} foregroundStyle="systemBlue" />
+              </Button>
+            </HStack>
+          )}
+        >
           <ScrollView frame={{ height: 220 }} padding>
             <Markdown content={notes} />
           </ScrollView>
@@ -1122,9 +1176,7 @@ export function HomeView() {
                   void openFullscreenLogs()
                 }}
               >
-                <Text foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}>
-                  全屏
-                </Text>
+                <Image systemName={FULLSCREEN_SYMBOL} foregroundStyle={busy ? "secondaryLabel" : "systemBlue"} />
               </Button>
             ) : null}
           </HStack>
