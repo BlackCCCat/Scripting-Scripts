@@ -250,9 +250,10 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
 function decorateLogMessage(message: string): string {
   const text = String(message ?? "").trim()
   if (!text) return text
-  if (/^(🟢|⬇️|🗑️|📝|⏭️|🚀|⏱️|❌|✅|🔎|ℹ️)\s/u.test(text)) return text
+  if (/^(🟢|🌐|⬇️|🗑️|📝|⏭️|🚀|⏱️|❌|✅|🔎|ℹ️)\s/u.test(text)) return text
   if (text.includes("可更新") || text.includes("有可用更新")) return `🟢 ${text}`
-  if (text.includes("下载地址") || text.includes("下载中") || text.includes("远程") || text.includes("资产")) return `⬇️ ${text}`
+  if (text.includes("远程")) return `🌐 ${text}`
+  if (text.includes("下载地址") || text.includes("下载中") || text.includes("资产")) return `⬇️ ${text}`
   if (text.includes("删除") || text.includes("清理")) return `🗑️ ${text}`
   if (text.includes("写入") || text.includes("整理")) return `📝 ${text}`
   if (text.includes("跳过排除文件")) return `⏭️ ${text}`
