@@ -2,7 +2,6 @@
 import type { InputMethod, ProSchemeKey, ReleaseSource, SchemeEdition } from "./config"
 import { PRO_KEYS } from "./config"
 import { storage } from "./common"
-import { RIME_SUFFIXES_BASE } from "./hamster"
 
 export type SchemeMeta = {
   remoteIdOrSha: string
@@ -61,26 +60,25 @@ type RootMetaRecords = {
 }
 
 type MetaRecordsMap = Record<string, RootMetaRecords>
-type MetaAliasMap = Record<string, string>
 type MetaBookmarkMap = Record<string, string>
 type MetaStoreData = {
   records: MetaRecordsMap
-  aliases: MetaAliasMap
   bookmarks: MetaBookmarkMap
 }
 
 const STORAGE_KEY = "wanxiang_meta_store"
 const LEGACY_STORAGE_KEYS = ["wanxiang_meta_store_v1"]
 
-// 静态后缀列表（动态 RimeUserData 子目录名由 relatedRoots 自动推导）
-const RIME_SUFFIXES = [...RIME_SUFFIXES_BASE, "/RimeUserData"]
-
 function normalizeRoot(root: string): string {
   return String(root ?? "").trim().replace(/\/+$/, "")
 }
 
+function pathKey(p: string): string {
+  return normalizeRoot(p)
+}
+
 function pathVariants(root: string): string[] {
-  const n = normalizeRoot(root)
+  const n = pathKey(root)
   if (!n) return []
   const set = new Set<string>([n])
   if (n.startsWith("/private/")) set.add(n.slice("/private".length))
@@ -88,61 +86,8 @@ function pathVariants(root: string): string[] {
   return Array.from(set)
 }
 
-function relatedRoots(root: string): string[] {
-  const base = pathVariants(root)
-  const out = new Set<string>(base)
-
-  // 静态后缀 + 从路径中动态推导的后缀
-  const allSuffixes = [...RIME_SUFFIXES]
-
-  // 从输入路径中动态推导 RimeUserData 子目录名
-  // 例如路径 /root/RimeUserData/myscheme → 推导出后缀 /RimeUserData/myscheme
-  for (const p of base) {
-    const rimeUserDataIdx = p.indexOf("/RimeUserData/")
-    if (rimeUserDataIdx >= 0) {
-      const afterRimeUserData = p.slice(rimeUserDataIdx)
-      // afterRimeUserData 形如 /RimeUserData/myscheme 或 /RimeUserData/myscheme/sub
-      // 取到子目录名级别
-      const parts = afterRimeUserData.split("/").filter(Boolean) // ["RimeUserData", "myscheme", ...]
-      if (parts.length >= 2) {
-        const dynamicSuffix = `/${parts[0]}/${parts[1]}`
-        if (!allSuffixes.includes(dynamicSuffix)) {
-          allSuffixes.push(dynamicSuffix)
-        }
-      }
-    }
-  }
-
-  for (const p of base) {
-    for (const s of allSuffixes) {
-      out.add(normalizeRoot(`${p}${s}`))
-      if (p.endsWith(s)) {
-        out.add(normalizeRoot(p.slice(0, -s.length)))
-      }
-    }
-  }
-  return Array.from(out).filter(Boolean)
-}
-
-
-
-function pathKey(p: string): string {
-  return normalizeRoot(p)
-}
-
 function bookmarkKey(name?: string): string {
   return String(name ?? "").trim()
-}
-
-function isRelatedRoot(a: string, b: string): boolean {
-  const x = pathKey(a)
-  const y = pathKey(b)
-  if (!x || !y) return false
-  if (x === y) return true
-  const relX = new Set(relatedRoots(x).map(pathKey))
-  if (relX.has(y)) return true
-  const relY = new Set(relatedRoots(y).map(pathKey))
-  return relY.has(x)
 }
 
 function mergeMissingKinds(target: RootMetaRecords, source?: RootMetaRecords): RootMetaRecords {
@@ -156,15 +101,13 @@ function mergeMissingKinds(target: RootMetaRecords, source?: RootMetaRecords): R
 function normalizeStore(raw: any): MetaStoreData {
   if (raw && typeof raw === "object" && raw.records && typeof raw.records === "object") {
     const records = raw.records && typeof raw.records === "object" ? (raw.records as MetaRecordsMap) : {}
-    const aliases = raw.aliases && typeof raw.aliases === "object" ? (raw.aliases as MetaAliasMap) : {}
     const bookmarks = raw.bookmarks && typeof raw.bookmarks === "object" ? (raw.bookmarks as MetaBookmarkMap) : {}
-    return { records, aliases, bookmarks }
+    return { records, bookmarks }
   }
-  // 兼容旧结构：直接是 { [root]: records }
   if (raw && typeof raw === "object") {
-    return { records: raw as MetaRecordsMap, aliases: {}, bookmarks: {} }
+    return { records: raw as MetaRecordsMap, bookmarks: {} }
   }
-  return { records: {}, aliases: {}, bookmarks: {} }
+  return { records: {}, bookmarks: {} }
 }
 
 function loadStore(): MetaStoreData {
@@ -177,14 +120,14 @@ function loadStore(): MetaStoreData {
         if (raw) break
       }
     }
-    if (!raw) return { records: {}, aliases: {}, bookmarks: {} }
+    if (!raw) return { records: {}, bookmarks: {} }
     const obj = JSON.parse(String(raw))
     const normalized = normalizeStore(obj)
     const current = st?.get?.(STORAGE_KEY) ?? st?.getString?.(STORAGE_KEY)
     if (!current) saveStore(normalized)
     return normalized
   } catch {
-    return { records: {}, aliases: {}, bookmarks: {} }
+    return { records: {}, bookmarks: {} }
   }
 }
 
@@ -195,183 +138,100 @@ function saveStore(data: MetaStoreData) {
   else if (st?.setString) st.setString(STORAGE_KEY, raw)
 }
 
+function findExactRecordKey(records: MetaRecordsMap, root: string): string {
+  for (const variant of pathVariants(root)) {
+    const key = pathKey(variant)
+    if (key && records[key]) return key
+  }
+  return ""
+}
+
+function rebindBookmark(data: MetaStoreData, bookmarkName?: string, targetRoot?: string): boolean {
+  const bkey = bookmarkKey(bookmarkName)
+  const canonical = pathKey(String(targetRoot ?? ""))
+  if (!bkey || !canonical) return false
+  if (data.bookmarks[bkey] === canonical) return false
+  data.bookmarks[bkey] = canonical
+  return true
+}
+
+function cleanupBookmarks(data: MetaStoreData): boolean {
+  let changed = false
+  for (const name of Object.keys(data.bookmarks)) {
+    const target = pathKey(data.bookmarks[name] ?? "")
+    if (!target || !data.records[target]) {
+      delete data.bookmarks[name]
+      changed = true
+    }
+  }
+  return changed
+}
+
 function readRecord(installRoot: string, kind: RecordKind, bookmarkName?: string): RecordData | undefined {
   const root = normalizeRoot(installRoot)
   const data = loadStore()
-  const bkey = bookmarkKey(bookmarkName)
-  const bindBookmark = (targetRoot: string) => {
-    if (!bkey) return
-    const canonical = pathKey(targetRoot)
-    if (!canonical) return
-    if (data.bookmarks[bkey] === canonical) return
-    data.bookmarks[bkey] = canonical
-    saveStore(data)
-  }
-  if (bkey) {
-    const mapped = pathKey(data.bookmarks[bkey] ?? "")
-    if (mapped) {
-      const byBookmark = data.records[mapped]?.[kind]
-      if (byBookmark) return byBookmark
-    }
-  }
-  if (!root) {
-    // 路径为空但有书签名时，尝试通过书签映射反查记录
-    if (bkey) {
-      for (const rk of Object.keys(data.records)) {
-        if (data.records[rk]?.[kind]) {
-          bindBookmark(rk)
-          return data.records[rk][kind]
-        }
-      }
+
+  if (root) {
+    const exact = findExactRecordKey(data.records, root)
+    if (exact && data.records[exact]?.[kind]) {
+      if (rebindBookmark(data, bookmarkName, exact)) saveStore(data)
+      return data.records[exact][kind]
     }
     return undefined
   }
-  const resolveAlias = (k: string): string => {
-    const key = pathKey(k)
-    return data.aliases[key] ? pathKey(data.aliases[key]) : key
-  }
-  for (const key of relatedRoots(root)) {
-    const rkey = pathKey(key)
-    const recDirect = data.records[rkey]?.[kind]
-    if (recDirect) {
-      bindBookmark(rkey)
-      return recDirect
-    }
-    const aliased = resolveAlias(rkey)
-    const rec = data.records[aliased]?.[kind]
-    if (rec) {
-      bindBookmark(aliased)
-      return rec
-    }
-  }
-  // 兜底：扫描已有 key，避免旧数据路径形态不一致时漏读
-  for (const k of Object.keys(data.records)) {
-    const key = pathKey(k)
-    for (const cand of relatedRoots(root)) {
-      const c = pathKey(cand)
-      if (key === c || key.endsWith(c) || c.endsWith(key)) {
-        const rec = data.records[key]?.[kind]
-        if (rec) {
-          bindBookmark(key)
-          return rec
-        }
-      }
-    }
-  }
-  // 最终兜底：通过书签名映射查找（权限重新授予后路径可能完全变化）
-  if (bkey) {
-    const mapped = pathKey(data.bookmarks[bkey] ?? "")
-    if (mapped && data.records[mapped]?.[kind]) {
-      return data.records[mapped][kind]
-    }
-  }
-  return undefined
+
+  const bkey = bookmarkKey(bookmarkName)
+  if (!bkey) return undefined
+  const mapped = findExactRecordKey(data.records, data.bookmarks[bkey] ?? "")
+  if (!mapped || !data.records[mapped]?.[kind]) return undefined
+  if (rebindBookmark(data, bkey, mapped)) saveStore(data)
+  return data.records[mapped][kind]
 }
 
 function writeRecord(installRoot: string, kind: RecordKind, rec: RecordData, bookmarkName?: string) {
   const root = normalizeRoot(installRoot)
   if (!root) return
-  const data = loadStore()
-  const bkey = bookmarkKey(bookmarkName)
-  const canonicalFromPath = pathKey(root)
-  const mappedBookmark = bkey ? pathKey(data.bookmarks[bkey] ?? "") : ""
 
-  let canonical = canonicalFromPath
-  if (mappedBookmark) {
-    if (isRelatedRoot(mappedBookmark, canonicalFromPath)) {
-      canonical = mappedBookmark
-    } else {
-      // 同一书签切到新路径时：不提前删除旧记录，
-      // 让下方 candidateKeys 循环统一合并后再清理，
-      // 避免丢失其他 kind（如 scheme/model）的数据。
-      canonical = canonicalFromPath
-    }
-  } else {
-    // 无书签名时，优先复用同路径家族已有记录
-    for (const r of relatedRoots(canonicalFromPath)) {
-      const rk = pathKey(r)
-      if (rk && data.records[rk]) {
-        canonical = rk
-        break
-      }
-      const aliased = pathKey(data.aliases[rk] ?? "")
-      if (aliased && data.records[aliased]) {
-        canonical = aliased
-        break
-      }
-    }
-  }
+  const data = loadStore()
+  const canonical = findExactRecordKey(data.records, root) || pathKey(root)
+  const bkey = bookmarkKey(bookmarkName)
+  const mappedBookmark = bkey ? findExactRecordKey(data.records, data.bookmarks[bkey] ?? "") : ""
 
   let bucket: RootMetaRecords = { ...(data.records[canonical] ?? {}) }
-
-  // 合并同一路径家族中的碎片记录，避免仅更新方案/词库后丢失模型信息
-  const candidateKeys = new Set<string>()
-  for (const r of relatedRoots(canonicalFromPath)) {
-    const rk = pathKey(r)
-    if (rk) candidateKeys.add(rk)
-    const aliased = pathKey(data.aliases[rk] ?? "")
-    if (aliased) candidateKeys.add(aliased)
-  }
-  if (mappedBookmark) candidateKeys.add(mappedBookmark)
-  for (const key of candidateKeys) {
-    if (!key || key === canonical) continue
-    if (data.records[key]) {
-      bucket = mergeMissingKinds(bucket, data.records[key])
-      delete data.records[key]
-    }
+  if (mappedBookmark && mappedBookmark !== canonical && data.records[mappedBookmark]) {
+    bucket = mergeMissingKinds(bucket, data.records[mappedBookmark])
+    delete data.records[mappedBookmark]
   }
 
   bucket[kind] = rec
   data.records[canonical] = bucket
-
-  // 清理失效 alias
-  for (const aliasKey of Object.keys(data.aliases)) {
-    const target = pathKey(data.aliases[aliasKey])
-    if (!target || !data.records[target]) {
-      delete data.aliases[aliasKey]
-    }
-  }
-
-  // 为同一路径的变体建立别名，便于通过“书签路径/实际rime路径”互相命中
-  for (const key of relatedRoots(canonical)) {
-    data.aliases[pathKey(key)] = canonical
-  }
-  data.aliases[canonicalFromPath] = canonical
-  if (bkey) data.bookmarks[bkey] = canonical
+  rebindBookmark(data, bkey, canonical)
+  cleanupBookmarks(data)
   saveStore(data)
 }
 
 export function clearMetaForRoot(installRoot: string) {
   const root = normalizeRoot(installRoot)
   if (!root) return
+
   const data = loadStore()
-  const canonicalSet = new Set<string>()
-  for (const key of relatedRoots(root)) {
-    const k = pathKey(key)
-    const target = data.aliases[k] ? pathKey(data.aliases[k]) : k
-    canonicalSet.add(target)
-  }
+  const keys = new Set<string>(pathVariants(root).map(pathKey).filter(Boolean))
   let changed = false
-  for (const key of canonicalSet) {
+
+  for (const key of keys) {
     if (data.records[key]) {
       delete data.records[key]
       changed = true
     }
   }
-  for (const key of Object.keys(data.aliases)) {
-    const target = pathKey(data.aliases[key])
-    if (canonicalSet.has(target)) {
-      delete data.aliases[key]
+  for (const name of Object.keys(data.bookmarks)) {
+    const target = pathKey(data.bookmarks[name] ?? "")
+    if (keys.has(target)) {
+      delete data.bookmarks[name]
       changed = true
     }
   }
-  for (const key of Object.keys(data.bookmarks)) {
-    const target = pathKey(data.bookmarks[key])
-    if (canonicalSet.has(target)) {
-      delete data.bookmarks[key]
-      changed = true
-    }
-  }
+
   if (!changed) return
   saveStore(data)
 }

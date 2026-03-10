@@ -1,5 +1,4 @@
 import { storage, normalizePath } from "./common"
-import { RIME_SUFFIXES_BASE } from "./hamster"
 
 const CONFIG_KEY = "wanxiang_updater_config"
 const META_KEY = "wanxiang_meta_store"
@@ -12,11 +11,7 @@ const LEGACY_KEYS = [
   "wanxiang_extracted_files_v1",
 ]
 
-const RIME_SUFFIXES = [...RIME_SUFFIXES_BASE, "/RimeUserData"]
-
 type AnyObj = Record<string, any>
-
-
 
 function getRaw(st: any, key: string): string {
   const v = st?.get?.(key) ?? st?.getString?.(key)
@@ -32,53 +27,6 @@ function removeKey(st: any, key: string) {
   try {
     if (st?.remove) st.remove(key)
   } catch { }
-}
-
-
-
-function pathVariants(root: string): string[] {
-  const n = normalizePath(root)
-  if (!n) return []
-  const out = new Set<string>([n])
-  if (n.startsWith("/private/")) out.add(n.slice("/private".length))
-  else if (n.startsWith("/")) out.add(`/private${n}`)
-  return Array.from(out)
-}
-
-function relatedRoots(root: string): string[] {
-  const out = new Set<string>()
-  const base = pathVariants(root)
-  const allSuffixes = [...RIME_SUFFIXES]
-  // 动态推导 RimeUserData 子目录名
-  for (const p of base) {
-    const idx = p.indexOf("/RimeUserData/")
-    if (idx >= 0) {
-      const parts = p.slice(idx).split("/").filter(Boolean)
-      if (parts.length >= 2) {
-        const ds = `/${parts[0]}/${parts[1]}`
-        if (!allSuffixes.includes(ds)) allSuffixes.push(ds)
-      }
-    }
-  }
-  for (const p of base) {
-    out.add(p)
-    for (const s of allSuffixes) {
-      out.add(normalizePath(`${p}${s}`))
-      if (p.endsWith(s)) out.add(normalizePath(p.slice(0, -s.length)))
-    }
-  }
-  return Array.from(out).filter(Boolean)
-}
-
-function isRelatedRoot(a: string, b: string): boolean {
-  const x = normalizePath(a)
-  const y = normalizePath(b)
-  if (!x || !y) return false
-  if (x === y) return true
-  const s1 = new Set(relatedRoots(x))
-  if (s1.has(y)) return true
-  const s2 = new Set(relatedRoots(y))
-  return s2.has(x)
 }
 
 function parseJson(raw: string): any {
@@ -120,24 +68,41 @@ function pickNewer(a: any, b: any): any {
   return b
 }
 
-function normalizeMetaData(raw: any): { records: AnyObj; aliases: AnyObj; bookmarks: AnyObj } {
+function normalizeMetaData(raw: any): { records: AnyObj; bookmarks: AnyObj } {
   if (raw && typeof raw === "object" && raw.records && typeof raw.records === "object") {
     return {
       records: raw.records as AnyObj,
-      aliases: raw.aliases && typeof raw.aliases === "object" ? (raw.aliases as AnyObj) : {},
       bookmarks: raw.bookmarks && typeof raw.bookmarks === "object" ? (raw.bookmarks as AnyObj) : {},
     }
   }
   if (raw && typeof raw === "object") {
-    return { records: raw as AnyObj, aliases: {}, bookmarks: {} }
+    return { records: raw as AnyObj, bookmarks: {} }
   }
-  return { records: {}, aliases: {}, bookmarks: {} }
+  return { records: {}, bookmarks: {} }
+}
+
+function comparablePath(path: string): string {
+  const normalized = normalizePath(path)
+  return normalized.startsWith("/private/") ? normalized.slice("/private".length) : normalized
+}
+
+function chooseCanonicalPath(paths: string[]): string {
+  return paths
+    .slice()
+    .sort((a, b) => {
+      const aPrivate = a.startsWith("/private/") ? 0 : 1
+      const bPrivate = b.startsWith("/private/") ? 0 : 1
+      if (aPrivate !== bPrivate) return aPrivate - bPrivate
+      if (a.length !== b.length) return a.length - b.length
+      return a.localeCompare(b)
+    })[0]
 }
 
 function cleanupMetaStore(raw: string): string {
   const parsed = normalizeMetaData(parseJson(raw))
 
-  const records: AnyObj = {}
+  const grouped = new Map<string, string[]>()
+  const normalizedRecords: AnyObj = {}
   for (const [k, v] of Object.entries(parsed.records)) {
     const key = normalizePath(k)
     if (!key || !v || typeof v !== "object") continue
@@ -145,88 +110,49 @@ function cleanupMetaStore(raw: string): string {
     if ((v as AnyObj).scheme) bucket.scheme = (v as AnyObj).scheme
     if ((v as AnyObj).dict) bucket.dict = (v as AnyObj).dict
     if ((v as AnyObj).model) bucket.model = (v as AnyObj).model
-    if (bucket.scheme || bucket.dict || bucket.model) records[key] = bucket
+    if (!bucket.scheme && !bucket.dict && !bucket.model) continue
+    normalizedRecords[key] = bucket
+    const cmp = comparablePath(key)
+    const list = grouped.get(cmp) ?? []
+    list.push(key)
+    grouped.set(cmp, list)
   }
 
-  const keys = Object.keys(records)
-  const visited = new Set<string>()
-  const newRecords: AnyObj = {}
-  const newAliases: AnyObj = {}
-  const newBookmarks: AnyObj = {}
-
-  const bookmarks = Object.entries(parsed.bookmarks).reduce((acc, [name, target]) => {
-    const bk = String(name ?? "").trim()
-    const tv = normalizePath(String(target ?? ""))
-    if (bk && tv) acc[bk] = tv
-    return acc
-  }, {} as AnyObj)
-
-  for (const start of keys) {
-    if (visited.has(start)) continue
-    const cluster: string[] = []
-    for (const k of keys) {
-      if (!visited.has(k) && isRelatedRoot(start, k)) {
-        visited.add(k)
-        cluster.push(k)
-      }
-    }
-    if (!cluster.length) continue
-
-    const bookmarkTarget = Object.values(bookmarks)
-      .map((v) => normalizePath(String(v)))
-      .find((target) => cluster.includes(target))
-    const canonical =
-      bookmarkTarget ??
-      cluster
-        .slice()
-        .sort((a, b) => {
-          const aPrivate = a.startsWith("/private/") ? 1 : 0
-          const bPrivate = b.startsWith("/private/") ? 1 : 0
-          if (aPrivate !== bPrivate) return aPrivate - bPrivate
-          if (a.length !== b.length) return a.length - b.length
-          return a.localeCompare(b)
-        })[0]
-
+  const records: AnyObj = {}
+  const remap = new Map<string, string>()
+  for (const list of grouped.values()) {
+    const canonical = chooseCanonicalPath(list)
     const merged: AnyObj = {}
-    for (const key of cluster) {
-      const bucket = records[key] ?? {}
+    for (const key of list) {
+      const bucket = normalizedRecords[key] ?? {}
       merged.scheme = pickNewer(merged.scheme, bucket.scheme)
       merged.dict = pickNewer(merged.dict, bucket.dict)
       merged.model = pickNewer(merged.model, bucket.model)
+      remap.set(key, canonical)
     }
     if (merged.scheme || merged.dict || merged.model) {
-      newRecords[canonical] = merged
-    }
-
-    for (const key of cluster) {
-      if (key !== canonical) newAliases[key] = canonical
-    }
-    for (const rel of relatedRoots(canonical)) {
-      if (rel !== canonical) newAliases[rel] = canonical
-    }
-
-    for (const [name, target] of Object.entries(bookmarks)) {
-      if (cluster.includes(target)) newBookmarks[name] = canonical
+      records[canonical] = merged
     }
   }
 
-  for (const [name, target] of Object.entries(bookmarks)) {
-    if (newBookmarks[name]) continue
-    const t = normalizePath(String(target))
-    if (!t) continue
-    if (newRecords[t]) {
-      newBookmarks[name] = t
+  const bookmarks: AnyObj = {}
+  for (const [name, target] of Object.entries(parsed.bookmarks)) {
+    const bk = String(name ?? "").trim()
+    const normalizedTarget = normalizePath(String(target ?? ""))
+    if (!bk || !normalizedTarget) continue
+    const mapped = remap.get(normalizedTarget)
+    if (mapped && records[mapped]) {
+      bookmarks[bk] = mapped
       continue
     }
-    const matched = Object.keys(newRecords).find((k) => isRelatedRoot(k, t))
-    if (matched) newBookmarks[name] = matched
+    const cmp = comparablePath(normalizedTarget)
+    const candidates = grouped.get(cmp) ?? []
+    if (!candidates.length) continue
+    const canonical = chooseCanonicalPath(candidates)
+    if (records[canonical]) bookmarks[bk] = canonical
   }
 
-  return JSON.stringify({
-    records: newRecords,
-    aliases: newAliases,
-    bookmarks: newBookmarks,
-  })
+  return JSON.stringify({ records, bookmarks })
 }
 
 function mergeMeta(st: any) {
@@ -252,4 +178,3 @@ export function runStorageMigration() {
     removeKey(st, key)
   }
 }
-

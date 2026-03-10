@@ -706,10 +706,14 @@ export function HomeView() {
     }
 
     const localScheme = normalizeMetaScheme(meta.scheme, current)
+    const localReleaseSource = meta.scheme?.releaseSource ?? meta.dict?.releaseSource ?? meta.model?.releaseSource
+    const localInputMethod = meta.scheme?.inputMethod ?? meta.dict?.inputMethod ?? meta.model?.inputMethod
     setLocalSelectedScheme(localScheme.selected)
     if (
       localScheme.schemeEdition &&
       (current.schemeEdition !== localScheme.schemeEdition ||
+        (localReleaseSource && current.releaseSource !== localReleaseSource) ||
+        (localInputMethod && current.inputMethod !== localInputMethod) ||
         (localScheme.schemeEdition === "pro" &&
           localScheme.proSchemeKey &&
           current.proSchemeKey !== localScheme.proSchemeKey))
@@ -722,6 +726,8 @@ export function HomeView() {
             localScheme.schemeEdition === "pro" && localScheme.proSchemeKey
               ? localScheme.proSchemeKey
               : current.proSchemeKey,
+          releaseSource: localReleaseSource ?? current.releaseSource,
+          inputMethod: localInputMethod ?? current.inputMethod,
         }
         saveConfig(next)
         setCfg(next)
