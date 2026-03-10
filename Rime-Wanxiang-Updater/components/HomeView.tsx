@@ -25,7 +25,6 @@ import {
 
 import {
   loadConfig,
-  saveConfig,
   type AppConfig,
   type HomeSectionKey,
   type ProSchemeKey,
@@ -159,7 +158,7 @@ type AlertState = {
 }
 
 type LogLevel = "INFO" | "WARN" | "ERROR" | "SUCCESS"
-type LogScope = "SYSTEM" | "CHECK" | "SCHEME" | "DICT" | "MODEL" | "AUTO" | "DEPLOY" | "PATH"
+type LogScope = "SYSTEM" | "CHECK" | "SCHEME" | "DICT" | "MODEL" | "PREDICT" | "AUTO" | "DEPLOY" | "PATH"
 
 type LogEntry = {
   id: string
@@ -173,12 +172,14 @@ type UpdateDecision = {
   scheme: boolean
   dict: boolean
   model: boolean
+  predict: boolean
 }
 
 type HomeSessionState = {
   remoteSchemeVer: string
   remoteDictMark: string
   remoteModelMark: string
+  remotePredictMark: string
   notes: string
   lastCheck: AllUpdateResult | null
   lastCheckDecision: UpdateDecision | null
@@ -190,6 +191,7 @@ const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
   remoteSchemeVer: "请检查更新",
   remoteDictMark: "请检查更新",
   remoteModelMark: "请检查更新",
+  remotePredictMark: "请检查更新",
   notes: "请检查更新",
   lastCheck: null,
   lastCheckDecision: null,
@@ -243,10 +245,12 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
   const schemeRemoteMark = normalizeMark(remote.scheme?.tag ?? remote.scheme?.name)
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
   const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
+  const predictRemoteMark = normalizeMark(remote.predict?.remoteIdOrSha)
   return {
     scheme: !!(schemeRemoteMark && normalizeMark(localMeta?.scheme?.remoteTagOrName) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
     model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
+    predict: !!(predictRemoteMark && normalizeMark(localMeta?.predict?.remoteIdOrSha) !== predictRemoteMark),
   }
 }
 
@@ -281,6 +285,7 @@ function logScopeColor(scope: LogScope) {
   if (scope === "SCHEME") return "systemGreen"
   if (scope === "DICT") return "systemOrange"
   if (scope === "MODEL") return "systemPink"
+  if (scope === "PREDICT") return "systemTeal"
   if (scope === "DEPLOY") return "systemPink"
   if (scope === "PATH") return "systemOrange"
   return "secondaryLabel"
@@ -476,6 +481,7 @@ function FullscreenNotesView(props: { content: string }) {
 
 function progressStageLabel(stage: string): string {
   const text = String(stage ?? "")
+  if (text.includes("预测库：")) return text.replace(/^预测库：/, "").trim() || "处理中"
   if (text.includes("下载中")) return "下载中"
   if (text.includes("清理旧文件")) return "删除中"
   if (text.includes("解压") || text.includes("整理") || text.includes("写入") || text.includes("校验")) return "写入中"
@@ -491,11 +497,13 @@ export function HomeView() {
   const [localSchemeVersion, setLocalSchemeVersion] = useState("暂无法获取")
   const [localDictMark, setLocalDictMark] = useState("暂无法获取")
   const [localModelMark, setLocalModelMark] = useState("暂无法获取")
+  const [localPredictMark, setLocalPredictMark] = useState("暂无法获取")
 
   // 远程信息
   const [remoteSchemeVer, setRemoteSchemeVer] = useState(() => homeSessionState.remoteSchemeVer)
   const [remoteDictMark, setRemoteDictMark] = useState(() => homeSessionState.remoteDictMark)
   const [remoteModelMark, setRemoteModelMark] = useState(() => homeSessionState.remoteModelMark)
+  const [remotePredictMark, setRemotePredictMark] = useState(() => homeSessionState.remotePredictMark)
   const [notes, setNotes] = useState(() => homeSessionState.notes)
   const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(() => homeSessionState.lastCheck)
   const [lastCheckDecision, setLastCheckDecision] = useState<UpdateDecision | null>(() => homeSessionState.lastCheckDecision)
@@ -522,6 +530,7 @@ export function HomeView() {
     setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer)
     setRemoteDictMark(DEFAULT_HOME_SESSION_STATE.remoteDictMark)
     setRemoteModelMark(DEFAULT_HOME_SESSION_STATE.remoteModelMark)
+    setRemotePredictMark(DEFAULT_HOME_SESSION_STATE.remotePredictMark)
     setNotes(DEFAULT_HOME_SESSION_STATE.notes)
     setLastCheck(DEFAULT_HOME_SESSION_STATE.lastCheck)
     setLastCheckDecision(DEFAULT_HOME_SESSION_STATE.lastCheckDecision)
@@ -529,7 +538,7 @@ export function HomeView() {
   }
 
   function checkKey(c: AppConfig) {
-    return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.hamsterRootPath, c.hamsterBookmarkName].join("|")
+    return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.usePredictDb ? "predict" : "plain", c.hamsterRootPath, c.hamsterBookmarkName].join("|")
   }
 
   function closeAlert() {
@@ -678,14 +687,14 @@ export function HomeView() {
     const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)))
     for (const root of uniq) {
       const m = await loadMetaAsync(root, current.hamsterBookmarkName)
-      if (m.scheme || m.dict || m.model) {
+      if (m.scheme || m.dict || m.model || m.predict) {
         return { meta: m, candidates: uniq }
       }
     }
     if (current.hamsterBookmarkName) {
       try {
         const byBookmark = await loadMetaAsync("", current.hamsterBookmarkName)
-        if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
+        if (byBookmark.scheme || byBookmark.dict || byBookmark.model || byBookmark.predict) {
           return { meta: byBookmark, candidates: uniq }
         }
       } catch { }
@@ -702,41 +711,17 @@ export function HomeView() {
       setLocalSchemeVersion("暂无法获取")
       setLocalDictMark("暂无法获取")
       setLocalModelMark("暂无法获取")
+      setLocalPredictMark("暂无法获取")
       return false
     }
 
     const localScheme = normalizeMetaScheme(meta.scheme, current)
-    const localReleaseSource = meta.scheme?.releaseSource ?? meta.dict?.releaseSource ?? meta.model?.releaseSource
-    const localInputMethod = meta.scheme?.inputMethod ?? meta.dict?.inputMethod ?? meta.model?.inputMethod
     setLocalSelectedScheme(localScheme.selected)
-    if (
-      localScheme.schemeEdition &&
-      (current.schemeEdition !== localScheme.schemeEdition ||
-        (localReleaseSource && current.releaseSource !== localReleaseSource) ||
-        (localInputMethod && current.inputMethod !== localInputMethod) ||
-        (localScheme.schemeEdition === "pro" &&
-          localScheme.proSchemeKey &&
-          current.proSchemeKey !== localScheme.proSchemeKey))
-    ) {
-      try {
-        const next: AppConfig = {
-          ...current,
-          schemeEdition: localScheme.schemeEdition,
-          proSchemeKey:
-            localScheme.schemeEdition === "pro" && localScheme.proSchemeKey
-              ? localScheme.proSchemeKey
-              : current.proSchemeKey,
-          releaseSource: localReleaseSource ?? current.releaseSource,
-          inputMethod: localInputMethod ?? current.inputMethod,
-        }
-        saveConfig(next)
-        setCfg(next)
-      } catch { }
-    }
 
     setLocalSchemeVersion(meta.scheme?.remoteTagOrName ?? "暂无法获取")
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取")
     setLocalModelMark(meta.model?.remoteIdOrSha ?? "暂无法获取")
+    setLocalPredictMark(meta.predict?.remoteIdOrSha ?? "暂无法获取")
     return true
   }
 
@@ -745,13 +730,14 @@ export function HomeView() {
       remoteSchemeVer,
       remoteDictMark,
       remoteModelMark,
+      remotePredictMark,
       notes,
       lastCheck,
       lastCheckDecision,
       lastCheckKey,
       logs,
     }
-  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckDecision, lastCheckKey, logs])
+  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, remotePredictMark, notes, lastCheck, lastCheckDecision, lastCheckKey, logs])
 
   useEffect(() => {
     if (!cfg.showVerboseLog) return
@@ -776,7 +762,7 @@ export function HomeView() {
       await guardPathAccess(true)
       await refreshLocal(current)
     })()
-  }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
+  }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.usePredictDb, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
 
   useEffect(() => {
     const current = loadConfig()
@@ -926,25 +912,31 @@ export function HomeView() {
     setRemoteSchemeVer("检查更新中...")
     setRemoteDictMark("检查更新中...")
     setRemoteModelMark("检查更新中...")
+    setRemotePredictMark("检查更新中...")
     setNotes("检查更新中...")
     try {
       const current = loadConfig()
       const { meta: localMeta } = await findLocalMeta(current)
       await refreshLocal(current)
+      const effective = loadConfig()
 
-      const r = await checkAllUpdates(current)
+      const r = await checkAllUpdates(effective)
       const decision = buildUpdateDecision(localMeta, r)
       setRemoteSchemeVer(r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取")
       setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取")
       setRemoteModelMark(r.model?.remoteIdOrSha ?? "暂无法获取")
+      setRemotePredictMark(r.predict?.remoteIdOrSha ?? "暂无法获取")
       setNotes(r.scheme?.body ?? "")
       setLastCheck(r)
       setLastCheckDecision(decision)
-      setLastCheckKey(checkKey(current))
+      setLastCheckKey(checkKey(effective))
 
       pushCheckResultLog("方案", r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取", decision.scheme)
       pushCheckResultLog("词库", r.dict?.remoteIdOrSha ?? "暂无法获取", decision.dict)
       pushCheckResultLog("模型", r.model?.remoteIdOrSha ?? "暂无法获取", decision.model)
+      if (effective.usePredictDb) {
+        pushCheckResultLog("预测库", r.predict?.remoteIdOrSha ?? "暂无法获取", decision.predict)
+      }
       setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true)
     } catch (e: any) {
       setStageAndMaybeLog(`检查失败：${String(e?.message ?? e)}`, "CHECK", "ERROR", true)
@@ -964,8 +956,9 @@ export function HomeView() {
       const current = loadConfig()
       const { meta: localMeta } = await findLocalMeta(current)
       await refreshLocal(current)
+      const effective = loadConfig()
 
-      const key = checkKey(current)
+      const key = checkKey(effective)
       let pre = lastCheck
       let decision = lastCheckDecision
       if (!pre || lastCheckKey !== key) {
@@ -975,11 +968,13 @@ export function HomeView() {
         setRemoteSchemeVer("检查更新中...")
         setRemoteDictMark("检查更新中...")
         setRemoteModelMark("检查更新中...")
+        setRemotePredictMark("检查更新中...")
         setNotes("检查更新中...")
-        pre = await checkAllUpdates(current)
+        pre = await checkAllUpdates(effective)
         setRemoteSchemeVer(pre.scheme?.tag ?? pre.scheme?.name ?? "暂无法获取")
         setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取")
         setRemoteModelMark(pre.model?.remoteIdOrSha ?? "暂无法获取")
+        setRemotePredictMark(pre.predict?.remoteIdOrSha ?? "暂无法获取")
         setNotes(pre.scheme?.body ?? "")
         setLastCheck(pre)
         decision = buildUpdateDecision(localMeta, pre)
@@ -994,13 +989,14 @@ export function HomeView() {
       if (decision?.scheme) pushLog("SUCCESS", "AUTO", "方案有可用更新")
       if (decision?.dict) pushLog("SUCCESS", "AUTO", "词库有可用更新")
       if (decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新")
-      if (decision && !decision.scheme && !decision.dict && !decision.model) {
+      if (decision?.predict) pushLog("SUCCESS", "AUTO", "预测库有可用更新")
+      if (decision && !decision.scheme && !decision.dict && !decision.model && !decision.predict) {
         setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
         return
       }
 
       const autoResult = await autoUpdateAll(
-        current,
+        effective,
         {
           onStage: wrapStageReporter("AUTO"),
           onLog: wrapDetailLogger("AUTO"),
@@ -1010,7 +1006,7 @@ export function HomeView() {
         decision ?? undefined
       )
 
-      await refreshLocal(current)
+      await refreshLocal(effective)
       if (!autoResult.didUpdate) {
         setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
       } else if (autoResult.didDeploy) {
@@ -1083,21 +1079,27 @@ export function HomeView() {
     if (!(await guardPathAccess(true))) return
     setBusy(true)
     setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStageAndMaybeLog("更新模型中…", "MODEL", "INFO", true)
+    setStageAndMaybeLog(cfg.usePredictDb ? "更新模型及预测库中…" : "更新模型中…", "MODEL", "INFO", true)
     setProgressPct("0.00%")
     setProgressValue(undefined)
     try {
       const current = loadConfig()
       await updateModel(current, {
         autoDeploy: false,
-        onStage: wrapStageReporter("MODEL"),
-        onLog: wrapDetailLogger("MODEL"),
+        onStage: (message) => {
+          const scope: LogScope = String(message ?? "").includes("预测库：") ? "PREDICT" : "MODEL"
+          setStageAndMaybeLog(message, scope, "INFO", true)
+        },
+        onLog: (message) => {
+          const scope: LogScope = String(message ?? "").includes("预测库") ? "PREDICT" : "MODEL"
+          pushLog("INFO", scope, message)
+        },
         onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
-      setStageAndMaybeLog("更新模型完成", "MODEL", "SUCCESS", true)
+      setStageAndMaybeLog(current.usePredictDb ? "更新模型及预测库完成" : "更新模型完成", "MODEL", "SUCCESS", true)
     } catch (e: any) {
-      setStageAndMaybeLog(`更新模型失败：${String(e?.message ?? e)}`, "MODEL", "ERROR", true)
+      setStageAndMaybeLog(`${cfg.usePredictDb ? "更新模型及预测库" : "更新模型"}失败：${String(e?.message ?? e)}`, "MODEL", "ERROR", true)
     } finally {
       setBusy(false)
       setShowProgress(false)
@@ -1134,6 +1136,7 @@ export function HomeView() {
           <RowKV k="本地方案版本" v={localSchemeVersion} />
           <RowKV k="本地词库" v={localDictMark} />
           <RowKV k="本地模型" v={localModelMark} />
+          {cfg.usePredictDb ? <RowKV k="本地预测库" v={localPredictMark} /> : null}
         </Section>
       )
     }
@@ -1143,6 +1146,7 @@ export function HomeView() {
           <RowKV k="远程方案版本" v={remoteSchemeVer} />
           <RowKV k="远程词库" v={remoteDictMark} />
           <RowKV k="远程模型" v={remoteModelMark} />
+          {cfg.usePredictDb ? <RowKV k="远程预测库" v={remotePredictMark} /> : null}
         </Section>
       )
     }
@@ -1198,7 +1202,7 @@ export function HomeView() {
             <Divider />
             <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="更新模型" onPress={onUpdateModel} disabled={busy || !pathUsable} />
+                <GridButton title={cfg.usePredictDb ? "更新模型及预测库" : "更新模型"} onPress={onUpdateModel} disabled={busy || !pathUsable} />
               </VStack>
               <Divider frame={{ height: 48 }} />
               <VStack frame={{ maxWidth: "infinity" }}>

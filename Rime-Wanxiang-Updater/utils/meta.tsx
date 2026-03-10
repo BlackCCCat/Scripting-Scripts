@@ -28,10 +28,18 @@ export type ModelMeta = {
   updatedAt: string
 }
 
+export type PredictMeta = {
+  remoteIdOrSha: string
+  releaseSource?: ReleaseSource
+  inputMethod?: InputMethod
+  updatedAt: string
+}
+
 export type MetaBundle = {
   scheme?: SchemeMeta
   dict?: DictMeta
   model?: ModelMeta
+  predict?: PredictMeta
 }
 
 type RecordData = {
@@ -42,6 +50,7 @@ type RecordData = {
   selected_scheme?: string
   dict_file?: string
   model_name?: string
+  predict_name?: string
   update_time?: string
   tag?: string
   apply_time?: string
@@ -51,12 +60,13 @@ type RecordData = {
   input_method?: string
 }
 
-type RecordKind = "scheme" | "dict" | "model"
+type RecordKind = "scheme" | "dict" | "model" | "predict"
 
 type RootMetaRecords = {
   scheme?: RecordData
   dict?: RecordData
   model?: RecordData
+  predict?: RecordData
 }
 
 type MetaRecordsMap = Record<string, RootMetaRecords>
@@ -95,6 +105,7 @@ function mergeMissingKinds(target: RootMetaRecords, source?: RootMetaRecords): R
   if (!target.scheme && source.scheme) target.scheme = source.scheme
   if (!target.dict && source.dict) target.dict = source.dict
   if (!target.model && source.model) target.model = source.model
+  if (!target.predict && source.predict) target.predict = source.predict
   return target
 }
 
@@ -340,6 +351,18 @@ function toModelMeta(rec?: RecordData): ModelMeta | undefined {
   }
 }
 
+function toPredictMeta(rec?: RecordData): PredictMeta | undefined {
+  if (!rec) return undefined
+  const remoteIdOrSha = pickRemoteId(rec, rec.predict_name)
+  if (!remoteIdOrSha) return undefined
+  return {
+    remoteIdOrSha,
+    releaseSource: inferReleaseSource(rec),
+    inputMethod: normalizeInputMethod(rec.input_method),
+    updatedAt: rec.update_time || rec.apply_time || new Date().toISOString(),
+  }
+}
+
 function splitRemoteId(source: ReleaseSource | undefined, remoteIdOrSha?: string) {
   if (!remoteIdOrSha) return { sha256: "", cnb_id: "" }
   if (source === "github") return { sha256: remoteIdOrSha, cnb_id: "" }
@@ -358,10 +381,12 @@ export async function loadMetaAsync(installRoot: string, bookmarkName?: string):
   const schemeRec = readRecord(root, "scheme", bookmarkName)
   const dictRec = readRecord(root, "dict", bookmarkName)
   const modelRec = readRecord(root, "model", bookmarkName)
+  const predictRec = readRecord(root, "predict", bookmarkName)
   CACHE = {
     scheme: toSchemeMeta(schemeRec),
     dict: toDictMeta(dictRec),
     model: toModelMeta(modelRec),
+    predict: toPredictMeta(predictRec),
   }
   return CACHE
 }
@@ -445,5 +470,30 @@ export async function setModelMeta(rec: {
     input_method: rec.inputMethod ?? "",
   }
   writeRecord(rec.installRoot, "model", data, rec.bookmarkName)
+  await loadMetaAsync(rec.installRoot, rec.bookmarkName)
+}
+
+export async function setPredictMeta(rec: {
+  installRoot: string
+  bookmarkName?: string
+  fileName: string
+  inputMethod?: InputMethod
+  tag?: string
+  updatedAt?: string
+  remoteIdOrSha?: string
+  source?: ReleaseSource
+}) {
+  const ids = splitRemoteId(rec.source, rec.remoteIdOrSha)
+  const data: RecordData = {
+    predict_name: rec.fileName,
+    update_time: rec.updatedAt ?? new Date().toISOString(),
+    tag: rec.tag ?? "",
+    apply_time: new Date().toISOString(),
+    sha256: ids.sha256,
+    cnb_id: ids.cnb_id,
+    release_source: rec.source ?? "",
+    input_method: rec.inputMethod ?? "",
+  }
+  writeRecord(rec.installRoot, "predict", data, rec.bookmarkName)
   await loadMetaAsync(rec.installRoot, rec.bookmarkName)
 }

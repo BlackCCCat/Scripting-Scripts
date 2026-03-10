@@ -110,7 +110,8 @@ function cleanupMetaStore(raw: string): string {
     if ((v as AnyObj).scheme) bucket.scheme = (v as AnyObj).scheme
     if ((v as AnyObj).dict) bucket.dict = (v as AnyObj).dict
     if ((v as AnyObj).model) bucket.model = (v as AnyObj).model
-    if (!bucket.scheme && !bucket.dict && !bucket.model) continue
+    if ((v as AnyObj).predict) bucket.predict = (v as AnyObj).predict
+    if (!bucket.scheme && !bucket.dict && !bucket.model && !bucket.predict) continue
     normalizedRecords[key] = bucket
     const cmp = comparablePath(key)
     const list = grouped.get(cmp) ?? []
@@ -128,9 +129,10 @@ function cleanupMetaStore(raw: string): string {
       merged.scheme = pickNewer(merged.scheme, bucket.scheme)
       merged.dict = pickNewer(merged.dict, bucket.dict)
       merged.model = pickNewer(merged.model, bucket.model)
+      merged.predict = pickNewer(merged.predict, bucket.predict)
       remap.set(key, canonical)
     }
-    if (merged.scheme || merged.dict || merged.model) {
+    if (merged.scheme || merged.dict || merged.model || merged.predict) {
       records[canonical] = merged
     }
   }

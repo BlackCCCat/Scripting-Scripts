@@ -9,7 +9,7 @@ import { ensureDir, removeDirSafe, unzipToDirWithOverwrite, mergeSubdirsByName }
 import { deployHamster } from "./deploy"
 import { assertInstallPathAccess, detectRimeDir } from "./hamster"
 
-import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
+import { loadMetaAsync, setDictMeta, setModelMeta, setPredictMeta, setSchemeMeta } from "./meta"
 import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
 
 const OWNER = "amzxyz"
@@ -20,6 +20,7 @@ const DICT_TAG = "dict-nightly"
 const MODEL_REPO = "RIME-LMDG"
 const MODEL_TAG = "LTS"
 const MODEL_FILE = "wanxiang-lts-zh-hans.gram"
+const PREDICT_FILE = "wanxiang-lts-zh-hans-predict.db"
 const CNB_DICT_TITLE = "\u8bcd\u5e93"
 const CNB_SCHEME_TITLE = "\u4e07\u8c61\u62fc\u97f3\u8f93\u5165\u65b9\u6848"
 const HTTP_TIMEOUT_MS = 30 * 1000
@@ -38,6 +39,7 @@ export type AllUpdateResult = {
   scheme?: RemoteAsset
   dict?: RemoteAsset
   model?: RemoteAsset
+  predict?: RemoteAsset
 }
 
 export type AutoUpdateRunResult = {
@@ -46,6 +48,7 @@ export type AutoUpdateRunResult = {
     scheme: boolean
     dict: boolean
     model: boolean
+    predict: boolean
   }
   didUpdate: boolean
   didDeploy: boolean
@@ -55,6 +58,7 @@ export type UpdateDecision = {
   scheme: boolean
   dict: boolean
   model: boolean
+  predict: boolean
 }
 
 function normalizeMark(v?: string): string {
@@ -259,6 +263,23 @@ function schemePattern(cfg: AppConfig): string {
   return cfg.schemeEdition === "base" ? "*base.zip" : `*${cfg.proSchemeKey}*fuzhu.zip`
 }
 
+async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise<RemoteAsset | undefined> {
+  return cfg.releaseSource === "github"
+    ? await fetchLatestAssetFromGithub({
+      owner: OWNER,
+      repo: MODEL_REPO,
+      tag: MODEL_TAG,
+      assetNameExact: fileName,
+      token: cfg.githubToken,
+    })
+    : await fetchLatestAssetFromCnb({
+      owner: OWNER,
+      repo: CNB_REPO,
+      assetNameExact: fileName,
+      needLastPage: true,
+    })
+}
+
 async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | undefined> {
   const glob = schemePattern(cfg)
   if (cfg.releaseSource === "github") {
@@ -305,21 +326,8 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
         releaseTitleIncludes: [CNB_DICT_TITLE],
       })
 
-  const model =
-    cfg.releaseSource === "github"
-      ? await fetchLatestAssetFromGithub({
-        owner: OWNER,
-        repo: MODEL_REPO,
-        tag: MODEL_TAG,
-        assetNameExact: MODEL_FILE,
-        token: cfg.githubToken,
-      })
-      : await fetchLatestAssetFromCnb({
-        owner: OWNER,
-        repo: CNB_REPO,
-        assetNameExact: MODEL_FILE,
-        needLastPage: true,
-      })
+  const model = await fetchModelReleaseAsset(cfg, MODEL_FILE)
+  const predict = cfg.usePredictDb ? await fetchModelReleaseAsset(cfg, PREDICT_FILE) : undefined
 
   if (dict && !dict.remoteIdOrSha) {
     dict.remoteIdOrSha = ensureRemoteMark(dict, "dict")
@@ -327,8 +335,11 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
   if (model && !model.remoteIdOrSha) {
     model.remoteIdOrSha = ensureRemoteMark(model, "model")
   }
+  if (predict && !predict.remoteIdOrSha) {
+    predict.remoteIdOrSha = ensureRemoteMark(predict, "model")
+  }
 
-  return { scheme, dict, model }
+  return { scheme, dict, model, predict }
 }
 
 // ===== 部署（删 build 再 URL scheme）=====
@@ -605,87 +616,68 @@ export async function updateDict(
   return dict
 }
 
-export async function updateModel(
-  cfg: AppConfig,
-  params: {
-    onStage?: (s: string) => void
-    onLog?: (s: string) => void
-    onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
-    autoDeploy?: boolean
-  }
-) {
-  const installRoot = await resolveRimeDir(cfg)
+async function updateBinaryAsset(args: {
+  cfg: AppConfig
+  fileName: string
+  asset?: RemoteAsset
+  label: string
+  onStage?: (s: string) => void
+  onLog?: (s: string) => void
+  onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
+  writeMeta: (installRoot: string, asset: RemoteAsset) => Promise<void>
+}) {
+  const installRoot = await resolveRimeDir(args.cfg)
   await ensureDir(installRoot)
   await removeDirSafe(Path.join(installRoot, "UpdateCache"))
 
-  const model =
-    cfg.releaseSource === "github"
-      ? await fetchLatestAssetFromGithub({
-        owner: OWNER,
-        repo: MODEL_REPO,
-        tag: MODEL_TAG,
-        assetNameExact: MODEL_FILE,
-        token: cfg.githubToken,
-      })
-      : await fetchLatestAssetFromCnb({
-        owner: OWNER,
-        repo: CNB_REPO,
-        assetNameExact: MODEL_FILE,
-        needLastPage: true,
-      })
+  const asset = args.asset ?? (await fetchModelReleaseAsset(args.cfg, args.fileName))
+  if (!asset?.url) throw new Error(`未找到可用的${args.label}资产`)
+  args.onLog?.(`远程${args.label}资产：${args.fileName}`)
+  args.onLog?.(`下载地址：${asset.url}`)
 
-  if (!model?.url) throw new Error("未找到可用的模型资产")
-  params.onLog?.(`远程模型资产：${MODEL_FILE}`)
-  params.onLog?.(`下载地址：${model.url}`)
+  const expectedSize = pickExpectedSize(asset)
+  const dstPath = Path.join(installRoot, args.fileName)
+  const tempPath = tempDownloadPath(args.fileName)
 
-  // ✅ 期望大小：优先使用远端资产元数据中的 size
-  const expectedSize = pickExpectedSize(model)
-
-  // 模型不解压，下载后直接落盘到 installRoot 根目录
-  const dstPath = Path.join(installRoot, MODEL_FILE)
-  const tempPath = tempDownloadPath(MODEL_FILE)
-
-  params.onStage?.("下载中…")
+  args.onStage?.("下载中…")
   const fm = FM()
   await removePathLoose(tempPath)
   try {
-    emitProgress(params.onProgress, 0)
+    emitProgress(args.onProgress, 0)
     try {
-      await downloadWithProgress(model.url, tempPath, (p) => {
-        emitProgress(params.onProgress, typeof p?.percent === "number" ? p.percent : 0)
+      await downloadWithProgress(asset.url, tempPath, (p) => {
+        emitProgress(args.onProgress, typeof p?.percent === "number" ? p.percent : 0)
       }, (e) => {
         if (e.type === "retrying") {
-          params.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
-          params.onLog?.(`下载出现波动，准备重试：${e.attempt}/${e.maxAttempts}`)
+          args.onStage?.(`下载中（重试 ${e.attempt}/${e.maxAttempts}）…`)
+          args.onLog?.(`下载出现波动，准备重试：${e.attempt}/${e.maxAttempts}`)
         }
       })
     } catch (error: any) {
-      params.onLog?.(`下载失败：${String(error?.message ?? error)}`)
+      args.onLog?.(`下载失败：${String(error?.message ?? error)}`)
       throw error
     }
 
-    // ✅ 下载完成后先做完整性校验：大小不一致则认为失败，不覆盖 dstPath
-    params.onStage?.("校验中…")
-    emitProgress(params.onProgress, 0)
+    args.onStage?.("校验中…")
+    emitProgress(args.onProgress, 0)
     {
       const actualSize = await getFileSize(fm, tempPath)
       if (expectedSize && expectedSize > 0) {
         if (actualSize !== expectedSize) {
           throw new Error(`下载不完整：实际 ${actualSize} bytes，期望 ${expectedSize} bytes`)
         }
-      } else {
-        if (actualSize <= 0) throw new Error("下载结果为空文件")
+      } else if (actualSize <= 0) {
+        throw new Error("下载结果为空文件")
       }
     }
 
-    // 校验通过后：原子替换到 dstPath
-    params.onStage?.("写入中…")
-    emitProgress(params.onProgress, 0)
+    args.onStage?.("写入中…")
+    emitProgress(args.onProgress, 0)
     try {
       try {
         if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
         else if (typeof fm?.remove === "function") await fm.remove(dstPath)
-        params.onLog?.(`删除旧模型：${dstPath}`)
+        args.onLog?.(`删除旧${args.label}：${dstPath}`)
       } catch { }
 
       if (typeof fm?.moveSync === "function") {
@@ -707,26 +699,89 @@ export async function updateModel(
       } else {
         throw new Error("FileManager 不支持 move/rename/copy 操作")
       }
-      params.onLog?.(`写入模型文件：${dstPath}`)
-      emitProgress(params.onProgress, 1)
+      args.onLog?.(`写入${args.label}文件：${dstPath}`)
+      emitProgress(args.onProgress, 1)
     } catch (err) {
-      params.onStage?.("写入失败")
+      args.onStage?.("写入失败")
       throw err
     }
   } finally {
     await removePathLoose(tempPath)
   }
 
-  await setModelMeta({
-    installRoot,
-    bookmarkName: cfg.hamsterBookmarkName,
+  await args.writeMeta(installRoot, asset)
+  return asset
+}
+
+export async function updateModel(
+  cfg: AppConfig,
+  params: {
+    onStage?: (s: string) => void
+    onLog?: (s: string) => void
+    onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
+    autoDeploy?: boolean
+    targets?: {
+      model?: boolean
+      predict?: boolean
+    }
+  }
+) {
+  const modelAsset = await fetchModelReleaseAsset(cfg, MODEL_FILE)
+  const predictAsset = cfg.usePredictDb ? await fetchModelReleaseAsset(cfg, PREDICT_FILE) : undefined
+  const shouldUpdateModel = params.targets?.model !== false
+  const shouldUpdatePredict = cfg.usePredictDb && params.targets?.predict !== false
+
+  if (!shouldUpdateModel && !shouldUpdatePredict) {
+    params.onStage?.("已是最新，无需更新")
+    params.onLog?.("模型和预测库均为最新")
+    return modelAsset
+  }
+
+  const model = shouldUpdateModel ? await updateBinaryAsset({
+    cfg,
     fileName: MODEL_FILE,
-    inputMethod: cfg.inputMethod,
-    tag: model.tag,
-    updatedAt: model.updatedAt ?? new Date().toISOString(),
-    remoteIdOrSha: ensureRemoteMark(model, "model"),
-    source: cfg.releaseSource,
-  })
+    asset: modelAsset,
+    label: "模型",
+    onStage: (s) => params.onStage?.(`模型：${s}`),
+    onLog: params.onLog,
+    onProgress: params.onProgress,
+    writeMeta: async (installRoot, asset) => {
+      await setModelMeta({
+        installRoot,
+        bookmarkName: cfg.hamsterBookmarkName,
+        fileName: MODEL_FILE,
+        inputMethod: cfg.inputMethod,
+        tag: asset.tag,
+        updatedAt: asset.updatedAt ?? new Date().toISOString(),
+        remoteIdOrSha: ensureRemoteMark(asset, "model"),
+        source: cfg.releaseSource,
+      })
+    },
+  }) : modelAsset
+
+  if (shouldUpdatePredict) {
+    await updateBinaryAsset({
+      cfg,
+      fileName: PREDICT_FILE,
+      asset: predictAsset,
+      label: "预测库",
+      onStage: (s) => params.onStage?.(`预测库：${s}`),
+      onLog: params.onLog,
+      onProgress: params.onProgress,
+      writeMeta: async (installRoot, asset) => {
+        await setPredictMeta({
+          installRoot,
+          bookmarkName: cfg.hamsterBookmarkName,
+          fileName: PREDICT_FILE,
+          inputMethod: cfg.inputMethod,
+          tag: asset.tag,
+          updatedAt: asset.updatedAt ?? new Date().toISOString(),
+          remoteIdOrSha: ensureRemoteMark(asset, "model"),
+          source: cfg.releaseSource,
+        })
+      },
+    })
+  }
 
   if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
   return model
@@ -764,12 +819,17 @@ export async function autoUpdateAll(
   const needModel = typeof preDecision?.model === "boolean"
     ? preDecision.model
     : !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
+  const remotePredictMark = normalizeMark(ensureRemoteMark(r.predict, "model"))
+  const localPredictMark = normalizeMark(meta.predict?.remoteIdOrSha)
+  const needPredict = cfg.usePredictDb && (typeof preDecision?.predict === "boolean"
+    ? preDecision.predict
+    : !!(r.predict && remotePredictMark && localPredictMark !== remotePredictMark))
 
-  if (!needScheme && !needDict && !needModel) {
+  if (!needScheme && !needDict && !needModel && !needPredict) {
     params.onStage?.("自动更新：已是最新，无需更新")
     return {
       remote: r,
-      updated: { scheme: false, dict: false, model: false },
+      updated: { scheme: false, dict: false, model: false, predict: false },
       didUpdate: false,
       didDeploy: false,
     }
@@ -792,12 +852,16 @@ export async function autoUpdateAll(
       autoDeploy: false,
     })
   }
-  if (needModel) {
+  if (needModel || needPredict) {
     await updateModel(cfg, {
-      onStage: (s) => params.onStage?.(`模型：${s}`),
-      onLog: (s) => params.onLog?.(`[模型] ${s}`),
+      onStage: params.onStage,
+      onLog: (s) => params.onLog?.(s),
       onProgress: params.onProgress,
       autoDeploy: false,
+      targets: {
+        model: needModel,
+        predict: needPredict,
+      },
     })
   }
 
@@ -817,7 +881,7 @@ export async function autoUpdateAll(
   params.onStage?.("自动更新：完成")
   return {
     remote: r,
-    updated: { scheme: needScheme, dict: needDict, model: needModel },
+    updated: { scheme: needScheme, dict: needDict, model: needModel, predict: needPredict },
     didUpdate: true,
     didDeploy: cfg.autoDeployAfterDownload !== false,
   }

@@ -25,6 +25,7 @@ export type AppConfig = {
 
   schemeEdition: SchemeEdition
   proSchemeKey: ProSchemeKey
+  usePredictDb: boolean
 
   excludePatternsText: string // 按行
   autoDeployAfterDownload: boolean
@@ -49,6 +50,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   githubToken: "",
   schemeEdition: "base",
   proSchemeKey: "moqi",
+  usePredictDb: false,
   excludePatternsText: "",
   autoDeployAfterDownload: true,
   inputMethod: "hamster",

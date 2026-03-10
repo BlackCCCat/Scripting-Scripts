@@ -63,6 +63,7 @@ function normalizeReleaseSourceFromMeta(meta: any): AppConfig["releaseSource"] |
     meta?.scheme?.releaseSource ??
     meta?.dict?.releaseSource ??
     meta?.model?.releaseSource ??
+    meta?.predict?.releaseSource ??
     ""
   )
     .trim()
@@ -76,6 +77,7 @@ function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputM
     meta?.scheme?.inputMethod ??
     meta?.dict?.inputMethod ??
     meta?.model?.inputMethod ??
+    meta?.predict?.inputMethod ??
     ""
   )
     .trim()
@@ -155,6 +157,7 @@ export function SettingsView(props: {
     const i = PRO_KEYS.indexOf(initialCfg.proSchemeKey)
     return i >= 0 ? i : 0
   })
+  const [predictIdx, setPredictIdx] = useState<number>(initialCfg.usePredictDb ? 0 : 1)
   const [inputIdx, setInputIdx] = useState<number>(() => {
     const i = INPUT_METHODS.findIndex((m) => m.value === initialCfg.inputMethod)
     return i >= 0 ? i : 0
@@ -167,9 +170,10 @@ export function SettingsView(props: {
       releaseSource: releaseIdx === 1 ? "github" : "cnb",
       schemeEdition: schemeIdx === 1 ? "pro" : "base",
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
+      usePredictDb: predictIdx === 0,
       inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
     }))
-  }, [releaseIdx, schemeIdx, proKeyIdx, inputIdx])
+  }, [releaseIdx, schemeIdx, proKeyIdx, predictIdx, inputIdx])
 
   const [alert, setAlert] = useState<AlertState>({
     title: "",
@@ -187,6 +191,7 @@ export function SettingsView(props: {
     setSchemeIdx(latest.schemeEdition === "pro" ? 1 : 0)
     const i = PRO_KEYS.indexOf(latest.proSchemeKey)
     setProKeyIdx(i >= 0 ? i : 0)
+    setPredictIdx(latest.usePredictDb ? 0 : 1)
     const im = INPUT_METHODS.findIndex((m) => m.value === latest.inputMethod)
     setInputIdx(im >= 0 ? im : 0)
       ; (async () => {
@@ -228,7 +233,7 @@ export function SettingsView(props: {
     })
   }
 
-  async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
+  async function syncSchemeFromLocal(base: AppConfig, strictPredict = false): Promise<AppConfig> {
     let detected = ""
     let detectedEngine = ""
     try {
@@ -247,7 +252,7 @@ export function SettingsView(props: {
     for (const root of candidates) {
       try {
         const m = await loadMetaAsync(root, base.hamsterBookmarkName)
-        if (m.scheme || m.dict || m.model) {
+        if (m.scheme || m.dict || m.model || m.predict) {
           meta = m
           break
         }
@@ -256,7 +261,7 @@ export function SettingsView(props: {
     if (!meta && base.hamsterBookmarkName) {
       try {
         const byBookmark = await loadMetaAsync("", base.hamsterBookmarkName)
-        if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
+        if (byBookmark.scheme || byBookmark.dict || byBookmark.model || byBookmark.predict) {
           meta = byBookmark
         }
       } catch { }
@@ -270,6 +275,7 @@ export function SettingsView(props: {
       ...base,
       releaseSource: releaseSource ?? base.releaseSource,
       inputMethod: inputMethod ?? base.inputMethod,
+      usePredictDb: strictPredict ? !!meta?.predict : (meta?.predict ? true : base.usePredictDb),
       schemeEdition: normalized?.schemeEdition ?? base.schemeEdition,
       proSchemeKey:
         normalized?.schemeEdition === "pro"
@@ -281,13 +287,15 @@ export function SettingsView(props: {
       base.schemeEdition !== next.schemeEdition ||
       base.proSchemeKey !== next.proSchemeKey ||
       base.releaseSource !== next.releaseSource ||
-      base.inputMethod !== next.inputMethod
+      base.inputMethod !== next.inputMethod ||
+      base.usePredictDb !== next.usePredictDb
     if (!changed) return base
 
     setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
     const proIdx = PRO_KEYS.indexOf(next.proSchemeKey)
     setProKeyIdx(proIdx >= 0 ? proIdx : 0)
     setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
+    setPredictIdx(next.usePredictDb ? 0 : 1)
     const inputMethodIdx = INPUT_METHODS.findIndex((m) => m.value === next.inputMethod)
     setInputIdx(inputMethodIdx >= 0 ? inputMethodIdx : 0)
     setCfg(next)
@@ -331,7 +339,7 @@ export function SettingsView(props: {
         if (pathChanged) {
           try {
             let next = { ...loadConfig(), hamsterRootPath: selectedPath, hamsterBookmarkName: matched.name }
-            next = await syncSchemeFromLocal(next)
+            next = await syncSchemeFromLocal(next, true)
             setCfg(next)
           } catch { }
         }
@@ -360,6 +368,7 @@ export function SettingsView(props: {
       ...cfg,
       // base 时 proKey 也可以保留，不影响；若你想 base 时清空也可以在这里处理
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
+      usePredictDb: predictIdx === 0,
       inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
     }
 
@@ -368,7 +377,7 @@ export function SettingsView(props: {
         fixed.hamsterRootPath !== initialHamsterRootPath ||
         fixed.hamsterBookmarkName !== initialHamsterBookmarkName
       if (pathChanged) {
-        fixed = await syncSchemeFromLocal(fixed)
+        fixed = await syncSchemeFromLocal(fixed, false)
       }
       saveConfig(fixed)
       const schemeChanged =
@@ -395,12 +404,24 @@ export function SettingsView(props: {
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.slice(), [])
+  const predictLabels = useMemo<string[]>(() => ["使用", "不使用"], [])
 
   return (
     <NavigationStack>
       <VStack
         navigationTitle={"设置"}
         navigationBarTitleDisplayMode={"inline"}
+        toolbar={{
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                void saveAndClose()
+              }}
+            />
+          ),
+        }}
         alert={{
           title: alert.title,
           isPresented: alert.isPresented,
@@ -446,7 +467,7 @@ export function SettingsView(props: {
                         hamsterBookmarkName: b.name,
                       }
                       try {
-                        next = await syncSchemeFromLocal(next)
+                        next = await syncSchemeFromLocal(next, true)
                         setCfg(next)
                       } catch { }
                     })()
@@ -525,6 +546,22 @@ export function SettingsView(props: {
                 ))}
               </Picker>
             ) : null}
+
+            <Picker
+              title={"预测库"}
+              pickerStyle="menu"
+              value={predictIdx}
+              onChanged={(v: number) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+                setPredictIdx(v)
+              }}
+            >
+              {predictLabels.map((label, index) => (
+                <Text key={label} tag={index}>
+                  {label}
+                </Text>
+              ))}
+            </Picker>
           </Section>
 
           <Section header={<Text>输入法</Text>}>
