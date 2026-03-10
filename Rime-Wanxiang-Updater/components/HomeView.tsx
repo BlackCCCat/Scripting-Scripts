@@ -348,12 +348,21 @@ function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
 
 function FullscreenLogView(props: { logs: LogEntry[] }) {
   const dismiss = Navigation.useDismiss()
+  const [visibleLogs, setVisibleLogs] = useState<LogEntry[] | null>(null)
   const copyAllLogs = () => {
     try {
       ;(globalThis as any).Clipboard?.copyText?.(props.logs.map(formatLogEntry).join("\n"))
       ;(globalThis as any).HapticFeedback?.mediumImpact?.()
     } catch { }
   }
+
+  useEffect(() => {
+    setVisibleLogs(null)
+    const timer = setTimeout(() => {
+      setVisibleLogs(props.logs)
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [props.logs])
 
   return (
     <NavigationStack>
@@ -382,7 +391,18 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
       >
         <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding={{ top: 8, bottom: 8, leading: 18, trailing: 14 }}>
           <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-            {props.logs.length ? props.logs.map((entry) => <LogEntryRow key={entry.id} entry={entry} insetLeft={18} />) : (
+            {visibleLogs == null ? (
+              <VStack
+                spacing={10}
+                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+                padding={{ top: 20, bottom: 20 }}
+              >
+                <ProgressView />
+                <Text font="footnote" foregroundStyle="secondaryLabel">
+                  加载日志中...
+                </Text>
+              </VStack>
+            ) : visibleLogs.length ? visibleLogs.map((entry) => <LogEntryRow key={entry.id} entry={entry} insetLeft={18} />) : (
               <HStack spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
                 <Rectangle foregroundStyle="clear" frame={{ width: 18, height: 1 }} />
                 <Text
@@ -405,6 +425,16 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
 
 function FullscreenNotesView(props: { content: string }) {
   const dismiss = Navigation.useDismiss()
+  const [visibleContent, setVisibleContent] = useState<string | null>(null)
+
+  useEffect(() => {
+    setVisibleContent(null)
+    const timer = setTimeout(() => {
+      setVisibleContent(props.content)
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [props.content])
+
   return (
     <NavigationStack>
       <VStack
@@ -424,7 +454,20 @@ function FullscreenNotesView(props: { content: string }) {
         }}
       >
         <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding>
-          <Markdown content={props.content} />
+          {visibleContent == null ? (
+            <VStack
+              spacing={10}
+              frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+              padding={{ top: 20, bottom: 20 }}
+            >
+              <ProgressView />
+              <Text font="footnote" foregroundStyle="secondaryLabel">
+                加载更新说明中...
+              </Text>
+            </VStack>
+          ) : (
+            <Markdown content={visibleContent} />
+          )}
         </ScrollView>
       </VStack>
     </NavigationStack>
