@@ -53,8 +53,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   autoDeployAfterDownload: true,
   inputMethod: "hamster",
   autoCheckOnLaunch: false,
-  showVerboseLog: false,
-  homeSectionOrder: HOME_SECTION_KEYS.slice(),
+  showVerboseLog: true,
+  homeSectionOrder: ["local", "actions", "status", "remote", "notes"],
 }
 
 export function normalizeHomeSectionOrder(input: unknown): HomeSectionKey[] {
