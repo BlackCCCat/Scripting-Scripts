@@ -10,7 +10,6 @@ import {
   VStack,
   HStack,
   Toggle,
-  Spacer,
   Picker,
   useEffect,
   useMemo,
@@ -21,6 +20,7 @@ import { Runtime } from "../utils/runtime"
 import {
   loadConfig,
   saveConfig,
+  DEFAULT_CONFIG,
   type AppConfig,
   type HomeSectionKey,
   type ProSchemeKey,
@@ -28,7 +28,7 @@ import {
   PRO_KEYS,
   HOME_SECTION_LABELS,
 } from "../utils/config"
-import { callMaybeAsync, normalizePath } from "../utils/common"
+import { callMaybeAsync, normalizePath, storage } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
 import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
@@ -45,6 +45,12 @@ type AlertState = {
 const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "仓输入法", value: "hamster" },
   { label: "元书输入法", value: "hamster3" },
+]
+
+const RESET_STORAGE_KEYS = [
+  "wanxiang_updater_config",
+  "wanxiang_meta_store",
+  "wanxiang_extracted_files",
 ]
 
 function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
@@ -102,36 +108,6 @@ async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): P
     for (const c of candidates) push(c)
   }
   return Array.from(new Set(out))
-}
-
-function CenterRowButton(props: {
-  title: string
-  role?: "cancel"
-  disabled?: boolean
-  onPress: () => void
-}) {
-  const haptic = () => {
-    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-  }
-  return (
-    <Button
-      role={props.role}
-      action={() => {
-        haptic()
-        props.onPress()
-      }}
-      disabled={props.disabled}
-    >
-      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        <Text opacity={0} frame={{ width: 1 }}>
-          .
-        </Text>
-        <Spacer />
-        <Text font="headline">{props.title}</Text>
-        <Spacer />
-      </HStack>
-    </Button>
-  )
 }
 
 export function SettingsView(props: {
@@ -400,6 +376,31 @@ export function SettingsView(props: {
     }
   }
 
+  async function resetSettings() {
+    try {
+      const st = storage()
+      for (const key of RESET_STORAGE_KEYS) {
+        try {
+          if (typeof st?.remove === "function") st.remove(key)
+          else if (typeof st?.set === "function") st.set(key, "")
+          else if (typeof st?.setString === "function") st.setString(key, "")
+        } catch { }
+      }
+
+      const next: AppConfig = { ...DEFAULT_CONFIG }
+      setCfg(next)
+      setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
+      setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
+      setProKeyIdx(PRO_KEYS.indexOf(next.proSchemeKey))
+      setPredictIdx(next.usePredictDb ? 0 : 1)
+      setInputIdx(INPUT_METHODS.findIndex((m) => m.value === next.inputMethod))
+      props.onDone?.(next)
+      showInfo("已重置设置", "已清理本地设置、更新记录和解压缓存记录。")
+    } catch (e: any) {
+      showInfo("重置失败", String(e?.message ?? e))
+    }
+  }
+
   // 供 Picker 渲染用的文本数组（与你示例一致：Text tag={index}）
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
@@ -633,9 +634,30 @@ export function SettingsView(props: {
             />
           </Section>
 
-          <Section>
-            <CenterRowButton title="保存" onPress={saveAndClose} />
-            <CenterRowButton title="取消" role="cancel" onPress={() => dismiss()} />
+          <Section
+            footer={(
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                将清理本地设置、更新记录和解压缓存记录。重置后需要重新选择路径并按需重新配置。
+              </Text>
+            )}
+          >
+            <Button
+              role="destructive"
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                void resetSettings()
+              }}
+            >
+              <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 6 }}>
+                <Text
+                  font="headline"
+                  foregroundStyle="systemRed"
+                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
+                >
+                  重置设置
+                </Text>
+              </HStack>
+            </Button>
           </Section>
         </Form>
       </VStack>
