@@ -109,12 +109,19 @@ function normalizeMetaScheme(
   }
 }
 
-function GridButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
+function GridButton(props: {
+  title: string
+  icon: string
+  disabled?: boolean
+  color?: string
+  onPress: () => void
+}) {
   const haptic = () => {
     try {
       ; (globalThis as any).HapticFeedback?.mediumImpact?.()
     } catch { }
   }
+  const tintColor = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
   return (
     <Button
       action={() => {
@@ -123,18 +130,30 @@ function GridButton(props: { title: string; disabled?: boolean; onPress: () => v
       }}
       disabled={props.disabled}
       buttonStyle="plain"
-      tint={props.disabled ? "secondaryLabel" : "systemBlue"}
-      frame={{ maxWidth: "infinity", minHeight: 60 }}
+      tint={tintColor}
+      frame={{ maxWidth: "infinity", minHeight: 62 }}
     >
-      <Text
-        font="headline"
-        frame={{ maxWidth: "infinity" }}
-        multilineTextAlignment="center"
-        foregroundStyle={props.disabled ? "secondaryLabel" : "systemBlue"}
-        padding={{ top: 18, bottom: 18 }}
+      <VStack
+        spacing={3}
+        frame={{ maxWidth: "infinity", minHeight: 62 }}
+        padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
       >
-        {props.title}
-      </Text>
+        <Image
+          systemName={props.icon}
+          font="title2"
+          frame={{ height: 22 }}
+          foregroundStyle={tintColor}
+        />
+        <Text
+          font="footnote"
+          frame={{ maxWidth: "infinity", minHeight: 16, alignment: "center" as any }}
+          lineLimit={1}
+          multilineTextAlignment="center"
+          foregroundStyle={tintColor}
+        >
+          {props.title}
+        </Text>
+      </VStack>
     </Button>
   )
 }
@@ -1177,36 +1196,39 @@ export function HomeView() {
       )
     }
     if (key === "actions") {
+      const autoUpdateReady =
+        lastCheckKey === checkKey(cfg) &&
+        !!lastCheckDecision &&
+        (lastCheckDecision.scheme || lastCheckDecision.dict || lastCheckDecision.model || lastCheckDecision.predict)
+      const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue"
       return (
         <Section key={key} header={<Text>操作</Text>}>
-          <VStack spacing={0}>
-            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+          <VStack spacing={6} padding={{ top: 1, bottom: 1 }}>
+            <HStack spacing={10} alignment="center">
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="更新方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+                <GridButton icon="doc.text" title="方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
               </VStack>
-              <Divider frame={{ height: 48 }} />
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="部署输入法" onPress={onDeploy} disabled={busy || !pathUsable} />
+                <GridButton icon="books.vertical" title="词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
               </VStack>
-            </HStack>
-            <Divider />
-            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="更新词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
-              </VStack>
-              <Divider frame={{ height: 48 }} />
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+                <GridButton
+                  icon="shippingbox"
+                  title={cfg.usePredictDb ? "模型/预测库" : "模型"}
+                  onPress={onUpdateModel}
+                  disabled={busy || !pathUsable}
+                />
               </VStack>
             </HStack>
-            <Divider />
-            <HStack spacing={0} alignment="center" frame={{ minHeight: 64 }}>
+            <HStack spacing={10} alignment="center">
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title={cfg.usePredictDb ? "更新模型及预测库" : "更新模型"} onPress={onUpdateModel} disabled={busy || !pathUsable} />
+                <GridButton icon="paperplane" title="部署" onPress={onDeploy} disabled={busy || !pathUsable} />
               </VStack>
-              <Divider frame={{ height: 48 }} />
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton title="自动更新" onPress={onAutoUpdate} disabled={busy || !pathUsable} />
+                <GridButton icon="arrow.triangle.2.circlepath" title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+              </VStack>
+              <VStack frame={{ maxWidth: "infinity" }}>
+                <GridButton icon="bolt.fill" title="自动更新" color={autoUpdateColor} onPress={onAutoUpdate} disabled={busy || !pathUsable} />
               </VStack>
             </HStack>
           </VStack>
