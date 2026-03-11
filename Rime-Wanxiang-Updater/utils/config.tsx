@@ -32,6 +32,7 @@ export type AppConfig = {
   inputMethod: InputMethod
   autoCheckOnLaunch: boolean
   showVerboseLog: boolean
+  deletePredictDbWhenUnused: boolean
   homeSectionOrder: HomeSectionKey[]
 }
 
@@ -56,6 +57,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   inputMethod: "hamster",
   autoCheckOnLaunch: false,
   showVerboseLog: true,
+  deletePredictDbWhenUnused: false,
   homeSectionOrder: ["local", "actions", "status", "remote", "notes"],
 }
 

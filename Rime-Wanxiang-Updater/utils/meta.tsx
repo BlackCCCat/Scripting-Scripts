@@ -247,6 +247,36 @@ export function clearMetaForRoot(installRoot: string) {
   saveStore(data)
 }
 
+export function clearPredictMetaForRoot(installRoot: string, bookmarkName?: string) {
+  const root = normalizeRoot(installRoot)
+  if (!root) return
+
+  const data = loadStore()
+  const exact = findExactRecordKey(data.records, root)
+  const bookmarkTarget = bookmarkKey(bookmarkName)
+    ? findExactRecordKey(data.records, data.bookmarks[bookmarkKey(bookmarkName)] ?? "")
+    : ""
+  const keys = Array.from(new Set([exact, bookmarkTarget].filter(Boolean)))
+  if (!keys.length) return
+
+  let changed = false
+  for (const key of keys) {
+    const bucket = data.records[key]
+    if (!bucket?.predict) continue
+    delete bucket.predict
+    changed = true
+    if (!bucket.scheme && !bucket.dict && !bucket.model && !bucket.predict) {
+      delete data.records[key]
+    } else {
+      data.records[key] = bucket
+    }
+  }
+
+  if (!changed) return
+  cleanupBookmarks(data)
+  saveStore(data)
+}
+
 function pickRemoteId(rec: RecordData, fallback?: string): string | undefined {
   return rec.sha256 || rec.cnb_id || fallback
 }

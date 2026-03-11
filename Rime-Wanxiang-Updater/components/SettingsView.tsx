@@ -28,9 +28,9 @@ import {
   PRO_KEYS,
   HOME_SECTION_LABELS,
 } from "../utils/config"
-import { callMaybeAsync, normalizePath, storage } from "../utils/common"
+import { callMaybeAsync, normalizePath, removePathLoose, storage } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
-import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
+import { clearMetaForRoot, clearPredictMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 import { HomeSectionOrderView } from "./HomeSectionOrderView"
 
@@ -52,6 +52,7 @@ const RESET_STORAGE_KEYS = [
   "wanxiang_meta_store",
   "wanxiang_extracted_files",
 ]
+const PREDICT_FILE = "wanxiang-lts-zh-hans-predict.db"
 
 function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
   const edition = meta?.scheme?.schemeEdition
@@ -359,6 +360,18 @@ export function SettingsView(props: {
       const schemeChanged =
         fixed.schemeEdition !== initialSchemeEdition ||
         (fixed.schemeEdition === "pro" && fixed.proSchemeKey !== initialProSchemeKey)
+      const predictDisabled = initialCfg.usePredictDb && !fixed.usePredictDb
+      const shouldDeletePredict = fixed.deletePredictDbWhenUnused && predictDisabled
+      if (shouldDeletePredict) {
+        try {
+          const { rimeDir } = await detectRimeDir(fixed)
+          const installRoot = rimeDir || fixed.hamsterRootPath
+          if (installRoot) {
+            await removePathLoose(`${installRoot}/${PREDICT_FILE}`)
+            clearPredictMetaForRoot(installRoot, fixed.hamsterBookmarkName)
+          }
+        } catch { }
+      }
       if (schemeChanged && !pathChanged) {
         try {
           const { rimeDir } = await detectRimeDir(fixed)
@@ -599,6 +612,15 @@ export function SettingsView(props: {
               onChanged={(v: boolean) => {
                 try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                 setCfg((c) => ({ ...c, showVerboseLog: v }))
+              }}
+              toggleStyle="switch"
+            />
+            <Toggle
+              title={"不使用预测库时删除"}
+              value={cfg.deletePredictDbWhenUnused}
+              onChanged={(v: boolean) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+                setCfg((c) => ({ ...c, deletePredictDbWhenUnused: v }))
               }}
               toggleStyle="switch"
             />
