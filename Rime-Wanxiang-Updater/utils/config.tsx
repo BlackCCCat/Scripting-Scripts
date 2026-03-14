@@ -86,7 +86,7 @@ export function loadConfig(): AppConfig {
     if (!raw) return DEFAULT_CONFIG
     const obj = JSON.parse(raw)
     if (obj?.inputMethod === "cang") obj.inputMethod = "hamster"
-    if (obj?.inputMethod === "yushu" || obj?.inputMethod === "yuanshu") obj.inputMethod = "hamster3"
+    if (obj?.inputMethod === "yuanshu") obj.inputMethod = "hamster3"
     if (typeof obj?.hamsterBookmarkName !== "string") obj.hamsterBookmarkName = ""
     obj.homeSectionOrder = normalizeHomeSectionOrder(obj?.homeSectionOrder)
     const cfg = { ...DEFAULT_CONFIG, ...obj }
