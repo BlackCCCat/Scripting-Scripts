@@ -70,5 +70,3 @@ jobs:
         with:
           files: dist/*.zip
           overwrite_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.REALEASE_TOKEN }}
