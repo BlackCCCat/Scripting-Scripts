@@ -2,8 +2,8 @@ import {
   Button,
   HStack,
   Image,
-  ProgressView,
   Rectangle,
+  RoundedRectangle,
   ScrollView,
   Spacer,
   Text,
@@ -15,12 +15,7 @@ import {
 
 import { loadConfig, type AppConfig } from "../utils/config"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
-import {
-  autoUpdateAll,
-  checkAllUpdates,
-  deployInputMethod,
-  type AllUpdateResult,
-} from "../utils/update_tasks"
+import { checkAllUpdates, type AllUpdateResult } from "../utils/update_tasks"
 import { collectRimeCandidates, detectRimeDir, verifyInstallPathAccess } from "../utils/hamster"
 import { Runtime } from "../utils/runtime"
 
@@ -30,6 +25,9 @@ type UpdateDecision = {
   model: boolean
   predict: boolean
 }
+
+type RemoteItemKey = keyof UpdateDecision
+type RemoteItemState = "unchecked" | "checking" | "update" | "latest" | "error" | "disabled"
 
 function normalizeMark(value?: string) {
   return String(value ?? "").trim().toLowerCase()
@@ -48,53 +46,6 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
   }
 }
 
-function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v))
-}
-
-function readFraction(x: any): number | undefined {
-  const toNum = (v: any): number | undefined => {
-    if (typeof v === "number" && Number.isFinite(v)) return v
-    if (typeof v === "string") {
-      const n = Number(v)
-      if (Number.isFinite(n)) return n
-    }
-    return undefined
-  }
-  return (
-    toNum(x?.percent) ??
-    toNum(x?.fractionCompleted) ??
-    toNum(x?.progress?.fractionCompleted) ??
-    toNum(x)
-  )
-}
-
-function pctFromFraction(f?: number) {
-  const v = typeof f === "number" && Number.isFinite(f) ? clamp01(f) : 0
-  return `${(v * 100).toFixed(0)}%`
-}
-
-function progressStageLabel(stage: string): string {
-  const text = String(stage ?? "")
-  if (text.includes("下载中")) return "下载中"
-  if (text.includes("清理旧文件")) return "删除中"
-  if (text.includes("解压") || text.includes("整理") || text.includes("写入") || text.includes("校验")) return "写入中"
-  if (text.includes("部署")) return "部署中"
-  if (text.includes("检查")) return "检查中"
-  return text || "处理中"
-}
-
-function statusColor(status: string): any {
-  const text = String(status ?? "")
-  if (text.includes("失败") || text.includes("不可用")) return "systemRed"
-  if (text.includes("可更新")) return "systemGreen"
-  if (text.includes("最新") || text.includes("完成")) return "systemGreen"
-  if (text.includes("检查") || text.includes("更新中") || text.includes("部署中") || text.includes("下载中") || text.includes("写入中")) {
-    return "systemBlue"
-  }
-  return undefined
-}
-
 function formatSchemeLabel(metaScheme: MetaBundle["scheme"], fallback: AppConfig) {
   if (!metaScheme) return fallback.schemeEdition === "base" ? "base" : `pro(${fallback.proSchemeKey})`
   if (metaScheme.selectedScheme) return metaScheme.selectedScheme.replace(" ", "")
@@ -103,6 +54,19 @@ function formatSchemeLabel(metaScheme: MetaBundle["scheme"], fallback: AppConfig
     : metaScheme.proSchemeKey
       ? `pro(${metaScheme.proSchemeKey})`
       : "pro"
+}
+
+function releaseSourceLabel(source: AppConfig["releaseSource"]) {
+  return source === "cnb" ? "CNB" : "GitHub"
+}
+
+function inputMethodLabel(method: AppConfig["inputMethod"]) {
+  return method === "hamster3" ? "元书输入法" : "仓输入法"
+}
+
+function countUpdates(decision: UpdateDecision | null) {
+  if (!decision) return 0
+  return [decision.scheme, decision.dict, decision.model, decision.predict].filter(Boolean).length
 }
 
 async function findLocalMeta(current: AppConfig): Promise<MetaBundle | undefined> {
@@ -137,7 +101,42 @@ async function findLocalMeta(current: AppConfig): Promise<MetaBundle | undefined
   return undefined
 }
 
-function SummaryButton(props: {
+function rowStateInfo(state: RemoteItemState): {
+  emoji: string
+  text: string
+  color?: any
+  stroke: any
+} {
+  switch (state) {
+    case "checking":
+      return { emoji: "⏳", text: "检查中", color: "systemBlue", stroke: "systemBlue" }
+    case "update":
+      return { emoji: "🟢", text: "可更新", color: "systemGreen", stroke: "systemGreen" }
+    case "latest":
+      return { emoji: "✅", text: "最新", color: "systemGreen", stroke: "systemGreen" }
+    case "error":
+      return { emoji: "❌", text: "暂无法获取", color: "systemRed", stroke: "systemRed" }
+    case "disabled":
+      return { emoji: "⏸️", text: "未使用", color: "secondaryLabel", stroke: "separator" }
+    default:
+      return { emoji: "⚪️", text: "未检查", color: "secondaryLabel", stroke: "separator" }
+  }
+}
+
+function overallStateText(busy: boolean, status: string, decision: UpdateDecision | null, checked: boolean) {
+  if (busy) return { text: "⏳ 检查中", color: "systemBlue" as any }
+  if (status.includes("失败") || status.includes("不可用")) return { text: "❌ 需处理", color: "systemRed" as any }
+  if (!checked || !decision) return { text: "⚪️ 未检查", color: "secondaryLabel" as any }
+  return countUpdates(decision) > 0
+    ? { text: "🟢 有更新", color: "systemGreen" as any }
+    : { text: "✅ 已最新", color: "systemGreen" as any }
+}
+
+function checkKey(c: AppConfig) {
+  return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.usePredictDb ? "predict" : "plain", c.hamsterRootPath, c.hamsterBookmarkName].join("|")
+}
+
+function CompactButton(props: {
   title: string
   icon: string
   disabled?: boolean
@@ -151,110 +150,117 @@ function SummaryButton(props: {
       disabled={props.disabled}
       buttonStyle="bordered"
       tint={tint}
-      frame={{ maxWidth: "infinity", minHeight: 46 }}
+      frame={{ maxWidth: "infinity", minHeight: 42 }}
     >
-      <VStack spacing={1} frame={{ maxWidth: "infinity" }} padding={{ top: 2, bottom: 2, leading: 4, trailing: 4 }}>
+      <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
         <Image systemName={props.icon} font="subheadline" foregroundStyle={tint} />
-        <Text font="caption" lineLimit={1} multilineTextAlignment="center" foregroundStyle={tint}>
+        <Text font="caption" lineLimit={1} foregroundStyle={tint}>
           {props.title}
         </Text>
-      </VStack>
+      </HStack>
     </Button>
+  )
+}
+
+function StatusCard(props: {
+  icon: string
+  label: string
+  state: RemoteItemState
+}) {
+  const info = rowStateInfo(props.state)
+  const iconColor: any = props.state === "disabled" ? "secondaryLabel" : undefined
+  const cardFill: any = props.state === "update" ? "systemGreen" : "tertiarySystemGroupedBackground"
+  const cardStroke: any = props.state === "update" ? info.stroke : "separator"
+  return (
+    <VStack frame={{ maxWidth: "infinity" }}>
+      <RoundedRectangle
+        cornerRadius={12}
+        fill={cardFill}
+        stroke={cardStroke}
+        opacity={props.state === "update" ? 0.18 : 1}
+        frame={{ maxWidth: "infinity", height: 62 }}
+        overlay={
+          <VStack
+            spacing={4}
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}
+            padding={{ top: 8, bottom: 8, leading: 10, trailing: 10 }}
+          >
+            <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              <Image systemName={props.icon} font="caption" foregroundStyle={iconColor} />
+              <Text font="caption" lineLimit={1} foregroundStyle={iconColor}>
+                {props.label}
+              </Text>
+            </HStack>
+            <HStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              <Text font="caption" foregroundStyle={info.color} frame={{ width: 18, alignment: "leading" as any }}>
+                {info.emoji}
+              </Text>
+              <Text font="caption" lineLimit={1} foregroundStyle={info.color}>
+                {info.text}
+              </Text>
+            </HStack>
+          </VStack>
+        }
+      />
+    </VStack>
   )
 }
 
 export function KeyboardView() {
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
   const [busy, setBusy] = useState(false)
-  const [progressValue, setProgressValue] = useState<number | undefined>(undefined)
-  const [progressPct, setProgressPct] = useState("0%")
   const [status, setStatus] = useState("未检查")
-  const [localSummary, setLocalSummary] = useState("本地：暂无法获取")
-  const [remoteSummary, setRemoteSummary] = useState("远程：未检查")
+  const [localScheme, setLocalScheme] = useState("暂无法获取")
   const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(null)
   const [lastDecision, setLastDecision] = useState<UpdateDecision | null>(null)
   const [lastCheckKey, setLastCheckKey] = useState("")
 
-  function checkKey(c: AppConfig) {
-    return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.usePredictDb ? "predict" : "plain", c.hamsterRootPath, c.hamsterBookmarkName].join("|")
-  }
-
-  function applyProgress(p: any) {
-    const f = readFraction(p)
-    if (typeof f === "number") {
-      const value = clamp01(f)
-      setProgressValue(value)
-      setProgressPct(pctFromFraction(value))
-    }
-  }
-
-  async function refreshLocalSummary(current: AppConfig): Promise<MetaBundle | undefined> {
+  async function refreshLocalInfo(current: AppConfig): Promise<MetaBundle | undefined> {
     const meta = await findLocalMeta(current)
-    if (!meta) {
-      setLocalSummary("本地：暂无法获取")
-      return undefined
-    }
-    const parts = [
-      `方案 ${formatSchemeLabel(meta.scheme, current)}`,
-      `词库 ${meta.dict?.remoteIdOrSha ? "已记录" : "无"}`,
-      `模型 ${meta.model?.remoteIdOrSha ? "已记录" : "无"}`,
-    ]
-    if (current.usePredictDb) parts.push(`预测 ${meta.predict?.remoteIdOrSha ? "已记录" : "无"}`)
-    setLocalSummary(parts.join(" · "))
+    setLocalScheme(formatSchemeLabel(meta?.scheme, current))
     return meta
   }
 
-  function refreshRemoteSummary(remote: AllUpdateResult, decision: UpdateDecision, current: AppConfig) {
-    const parts: string[] = []
-    parts.push(`方案${decision.scheme ? "可更新" : "最新"}`)
-    parts.push(`词库${decision.dict ? "可更新" : "最新"}`)
-    parts.push(`模型${decision.model ? "可更新" : "最新"}`)
-    if (current.usePredictDb) parts.push(`预测${decision.predict ? "可更新" : "最新"}`)
-    setRemoteSummary(parts.join(" · "))
+  function remoteItemState(kind: RemoteItemKey): RemoteItemState {
+    if (kind === "predict" && !cfg.usePredictDb) return "disabled"
+    if (busy) return "checking"
+    const checked = lastCheckKey === checkKey(cfg) && !!lastDecision
+    if (!checked) return "unchecked"
+    if (lastDecision?.[kind]) return "update"
+    const remote = kind === "scheme"
+      ? lastCheck?.scheme?.tag ?? lastCheck?.scheme?.name
+      : kind === "dict"
+        ? lastCheck?.dict?.remoteIdOrSha
+        : kind === "model"
+          ? lastCheck?.model?.remoteIdOrSha
+          : lastCheck?.predict?.remoteIdOrSha
+    return remote ? "latest" : "error"
   }
 
-  async function guardPathAccess() {
-    const current = loadConfig()
-    const result = await verifyInstallPathAccess(current)
-    setCfg(current)
-    if (!result.ok) {
-      setStatus("路径不可用，请打开主脚本检查设置")
-      return false
-    }
-    return true
-  }
-
-  async function recalcDecision(current: AppConfig, remote?: AllUpdateResult | null) {
-    const effectiveRemote = remote ?? ((lastCheckKey === checkKey(current)) ? lastCheck : null)
-    if (!effectiveRemote) return
-    const localMeta = await findLocalMeta(current)
-    const decision = buildUpdateDecision(localMeta, effectiveRemote)
-    setLastDecision(decision)
-    setLastCheck(effectiveRemote)
-    setLastCheckKey(checkKey(current))
-    refreshRemoteSummary(effectiveRemote, decision, current)
-  }
-
-  async function onCheckUpdate() {
-    if (!(await guardPathAccess())) return
+  async function onCheckUpdate(mode: "auto" | "manual" = "manual") {
     setBusy(true)
-    setProgressValue(undefined)
-    setStatus("检查中...")
+    setStatus(mode === "auto" ? "正在自动检查更新…" : "正在检查更新…")
     try {
       const current = loadConfig()
       setCfg(current)
-      const localMeta = await refreshLocalSummary(current)
+      await refreshLocalInfo(current)
+      const access = await verifyInstallPathAccess(current)
+      if (!access.ok) {
+        setLastCheck(null)
+        setLastDecision(null)
+        setLastCheckKey("")
+        setStatus("书签路径不可用，请去 App 中处理")
+        return
+      }
+
+      const localMeta = await findLocalMeta(current)
       const remote = await checkAllUpdates(current)
       const decision = buildUpdateDecision(localMeta, remote)
       setLastCheck(remote)
       setLastDecision(decision)
       setLastCheckKey(checkKey(current))
-      refreshRemoteSummary(remote, decision, current)
-      if (decision.scheme || decision.dict || decision.model || decision.predict) {
-        setStatus("检测到可更新项")
-      } else {
-        setStatus("已是最新")
-      }
+      const updates = countUpdates(decision)
+      setStatus(updates > 0 ? `已检查到 ${updates} 项可更新` : "已是最新")
     } catch (e: any) {
       setStatus(`检查失败：${String(e?.message ?? e)}`)
     } finally {
@@ -262,69 +268,12 @@ export function KeyboardView() {
     }
   }
 
-  async function onAutoUpdate() {
-    if (!(await guardPathAccess())) return
-    setBusy(true)
-    setProgressValue(undefined)
-    setProgressPct("0%")
-    setStatus("自动更新中...")
+  async function onOpenAppUpdate() {
     try {
-      const current = loadConfig()
-      setCfg(current)
-      const localMeta = await refreshLocalSummary(current)
-      const key = checkKey(current)
-      let remote = lastCheck
-      let decision = lastDecision
-      if (!remote || lastCheckKey !== key) {
-        remote = await checkAllUpdates(current)
-        decision = buildUpdateDecision(localMeta, remote)
-        setLastCheck(remote)
-        setLastDecision(decision)
-        setLastCheckKey(key)
-        refreshRemoteSummary(remote, decision, current)
-      }
-      if (decision && !decision.scheme && !decision.dict && !decision.model && !decision.predict) {
-        setStatus("已是最新，无需更新")
-        return
-      }
-      const result = await autoUpdateAll(current, {
-        onStage: (message) => setStatus(progressStageLabel(message)),
-        onProgress: (p) => applyProgress(p),
-      }, remote ?? undefined, decision ?? undefined)
-      await refreshLocalSummary(current)
-      await recalcDecision(current, result.remote)
-      setProgressValue(undefined)
-      setProgressPct("0%")
-      if (!result.didUpdate) setStatus("已是最新，无需更新")
-      else if (result.didDeploy) setStatus("更新完成，已部署")
-      else setStatus("更新完成")
-    } catch (e: any) {
-      setStatus(`更新失败：${String(e?.message ?? e)}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function onDeploy() {
-    if (!(await guardPathAccess())) return
-    setBusy(true)
-    setProgressValue(undefined)
-    setStatus("部署中...")
-    try {
-      const current = loadConfig()
-      setCfg(current)
-      await deployInputMethod(current, (message) => setStatus(progressStageLabel(message)))
-      setStatus("部署完成")
-    } catch (e: any) {
-      setStatus(`部署失败：${String(e?.message ?? e)}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function onOpenMainScript() {
-    try {
-      const url = Script.createRunSingleURLScheme("万象下载更新")
+      const url = Script.createRunSingleURLScheme("万象下载更新", {
+        action: "autoUpdate",
+        requestId: String(Date.now()),
+      })
       const openURLFn = (globalThis as any).openURL
       if (typeof openURLFn === "function") {
         await openURLFn(url)
@@ -337,96 +286,84 @@ export function KeyboardView() {
       try {
         CustomKeyboard.dismissToHome()
       } catch { }
+      return
     }
+    await onNextKeyboard()
+  }
+
+  async function onNextKeyboard() {
+    try {
+      await (globalThis as any).CustomKeyboard?.nextKeyboard?.()
+    } catch { }
   }
 
   useEffect(() => {
     const current = loadConfig()
     setCfg(current)
-    void refreshLocalSummary(current)
+    void onCheckUpdate("auto")
   }, [])
 
-  const autoUpdateReady =
-    !!lastDecision &&
-    lastCheckKey === checkKey(cfg) &&
-    (lastDecision.scheme || lastDecision.dict || lastDecision.model || lastDecision.predict)
+  const checked = lastCheckKey === checkKey(cfg) && !!lastDecision
+  const headerState = overallStateText(busy, status, lastDecision, checked)
+  const updateAvailable = checked && countUpdates(lastDecision) > 0
+  const canOpenAppUpdate = !busy && updateAvailable
 
   return (
     <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       <VStack spacing={10} padding={{ top: 12, bottom: 12, leading: 12, trailing: 12 }}>
         <VStack
-          spacing={6}
+          spacing={8}
           padding={{ top: 10, bottom: 10, leading: 10, trailing: 10 }}
           frame={{ maxWidth: "infinity" }}
         >
           <HStack>
-            <Text font="headline">万象更新</Text>
+            <Button
+              action={() => { void onNextKeyboard() }}
+              buttonStyle="plain"
+            >
+              <Text font="subheadline" lineLimit={1}>
+                {localScheme}
+              </Text>
+            </Button>
             <Spacer />
-            <Text font="caption" foregroundStyle={autoUpdateReady ? "systemGreen" : "secondaryLabel"}>
-              {autoUpdateReady ? "有可更新项" : "状态正常"}
+            <Text font="caption" foregroundStyle={headerState.color}>
+              {headerState.text}
             </Text>
           </HStack>
-          <Text font="caption" lineLimit={1}>
-            {localSummary}
-          </Text>
-          <Text font="caption" lineLimit={1} foregroundStyle="secondaryLabel">
-            {remoteSummary}
-          </Text>
-        </VStack>
 
-        <VStack spacing={8}>
-          <HStack spacing={8}>
-            <SummaryButton icon="arrow.triangle.2.circlepath" title="检查更新" disabled={busy} onPress={() => { void onCheckUpdate() }} />
-            <SummaryButton icon="bolt.fill" title="自动更新" color={autoUpdateReady ? "systemGreen" : "systemBlue"} disabled={busy} onPress={() => { void onAutoUpdate() }} />
-          </HStack>
-          <HStack spacing={8}>
-            <SummaryButton icon="paperplane" title="部署输入法" disabled={busy} onPress={() => { void onDeploy() }} />
-            <SummaryButton icon="play.circle" title="在App中运行" disabled={busy} onPress={() => { void onOpenMainScript() }} />
-          </HStack>
-        </VStack>
-
-        <Rectangle foregroundStyle="separator" frame={{ maxWidth: "infinity", height: 1 }} />
-
-        <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="caption" foregroundStyle="secondaryLabel">
-            当前状态
+          <Text font="caption2" lineLimit={1} foregroundStyle="secondaryLabel">
+            {releaseSourceLabel(cfg.releaseSource)} · {inputMethodLabel(cfg.inputMethod)}
           </Text>
-          <Text
-            font="footnote"
-            foregroundStyle={statusColor(status)}
-            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            lineLimit={2}
-          >
-            {status}
-          </Text>
-          <VStack spacing={4} frame={{ maxWidth: "infinity", minHeight: 30 }}>
-            {busy || progressValue !== undefined ? (
-              <>
-                {progressValue !== undefined ? (
-                  <ProgressView
-                    value={progressValue}
-                    total={1}
-                    progressViewStyle="linear"
-                    frame={{ maxWidth: "infinity" }}
-                  />
-                ) : (
-                  <ProgressView
-                    progressViewStyle="linear"
-                    frame={{ maxWidth: "infinity" }}
-                  />
-                )}
-                <HStack>
-                  <Spacer />
-                  <Text font="caption" foregroundStyle="secondaryLabel">
-                    {progressPct}
-                  </Text>
-                </HStack>
-              </>
-            ) : (
-              <Rectangle foregroundStyle="clear" frame={{ maxWidth: "infinity", height: 30 }} />
-            )}
+
+          <VStack spacing={8}>
+            <HStack spacing={8}>
+              <StatusCard icon="doc.text" label="方案" state={remoteItemState("scheme")} />
+              <StatusCard icon="books.vertical" label="词库" state={remoteItemState("dict")} />
+            </HStack>
+            <HStack spacing={8}>
+              <StatusCard icon="shippingbox" label="模型" state={remoteItemState("model")} />
+              <StatusCard icon="wand.and.stars" label="预测库" state={remoteItemState("predict")} />
+            </HStack>
           </VStack>
+
+          <Rectangle foregroundStyle="separator" frame={{ maxWidth: "infinity", height: 1 }} />
         </VStack>
+
+        <HStack spacing={8}>
+          <CompactButton
+            icon="arrow.clockwise"
+            title="重新检查"
+            disabled={busy}
+            onPress={() => { void onCheckUpdate("manual") }}
+          />
+          <CompactButton
+            icon="play.circle"
+            title="去 App 更新"
+            color={updateAvailable ? "systemGreen" : "systemBlue"}
+            disabled={!canOpenAppUpdate}
+            onPress={() => { void onOpenAppUpdate() }}
+          />
+        </HStack>
       </VStack>
     </ScrollView>
   )

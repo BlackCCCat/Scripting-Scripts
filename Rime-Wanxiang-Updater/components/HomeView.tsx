@@ -220,6 +220,7 @@ const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
 
 let homeSessionState: HomeSessionState = { ...DEFAULT_HOME_SESSION_STATE }
 let launchAutoCheckHandled = false
+let lastHandledLaunchActionKey = ""
 
 function nowTimeLabel(date = new Date()) {
   const pad = (n: number) => String(n).padStart(2, "0")
@@ -795,6 +796,7 @@ export function HomeView() {
 
   useEffect(() => {
     const current = loadConfig()
+    if (String(Script.queryParameters?.action ?? "") === "autoUpdate") return
     if (current.autoCheckOnLaunch && !launchAutoCheckHandled) {
       launchAutoCheckHandled = true
       void (async () => {
@@ -803,6 +805,20 @@ export function HomeView() {
         }
       })()
     }
+  }, [])
+
+  useEffect(() => {
+    const action = String(Script.queryParameters?.action ?? "")
+    const requestId = String(Script.queryParameters?.requestId ?? "")
+    const actionKey = `${action}:${requestId}`
+    if (action !== "autoUpdate" || !requestId || lastHandledLaunchActionKey === actionKey) return
+    lastHandledLaunchActionKey = actionKey
+    launchAutoCheckHandled = true
+    void (async () => {
+      if (await guardPathAccess(true)) {
+        await onAutoUpdate()
+      }
+    })()
   }, [])
 
   async function openSettings() {
