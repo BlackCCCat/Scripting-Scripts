@@ -121,7 +121,7 @@ function GridButton(props: {
       ; (globalThis as any).HapticFeedback?.mediumImpact?.()
     } catch { }
   }
-  const tintColor = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
+  const tintColor: any = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
   return (
     <Button
       action={() => {
@@ -744,6 +744,16 @@ export function HomeView() {
     return true
   }
 
+  async function refreshLastCheckDecision(current: AppConfig, remoteOverride?: AllUpdateResult | null) {
+    const remote = remoteOverride ?? ((lastCheckKey === checkKey(current)) ? lastCheck : null)
+    if (!remote) return
+    const { meta } = await findLocalMeta(current)
+    const nextDecision = buildUpdateDecision(meta, remote)
+    setLastCheck(remote)
+    setLastCheckDecision(nextDecision)
+    setLastCheckKey(checkKey(current))
+  }
+
   useEffect(() => {
     homeSessionState = {
       remoteSchemeVer,
@@ -1026,6 +1036,7 @@ export function HomeView() {
       )
 
       await refreshLocal(effective)
+      await refreshLastCheckDecision(effective, autoResult.remote)
       if (!autoResult.didUpdate) {
         setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
       } else if (autoResult.didDeploy) {
@@ -1058,6 +1069,7 @@ export function HomeView() {
         onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
+      await refreshLastCheckDecision(current)
       setStageAndMaybeLog("更新方案完成", "SCHEME", "SUCCESS", true)
     } catch (e: any) {
       setStageAndMaybeLog(`更新方案失败：${String(e?.message ?? e)}`, "SCHEME", "ERROR", true)
@@ -1084,6 +1096,7 @@ export function HomeView() {
         onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
+      await refreshLastCheckDecision(current)
       setStageAndMaybeLog("更新词库完成", "DICT", "SUCCESS", true)
     } catch (e: any) {
       setStageAndMaybeLog(`更新词库失败：${String(e?.message ?? e)}`, "DICT", "ERROR", true)
@@ -1116,6 +1129,7 @@ export function HomeView() {
         onProgress: (p) => applyProgress(p),
       })
       await refreshLocal(current)
+      await refreshLastCheckDecision(current)
       setStageAndMaybeLog(current.usePredictDb ? "更新模型及预测库完成" : "更新模型完成", "MODEL", "SUCCESS", true)
     } catch (e: any) {
       setStageAndMaybeLog(`${cfg.usePredictDb ? "更新模型及预测库" : "更新模型"}失败：${String(e?.message ?? e)}`, "MODEL", "ERROR", true)
