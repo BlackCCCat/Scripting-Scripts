@@ -33,6 +33,7 @@ import {
 import { SettingsView } from "./SettingsView"
 import { loadMetaAsync, type MetaBundle } from "../utils/meta"
 import { detectRimeDir, verifyInstallPathAccess, collectRimeCandidates } from "../utils/hamster"
+import { getCheckCacheKey, loadSharedCheckCache, saveSharedCheckCache } from "../utils/check_cache"
 import {
   checkAllUpdates,
   updateScheme,
@@ -558,7 +559,7 @@ export function HomeView() {
   }
 
   function checkKey(c: AppConfig) {
-    return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.usePredictDb ? "predict" : "plain", c.hamsterRootPath, c.hamsterBookmarkName].join("|")
+    return getCheckCacheKey(c)
   }
 
   function closeAlert() {
@@ -753,6 +754,21 @@ export function HomeView() {
     setLastCheck(remote)
     setLastCheckDecision(nextDecision)
     setLastCheckKey(checkKey(current))
+    saveSharedCheckCache(current, remote, nextDecision)
+  }
+
+  function applySharedCheckCache(current: AppConfig) {
+    const cache = loadSharedCheckCache()
+    if (!cache || cache.key !== checkKey(current)) return false
+    setRemoteSchemeVer(cache.remote.scheme?.tag ?? cache.remote.scheme?.name ?? "暂无法获取")
+    setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取")
+    setRemoteModelMark(cache.remote.model?.remoteIdOrSha ?? "暂无法获取")
+    setRemotePredictMark(cache.remote.predict?.remoteIdOrSha ?? "暂无法获取")
+    setNotes(cache.remote.scheme?.body ?? "")
+    setLastCheck(cache.remote)
+    setLastCheckDecision(cache.decision)
+    setLastCheckKey(cache.key)
+    return true
   }
 
   useEffect(() => {
@@ -791,6 +807,7 @@ export function HomeView() {
     void (async () => {
       await guardPathAccess(true)
       await refreshLocal(current)
+      applySharedCheckCache(current)
     })()
   }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.usePredictDb, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
 
@@ -975,6 +992,7 @@ export function HomeView() {
       setLastCheck(r)
       setLastCheckDecision(decision)
       setLastCheckKey(checkKey(effective))
+      saveSharedCheckCache(effective, r, decision)
 
       pushCheckResultLog("方案", r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取", decision.scheme)
       pushCheckResultLog("词库", r.dict?.remoteIdOrSha ?? "暂无法获取", decision.dict)
@@ -1006,7 +1024,22 @@ export function HomeView() {
       const key = checkKey(effective)
       let pre = lastCheck
       let decision = lastCheckDecision
-      if (!pre || lastCheckKey !== key) {
+      let resolvedKey = lastCheckKey
+      const shared = loadSharedCheckCache()
+      if ((!pre || lastCheckKey !== key) && shared && shared.key === key) {
+        pre = shared.remote
+        decision = shared.decision
+        resolvedKey = key
+        setRemoteSchemeVer(shared.remote.scheme?.tag ?? shared.remote.scheme?.name ?? "暂无法获取")
+        setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取")
+        setRemoteModelMark(shared.remote.model?.remoteIdOrSha ?? "暂无法获取")
+        setRemotePredictMark(shared.remote.predict?.remoteIdOrSha ?? "暂无法获取")
+        setNotes(shared.remote.scheme?.body ?? "")
+        setLastCheck(shared.remote)
+        setLastCheckDecision(shared.decision)
+        setLastCheckKey(key)
+      }
+      if (!pre || resolvedKey !== key) {
         // 检查阶段也不显示进度（避免误导）
         setShowProgress(false)
         setStageAndMaybeLog("自动更新：检查更新中…", "AUTO", "INFO", true)

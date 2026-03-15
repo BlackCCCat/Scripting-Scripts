@@ -18,6 +18,7 @@ import { loadMetaAsync, type MetaBundle } from "../utils/meta"
 import { checkAllUpdates, type AllUpdateResult } from "../utils/update_tasks"
 import { collectRimeCandidates, detectRimeDir, verifyInstallPathAccess } from "../utils/hamster"
 import { Runtime } from "../utils/runtime"
+import { saveSharedCheckCache, getCheckCacheKey } from "../utils/check_cache"
 
 type UpdateDecision = {
   scheme: boolean
@@ -132,10 +133,6 @@ function overallStateText(busy: boolean, status: string, decision: UpdateDecisio
     : { text: "✅ 已最新", color: "systemGreen" as any }
 }
 
-function checkKey(c: AppConfig) {
-  return [c.releaseSource, c.schemeEdition, c.proSchemeKey, c.usePredictDb ? "predict" : "plain", c.hamsterRootPath, c.hamsterBookmarkName].join("|")
-}
-
 function CompactButton(props: {
   title: string
   icon: string
@@ -224,7 +221,7 @@ export function KeyboardView() {
   function remoteItemState(kind: RemoteItemKey): RemoteItemState {
     if (kind === "predict" && !cfg.usePredictDb) return "disabled"
     if (busy) return "checking"
-    const checked = lastCheckKey === checkKey(cfg) && !!lastDecision
+    const checked = lastCheckKey === getCheckCacheKey(cfg) && !!lastDecision
     if (!checked) return "unchecked"
     if (lastDecision?.[kind]) return "update"
     const remote = kind === "scheme"
@@ -258,7 +255,8 @@ export function KeyboardView() {
       const decision = buildUpdateDecision(localMeta, remote)
       setLastCheck(remote)
       setLastDecision(decision)
-      setLastCheckKey(checkKey(current))
+      setLastCheckKey(getCheckCacheKey(current))
+      saveSharedCheckCache(current, remote, decision)
       const updates = countUpdates(decision)
       setStatus(updates > 0 ? `已检查到 ${updates} 项可更新` : "已是最新")
     } catch (e: any) {
@@ -303,7 +301,7 @@ export function KeyboardView() {
     void onCheckUpdate("auto")
   }, [])
 
-  const checked = lastCheckKey === checkKey(cfg) && !!lastDecision
+  const checked = lastCheckKey === getCheckCacheKey(cfg) && !!lastDecision
   const headerState = overallStateText(busy, status, lastDecision, checked)
   const updateAvailable = checked && countUpdates(lastDecision) > 0
   const canOpenAppUpdate = !busy && updateAvailable
