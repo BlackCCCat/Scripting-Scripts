@@ -1,7 +1,7 @@
 import { AppIntentManager, AppIntentProtocol, Widget } from "scripting"
 
-import type { ApiCheckResult, ApiEntry } from "./types"
-import { checkApiEntry } from "./utils/checker"
+import type { ApiEntry } from "./types"
+import { runChecksConcurrently } from "./utils/checker"
 import { loadManagerState, saveManagerState } from "./utils/storage"
 
 const RELOAD_THROTTLE_MS = 600
@@ -16,16 +16,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
-}
-
-function buildFailedResult(error: unknown): ApiCheckResult {
-  return {
-    status: "red",
-    baseAvailable: false,
-    modelsAvailable: false,
-    checkedAt: Date.now(),
-    message: String((error as any)?.message ?? error ?? "检测失败"),
-  }
 }
 
 export const RefreshApiAvailabilityIntent = AppIntentManager.register({
@@ -52,15 +42,7 @@ export const RefreshApiAvailabilityIntent = AppIntentManager.register({
       reloadWidgets()
     }
 
-    await Promise.allSettled(
-      state.entries.map(async (entry) => {
-        let result: ApiCheckResult
-        try {
-          result = await checkApiEntry(entry)
-        } catch (error) {
-          result = buildFailedResult(error)
-        }
-
+    await runChecksConcurrently(state.entries, async (entry, result) => {
         currentEntries = currentEntries.map((item) =>
           item.id === entry.id
             ? {
@@ -72,7 +54,7 @@ export const RefreshApiAvailabilityIntent = AppIntentManager.register({
         )
         saveEntries()
         maybeReloadWidgets()
-      })
+      }
     )
 
     maybeReloadWidgets(true)

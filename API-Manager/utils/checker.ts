@@ -14,11 +14,13 @@ import {
 } from "./common"
 
 const REQUEST_TIMEOUT_MS = 8000
+export const CHECK_CONCURRENCY_LIMIT = 4
 
 type ProbeResult = {
   ok: boolean
   detail: string
   count?: number
+  modelIds?: string[]
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
@@ -75,6 +77,27 @@ function readModelCount(payload: any): number {
   return 0
 }
 
+function extractModelIds(payload: any): string[] {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : []
+
+  return list
+    .map((item: any) => {
+      if (typeof item === "string") return normalizeModelId(item)
+      return normalizeModelId(String(item?.id ?? item?.name ?? item?.model ?? ""))
+    })
+    .filter(Boolean)
+}
+
+function normalizeModelId(value: string): string {
+  return String(value ?? "").trim().replace(/^models\//, "")
+}
+
 async function probeModels(baseUrl: string, apiKey: string): Promise<ProbeResult> {
   try {
     const response = await fetchWithTimeout(joinBaseUrl(baseUrl, "/v1/models"), {
@@ -91,17 +114,21 @@ async function probeModels(baseUrl: string, apiKey: string): Promise<ProbeResult
     }
 
     let count = 0
+    let modelIds: string[] = []
     try {
       const payload = await response.json()
       count = readModelCount(payload)
+      modelIds = extractModelIds(payload)
     } catch {
       count = 0
+      modelIds = []
     }
 
     return {
       ok: count > 0,
       detail: count > 0 ? `发现 ${count} 个模型` : "模型列表为空",
       count,
+      modelIds,
     }
   } catch (error: any) {
     return {
@@ -121,6 +148,7 @@ async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: "API Key 为空",
     }
@@ -131,6 +159,7 @@ async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: "链接格式无效，请填写 http(s) 基础地址",
     }
@@ -149,11 +178,13 @@ async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
     } catch {}
 
     const count = readModelCount(payload)
+    const modelIds = extractModelIds(payload)
     if (response.ok && count > 0) {
       return {
         status: "green",
         baseAvailable: true,
         modelsAvailable: true,
+        modelIds,
         checkedAt,
         message: `OpenAI 兼容接口可用，发现 ${count} 个模型`,
       }
@@ -165,6 +196,7 @@ async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
         status: "yellow",
         baseAvailable: true,
         modelsAvailable: false,
+        modelIds: [],
         checkedAt,
         message: invalidApiKey
           ? "OpenAI 兼容地址可用，但 API Key 无效"
@@ -176,6 +208,7 @@ async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "yellow",
       baseAvailable: true,
       modelsAvailable: false,
+      modelIds,
       checkedAt,
       message: "OpenAI 兼容地址可用，但模型列表为空",
     }
@@ -184,6 +217,7 @@ async function checkOpenAICompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: String(error?.message ?? error),
     }
@@ -200,6 +234,7 @@ async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: "API Key 为空",
     }
@@ -210,6 +245,7 @@ async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: "链接格式无效，请填写 http(s) 基础地址",
     }
@@ -228,11 +264,13 @@ async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
     } catch {}
 
     const count = readModelCount(payload)
+    const modelIds = extractModelIds(payload)
     if (response.ok && count > 0) {
       return {
         status: "green",
         baseAvailable: true,
         modelsAvailable: true,
+        modelIds,
         checkedAt,
         message: `Gemini 接口可用，发现 ${count} 个模型`,
       }
@@ -243,6 +281,7 @@ async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
         status: "yellow",
         baseAvailable: true,
         modelsAvailable: false,
+        modelIds: [],
         checkedAt,
         message: "Gemini 地址可用，但 API Key 无效或模型接口不可用",
       }
@@ -252,6 +291,7 @@ async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "yellow",
       baseAvailable: true,
       modelsAvailable: false,
+      modelIds,
       checkedAt,
       message: "Gemini 地址可用，但模型列表为空",
     }
@@ -260,6 +300,7 @@ async function checkGeminiCompatible(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: String(error?.message ?? error),
     }
@@ -302,6 +343,7 @@ export async function checkApiEntry(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: "地址或 API Key 为空",
     }
@@ -312,6 +354,7 @@ export async function checkApiEntry(entry: ApiEntry): Promise<ApiCheckResult> {
       status: "red",
       baseAvailable: false,
       modelsAvailable: false,
+      modelIds: [],
       checkedAt,
       message: "链接格式无效，请填写 http(s) 基础地址",
     }
@@ -327,36 +370,56 @@ export async function checkApiEntry(entry: ApiEntry): Promise<ApiCheckResult> {
     status,
     baseAvailable: baseProbe.ok,
     modelsAvailable: modelsProbe.ok,
+    modelIds: modelsProbe.modelIds ?? [],
     checkedAt,
     message: buildMessage(baseProbe, modelsProbe, status),
   }
 }
 
 export async function checkEntries(entries: ApiEntry[]): Promise<Map<string, ApiCheckResult>> {
-  const results = await Promise.allSettled(
-    entries.map(async (entry) => {
-      const result = await checkApiEntry(entry)
-      return {
-        id: entry.id,
-        result,
-      }
-    })
-  )
-  return new Map(
-    results.map((item, index) => {
-      if (item.status === "fulfilled") {
-        return [item.value.id, item.value.result] as const
-      }
-      return [
-        entries[index].id,
-        {
+  return runChecksConcurrently(entries)
+}
+
+export async function runChecksConcurrently(
+  entries: ApiEntry[],
+  onResult?: (entry: ApiEntry, result: ApiCheckResult, completedCount: number) => void | Promise<void>,
+  concurrency = CHECK_CONCURRENCY_LIMIT
+): Promise<Map<string, ApiCheckResult>> {
+  const results = new Map<string, ApiCheckResult>()
+  const limit = Math.max(1, Math.min(concurrency, entries.length || 1))
+  let nextIndex = 0
+
+  async function worker() {
+    while (true) {
+      const currentIndex = nextIndex
+      nextIndex += 1
+      if (currentIndex >= entries.length) return
+
+      const entry = entries[currentIndex]
+      let result: ApiCheckResult
+      try {
+        result = await checkApiEntry(entry)
+      } catch (error: any) {
+        result = {
           status: "red",
           baseAvailable: false,
           modelsAvailable: false,
+          modelIds: [],
           checkedAt: Date.now(),
-          message: String((item as PromiseRejectedResult).reason?.message ?? (item as PromiseRejectedResult).reason ?? "检测失败"),
-        } satisfies ApiCheckResult,
-      ] as const
-    })
+          message: String(error?.message ?? error ?? "检测失败"),
+        }
+      }
+
+      results.set(entry.id, result)
+      if (onResult) {
+        await onResult(entry, result, results.size)
+      }
+    }
+  }
+
+  await Promise.allSettled(
+    Array.from({ length: limit }, () => worker())
   )
+
+  return results
 }

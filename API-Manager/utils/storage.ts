@@ -11,6 +11,7 @@ export function makeEmptyCheckResult(): ApiCheckResult {
     status: "unknown",
     baseAvailable: false,
     modelsAvailable: false,
+    modelIds: [],
     checkedAt: null,
     message: "尚未检测",
   }
@@ -83,6 +84,9 @@ function sanitizeEntry(raw: any): ApiEntry | null {
       status: rawCheck?.status ?? "unknown",
       baseAvailable: Boolean(rawCheck?.baseAvailable ?? false),
       modelsAvailable: Boolean(rawCheck?.modelsAvailable ?? false),
+      modelIds: Array.isArray(rawCheck?.modelIds)
+        ? rawCheck.modelIds.map((item: any) => String(item ?? "").trim()).filter(Boolean)
+        : [],
       checkedAt: rawCheck?.checkedAt == null ? null : Number(rawCheck.checkedAt) || null,
       message: String(rawCheck?.message ?? "尚未检测"),
     },

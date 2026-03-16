@@ -5,6 +5,7 @@ export type ApiCheckResult = {
   status: CheckStatus
   baseAvailable: boolean
   modelsAvailable: boolean
+  modelIds: string[]
   checkedAt: number | null
   message: string
 }

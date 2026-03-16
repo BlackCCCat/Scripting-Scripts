@@ -23,8 +23,9 @@ import {
 
 import type { ApiCheckResult, ApiEntry, CheckStatus, ManagerSettings } from "../types"
 import { EditEntryView, type EditEntryResult } from "./EditEntryView"
+import { ModelIdsView } from "./ModelIdsView"
 import { SettingsView } from "./SettingsView"
-import { checkApiEntry } from "../utils/checker"
+import { checkApiEntry, runChecksConcurrently } from "../utils/checker"
 import { formatDateTime, joinBaseUrl, makeId, maskApiKey, normalizeBaseUrl } from "../utils/common"
 import { buildOverviewItems, buildOverviewSummary, chartColorScale } from "../utils/overview"
 import { clearMinimizeRequested, markMinimizeRequested } from "../utils/runtime"
@@ -72,6 +73,7 @@ function buildCheckingResult(): ApiCheckResult {
     status: "checking",
     baseAvailable: false,
     modelsAvailable: false,
+    modelIds: [],
     checkedAt: null,
     message: "正在检测地址和模型列表…",
   }
@@ -82,6 +84,7 @@ function buildFailedResult(error: unknown): ApiCheckResult {
     status: "red",
     baseAvailable: false,
     modelsAvailable: false,
+    modelIds: [],
     checkedAt: Date.now(),
     message: String((error as any)?.message ?? error ?? "检测失败"),
   }
@@ -122,6 +125,7 @@ function buildMenuItems(props: {
   }>
   onCopyOriginalUrl: () => void
   onCopyApiKey: () => void
+  onViewModels: () => void
   onCheckNow: () => void
   onEdit: () => void
   onDelete: () => void
@@ -133,6 +137,7 @@ function buildMenuItems(props: {
       {props.baseUrlOptions.map((item) => (
         <Button key={item.title} title={item.title} action={item.onCopy} />
       ))}
+      <Button title="查看可用模型" action={props.onViewModels} />
       <Button title="立即检测" action={props.onCheckNow} />
       <Button title="编辑" action={props.onEdit} />
       <Button title="删除" role="destructive" action={props.onDelete} />
@@ -222,6 +227,23 @@ export function HomeView() {
     await copyText(value, `已复制 ${entry.name} 的 ${label}`)
   }
 
+  async function showModels(entry: ApiEntry) {
+    if (!entry.check.modelIds.length) {
+      await Dialog.alert({ message: `${entry.name} 当前没有可用模型` })
+      return
+    }
+
+    await Navigation.present({
+      element: (
+        <ModelIdsView
+          title={entry.name}
+          modelIds={entry.check.modelIds}
+          onCopy={(modelId) => copyText(modelId, `已复制模型 ID：${modelId}`)}
+        />
+      ),
+    })
+  }
+
   async function runCheck(entry: ApiEntry, silent = false) {
     updateEntry(entry.id, (current) => ({
       ...current,
@@ -229,7 +251,12 @@ export function HomeView() {
       updatedAt: Date.now(),
     }))
 
-    const result = await checkApiEntry(entry)
+    let result: ApiCheckResult
+    try {
+      result = await checkApiEntry(entry)
+    } catch (error) {
+      result = buildFailedResult(error)
+    }
     updateEntry(entry.id, (current) => ({
       ...current,
       check: result,
@@ -261,33 +288,22 @@ export function HomeView() {
         )
       )
 
-      let completed = 0
-      await Promise.allSettled(
-        snapshot.map(async (entry) => {
-          let result: ApiCheckResult
-          try {
-            result = await checkApiEntry(entry)
-          } catch (error) {
-            result = buildFailedResult(error)
-          }
-
-          completed += 1
-          setEntries((current) =>
-            current.map((item) =>
-              item.id === entry.id
-                ? {
-                    ...item,
-                    check: result,
-                    updatedAt: Date.now(),
-                  }
-                : item
-            )
+      await runChecksConcurrently(snapshot, async (entry, result, completedCount) => {
+        setEntries((current) =>
+          current.map((item) =>
+            item.id === entry.id
+              ? {
+                  ...item,
+                  check: result,
+                  updatedAt: Date.now(),
+                }
+              : item
           )
-          if (completed < snapshot.length) {
-            setStatusText(`正在检测全部 API… ${completed}/${snapshot.length}`)
-          }
-        })
-      )
+        )
+        if (completedCount < snapshot.length) {
+          setStatusText(`正在检测全部 API… ${completedCount}/${snapshot.length}`)
+        }
+      })
       setStatusText(`全部检测完成，共 ${snapshot.length} 条`)
     } finally {
       setCheckingAll(false)
@@ -414,20 +430,24 @@ export function HomeView() {
         { label: "复制原链接" },
         { label: "复制 API Key" },
         ...copyOptions.map((item) => ({ label: item.title })),
+        { label: "查看可用模型" },
         { label: "立即检测" },
         { label: "编辑" },
         { label: "删除", destructive: true },
       ],
     })
 
+    if (index == null || index < 0) return
+
     if (index === 0) await copyText(entry.baseUrl, `已复制 ${entry.name} 的原链接`)
     else if (index === 1) await copyText(entry.apiKey, `已复制 ${entry.name} 的 API Key`)
     else if (index >= 2 && index < 2 + copyOptions.length) {
       const target = copyOptions[index - 2]
       if (target) await copyBaseUrl(entry, target.suffix, target.copiedLabel)
-    } else if (index === 2 + copyOptions.length) await runCheck(entry)
-    else if (index === 3 + copyOptions.length) await editEntry(entry)
-    else if (index === 4 + copyOptions.length) await deleteEntry(entry)
+    } else if (index === 2 + copyOptions.length) await showModels(entry)
+    else if (index === 3 + copyOptions.length) await runCheck(entry)
+    else if (index === 4 + copyOptions.length) await editEntry(entry)
+    else if (index === 5 + copyOptions.length) await deleteEntry(entry)
   }
 
   return (
@@ -597,6 +617,7 @@ export function HomeView() {
                       })),
                       onCopyOriginalUrl: () => void copyText(entry.baseUrl, `已复制 ${entry.name} 的原链接`),
                       onCopyApiKey: () => void copyText(entry.apiKey, `已复制 ${entry.name} 的 API Key`),
+                      onViewModels: () => void showModels(entry),
                       onCheckNow: () => void runCheck(entry),
                       onEdit: () => void editEntry(entry),
                       onDelete: () => void deleteEntry(entry),
