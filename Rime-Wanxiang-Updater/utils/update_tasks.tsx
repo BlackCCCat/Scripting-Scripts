@@ -129,6 +129,7 @@ async function fetchLatestAssetFromGithub(args: {
   tag?: string
   assetNameExact?: string
   assetNameGlob?: string
+  releaseTagPattern?: RegExp
   token?: string
 }): Promise<RemoteAsset | undefined> {
   const headers: Record<string, string> = {
@@ -147,6 +148,8 @@ async function fetchLatestAssetFromGithub(args: {
   const re = args.assetNameGlob ? globToRegExp(args.assetNameGlob) : undefined
 
   for (const rel of releases) {
+    const releaseTag = String(rel?.tag_name ?? "").trim()
+    if (args.releaseTagPattern && !args.releaseTagPattern.test(releaseTag)) continue
     const assets = rel?.assets ?? []
     for (const a of assets) {
       const name = a?.name
@@ -287,6 +290,7 @@ async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | und
       owner: OWNER,
       repo: GH_REPO,
       assetNameGlob: glob,
+      releaseTagPattern: /^v\d+\.\d+\.\d+$/,
       token: cfg.githubToken,
     })
   }
