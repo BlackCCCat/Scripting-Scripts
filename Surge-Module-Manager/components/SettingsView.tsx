@@ -23,33 +23,6 @@ import {
 } from "../utils/config"
 import { countModulesByCategory, loadCategoriesFromModules, renameCategoryInModules } from "../utils/storage"
 
-function CenterRowButton(props: {
-  title: string
-  role?: "cancel" | "destructive"
-  disabled?: boolean
-  onPress: () => void
-}) {
-  return (
-    <Button
-      role={props.role}
-      action={() => {
-        HapticFeedback.mediumImpact()
-        props.onPress()
-      }}
-      disabled={props.disabled}
-    >
-      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        <Text opacity={0} frame={{ width: 1 }}>
-          .
-        </Text>
-        <Spacer />
-        <Text font="headline">{props.title}</Text>
-        <Spacer />
-      </HStack>
-    </Button>
-  )
-}
-
 function PlainRowButton(props: { title: string; onPress: () => void }) {
   return (
     <Button
@@ -259,6 +232,17 @@ function deleteCategoryAt(indices: number[]) {
       <VStack
         navigationTitle={"设置"}
         navigationBarTitleDisplayMode={"inline"}
+        toolbar={{
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => {
+                HapticFeedback.mediumImpact()
+                void saveAndClose()
+              }}
+            />
+          ),
+        }}
       >
         <Form formStyle="grouped">
           <Section header={<Text>存储目录</Text>}>
@@ -360,11 +344,6 @@ function deleteCategoryAt(indices: number[]) {
           <Section>
             <PlainRowButton title="导入分类" onPress={importCategories} />
             <PlainRowButton title="添加分类" onPress={addCategoryAction} />
-          </Section>
-
-          <Section>
-            <CenterRowButton title="保存" onPress={saveAndClose} />
-            <CenterRowButton title="取消" role="cancel" onPress={() => dismiss()} />
           </Section>
         </Form>
       </VStack>

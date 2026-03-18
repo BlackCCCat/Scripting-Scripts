@@ -33,23 +33,7 @@ import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
 import { SettingsView } from "./SettingsView"
-
-function CenterRowButton(props: { title: string; disabled?: boolean; onPress: () => void }) {
-  return (
-    <Button action={props.onPress} disabled={props.disabled}>
-      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        <Text opacity={0} frame={{ width: 1 }}>
-          .
-        </Text>
-        <Spacer />
-        <Text font="headline">{props.title}</Text>
-        <Spacer />
-      </HStack>
-    </Button>
-  )
-}
-
-
+import { ActionTileButton } from "./ActionTileButton"
 
 export function HomeView() {
   const withButtonHaptic = (action: () => void | Promise<void>) => () => {
@@ -395,12 +379,22 @@ export function HomeView() {
         }}
       >
         <Section header={<Text>操作</Text>}>
-          <CenterRowButton title="添加模块" onPress={withButtonHaptic(addModule)} disabled={busy} />
-          <CenterRowButton
-            title="全部更新"
-            onPress={withButtonHaptic(downloadAll)}
-            disabled={busy || onlyLocalFiltered}
-          />
+          <HStack spacing={12}>
+            <ActionTileButton
+              title="添加模块"
+              systemImage="plus.square.on.square"
+              tint="systemBlue"
+              onPress={addModule}
+              disabled={busy}
+            />
+            <ActionTileButton
+              title="全部更新"
+              systemImage="arrow.triangle.2.circlepath.circle.fill"
+              tint="systemGreen"
+              onPress={downloadAll}
+              disabled={busy || onlyLocalFiltered}
+            />
+          </HStack>
         </Section>
 
         <Section header={<Text>状态</Text>}>

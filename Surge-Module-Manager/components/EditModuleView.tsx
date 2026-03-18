@@ -25,33 +25,6 @@ let cachedLibraryItems: ModuleInfo[] | null = null
 let cachedLibraryError: string | null = null
 let cachedLibraryPromise: Promise<ModuleInfo[]> | null = null
 
-function CenterRowButton(props: {
-  title: string
-  role?: "cancel" | "destructive"
-  disabled?: boolean
-  onPress: () => void
-}) {
-  return (
-    <Button
-      role={props.role}
-      action={() => {
-        HapticFeedback.mediumImpact()
-        props.onPress()
-      }}
-      disabled={props.disabled}
-    >
-      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        <Text opacity={0} frame={{ width: 1 }}>
-          .
-        </Text>
-        <Spacer />
-        <Text font="headline">{props.title}</Text>
-        <Spacer />
-      </HStack>
-    </Button>
-  )
-}
-
 export function EditModuleView(props: {
   title: string
   categories: string[]
@@ -295,7 +268,21 @@ export function EditModuleView(props: {
 
   return (
     <NavigationStack>
-      <VStack navigationTitle={props.title} navigationBarTitleDisplayMode={"inline"}>
+      <VStack
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode={"inline"}
+        toolbar={{
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => {
+                HapticFeedback.mediumImpact()
+                void onSave()
+              }}
+            />
+          ),
+        }}
+      >
         <Form formStyle="grouped">
           <Section header={<Text>模块信息</Text>}>
             <TextField
@@ -371,11 +358,6 @@ export function EditModuleView(props: {
               </Picker>
             </Section>
           ) : null}
-
-          <Section>
-            <CenterRowButton title="保存" onPress={onSave} />
-            <CenterRowButton title="取消" role="cancel" onPress={() => dismiss()} />
-          </Section>
 
           {showLibrary ? (
             <Section
