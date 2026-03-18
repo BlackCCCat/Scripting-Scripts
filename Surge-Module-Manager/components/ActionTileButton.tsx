@@ -25,19 +25,25 @@ export function ActionTileButton(props: {
       disabled={props.disabled}
       buttonStyle="plain"
       frame={{ maxWidth: "infinity", minHeight: 96 }}
-      background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 16 } }}
     >
       <VStack
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         padding
         spacing={8}
+        background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 16 } }}
       >
-        <Spacer />
-        <Image systemName={props.systemImage} font="title2" foregroundStyle={foreground} />
-        <Text font="headline" foregroundStyle={foreground}>
-          {props.title}
-        </Text>
-        <Spacer />
+        <VStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          background={"rgba(0,0,0,0.001)"}
+          spacing={8}
+        >
+          <Spacer />
+          <Image systemName={props.systemImage} font="title2" foregroundStyle={foreground} />
+          <Text font="headline" foregroundStyle={foreground}>
+            {props.title}
+          </Text>
+          <Spacer />
+        </VStack>
       </VStack>
     </Button>
   )

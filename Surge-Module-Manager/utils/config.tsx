@@ -3,6 +3,7 @@ export type AppConfig = {
   baseBookmarkName: string
   categories: string[]
   linkPatternsText: string
+  downloadConcurrency: number
 }
 
 const KEY = "surge_modules_manager_cfg_v1"
@@ -12,6 +13,13 @@ const DEFAULT_CONFIG: AppConfig = {
   baseBookmarkName: "",
   categories: [],
   linkPatternsText: "#!url=",
+  downloadConcurrency: 3,
+}
+
+function normalizeDownloadConcurrency(value: unknown): number {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return DEFAULT_CONFIG.downloadConcurrency
+  return Math.max(1, Math.min(10, Math.round(num)))
 }
 
 function normalizeCategories(list: string[]): string[] {
@@ -37,7 +45,16 @@ export function loadConfig(): AppConfig {
     const baseDir = String(obj?.baseDir ?? "").trim()
     const baseBookmarkName = String(obj?.baseBookmarkName ?? "").trim()
     const linkPatternsText = String(obj?.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText)
-    return { ...DEFAULT_CONFIG, ...obj, categories, baseDir, baseBookmarkName, linkPatternsText }
+    const downloadConcurrency = normalizeDownloadConcurrency(obj?.downloadConcurrency)
+    return {
+      ...DEFAULT_CONFIG,
+      ...obj,
+      categories,
+      baseDir,
+      baseBookmarkName,
+      linkPatternsText,
+      downloadConcurrency,
+    }
   } catch {
     return DEFAULT_CONFIG
   }
@@ -50,6 +67,7 @@ export function saveConfig(cfg: AppConfig): void {
     baseBookmarkName: String(cfg.baseBookmarkName ?? "").trim(),
     categories: normalizeCategories(cfg.categories ?? []),
     linkPatternsText: String(cfg.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText),
+    downloadConcurrency: normalizeDownloadConcurrency(cfg.downloadConcurrency),
   }
   const raw = JSON.stringify(fixed)
   if (st?.set) st.set(KEY, raw)

@@ -328,24 +328,46 @@ export function HomeView() {
     const errors: string[] = []
     let okCount = 0
     try {
-      for (let i = 0; i < downloadable.length; i += 1) {
-        const m = downloadable[i]
-        setStage(`下载中 (${i + 1}/${downloadable.length})：${m.name}`)
-        const pct = Math.round(((i + 1) / downloadable.length) * 100)
-        setProgress(`${pct}%`)
-        const linkPrefix = await detectLinkPrefix(m)
-        const res = await downloadModule({ ...m, saveDir: inferSaveDir(m), linkPrefix })
-        if (res.ok) okCount += 1
-        else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
+      const total = downloadable.length
+      let nextIndex = 0
+      let completed = 0
+      const concurrency = Math.max(1, Math.min(cfg.downloadConcurrency || 3, total))
+
+      const updateOverallProgress = () => {
+        setStage(`下载中：已完成 ${completed}/${total}`)
+        setProgress(`${Math.round((completed / total) * 100)}%`)
       }
+
+      updateOverallProgress()
+
+      async function worker() {
+        for (;;) {
+          const idx = nextIndex
+          nextIndex += 1
+          if (idx >= total) return
+
+          const m = downloadable[idx]
+          const linkPrefix = await detectLinkPrefix(m)
+          const res = await downloadModule({ ...m, saveDir: inferSaveDir(m), linkPrefix })
+          if (res.ok) okCount += 1
+          else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
+
+          completed += 1
+          updateOverallProgress()
+        }
+      }
+
+      const workers = Array.from({ length: concurrency }, () => worker())
+      await Promise.all(workers)
+
       if (errors.length) {
-        setStage(`下载完成：成功 ${okCount}/${downloadable.length}`)
+        setStage(`下载完成：成功 ${okCount}/${total}`)
         await Dialog.alert({
           title: "部分下载失败",
           message: errors.slice(0, 6).join("\n"),
         })
       } else {
-        setStage(`下载完成：${okCount}/${downloadable.length}`)
+        setStage(`下载完成：${okCount}/${total}`)
       }
     } catch (e: any) {
       const msg = String(e?.message ?? e)

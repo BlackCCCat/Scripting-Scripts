@@ -54,6 +54,7 @@ export function SettingsView(props: {
   const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>([])
   const [bookmarkIdx, setBookmarkIdx] = useState<number>(0)
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+  const concurrencyOptions = Array.from({ length: 10 }, (_, idx) => idx + 1)
 
   useEffect(() => {
     setCfg(props.initial ?? loadConfig())
@@ -303,6 +304,25 @@ function deleteCategoryAt(indices: number[]) {
               prompt={"例如：\n#!url=\n#SUBSCRIBED \n每行一个，按顺序优先匹配"}
               textFieldStyle="roundedBorder"
             />
+          </Section>
+
+          <Section header={<Text>下载设置</Text>}>
+            <Picker
+              title={"并发下载数"}
+              pickerStyle="menu"
+              value={Math.max(0, concurrencyOptions.indexOf(cfg.downloadConcurrency))}
+              onChanged={(idx: number) => {
+                HapticFeedback.heavyImpact()
+                const next = concurrencyOptions[idx] ?? 3
+                setCfg((c) => ({ ...c, downloadConcurrency: next }))
+              }}
+            >
+              {concurrencyOptions.map((num, idx) => (
+                <Text key={`${num}`} tag={idx}>
+                  {num}
+                </Text>
+              ))}
+            </Picker>
           </Section>
 
           <Section header={<Text>分类列表</Text>}>
