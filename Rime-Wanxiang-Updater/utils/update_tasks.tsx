@@ -99,7 +99,8 @@ function emitProgress(
 async function httpJson(url: string, init?: any) {
   const fetchFn = Runtime.fetch
   if (!fetchFn) throw new Error("\u8fd0\u884c\u65f6\u6ca1\u6709 fetch")
-  const controller = typeof AbortController === "function" ? new AbortController() : null
+  const AbortControllerCtor = (globalThis as any).AbortController
+  const controller = typeof AbortControllerCtor === "function" ? new AbortControllerCtor() : null
   const timer = setTimeout(() => {
     try {
       controller?.abort()

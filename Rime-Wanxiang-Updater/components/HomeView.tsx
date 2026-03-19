@@ -7,15 +7,18 @@ import {
   NavigationStack,
   Script,
   Rectangle,
+  RoundedRectangle,
   Section,
   Divider,
   Spacer,
   Text,
   HStack,
   VStack,
+  ZStack,
   ScrollView,
   ScrollViewReader,
   ProgressView,
+  useColorScheme,
   useEffect,
   useRef,
   useState,
@@ -117,12 +120,14 @@ function GridButton(props: {
   color?: string
   onPress: () => void
 }) {
+  const colorScheme = useColorScheme()
   const haptic = () => {
     try {
       ; (globalThis as any).HapticFeedback?.mediumImpact?.()
     } catch { }
   }
   const tintColor: any = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
+  const darkCardFill: any = props.disabled ? "rgba(58,58,60,0.72)" : "rgba(58,58,60,0.96)"
   return (
     <Button
       action={() => {
@@ -134,27 +139,73 @@ function GridButton(props: {
       tint={tintColor}
       frame={{ maxWidth: "infinity", minHeight: 62 }}
     >
-      <VStack
-        spacing={3}
-        frame={{ maxWidth: "infinity", minHeight: 62 }}
-        padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
-      >
-        <Image
-          systemName={props.icon}
-          font="title2"
-          frame={{ height: 22 }}
-          foregroundStyle={tintColor}
-        />
-        <Text
-          font="footnote"
-          frame={{ maxWidth: "infinity", minHeight: 16, alignment: "center" as any }}
-          lineLimit={1}
-          multilineTextAlignment="center"
-          foregroundStyle={tintColor}
+      {colorScheme === "dark" ? (
+        <ZStack
+          frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+          background={"rgba(0,0,0,0.001)"}
         >
-          {props.title}
-        </Text>
-      </VStack>
+          <RoundedRectangle
+            cornerRadius={16}
+            fill={darkCardFill}
+            stroke={"separator"}
+            frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+          />
+          <VStack
+            spacing={3}
+            frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+            padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
+          >
+            <Spacer />
+            <Image
+              systemName={props.icon}
+              font="title2"
+              frame={{ height: 22 }}
+              foregroundStyle={tintColor}
+            />
+            <Text
+              font="footnote"
+              frame={{ maxWidth: "infinity", minHeight: 16, alignment: "center" as any }}
+              lineLimit={1}
+              multilineTextAlignment="center"
+              foregroundStyle={tintColor}
+            >
+              {props.title}
+            </Text>
+            <Spacer />
+          </VStack>
+        </ZStack>
+      ) : (
+        <VStack
+          spacing={0}
+          frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+          background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 16 } }}
+        >
+          <VStack
+            spacing={3}
+            frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+            padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
+            background={"rgba(0,0,0,0.001)"}
+          >
+            <Spacer />
+            <Image
+              systemName={props.icon}
+              font="title2"
+              frame={{ height: 22 }}
+              foregroundStyle={tintColor}
+            />
+            <Text
+              font="footnote"
+              frame={{ maxWidth: "infinity", minHeight: 16, alignment: "center" as any }}
+              lineLimit={1}
+              multilineTextAlignment="center"
+              foregroundStyle={tintColor}
+            >
+              {props.title}
+            </Text>
+            <Spacer />
+          </VStack>
+        </VStack>
+      )}
     </Button>
   )
 }
