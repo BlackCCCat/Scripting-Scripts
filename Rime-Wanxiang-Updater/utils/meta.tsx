@@ -28,18 +28,10 @@ export type ModelMeta = {
   updatedAt: string
 }
 
-export type PredictMeta = {
-  remoteIdOrSha: string
-  releaseSource?: ReleaseSource
-  inputMethod?: InputMethod
-  updatedAt: string
-}
-
 export type MetaBundle = {
   scheme?: SchemeMeta
   dict?: DictMeta
   model?: ModelMeta
-  predict?: PredictMeta
 }
 
 type RecordData = {
@@ -247,36 +239,6 @@ export function clearMetaForRoot(installRoot: string) {
   saveStore(data)
 }
 
-export function clearPredictMetaForRoot(installRoot: string, bookmarkName?: string) {
-  const root = normalizeRoot(installRoot)
-  if (!root) return
-
-  const data = loadStore()
-  const exact = findExactRecordKey(data.records, root)
-  const bookmarkTarget = bookmarkKey(bookmarkName)
-    ? findExactRecordKey(data.records, data.bookmarks[bookmarkKey(bookmarkName)] ?? "")
-    : ""
-  const keys = Array.from(new Set([exact, bookmarkTarget].filter(Boolean)))
-  if (!keys.length) return
-
-  let changed = false
-  for (const key of keys) {
-    const bucket = data.records[key]
-    if (!bucket?.predict) continue
-    delete bucket.predict
-    changed = true
-    if (!bucket.scheme && !bucket.dict && !bucket.model && !bucket.predict) {
-      delete data.records[key]
-    } else {
-      data.records[key] = bucket
-    }
-  }
-
-  if (!changed) return
-  cleanupBookmarks(data)
-  saveStore(data)
-}
-
 function pickRemoteId(rec: RecordData, fallback?: string): string | undefined {
   return rec.sha256 || rec.cnb_id || fallback
 }
@@ -381,18 +343,6 @@ function toModelMeta(rec?: RecordData): ModelMeta | undefined {
   }
 }
 
-function toPredictMeta(rec?: RecordData): PredictMeta | undefined {
-  if (!rec) return undefined
-  const remoteIdOrSha = pickRemoteId(rec, rec.predict_name)
-  if (!remoteIdOrSha) return undefined
-  return {
-    remoteIdOrSha,
-    releaseSource: inferReleaseSource(rec),
-    inputMethod: normalizeInputMethod(rec.input_method),
-    updatedAt: rec.update_time || rec.apply_time || new Date().toISOString(),
-  }
-}
-
 function splitRemoteId(source: ReleaseSource | undefined, remoteIdOrSha?: string) {
   if (!remoteIdOrSha) return { sha256: "", cnb_id: "" }
   if (source === "github") return { sha256: remoteIdOrSha, cnb_id: "" }
@@ -411,12 +361,10 @@ export async function loadMetaAsync(installRoot: string, bookmarkName?: string):
   const schemeRec = readRecord(root, "scheme", bookmarkName)
   const dictRec = readRecord(root, "dict", bookmarkName)
   const modelRec = readRecord(root, "model", bookmarkName)
-  const predictRec = readRecord(root, "predict", bookmarkName)
   CACHE = {
     scheme: toSchemeMeta(schemeRec),
     dict: toDictMeta(dictRec),
     model: toModelMeta(modelRec),
-    predict: toPredictMeta(predictRec),
   }
   return CACHE
 }
@@ -500,30 +448,5 @@ export async function setModelMeta(rec: {
     input_method: rec.inputMethod ?? "",
   }
   writeRecord(rec.installRoot, "model", data, rec.bookmarkName)
-  await loadMetaAsync(rec.installRoot, rec.bookmarkName)
-}
-
-export async function setPredictMeta(rec: {
-  installRoot: string
-  bookmarkName?: string
-  fileName: string
-  inputMethod?: InputMethod
-  tag?: string
-  updatedAt?: string
-  remoteIdOrSha?: string
-  source?: ReleaseSource
-}) {
-  const ids = splitRemoteId(rec.source, rec.remoteIdOrSha)
-  const data: RecordData = {
-    predict_name: rec.fileName,
-    update_time: rec.updatedAt ?? new Date().toISOString(),
-    tag: rec.tag ?? "",
-    apply_time: new Date().toISOString(),
-    sha256: ids.sha256,
-    cnb_id: ids.cnb_id,
-    release_source: rec.source ?? "",
-    input_method: rec.inputMethod ?? "",
-  }
-  writeRecord(rec.installRoot, "predict", data, rec.bookmarkName)
   await loadMetaAsync(rec.installRoot, rec.bookmarkName)
 }

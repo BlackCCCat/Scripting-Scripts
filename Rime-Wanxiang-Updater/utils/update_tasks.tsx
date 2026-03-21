@@ -9,7 +9,7 @@ import { ensureDir, removeDirSafe, unzipToDirWithOverwrite, mergeSubdirsByName }
 import { deployHamster } from "./deploy"
 import { assertInstallPathAccess, detectRimeDir } from "./hamster"
 
-import { loadMetaAsync, setDictMeta, setModelMeta, setPredictMeta, setSchemeMeta } from "./meta"
+import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
 import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
 
 const OWNER = "amzxyz"
@@ -20,7 +20,6 @@ const DICT_TAG = "dict-nightly"
 const MODEL_REPO = "RIME-LMDG"
 const MODEL_TAG = "LTS"
 const MODEL_FILE = "wanxiang-lts-zh-hans.gram"
-const PREDICT_FILE = "wanxiang-lts-zh-hans-predict.db"
 const CNB_DICT_TITLE = "\u8bcd\u5e93"
 const CNB_SCHEME_TITLE = "\u4e07\u8c61\u62fc\u97f3\u8f93\u5165\u65b9\u6848"
 const HTTP_TIMEOUT_MS = 30 * 1000
@@ -39,7 +38,6 @@ export type AllUpdateResult = {
   scheme?: RemoteAsset
   dict?: RemoteAsset
   model?: RemoteAsset
-  predict?: RemoteAsset
 }
 
 export type AutoUpdateRunResult = {
@@ -48,7 +46,6 @@ export type AutoUpdateRunResult = {
     scheme: boolean
     dict: boolean
     model: boolean
-    predict: boolean
   }
   didUpdate: boolean
   didDeploy: boolean
@@ -58,7 +55,6 @@ export type UpdateDecision = {
   scheme: boolean
   dict: boolean
   model: boolean
-  predict: boolean
 }
 
 function normalizeMark(v?: string): string {
@@ -332,7 +328,6 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
       })
 
   const model = await fetchModelReleaseAsset(cfg, MODEL_FILE)
-  const predict = cfg.usePredictDb ? await fetchModelReleaseAsset(cfg, PREDICT_FILE) : undefined
 
   if (dict && !dict.remoteIdOrSha) {
     dict.remoteIdOrSha = ensureRemoteMark(dict, "dict")
@@ -340,11 +335,8 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
   if (model && !model.remoteIdOrSha) {
     model.remoteIdOrSha = ensureRemoteMark(model, "model")
   }
-  if (predict && !predict.remoteIdOrSha) {
-    predict.remoteIdOrSha = ensureRemoteMark(predict, "model")
-  }
 
-  return { scheme, dict, model, predict }
+  return { scheme, dict, model }
 }
 
 // ===== 部署（删 build 再 URL scheme）=====
@@ -727,18 +719,15 @@ export async function updateModel(
     autoDeploy?: boolean
     targets?: {
       model?: boolean
-      predict?: boolean
     }
   }
 ) {
   const modelAsset = await fetchModelReleaseAsset(cfg, MODEL_FILE)
-  const predictAsset = cfg.usePredictDb ? await fetchModelReleaseAsset(cfg, PREDICT_FILE) : undefined
   const shouldUpdateModel = params.targets?.model !== false
-  const shouldUpdatePredict = cfg.usePredictDb && params.targets?.predict !== false
 
-  if (!shouldUpdateModel && !shouldUpdatePredict) {
+  if (!shouldUpdateModel) {
     params.onStage?.("已是最新，无需更新")
-    params.onLog?.("模型和预测库均为最新")
+    params.onLog?.("模型已是最新")
     return modelAsset
   }
 
@@ -763,30 +752,6 @@ export async function updateModel(
       })
     },
   }) : modelAsset
-
-  if (shouldUpdatePredict) {
-    await updateBinaryAsset({
-      cfg,
-      fileName: PREDICT_FILE,
-      asset: predictAsset,
-      label: "预测库",
-      onStage: (s) => params.onStage?.(`预测库：${s}`),
-      onLog: params.onLog,
-      onProgress: params.onProgress,
-      writeMeta: async (installRoot, asset) => {
-        await setPredictMeta({
-          installRoot,
-          bookmarkName: cfg.hamsterBookmarkName,
-          fileName: PREDICT_FILE,
-          inputMethod: cfg.inputMethod,
-          tag: asset.tag,
-          updatedAt: asset.updatedAt ?? new Date().toISOString(),
-          remoteIdOrSha: ensureRemoteMark(asset, "model"),
-          source: cfg.releaseSource,
-        })
-      },
-    })
-  }
 
   if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
   return model
@@ -824,17 +789,12 @@ export async function autoUpdateAll(
   const needModel = typeof preDecision?.model === "boolean"
     ? preDecision.model
     : !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
-  const remotePredictMark = normalizeMark(ensureRemoteMark(r.predict, "model"))
-  const localPredictMark = normalizeMark(meta.predict?.remoteIdOrSha)
-  const needPredict = cfg.usePredictDb && (typeof preDecision?.predict === "boolean"
-    ? preDecision.predict
-    : !!(r.predict && remotePredictMark && localPredictMark !== remotePredictMark))
 
-  if (!needScheme && !needDict && !needModel && !needPredict) {
+  if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")
     return {
       remote: r,
-      updated: { scheme: false, dict: false, model: false, predict: false },
+      updated: { scheme: false, dict: false, model: false },
       didUpdate: false,
       didDeploy: false,
     }
@@ -857,7 +817,7 @@ export async function autoUpdateAll(
       autoDeploy: false,
     })
   }
-  if (needModel || needPredict) {
+  if (needModel) {
     await updateModel(cfg, {
       onStage: params.onStage,
       onLog: (s) => params.onLog?.(s),
@@ -865,7 +825,6 @@ export async function autoUpdateAll(
       autoDeploy: false,
       targets: {
         model: needModel,
-        predict: needPredict,
       },
     })
   }
@@ -886,7 +845,7 @@ export async function autoUpdateAll(
   params.onStage?.("自动更新：完成")
   return {
     remote: r,
-    updated: { scheme: needScheme, dict: needDict, model: needModel, predict: needPredict },
+    updated: { scheme: needScheme, dict: needDict, model: needModel },
     didUpdate: true,
     didDeploy: cfg.autoDeployAfterDownload !== false,
   }

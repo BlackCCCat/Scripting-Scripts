@@ -25,14 +25,12 @@ export type AppConfig = {
 
   schemeEdition: SchemeEdition
   proSchemeKey: ProSchemeKey
-  usePredictDb: boolean
 
   excludePatternsText: string // 按行
   autoDeployAfterDownload: boolean
   inputMethod: InputMethod
   autoCheckOnLaunch: boolean
   showVerboseLog: boolean
-  deletePredictDbWhenUnused: boolean
   homeSectionOrder: HomeSectionKey[]
 }
 
@@ -51,13 +49,11 @@ export const DEFAULT_CONFIG: AppConfig = {
   githubToken: "",
   schemeEdition: "base",
   proSchemeKey: "moqi",
-  usePredictDb: false,
   excludePatternsText: "",
   autoDeployAfterDownload: true,
   inputMethod: "hamster",
   autoCheckOnLaunch: false,
   showVerboseLog: true,
-  deletePredictDbWhenUnused: false,
   homeSectionOrder: ["local", "actions", "status", "remote", "notes"],
 }
 
@@ -88,6 +84,10 @@ export function loadConfig(): AppConfig {
     if (obj?.inputMethod === "cang") obj.inputMethod = "hamster"
     if (obj?.inputMethod === "yuanshu") obj.inputMethod = "hamster3"
     if (typeof obj?.hamsterBookmarkName !== "string") obj.hamsterBookmarkName = ""
+    if (obj && typeof obj === "object") {
+      delete obj.usePredictDb
+      delete obj.deletePredictDbWhenUnused
+    }
     obj.homeSectionOrder = normalizeHomeSectionOrder(obj?.homeSectionOrder)
     const cfg = { ...DEFAULT_CONFIG, ...obj }
     const currentRaw = readStorageValue(st, STORAGE_KEY)

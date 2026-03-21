@@ -28,9 +28,9 @@ import {
   PRO_KEYS,
   HOME_SECTION_LABELS,
 } from "../utils/config"
-import { callMaybeAsync, normalizePath, removePathLoose, storage } from "../utils/common"
+import { callMaybeAsync, normalizePath, storage } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
-import { clearMetaForRoot, clearPredictMetaForRoot, loadMetaAsync } from "../utils/meta"
+import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 import { HomeSectionOrderView } from "./HomeSectionOrderView"
 
@@ -52,7 +52,6 @@ const RESET_STORAGE_KEYS = [
   "wanxiang_meta_store",
   "wanxiang_extracted_files",
 ]
-const PREDICT_FILE = "wanxiang-lts-zh-hans-predict.db"
 
 function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
   const edition = meta?.scheme?.schemeEdition
@@ -70,7 +69,6 @@ function normalizeReleaseSourceFromMeta(meta: any): AppConfig["releaseSource"] |
     meta?.scheme?.releaseSource ??
     meta?.dict?.releaseSource ??
     meta?.model?.releaseSource ??
-    meta?.predict?.releaseSource ??
     ""
   )
     .trim()
@@ -84,7 +82,6 @@ function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputM
     meta?.scheme?.inputMethod ??
     meta?.dict?.inputMethod ??
     meta?.model?.inputMethod ??
-    meta?.predict?.inputMethod ??
     ""
   )
     .trim()
@@ -134,7 +131,6 @@ export function SettingsView(props: {
     const i = PRO_KEYS.indexOf(initialCfg.proSchemeKey)
     return i >= 0 ? i : 0
   })
-  const [predictIdx, setPredictIdx] = useState<number>(initialCfg.usePredictDb ? 0 : 1)
   const [inputIdx, setInputIdx] = useState<number>(() => {
     const i = INPUT_METHODS.findIndex((m) => m.value === initialCfg.inputMethod)
     return i >= 0 ? i : 0
@@ -147,10 +143,9 @@ export function SettingsView(props: {
       releaseSource: releaseIdx === 1 ? "github" : "cnb",
       schemeEdition: schemeIdx === 1 ? "pro" : "base",
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      usePredictDb: predictIdx === 0,
       inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
     }))
-  }, [releaseIdx, schemeIdx, proKeyIdx, predictIdx, inputIdx])
+  }, [releaseIdx, schemeIdx, proKeyIdx, inputIdx])
 
   const [alert, setAlert] = useState<AlertState>({
     title: "",
@@ -168,7 +163,6 @@ export function SettingsView(props: {
     setSchemeIdx(latest.schemeEdition === "pro" ? 1 : 0)
     const i = PRO_KEYS.indexOf(latest.proSchemeKey)
     setProKeyIdx(i >= 0 ? i : 0)
-    setPredictIdx(latest.usePredictDb ? 0 : 1)
     const im = INPUT_METHODS.findIndex((m) => m.value === latest.inputMethod)
     setInputIdx(im >= 0 ? im : 0)
       ; (async () => {
@@ -229,7 +223,7 @@ export function SettingsView(props: {
     for (const root of candidates) {
       try {
         const m = await loadMetaAsync(root, base.hamsterBookmarkName)
-        if (m.scheme || m.dict || m.model || m.predict) {
+        if (m.scheme || m.dict || m.model) {
           meta = m
           break
         }
@@ -238,7 +232,7 @@ export function SettingsView(props: {
     if (!meta && base.hamsterBookmarkName) {
       try {
         const byBookmark = await loadMetaAsync("", base.hamsterBookmarkName)
-        if (byBookmark.scheme || byBookmark.dict || byBookmark.model || byBookmark.predict) {
+        if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
           meta = byBookmark
         }
       } catch { }
@@ -252,7 +246,6 @@ export function SettingsView(props: {
       ...base,
       releaseSource: releaseSource ?? base.releaseSource,
       inputMethod: inputMethod ?? base.inputMethod,
-      usePredictDb: strictPredict ? !!meta?.predict : (meta?.predict ? true : base.usePredictDb),
       schemeEdition: normalized?.schemeEdition ?? base.schemeEdition,
       proSchemeKey:
         normalized?.schemeEdition === "pro"
@@ -264,15 +257,13 @@ export function SettingsView(props: {
       base.schemeEdition !== next.schemeEdition ||
       base.proSchemeKey !== next.proSchemeKey ||
       base.releaseSource !== next.releaseSource ||
-      base.inputMethod !== next.inputMethod ||
-      base.usePredictDb !== next.usePredictDb
+      base.inputMethod !== next.inputMethod
     if (!changed) return base
 
     setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
     const proIdx = PRO_KEYS.indexOf(next.proSchemeKey)
     setProKeyIdx(proIdx >= 0 ? proIdx : 0)
     setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
-    setPredictIdx(next.usePredictDb ? 0 : 1)
     const inputMethodIdx = INPUT_METHODS.findIndex((m) => m.value === next.inputMethod)
     setInputIdx(inputMethodIdx >= 0 ? inputMethodIdx : 0)
     setCfg(next)
@@ -345,7 +336,6 @@ export function SettingsView(props: {
       ...cfg,
       // base 时 proKey 也可以保留，不影响；若你想 base 时清空也可以在这里处理
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      usePredictDb: predictIdx === 0,
       inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
     }
 
@@ -360,18 +350,6 @@ export function SettingsView(props: {
       const schemeChanged =
         fixed.schemeEdition !== initialSchemeEdition ||
         (fixed.schemeEdition === "pro" && fixed.proSchemeKey !== initialProSchemeKey)
-      const predictDisabled = initialCfg.usePredictDb && !fixed.usePredictDb
-      const shouldDeletePredict = fixed.deletePredictDbWhenUnused && predictDisabled
-      if (shouldDeletePredict) {
-        try {
-          const { rimeDir } = await detectRimeDir(fixed)
-          const installRoot = rimeDir || fixed.hamsterRootPath
-          if (installRoot) {
-            await removePathLoose(`${installRoot}/${PREDICT_FILE}`)
-            clearPredictMetaForRoot(installRoot, fixed.hamsterBookmarkName)
-          }
-        } catch { }
-      }
       if (schemeChanged && !pathChanged) {
         try {
           const { rimeDir } = await detectRimeDir(fixed)
@@ -405,7 +383,6 @@ export function SettingsView(props: {
       setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
       setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
       setProKeyIdx(PRO_KEYS.indexOf(next.proSchemeKey))
-      setPredictIdx(next.usePredictDb ? 0 : 1)
       setInputIdx(INPUT_METHODS.findIndex((m) => m.value === next.inputMethod))
       props.onDone?.(next)
       showInfo("已重置设置", "已清理本地设置、更新记录和解压缓存记录。")
@@ -418,7 +395,6 @@ export function SettingsView(props: {
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.slice(), [])
-  const predictLabels = useMemo<string[]>(() => ["使用", "不使用"], [])
 
   return (
     <NavigationStack>
@@ -560,22 +536,6 @@ export function SettingsView(props: {
                 ))}
               </Picker>
             ) : null}
-
-            <Picker
-              title={"预测库"}
-              pickerStyle="menu"
-              value={predictIdx}
-              onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setPredictIdx(v)
-              }}
-            >
-              {predictLabels.map((label, index) => (
-                <Text key={label} tag={index}>
-                  {label}
-                </Text>
-              ))}
-            </Picker>
           </Section>
 
           <Section header={<Text>输入法</Text>}>
@@ -612,15 +572,6 @@ export function SettingsView(props: {
               onChanged={(v: boolean) => {
                 try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
                 setCfg((c) => ({ ...c, showVerboseLog: v }))
-              }}
-              toggleStyle="switch"
-            />
-            <Toggle
-              title={"不使用预测库时删除"}
-              value={cfg.deletePredictDbWhenUnused}
-              onChanged={(v: boolean) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setCfg((c) => ({ ...c, deletePredictDbWhenUnused: v }))
               }}
               toggleStyle="switch"
             />

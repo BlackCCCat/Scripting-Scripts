@@ -24,11 +24,10 @@ type UpdateDecision = {
   scheme: boolean
   dict: boolean
   model: boolean
-  predict: boolean
 }
 
 type RemoteItemKey = keyof UpdateDecision
-type RemoteItemState = "unchecked" | "checking" | "update" | "latest" | "error" | "disabled"
+type RemoteItemState = "unchecked" | "checking" | "update" | "latest" | "error"
 
 function normalizeMark(value?: string) {
   return String(value ?? "").trim().toLowerCase()
@@ -38,12 +37,10 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
   const schemeRemoteMark = normalizeMark(remote.scheme?.tag ?? remote.scheme?.name)
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
   const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
-  const predictRemoteMark = normalizeMark(remote.predict?.remoteIdOrSha)
   return {
     scheme: !!(schemeRemoteMark && normalizeMark(localMeta?.scheme?.remoteTagOrName) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
     model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
-    predict: !!(predictRemoteMark && normalizeMark(localMeta?.predict?.remoteIdOrSha) !== predictRemoteMark),
   }
 }
 
@@ -67,7 +64,7 @@ function inputMethodLabel(method: AppConfig["inputMethod"]) {
 
 function countUpdates(decision: UpdateDecision | null) {
   if (!decision) return 0
-  return [decision.scheme, decision.dict, decision.model, decision.predict].filter(Boolean).length
+  return [decision.scheme, decision.dict, decision.model].filter(Boolean).length
 }
 
 async function findLocalMeta(current: AppConfig): Promise<MetaBundle | undefined> {
@@ -90,13 +87,13 @@ async function findLocalMeta(current: AppConfig): Promise<MetaBundle | undefined
   for (const root of uniq) {
     try {
       const meta = await loadMetaAsync(root, current.hamsterBookmarkName)
-      if (meta.scheme || meta.dict || meta.model || meta.predict) return meta
+      if (meta.scheme || meta.dict || meta.model) return meta
     } catch { }
   }
   if (current.hamsterBookmarkName) {
     try {
       const meta = await loadMetaAsync("", current.hamsterBookmarkName)
-      if (meta.scheme || meta.dict || meta.model || meta.predict) return meta
+      if (meta.scheme || meta.dict || meta.model) return meta
     } catch { }
   }
   return undefined
@@ -117,8 +114,6 @@ function rowStateInfo(state: RemoteItemState): {
       return { emoji: "✅", text: "最新", color: "systemGreen", stroke: "systemGreen" }
     case "error":
       return { emoji: "❌", text: "暂无法获取", color: "systemRed", stroke: "systemRed" }
-    case "disabled":
-      return { emoji: "⏸️", text: "未使用", color: "secondaryLabel", stroke: "separator" }
     default:
       return { emoji: "⚪️", text: "未检查", color: "secondaryLabel", stroke: "separator" }
   }
@@ -165,7 +160,7 @@ function StatusCard(props: {
   state: RemoteItemState
 }) {
   const info = rowStateInfo(props.state)
-  const iconColor: any = props.state === "disabled" ? "secondaryLabel" : undefined
+  const iconColor: any = undefined
   const cardFill: any = props.state === "update" ? "systemGreen" : "tertiarySystemGroupedBackground"
   const cardStroke: any = props.state === "update" ? info.stroke : "separator"
   return (
@@ -219,7 +214,6 @@ export function KeyboardView() {
   }
 
   function remoteItemState(kind: RemoteItemKey): RemoteItemState {
-    if (kind === "predict" && !cfg.usePredictDb) return "disabled"
     if (busy) return "checking"
     const checked = lastCheckKey === getCheckCacheKey(cfg) && !!lastDecision
     if (!checked) return "unchecked"
@@ -228,9 +222,7 @@ export function KeyboardView() {
       ? lastCheck?.scheme?.tag ?? lastCheck?.scheme?.name
       : kind === "dict"
         ? lastCheck?.dict?.remoteIdOrSha
-        : kind === "model"
-          ? lastCheck?.model?.remoteIdOrSha
-          : lastCheck?.predict?.remoteIdOrSha
+        : lastCheck?.model?.remoteIdOrSha
     return remote ? "latest" : "error"
   }
 
@@ -337,10 +329,7 @@ export function KeyboardView() {
             <HStack spacing={8}>
               <StatusCard icon="doc.text" label="方案" state={remoteItemState("scheme")} />
               <StatusCard icon="books.vertical" label="词库" state={remoteItemState("dict")} />
-            </HStack>
-            <HStack spacing={8}>
               <StatusCard icon="shippingbox" label="模型" state={remoteItemState("model")} />
-              <StatusCard icon="wand.and.stars" label="预测库" state={remoteItemState("predict")} />
             </HStack>
           </VStack>
 
