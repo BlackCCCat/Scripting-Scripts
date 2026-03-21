@@ -1,6 +1,9 @@
 name: Zip Folders On Release
 
 on:
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
 
@@ -9,24 +12,32 @@ permissions:
 
 jobs:
   zip-and-upload:
+    if: github.event_name != 'release' || github.event.sender.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
 
-      - name: Create zip archives for each top-level folder
+      - name: Prepare release metadata
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p dist
-
-          TAG_NAME="${{ github.event.release.tag_name }}"
           VERSION="${TAG_NAME#v}"
           export VERSION
 
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "Release tag: ${TAG_NAME}"
           echo "Normalized version: ${VERSION}"
+
+      - name: Update script.json versions
+        shell: bash
+        run: |
+          set -euo pipefail
 
           python3 - <<'PY'
           import json
@@ -36,24 +47,36 @@ jobs:
           updated = 0
 
           for root, _, files in os.walk("."):
-              if "script.json" in files:
-                  path = os.path.join(root, "script.json")
-                  with open(path, "r", encoding="utf-8") as f:
-                      data = json.load(f)
-                  data["version"] = version
-                  with open(path, "w", encoding="utf-8") as f:
-                      json.dump(data, f, ensure_ascii=False, indent=2)
-                      f.write("\n")
-                  updated += 1
-                  print(f"Updated {path}")
+              if "script.json" not in files:
+                  continue
+
+              path = os.path.join(root, "script.json")
+              with open(path, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              data["version"] = version
+
+              with open(path, "w", encoding="utf-8") as f:
+                  json.dump(data, f, ensure_ascii=False, indent=2)
+                  f.write("\n")
+
+              updated += 1
+              print(f"Updated {path}")
 
           print(f"Updated {updated} script.json file(s).")
           PY
 
+      - name: Create zip archives for each top-level folder
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+
           for dir in */; do
             folder="${dir%/}"
 
-            # Skip metadata, build output, and src folders if present.
+            # Skip metadata, build output, and source folders.
             if [[ "$folder" == ".github" || "$folder" == "dist" || "$folder" == "src" ]]; then
               continue
             fi
@@ -65,8 +88,23 @@ jobs:
           echo "Generated archives:"
           ls -lh dist
 
-      - name: Upload archives to the release
+      - name: Create or update release
+        if: github.event_name != 'release'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG_NAME }}
           files: dist/*.zip
           overwrite_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload archives to existing release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          files: dist/*.zip
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
