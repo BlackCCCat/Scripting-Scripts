@@ -12,9 +12,9 @@
     "it": ""
   },
   "iconImage": null,
-  "color": "rgba(45, 157, 120,1)",
+  "color": "rgba(124, 76, 179,1)",
   "runInApp": true,
-  "icon": "key.fill",
+  "icon": "lock.circle.fill",
   "contributors": [],
   "localizedDescriptions": {
     "en": "Generate secure passwords in app or keyboard mode.",
