@@ -1,0 +1,43 @@
+{
+  "intentInputTypes": [],
+  "localizedNames": {
+    "en": "Password Generator",
+    "de": "",
+    "es": "",
+    "pt": "",
+    "ru": "",
+    "fr": "",
+    "zh": "密码生成器",
+    "ja": "",
+    "it": ""
+  },
+  "iconImage": null,
+  "color": "rgba(45, 157, 120,1)",
+  "runInApp": true,
+  "icon": "key.fill",
+  "contributors": [],
+  "localizedDescriptions": {
+    "en": "Generate secure passwords in app or keyboard mode.",
+    "de": "",
+    "es": "",
+    "pt": "",
+    "ru": "",
+    "fr": "",
+    "zh": "支持 App 与自定义键盘的密码生成器",
+    "ja": "",
+    "it": ""
+  },
+  "version": "",
+  "author": {
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat"
+  },
+  "description": "Generate secure passwords with history and keyboard support.",
+  "name": "Password Generator",
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Password-Generator.zip",
+    "hash": "",
+    "autoUpdateInterval": null
+  }
+}
