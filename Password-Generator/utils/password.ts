@@ -15,7 +15,6 @@ type Pool = {
 
 export type PasswordStrength = {
   score: number
-  label: string
   color: Color
   description: string
 }
@@ -180,7 +179,6 @@ export function evaluatePasswordStrength(password: string, options: PasswordOpti
   if (score >= 85) {
     return {
       score,
-      label: "极强",
       color: "systemGreen",
       description: "长度、构成分布和字符切换都很理想，整体强度处于高位。",
     }
@@ -188,7 +186,6 @@ export function evaluatePasswordStrength(password: string, options: PasswordOpti
   if (score >= 65) {
     return {
       score,
-      label: "很强",
       color: "systemBlue",
       description: "长度不错，字符构成较均衡，适合大多数重要账号。",
     }
@@ -196,14 +193,12 @@ export function evaluatePasswordStrength(password: string, options: PasswordOpti
   if (score >= 40) {
     return {
       score,
-      label: "中等",
       color: "systemOrange",
       description: "建议继续增加长度，并减少重复或提升字符混合度。",
     }
   }
   return {
     score,
-    label: "较弱",
     color: "systemRed",
     description: "当前长度、构成或重复情况偏保守，建议继续拉长并提高混合度。",
   }

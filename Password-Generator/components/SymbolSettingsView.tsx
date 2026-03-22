@@ -37,29 +37,31 @@ function SymbolToggleRow(props: {
   onChanged: (next: boolean) => void
 }) {
   return (
-    <HStack
-      frame={{ width: "100%" as any }}
-      padding={{ top: 8, bottom: 8 }}
-      background={"rgba(0,0,0,0.001)"}
+    <Toggle
+      value={props.enabled}
+      onChanged={props.onChanged}
+      toggleStyle="switch"
     >
-      <Text font="title3" frame={{ width: 28, alignment: "center" as any }}>
-        {props.value}
-      </Text>
-      <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-        <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          符号 {props.value}
+      <HStack
+        frame={{ width: "100%" as any }}
+        spacing={12}
+        alignment="center"
+        padding={{ top: 8, bottom: 8 }}
+      >
+        <Text font="title3" frame={{ width: 28, alignment: "center" as any }}>
+          {props.value}
         </Text>
-        <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          开启后会加入密码生成字符池
-        </Text>
-      </VStack>
-      <Spacer />
-      <Toggle
-        value={props.enabled}
-        onChanged={props.onChanged}
-        toggleStyle="switch"
-      />
-    </HStack>
+        <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+          <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            符号 {props.value}
+          </Text>
+          <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            开启后会加入密码生成字符池
+          </Text>
+        </VStack>
+        <Spacer />
+      </HStack>
+    </Toggle>
   )
 }
 

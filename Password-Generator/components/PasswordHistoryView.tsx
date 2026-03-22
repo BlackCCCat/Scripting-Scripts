@@ -4,7 +4,6 @@ import {
   HStack,
   Image,
   List,
-  Navigation,
   NavigationStack,
   Spacer,
   Text,
@@ -41,7 +40,6 @@ function HistoryRow(props: {
   selectionMode: boolean
   onToggleSelected: (id: string) => void
   onDelete: (id: string) => void
-  pickMode?: boolean
 }) {
   const strength = evaluatePasswordStrength(props.item.password, props.item.options)
   return (
@@ -52,7 +50,7 @@ function HistoryRow(props: {
         else void props.onCopy(props.item)
       })}
       frame={{ maxWidth: "infinity" }}
-      trailingSwipeActions={props.pickMode ? undefined : {
+      trailingSwipeActions={{
         allowsFullSwipe: true,
         actions: [
           <Button
@@ -86,7 +84,7 @@ function HistoryRow(props: {
           </Text>
           <Spacer />
           <Text font="caption2" foregroundStyle="secondaryLabel">
-            {props.pickMode ? "点击填入" : "点击再次复制"}
+            点击再次复制
           </Text>
         </HStack>
         <Text
@@ -108,18 +106,12 @@ function HistoryRow(props: {
   )
 }
 
-export function PasswordHistoryView(props?: { mode?: "browse" | "pick" }) {
-  const dismiss = Navigation.useDismiss()
+export function PasswordHistoryView() {
   const items = useObservable<PasswordHistoryItem[]>(() => loadPasswordHistory())
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const pickMode = props?.mode === "pick"
 
   async function copyItem(item: PasswordHistoryItem) {
-    if (pickMode) {
-      dismiss(item)
-      return
-    }
     await Pasteboard.setString(item.password)
     const next = addPasswordHistory({
       id: `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
@@ -193,7 +185,7 @@ export function PasswordHistoryView(props?: { mode?: "browse" | "pick" }) {
   }
 
   const toolbar = {
-    topBarLeading: !pickMode && selectionMode ? (
+    topBarLeading: selectionMode ? (
       <HStack spacing={10}>
         <Button
           title="全选"
@@ -205,7 +197,7 @@ export function PasswordHistoryView(props?: { mode?: "browse" | "pick" }) {
         />
       </HStack>
     ) : undefined,
-    topBarTrailing: pickMode ? undefined : (
+    topBarTrailing: (
       <HStack spacing={10}>
         <Button
           title=""
@@ -239,10 +231,9 @@ export function PasswordHistoryView(props?: { mode?: "browse" | "pick" }) {
                 item={item}
                 onCopy={copyItem}
                 onDelete={removeOne}
-                selectionMode={!pickMode && selectionMode}
+                selectionMode={selectionMode}
                 selected={selectedIds.includes(item.id)}
                 onToggleSelected={toggleSelected}
-                pickMode={pickMode}
               />
             )}
           />

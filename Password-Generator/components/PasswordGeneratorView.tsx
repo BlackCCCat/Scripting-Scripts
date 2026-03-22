@@ -523,55 +523,45 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
     </Card>
   )
 
-  const content = (
+  const appContent = (
     <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       <VStack spacing={12} padding={{ top: topPadding, bottom: 20, leading: 12, trailing: 12 }}>
-        {props.mode === "keyboard" ? (
-          <HStack frame={{ width: "100%" as any }}>
-            <KeyboardTopIconButton icon="globe" onPress={switchKeyboard} />
-            <Spacer />
-            <KeyboardTopIconButton icon="clock.arrow.circlepath" onPress={openHistory} />
-          </HStack>
-        ) : null}
-
         {firstCard}
 
-        {props.mode === "app" ? (
-          <Card>
-            <VStack spacing={2}>
-              <ToggleRow
-                title="英文字母"
-                subtitle="包含大写和小写字母"
-                icon="textformat"
-                value={options.includeLetters}
-                disabled={onlyOneEnabled && options.includeLetters}
-                onChanged={(value) => updateToggle("includeLetters", value)}
-              />
-              <ToggleRow
-                title="数字"
-                subtitle="包含 0-9"
-                icon="123.rectangle"
-                value={options.includeNumbers}
-                disabled={onlyOneEnabled && options.includeNumbers}
-                onChanged={(value) => updateToggle("includeNumbers", value)}
-              />
-              <ToggleRow
-                title="特殊符号"
-                subtitle={`当前 ${symbolSettings.enabledSymbols.length} 个可用符号`}
-                icon="at.circle"
-                value={options.includeSymbols}
-                disabled={onlyOneEnabled && options.includeSymbols}
-                onChanged={(value) => updateToggle("includeSymbols", value)}
-              />
-            </VStack>
+        <Card>
+          <VStack spacing={2}>
+            <ToggleRow
+              title="英文字母"
+              subtitle="包含大写和小写字母"
+              icon="textformat"
+              value={options.includeLetters}
+              disabled={onlyOneEnabled && options.includeLetters}
+              onChanged={(value) => updateToggle("includeLetters", value)}
+            />
+            <ToggleRow
+              title="数字"
+              subtitle="包含 0-9"
+              icon="123.rectangle"
+              value={options.includeNumbers}
+              disabled={onlyOneEnabled && options.includeNumbers}
+              onChanged={(value) => updateToggle("includeNumbers", value)}
+            />
+            <ToggleRow
+              title="特殊符号"
+              subtitle={`当前 ${symbolSettings.enabledSymbols.length} 个可用符号`}
+              icon="at.circle"
+              value={options.includeSymbols}
+              disabled={onlyOneEnabled && options.includeSymbols}
+              onChanged={(value) => updateToggle("includeSymbols", value)}
+            />
+          </VStack>
 
-            <Text font="caption" foregroundStyle="secondaryLabel">
-              至少保留一种字符类型。生成器会确保每个已开启的字符类型都至少出现一次。
-            </Text>
-          </Card>
-        ) : null}
+          <Text font="caption" foregroundStyle="secondaryLabel">
+            至少保留一种字符类型。生成器会确保每个已开启的字符类型都至少出现一次。
+          </Text>
+        </Card>
 
-        {props.mode === "app" ? statusCard : null}
+        {statusCard}
       </VStack>
     </ScrollView>
   )
@@ -609,7 +599,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
           ),
         }}
       >
-        {content}
+        {appContent}
       </VStack>
     </NavigationStack>
   )
