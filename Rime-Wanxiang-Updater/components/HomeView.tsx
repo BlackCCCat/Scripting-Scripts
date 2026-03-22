@@ -1283,21 +1283,28 @@ export function HomeView() {
         lastCheckKey === checkKey(cfg) &&
         !!lastCheckDecision &&
         (lastCheckDecision.scheme || lastCheckDecision.dict || lastCheckDecision.model)
+      const schemeColor =
+        lastCheckKey === checkKey(cfg) && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue"
+      const dictColor =
+        lastCheckKey === checkKey(cfg) && lastCheckDecision?.dict ? "systemGreen" : "systemBlue"
+      const modelColor =
+        lastCheckKey === checkKey(cfg) && lastCheckDecision?.model ? "systemGreen" : "systemBlue"
       const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue"
       return (
         <Section key={key} header={<Text>操作</Text>}>
           <VStack spacing={6} padding={{ top: 1, bottom: 1 }}>
             <HStack spacing={10} alignment="center">
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="doc.text" title="方案" onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+                <GridButton icon="doc.text" title="方案" color={schemeColor} onPress={onUpdateScheme} disabled={busy || !pathUsable} />
               </VStack>
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="books.vertical" title="词库" onPress={onUpdateDict} disabled={busy || !pathUsable} />
+                <GridButton icon="books.vertical" title="词库" color={dictColor} onPress={onUpdateDict} disabled={busy || !pathUsable} />
               </VStack>
               <VStack frame={{ maxWidth: "infinity" }}>
                 <GridButton
                   icon="shippingbox"
                   title="模型"
+                  color={modelColor}
                   onPress={onUpdateModel}
                   disabled={busy || !pathUsable}
                 />
