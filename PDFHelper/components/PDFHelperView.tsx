@@ -4,9 +4,10 @@ import {
   HStack,
   Image,
   List,
+  LongPressGesture,
   Menu,
   NavigationStack,
-  LongPressGesture,
+  Path,
   ProgressView,
   Spacer,
   Text,
@@ -27,15 +28,7 @@ function isUserCancelled(error: any): boolean {
   return message.includes("cancel")
 }
 
-async function confirmAndExportPdf(data: Data, fileName: string, summary: string) {
-  const shouldSave = await Dialog.confirm({
-    title: "处理完成",
-    message: `${summary}\n是否保存文件？`,
-    confirmLabel: "保存",
-    cancelLabel: "取消",
-  })
-  if (!shouldSave) return
-
+async function saveExportedPdf(data: Data, fileName: string) {
   const result = await DocumentPicker.exportFiles({
     files: [{ data, name: fileName }],
   })
@@ -45,6 +38,39 @@ async function confirmAndExportPdf(data: Data, fileName: string, summary: string
       title: "保存成功",
       message: `已保存：${result[0]}`,
     })
+  }
+}
+
+async function buildPreviewFilePath(data: Data, fileName: string): Promise<string> {
+  const previewPath = Path.join(FileManager.temporaryDirectory, fileName)
+  await FileManager.writeAsData(previewPath, data)
+  return previewPath
+}
+
+async function previewExportedPdf(data: Data, fileName: string) {
+  const previewPath = await buildPreviewFilePath(data, fileName)
+  await QuickLook.previewURLs([previewPath], true)
+}
+
+async function presentExportActionSheet(data: Data, fileName: string, summary: string) {
+  const action = await Dialog.actionSheet({
+    title: summary,
+    message: "请选择后续操作",
+    cancelButton: false,
+    actions: [
+      { label: "保存" },
+      { label: "预览" },
+      { label: "取消", destructive: true },
+    ],
+  })
+
+  if (action === 0) {
+    await saveExportedPdf(data, fileName)
+    return
+  }
+
+  if (action === 1) {
+    await previewExportedPdf(data, fileName)
   }
 }
 
@@ -65,35 +91,36 @@ function assignSelectionOrderForImported(
   startOrder: number
 ): SourceItem[] {
   let order = startOrder
-  const nextSources = sources.map((source) => ({
+  return sources.map((source) => ({
     ...source,
     pages: source.pages.map((page) => {
       if (!page.selected) return { ...page, selectedOrder: undefined }
-      const next = { ...page, selectedOrder: order }
+      const nextPage = { ...page, selectedOrder: order }
       order += 1
-      return next
+      return nextPage
     }),
   }))
-  return nextSources
 }
 
 function compactSelectionOrders(sources: SourceItem[]): SourceItem[] {
   const selectedRows: Array<{ sourceId: string; pageId: string; order: number }> = []
+
   for (const source of sources) {
     for (const page of source.pages) {
-      if (page.selected) {
-        selectedRows.push({
-          sourceId: source.id,
-          pageId: page.id,
-          order: typeof page.selectedOrder === "number" ? page.selectedOrder : Number.MAX_SAFE_INTEGER,
-        })
-      }
+      if (!page.selected) continue
+      selectedRows.push({
+        sourceId: source.id,
+        pageId: page.id,
+        order: typeof page.selectedOrder === "number" ? page.selectedOrder : Number.MAX_SAFE_INTEGER,
+      })
     }
   }
 
   selectedRows.sort((a, b) => a.order - b.order)
   const orderMap = new Map<string, number>()
-  selectedRows.forEach((row, idx) => orderMap.set(`${row.sourceId}::${row.pageId}`, idx + 1))
+  selectedRows.forEach((row, index) => {
+    orderMap.set(`${row.sourceId}::${row.pageId}`, index + 1)
+  })
 
   return sources.map((source) => ({
     ...source,
@@ -118,11 +145,8 @@ export function PDFHelperView() {
   const selectedTotalPageCount = useMemo(() => {
     let count = 0
     for (const page of selectedPages) {
-      if (page.kind === "pdf-whole") {
-        count += page.pageCount
-      } else {
-        count += 1
-      }
+      if (page.kind === "pdf-whole") count += page.pageCount
+      else count += 1
     }
     return count
   }, [selectedPages])
@@ -137,7 +161,7 @@ export function PDFHelperView() {
   const togglePage = useCallback((sourceId: string, pageId: string) => {
     setSources((prev) => {
       const currentMax = getMaxSelectedOrder(prev)
-      let next = prev.map((source) =>
+      const next = prev.map((source) =>
         source.id !== sourceId
           ? source
           : {
@@ -151,22 +175,22 @@ export function PDFHelperView() {
             ),
           }
       )
-      next = compactSelectionOrders(next)
-      return next
+      return compactSelectionOrders(next)
     })
   }, [])
 
   const deletePage = useCallback((sourceId: string, pageId: string) => {
-    setSources((prev) => {
-      const next = compactSelectionOrders(prev
-        .map((source) =>
-          source.id !== sourceId
-            ? source
-            : { ...source, pages: source.pages.filter((page) => page.id !== pageId) }
-        )
-        .filter((source) => source.pages.length > 0))
-      return next
-    })
+    setSources((prev) =>
+      compactSelectionOrders(
+        prev
+          .map((source) =>
+            source.id !== sourceId
+              ? source
+              : { ...source, pages: source.pages.filter((page) => page.id !== pageId) }
+          )
+          .filter((source) => source.pages.length > 0)
+      )
+    )
   }, [])
 
   const addFromFiles = useCallback(async () => {
@@ -177,8 +201,7 @@ export function PDFHelperView() {
       if (imported.sources.length > 0) {
         setSources((prev) => {
           const start = getMaxSelectedOrder(prev) + 1
-          const normalized = assignSelectionOrderForImported(imported.sources, start)
-          return [...prev, ...normalized]
+          return [...prev, ...assignSelectionOrderForImported(imported.sources, start)]
         })
       }
       if (imported.notices.length > 0) {
@@ -206,8 +229,7 @@ export function PDFHelperView() {
       if (imported.sources.length > 0) {
         setSources((prev) => {
           const start = getMaxSelectedOrder(prev) + 1
-          const normalized = assignSelectionOrderForImported(imported.sources, start)
-          return [...prev, ...normalized]
+          return [...prev, ...assignSelectionOrderForImported(imported.sources, start)]
         })
       }
       if (imported.notices.length > 0) {
@@ -235,12 +257,14 @@ export function PDFHelperView() {
     })
     if (!ok) return
     setSources((prev) =>
-      compactSelectionOrders(prev
-        .map((source) => ({
-          ...source,
-          pages: source.pages.filter((page) => !page.selected),
-        }))
-        .filter((source) => source.pages.length > 0))
+      compactSelectionOrders(
+        prev
+          .map((source) => ({
+            ...source,
+            pages: source.pages.filter((page) => !page.selected),
+          }))
+          .filter((source) => source.pages.length > 0)
+      )
     )
   }, [canDeleteSelected, selectedPages.length])
 
@@ -256,12 +280,13 @@ export function PDFHelperView() {
     setSources([])
   }, [isBusy, sources])
 
-  const convertImages = useCallback(async () => {
+  const runConvert = useCallback(async () => {
     if (!canConvert) return
     setProcessing(true)
     try {
       const result = await convertSelectedImagesToPdf(sources)
-      await confirmAndExportPdf(
+      setProcessing(false)
+      await presentExportActionSheet(
         result.data,
         buildOutputFileName("images-converted"),
         `已转换 ${result.pageCount} 页图片`
@@ -276,12 +301,13 @@ export function PDFHelperView() {
     }
   }, [canConvert, sources])
 
-  const mergePages = useCallback(async () => {
+  const runMerge = useCallback(async () => {
     if (!canMerge) return
     setProcessing(true)
     try {
       const result = await mergeSelectedPagesToPdf(sources)
-      await confirmAndExportPdf(
+      setProcessing(false)
+      await presentExportActionSheet(
         result.data,
         buildOutputFileName("merged-pdf"),
         `已合并 ${result.pageCount} 页`
@@ -315,11 +341,10 @@ export function PDFHelperView() {
                 void Dialog.alert({ message: "请先选择要删除的项目，或长按删除全部" })
               }}
               gesture={
-                LongPressGesture({ minDuration: 600 })
-                  .onEnded(() => {
-                    if (deleteButtonDisabled) return
-                    void deleteAll()
-                  })
+                LongPressGesture({ minDuration: 600 }).onEnded(() => {
+                  if (deleteButtonDisabled) return
+                  void deleteAll()
+                })
               }
             >
               <Image
@@ -379,14 +404,14 @@ export function PDFHelperView() {
               systemImage="doc.badge.gearshape"
               buttonStyle="borderedProminent"
               disabled={!canConvert}
-              action={() => void convertImages()}
+              action={() => void runConvert()}
             />
             <Button
               title={processing ? "处理中..." : "合并"}
               systemImage="square.stack.3d.up.fill"
               buttonStyle="borderedProminent"
               disabled={!canMerge}
-              action={() => void mergePages()}
+              action={() => void runMerge()}
             />
           </HStack>
         </VStack>
