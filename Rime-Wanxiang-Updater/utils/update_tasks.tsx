@@ -61,6 +61,14 @@ function normalizeMark(v?: string): string {
   return String(v ?? "").trim().toLowerCase()
 }
 
+function schemeRemoteMarkForConfig(cfg: AppConfig, asset?: RemoteAsset): string {
+  return normalizeMark(
+    cfg.usePrereleaseScheme
+      ? (asset?.remoteIdOrSha ?? asset?.tag ?? asset?.name)
+      : (asset?.tag ?? asset?.name)
+  )
+}
+
 function ensureRemoteMark(asset?: RemoteAsset, kind?: "dict" | "model"): string | undefined {
   if (!asset) return undefined
   const direct = String(asset.remoteIdOrSha ?? "").trim()
@@ -282,6 +290,23 @@ async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise
 
 async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | undefined> {
   const glob = schemePattern(cfg)
+  if (cfg.usePrereleaseScheme) {
+    if (cfg.releaseSource === "github") {
+      return fetchLatestAssetFromGithub({
+        owner: OWNER,
+        repo: GH_REPO,
+        tag: DICT_TAG,
+        assetNameGlob: glob,
+        token: cfg.githubToken,
+      })
+    }
+    return fetchLatestAssetFromCnb({
+      owner: OWNER,
+      repo: CNB_REPO,
+      assetNameGlob: glob,
+      releaseTitleIncludes: [CNB_DICT_TITLE],
+    })
+  }
   if (cfg.releaseSource === "github") {
     return fetchLatestAssetFromGithub({
       owner: OWNER,
@@ -465,6 +490,7 @@ export async function updateScheme(
     installRoot: installDir,
     bookmarkName: cfg.hamsterBookmarkName,
     fileName: latest.name,
+    usePrereleaseScheme: cfg.usePrereleaseScheme,
     schemeEdition: cfg.schemeEdition,
     proSchemeKey: cfg.schemeEdition === "pro" ? cfg.proSchemeKey : undefined,
     inputMethod: cfg.inputMethod,
@@ -773,10 +799,17 @@ export async function autoUpdateAll(
   const installRoot = await resolveRimeDir(cfg)
   const meta = await loadMetaAsync(installRoot, cfg.hamsterBookmarkName)
 
-  const schemeRemoteMark = r.scheme?.tag ?? r.scheme?.name
+  const schemeRemoteMark = schemeRemoteMarkForConfig(cfg, r.scheme)
   const needScheme = typeof preDecision?.scheme === "boolean"
     ? preDecision.scheme
-    : !!(schemeRemoteMark && normalizeMark(meta.scheme?.remoteTagOrName) !== normalizeMark(schemeRemoteMark))
+    : !!(
+      schemeRemoteMark &&
+      normalizeMark(
+        cfg.usePrereleaseScheme
+          ? meta.scheme?.remoteIdOrSha
+          : meta.scheme?.remoteTagOrName
+      ) !== schemeRemoteMark
+    )
 
   const remoteDictMark = normalizeMark(ensureRemoteMark(r.dict, "dict"))
   const localDictMark = normalizeMark(meta.dict?.remoteIdOrSha)

@@ -310,12 +310,39 @@ function normalizeMark(value: string | undefined): string {
   return String(value ?? "").trim().toLowerCase()
 }
 
-function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult): UpdateDecision {
-  const schemeRemoteMark = normalizeMark(remote.scheme?.tag ?? remote.scheme?.name)
+function schemeRemoteDisplayMark(cfg: AppConfig, remote: AllUpdateResult["scheme"] | null | undefined): string {
+  return String(
+    (cfg.usePrereleaseScheme
+      ? (remote?.remoteIdOrSha ?? remote?.tag ?? remote?.name)
+      : (remote?.tag ?? remote?.name))
+      ?? ""
+  ).trim()
+}
+
+function schemeLocalDisplayMark(cfg: AppConfig, metaScheme: MetaBundle["scheme"] | undefined): string {
+  return String(
+    (cfg.usePrereleaseScheme
+      ? metaScheme?.remoteIdOrSha
+      : metaScheme?.remoteTagOrName)
+      ?? ""
+  ).trim()
+}
+
+function schemeStoredDisplayMark(metaScheme: MetaBundle["scheme"] | undefined): string {
+  return String(
+    ((metaScheme?.usePrereleaseScheme ? metaScheme?.remoteIdOrSha : metaScheme?.remoteTagOrName)
+      ?? metaScheme?.remoteTagOrName
+      ?? metaScheme?.remoteIdOrSha
+      ?? "")
+  ).trim()
+}
+
+function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult, cfg: AppConfig): UpdateDecision {
+  const schemeRemoteMark = normalizeMark(schemeRemoteDisplayMark(cfg, remote.scheme))
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
   const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
   return {
-    scheme: !!(schemeRemoteMark && normalizeMark(localMeta?.scheme?.remoteTagOrName) !== schemeRemoteMark),
+    scheme: !!(schemeRemoteMark && normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
     model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
   }
@@ -779,7 +806,7 @@ export function HomeView() {
     const localScheme = normalizeMetaScheme(meta.scheme, current)
     setLocalSelectedScheme(localScheme.selected)
 
-    setLocalSchemeVersion(meta.scheme?.remoteTagOrName ?? "暂无法获取")
+    setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取")
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取")
     setLocalModelMark(meta.model?.remoteIdOrSha ?? "暂无法获取")
     return true
@@ -789,7 +816,7 @@ export function HomeView() {
     const remote = remoteOverride ?? ((lastCheckKey === checkKey(current)) ? lastCheck : null)
     if (!remote) return
     const { meta } = await findLocalMeta(current)
-    const nextDecision = buildUpdateDecision(meta, remote)
+    const nextDecision = buildUpdateDecision(meta, remote, current)
     setLastCheck(remote)
     setLastCheckDecision(nextDecision)
     setLastCheckKey(checkKey(current))
@@ -799,7 +826,7 @@ export function HomeView() {
   function applySharedCheckCache(current: AppConfig) {
     const cache = loadSharedCheckCache()
     if (!cache || cache.key !== checkKey(current)) return false
-    setRemoteSchemeVer(cache.remote.scheme?.tag ?? cache.remote.scheme?.name ?? "暂无法获取")
+    setRemoteSchemeVer(schemeRemoteDisplayMark(current, cache.remote.scheme) || "暂无法获取")
     setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取")
     setRemoteModelMark(cache.remote.model?.remoteIdOrSha ?? "暂无法获取")
     setNotes(cache.remote.scheme?.body ?? "")
@@ -1019,8 +1046,8 @@ export function HomeView() {
       const effective = loadConfig()
 
       const r = await checkAllUpdates(effective)
-      const decision = buildUpdateDecision(localMeta, r)
-      setRemoteSchemeVer(r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取")
+      const decision = buildUpdateDecision(localMeta, r, effective)
+      setRemoteSchemeVer(schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取")
       setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取")
       setRemoteModelMark(r.model?.remoteIdOrSha ?? "暂无法获取")
       setNotes(r.scheme?.body ?? "")
@@ -1029,7 +1056,7 @@ export function HomeView() {
       setLastCheckKey(checkKey(effective))
       saveSharedCheckCache(effective, r, decision)
 
-      pushCheckResultLog("方案", r.scheme?.tag ?? r.scheme?.name ?? "暂无法获取", decision.scheme)
+      pushCheckResultLog("方案", schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取", decision.scheme)
       pushCheckResultLog("词库", r.dict?.remoteIdOrSha ?? "暂无法获取", decision.dict)
       pushCheckResultLog("模型", r.model?.remoteIdOrSha ?? "暂无法获取", decision.model)
       setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true)
@@ -1062,7 +1089,7 @@ export function HomeView() {
         pre = shared.remote
         decision = shared.decision
         resolvedKey = key
-        setRemoteSchemeVer(shared.remote.scheme?.tag ?? shared.remote.scheme?.name ?? "暂无法获取")
+        setRemoteSchemeVer(schemeRemoteDisplayMark(effective, shared.remote.scheme) || "暂无法获取")
         setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取")
         setRemoteModelMark(shared.remote.model?.remoteIdOrSha ?? "暂无法获取")
         setNotes(shared.remote.scheme?.body ?? "")
@@ -1079,17 +1106,17 @@ export function HomeView() {
         setRemoteModelMark("检查更新中...")
         setNotes("检查更新中...")
         pre = await checkAllUpdates(effective)
-        setRemoteSchemeVer(pre.scheme?.tag ?? pre.scheme?.name ?? "暂无法获取")
+        setRemoteSchemeVer(schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取")
         setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取")
         setRemoteModelMark(pre.model?.remoteIdOrSha ?? "暂无法获取")
         setNotes(pre.scheme?.body ?? "")
         setLastCheck(pre)
-        decision = buildUpdateDecision(localMeta, pre)
+        decision = buildUpdateDecision(localMeta, pre, effective)
         setLastCheckDecision(decision)
         setLastCheckKey(key)
       }
       if (pre && !decision) {
-        decision = buildUpdateDecision(localMeta, pre)
+        decision = buildUpdateDecision(localMeta, pre, effective)
         setLastCheckDecision(decision)
       }
 
@@ -1237,7 +1264,7 @@ export function HomeView() {
       return (
         <Section key={key} header={<Text>本地信息</Text>}>
           <RowKV k="当前选择的方案" v={localSelectedScheme} />
-          <RowKV k="本地方案版本" v={localSchemeVersion} />
+          <RowKV k="本地方案" v={localSchemeVersion} />
           <RowKV k="本地词库" v={localDictMark} />
           <RowKV k="本地模型" v={localModelMark} />
         </Section>
@@ -1246,7 +1273,7 @@ export function HomeView() {
     if (key === "remote") {
       return (
         <Section key={key} header={<Text>远程信息</Text>}>
-          <RowKV k="远程方案版本" v={remoteSchemeVer} />
+          <RowKV k="远程方案" v={remoteSchemeVer} />
           <RowKV k="远程词库" v={remoteDictMark} />
           <RowKV k="远程模型" v={remoteModelMark} />
         </Section>

@@ -92,6 +92,16 @@ function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputM
   return undefined
 }
 
+function normalizePrereleaseSchemeFromMeta(meta: any): boolean | undefined {
+  const value = meta?.scheme?.usePrereleaseScheme
+  if (typeof value === "boolean") return value
+  const raw = String(value ?? "").trim().toLowerCase()
+  if (raw === "1" || raw === "true" || raw === "yes") return true
+  if (raw === "0" || raw === "false" || raw === "no") return false
+  if (String(meta?.scheme?.remoteTagOrName ?? "").trim().toLowerCase() === "dict-nightly") return true
+  return undefined
+}
+
 async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): Promise<string[]> {
   const out: string[] = []
   const push = (p?: string) => {
@@ -241,10 +251,12 @@ export function SettingsView(props: {
     const normalized = normalizeSchemeFromMeta(meta, base)
     const releaseSource = normalizeReleaseSourceFromMeta(meta)
     const inputMethod = normalizeInputMethodFromMeta(meta, detectedEngine)
+    const usePrereleaseScheme = normalizePrereleaseSchemeFromMeta(meta)
 
     const next: AppConfig = {
       ...base,
       releaseSource: releaseSource ?? base.releaseSource,
+      usePrereleaseScheme: usePrereleaseScheme ?? base.usePrereleaseScheme,
       inputMethod: inputMethod ?? base.inputMethod,
       schemeEdition: normalized?.schemeEdition ?? base.schemeEdition,
       proSchemeKey:
@@ -257,6 +269,7 @@ export function SettingsView(props: {
       base.schemeEdition !== next.schemeEdition ||
       base.proSchemeKey !== next.proSchemeKey ||
       base.releaseSource !== next.releaseSource ||
+      base.usePrereleaseScheme !== next.usePrereleaseScheme ||
       base.inputMethod !== next.inputMethod
     if (!changed) return base
 
@@ -490,6 +503,16 @@ export function SettingsView(props: {
                 </Text>
               ))}
             </Picker>
+
+            <Toggle
+              title={"预发布版本"}
+              value={cfg.usePrereleaseScheme}
+              onChanged={(v: boolean) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+                setCfg((c) => ({ ...c, usePrereleaseScheme: v }))
+              }}
+              toggleStyle="switch"
+            />
 
             {releaseIdx === 1 ? (
               <TextField

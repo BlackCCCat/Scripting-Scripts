@@ -21,6 +21,7 @@ export type AppConfig = {
   hamsterRootPath: string
   hamsterBookmarkName: string
   releaseSource: ReleaseSource
+  usePrereleaseScheme: boolean
   githubToken: string
 
   schemeEdition: SchemeEdition
@@ -46,6 +47,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   hamsterRootPath: "",
   hamsterBookmarkName: "",
   releaseSource: "cnb",
+  usePrereleaseScheme: false,
   githubToken: "",
   schemeEdition: "base",
   proSchemeKey: "moqi",

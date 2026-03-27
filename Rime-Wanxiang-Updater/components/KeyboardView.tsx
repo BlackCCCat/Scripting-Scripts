@@ -33,12 +33,30 @@ function normalizeMark(value?: string) {
   return String(value ?? "").trim().toLowerCase()
 }
 
-function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult): UpdateDecision {
-  const schemeRemoteMark = normalizeMark(remote.scheme?.tag ?? remote.scheme?.name)
+function schemeRemoteDisplayMark(cfg: AppConfig, remote: AllUpdateResult["scheme"] | null | undefined) {
+  return String(
+    (cfg.usePrereleaseScheme
+      ? (remote?.remoteIdOrSha ?? remote?.tag ?? remote?.name)
+      : (remote?.tag ?? remote?.name))
+      ?? ""
+  ).trim()
+}
+
+function schemeLocalDisplayMark(cfg: AppConfig, metaScheme: MetaBundle["scheme"] | undefined) {
+  return String(
+    (cfg.usePrereleaseScheme
+      ? metaScheme?.remoteIdOrSha
+      : metaScheme?.remoteTagOrName)
+      ?? ""
+  ).trim()
+}
+
+function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult, cfg: AppConfig): UpdateDecision {
+  const schemeRemoteMark = normalizeMark(schemeRemoteDisplayMark(cfg, remote.scheme))
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
   const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
   return {
-    scheme: !!(schemeRemoteMark && normalizeMark(localMeta?.scheme?.remoteTagOrName) !== schemeRemoteMark),
+    scheme: !!(schemeRemoteMark && normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
     model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
   }
@@ -219,7 +237,7 @@ export function KeyboardView() {
     if (!checked) return "unchecked"
     if (lastDecision?.[kind]) return "update"
     const remote = kind === "scheme"
-      ? lastCheck?.scheme?.tag ?? lastCheck?.scheme?.name
+      ? schemeRemoteDisplayMark(cfg, lastCheck?.scheme)
       : kind === "dict"
         ? lastCheck?.dict?.remoteIdOrSha
         : lastCheck?.model?.remoteIdOrSha
@@ -244,7 +262,7 @@ export function KeyboardView() {
 
       const localMeta = await findLocalMeta(current)
       const remote = await checkAllUpdates(current)
-      const decision = buildUpdateDecision(localMeta, remote)
+      const decision = buildUpdateDecision(localMeta, remote, current)
       setLastCheck(remote)
       setLastDecision(decision)
       setLastCheckKey(getCheckCacheKey(current))

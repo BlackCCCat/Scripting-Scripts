@@ -31,7 +31,14 @@ function writeValue(st: any, key: string, value: string) {
 }
 
 export function getCheckCacheKey(cfg: AppConfig) {
-  return [cfg.releaseSource, cfg.schemeEdition, cfg.proSchemeKey, cfg.hamsterRootPath, cfg.hamsterBookmarkName].join("|")
+  return [
+    cfg.releaseSource,
+    cfg.usePrereleaseScheme ? "prerelease" : "stable",
+    cfg.schemeEdition,
+    cfg.proSchemeKey,
+    cfg.hamsterRootPath,
+    cfg.hamsterBookmarkName,
+  ].join("|")
 }
 
 export function loadSharedCheckCache(): SharedCheckCache | null {

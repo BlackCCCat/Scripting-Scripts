@@ -6,6 +6,7 @@ import { storage } from "./common"
 export type SchemeMeta = {
   remoteIdOrSha: string
   remoteTagOrName: string
+  usePrereleaseScheme?: boolean
   schemeEdition?: SchemeEdition
   proSchemeKey?: ProSchemeKey
   selectedScheme?: string
@@ -50,6 +51,7 @@ type RecordData = {
   cnb_id?: string
   release_source?: string
   input_method?: string
+  prerelease_scheme?: string
 }
 
 type RecordKind = "scheme" | "dict" | "model" | "predict"
@@ -310,6 +312,7 @@ function toSchemeMeta(rec?: RecordData): SchemeMeta | undefined {
   return {
     remoteIdOrSha,
     remoteTagOrName,
+    usePrereleaseScheme: String(rec.prerelease_scheme ?? "").trim() === "1",
     schemeEdition,
     proSchemeKey,
     selectedScheme,
@@ -373,6 +376,7 @@ export async function setSchemeMeta(rec: {
   installRoot: string
   bookmarkName?: string
   fileName: string
+  usePrereleaseScheme?: boolean
   schemeEdition: SchemeEdition
   proSchemeKey?: ProSchemeKey
   inputMethod?: InputMethod
@@ -396,6 +400,7 @@ export async function setSchemeMeta(rec: {
     cnb_id: ids.cnb_id,
     release_source: rec.source ?? "",
     input_method: rec.inputMethod ?? "",
+    prerelease_scheme: rec.usePrereleaseScheme ? "1" : "0",
   }
   writeRecord(rec.installRoot, "scheme", data, rec.bookmarkName)
   await loadMetaAsync(rec.installRoot, rec.bookmarkName)
