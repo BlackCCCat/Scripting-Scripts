@@ -598,6 +598,15 @@ export function SettingsView(props: {
               }}
               toggleStyle="switch"
             />
+            <Toggle
+              title={"不清理部署目录(build)"}
+              value={cfg.skipBuildCleanup}
+              onChanged={(v: boolean) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+                setCfg((c) => ({ ...c, skipBuildCleanup: v }))
+              }}
+              toggleStyle="switch"
+            />
           </Section>
 
           <Section header={<Text>页面显示设置</Text>}>

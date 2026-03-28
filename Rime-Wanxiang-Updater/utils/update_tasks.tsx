@@ -369,9 +369,13 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, on
   if (cfg.autoDeployAfterDownload === false) return
   const installRoot = await resolveRimeDir(cfg)
   const buildDir = Path.join(installRoot, "build")
-  onStage?.("部署前清理 build…")
-  onLog?.(`删除 build 目录：${buildDir}`)
-  await removeDirSafe(buildDir)
+  if (cfg.skipBuildCleanup) {
+    onLog?.(`跳过清理 build 目录：${buildDir}`)
+  } else {
+    onStage?.("部署前清理 build…")
+    onLog?.(`删除 build 目录：${buildDir}`)
+    await removeDirSafe(buildDir)
+  }
   for (let i = 3; i >= 1; i--) {
     onStage?.(`部署倒计时：${i}s`)
     await sleep(1000)
@@ -383,8 +387,12 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, on
 export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
   const installRoot = await resolveRimeDir(cfg)
   const buildDir = Path.join(installRoot, "build")
-  onLog?.(`删除 build 目录：${buildDir}`)
-  await removeDirSafe(buildDir)
+  if (cfg.skipBuildCleanup) {
+    onLog?.(`跳过清理 build 目录：${buildDir}`)
+  } else {
+    onLog?.(`删除 build 目录：${buildDir}`)
+    await removeDirSafe(buildDir)
+  }
   for (let i = 3; i >= 1; i--) {
     onStage?.(`部署倒计时：${i}s`)
     await sleep(1000)

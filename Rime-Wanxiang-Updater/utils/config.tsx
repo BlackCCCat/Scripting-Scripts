@@ -29,6 +29,7 @@ export type AppConfig = {
 
   excludePatternsText: string // 按行
   autoDeployAfterDownload: boolean
+  skipBuildCleanup: boolean
   inputMethod: InputMethod
   autoCheckOnLaunch: boolean
   showVerboseLog: boolean
@@ -53,6 +54,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   proSchemeKey: "moqi",
   excludePatternsText: "",
   autoDeployAfterDownload: true,
+  skipBuildCleanup: false,
   inputMethod: "hamster",
   autoCheckOnLaunch: false,
   showVerboseLog: true,
