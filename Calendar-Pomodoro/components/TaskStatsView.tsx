@@ -147,6 +147,18 @@ function formatDurationMinutes(ms: number): string {
   return `${`${hours}`.padStart(2, "0")}:${`${minutes}`.padStart(2, "0")}`;
 }
 
+function formatDurationWithUnit(ms: number): string {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60000));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}天`);
+  if (hours > 0 || days > 0) parts.push(`${hours}小时`);
+  parts.push(`${minutes}分钟`);
+  return parts.join("");
+}
+
 function weekdayLabel(weekday: number): string {
   const labels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   return labels[weekday] ?? "未知";
@@ -235,6 +247,7 @@ export function TaskStatsView(props: { task: Task }) {
         return;
       }
       await event.presentEditView();
+      await loadRecords();
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) });
     }
@@ -384,16 +397,16 @@ export function TaskStatsView(props: { task: Task }) {
       left: [
         {
           title: "累计时长",
-          value: formatDurationMinutes(summary.totalMs),
+          value: formatDurationWithUnit(summary.totalMs),
           tint: "systemGreen",
         },
         {
           title: "平均单次",
-          value: formatDurationMinutes(summary.averageMs),
+          value: formatDurationWithUnit(summary.averageMs),
         },
         {
           title: "最长单次",
-          value: formatDurationMinutes(summary.longestMs),
+          value: formatDurationWithUnit(summary.longestMs),
           tint: "systemOrange",
         },
       ],
@@ -401,15 +414,16 @@ export function TaskStatsView(props: { task: Task }) {
         {
           title: "记录次数",
           value: `${summary.totalCount}`,
+          tint: "systemTeal",
         },
         {
           title: "本月时长",
-          value: formatDurationMinutes(summary.monthMs),
+          value: formatDurationWithUnit(summary.monthMs),
           tint: "systemBlue",
         },
         {
           title: "最近 30 天",
-          value: formatDurationMinutes(summary.last30Ms),
+          value: formatDurationWithUnit(summary.last30Ms),
           tint: "systemPurple",
         },
       ],
