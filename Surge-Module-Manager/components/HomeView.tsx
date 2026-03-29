@@ -6,6 +6,7 @@ import {
   Navigation,
   NavigationStack,
   Picker,
+  ProgressView,
   Section,
   Spacer,
   Text,
@@ -43,7 +44,7 @@ export function HomeView() {
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
   const [modules, setModules] = useState<ModuleInfo[]>([])
   const [stage, setStage] = useState("就绪")
-  const [progress, setProgress] = useState("")
+  const [progress, setProgress] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [resolvedBaseDir, setResolvedBaseDir] = useState("")
   const [filterCategory, setFilterCategory] = useState("全部")
@@ -98,7 +99,7 @@ export function HomeView() {
       setModules(list)
       if (resetStageOnSuccess) {
         setStage("就绪")
-        setProgress("")
+        setProgress(null)
       }
     } catch (e: any) {
       setModules([])
@@ -164,7 +165,7 @@ export function HomeView() {
 
     setBusy(true)
     setStage("添加模块中…")
-    setProgress("")
+    setProgress(null)
     try {
       if (info.isLocal) {
         setStage(`保存模块：${info.name}`)
@@ -225,7 +226,7 @@ export function HomeView() {
 
     setBusy(true)
     setStage("修改模块中…")
-    setProgress("")
+    setProgress(null)
     try {
       next[idx] = merged
       if (merged.name && merged.name !== target.name) {
@@ -286,7 +287,7 @@ export function HomeView() {
 
     setBusy(true)
     setStage("删除模块中…")
-    setProgress("")
+    setProgress(null)
     try {
       await removeModuleFile(target)
       await refreshModules()
@@ -324,7 +325,7 @@ export function HomeView() {
 
     setBusy(true)
     setStage(title)
-    setProgress("")
+    setProgress(null)
     const errors: string[] = []
     let okCount = 0
     try {
@@ -335,7 +336,7 @@ export function HomeView() {
 
       const updateOverallProgress = () => {
         setStage(`下载中：已完成 ${completed}/${total}`)
-        setProgress(`${Math.round((completed / total) * 100)}%`)
+        setProgress(completed / total)
       }
 
       updateOverallProgress()
@@ -375,7 +376,7 @@ export function HomeView() {
       await Dialog.alert({ title: "下载失败", message: msg })
     } finally {
       setBusy(false)
-      setProgress("")
+      setProgress(null)
     }
   }
 
@@ -421,7 +422,14 @@ export function HomeView() {
 
         <Section header={<Text>状态</Text>}>
           <Text>{stage}</Text>
-          {progress ? <Text>进度：{progress}</Text> : null}
+          {progress !== null ? (
+            <ProgressView
+              value={progress}
+              total={1}
+              progressViewStyle="linear"
+              frame={{ maxWidth: "infinity" }}
+            />
+          ) : null}
         </Section>
 
         <Section
