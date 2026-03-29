@@ -57,6 +57,8 @@ import {
 import { formatDateTime, formatDuration } from "../utils/time";
 // 任务新增/编辑页面
 import { TaskEditView } from "./TaskEditView";
+// 任务统计页面
+import { TaskStatsView } from "./TaskStatsView";
 
 // Live Activity 创建器（用于 start/update/end）
 const createTimerActivity = PomodoroLiveActivity;
@@ -583,6 +585,13 @@ export function CalendarTimerView() {
     }
     const next = tasks.map((t) => (t.id === task.id ? updated : t));
     await persistTasks(next);
+  }
+
+  async function openTaskStats(task: Task) {
+    // 点击任务行时进入统计页；这里不改变当前计时状态。
+    await Navigation.present({
+      element: <TaskStatsView task={task} />,
+    });
   }
 
   async function removeTask(task: Task) {
@@ -1219,19 +1228,14 @@ export function CalendarTimerView() {
                   action={withButtonHaptic(minimizeScript)}
                 />
               ) : null}
-              <Button
-                title=""
-                systemImage="arrow.clockwise"
-                action={withButtonHaptic(refreshLiveActivityManually)}
-              />
             </HStack>
           ),
           topBarTrailing: (
             <HStack>
               <Button
                 title=""
-                systemImage="list.bullet"
-                action={withButtonHaptic(toggleEditMode)}
+                systemImage="arrow.clockwise"
+                action={withButtonHaptic(refreshLiveActivityManually)}
               />
               <Button
                 title=""
@@ -1345,7 +1349,19 @@ export function CalendarTimerView() {
           )}
         </Section>
 
-        <Section header={<Text>任务列表</Text>}>
+        <Section
+          header={
+            <HStack>
+              <Text>任务列表</Text>
+              <Spacer />
+              <Button
+                title=""
+                systemImage="list.bullet"
+                action={withButtonHaptic(toggleEditMode)}
+              />
+            </HStack>
+          }
+        >
           {tasks.length ? (
             <ForEach
               count={tasks.length}
@@ -1393,39 +1409,47 @@ export function CalendarTimerView() {
                     }}
                   >
                     {/* 单行任务展示 */}
-                    <HStack padding={{ top: 8, bottom: 8 }}>
-                      <Image
-                        systemName={iconName}
-                        foregroundStyle={iconColor}
-                        imageScale="large"
-                        frame={{ width: 22, height: 22 }}
-                      />
-                      <VStack alignment="leading">
-                        <Text font="headline">{task.name}</Text>
-                        <HStack spacing={4}>
-                          <Text foregroundStyle="secondaryLabel">
-                            {task.calendarTitle}
-                          </Text>
-                          {countdownLabel ? (
-                            <Text foregroundStyle="secondaryLabel">
-                              · {countdownLabel}
-                            </Text>
-                          ) : null}
-                          {notifyLabel ? (
+                    <HStack padding={{ top: 8, bottom: 8 }} spacing={10}>
+                      <Button
+                        buttonStyle="plain"
+                        disabled={saving || isEditing}
+                        action={withButtonHaptic(() => openTaskStats(task))}
+                      >
+                        <HStack spacing={10}>
+                          <Image
+                            systemName={iconName}
+                            foregroundStyle={iconColor}
+                            imageScale="large"
+                            frame={{ width: 22, height: 22 }}
+                          />
+                          <VStack alignment="leading">
+                            <Text font="headline">{task.name}</Text>
                             <HStack spacing={4}>
-                              <Text foregroundStyle="secondaryLabel">·</Text>
-                              <Image
-                                systemName="bell.badge.fill"
-                                foregroundStyle="secondaryLabel"
-                                imageScale="small"
-                              />
                               <Text foregroundStyle="secondaryLabel">
-                                {notifyLabel}
+                                {task.calendarTitle}
                               </Text>
+                              {countdownLabel ? (
+                                <Text foregroundStyle="secondaryLabel">
+                                  · {countdownLabel}
+                                </Text>
+                              ) : null}
+                              {notifyLabel ? (
+                                <HStack spacing={4}>
+                                  <Text foregroundStyle="secondaryLabel">·</Text>
+                                  <Image
+                                    systemName="bell.badge.fill"
+                                    foregroundStyle="secondaryLabel"
+                                    imageScale="small"
+                                  />
+                                  <Text foregroundStyle="secondaryLabel">
+                                    {notifyLabel}
+                                  </Text>
+                                </HStack>
+                              ) : null}
                             </HStack>
-                          ) : null}
+                          </VStack>
                         </HStack>
-                      </VStack>
+                      </Button>
                       <Spacer />
                       {isRunning ? (
                         <Text foregroundStyle="secondaryLabel">计时中</Text>
