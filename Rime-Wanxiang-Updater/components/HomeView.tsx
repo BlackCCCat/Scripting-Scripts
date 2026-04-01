@@ -581,6 +581,8 @@ function progressStageLabel(stage: string): string {
 }
 
 export function HomeView() {
+  const supportsMinimization =
+    typeof Script.supportsMinimization === "function" && Script.supportsMinimization()
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
   const logProxyRef = useRef<any>()
 
@@ -986,11 +988,48 @@ export function HomeView() {
     }
   }
 
+  async function minimizeScript() {
+    if (!supportsMinimization || busy) return
+    try {
+      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
+    } catch { }
+    try {
+      await Script.minimize()
+    } catch { }
+  }
+
   function closeScript() {
     try {
       ; (globalThis as any).HapticFeedback?.mediumImpact?.()
     } catch { }
-    Script.exit()
+    if (!busy) {
+      Script.exit()
+      return
+    }
+    setAlert({
+      title: "退出当前更新？",
+      isPresented: true,
+      message: <Text>当前有更新任务正在进行，退出后将关闭当前脚本界面。是否继续退出？</Text>,
+      actions: (
+        <HStack>
+          <Button
+            title="取消"
+            action={() => {
+              try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+              closeAlert()
+            }}
+          />
+          <Button
+            title="退出"
+            action={() => {
+              try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+              closeAlert()
+              Script.exit()
+            }}
+          />
+        </HStack>
+      ),
+    })
   }
 
   async function openFullscreenLogs() {
@@ -1455,18 +1494,30 @@ export function HomeView() {
         }}
       >
         <List
-          navigationTitle={"方案更新"}
+          navigationTitle={"万象工具"}
           navigationBarTitleDisplayMode={"inline"}
           listStyle={"insetGroup"}
           toolbar={{
             topBarLeading: (
-              <Button
-                title=""
-                systemImage="xmark.circle.fill"
-                buttonStyle="plain"
-                foregroundStyle="systemRed"
-                action={closeScript}
-              />
+              <HStack spacing={8}>
+                <Button
+                  title=""
+                  systemImage="xmark.circle"
+                  foregroundStyle="systemRed"
+                  action={closeScript}
+                />
+                {supportsMinimization ? (
+                  <Button
+                    title=""
+                    systemImage="minus.circle"
+                    foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}
+                    disabled={busy}
+                    action={() => {
+                      void minimizeScript()
+                    }}
+                  />
+                ) : null}
+              </HStack>
             ),
             topBarTrailing: (
               <HStack spacing={8}>

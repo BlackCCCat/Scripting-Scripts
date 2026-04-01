@@ -214,7 +214,7 @@ export function SettingsView(props: {
     })
   }
 
-  async function syncSchemeFromLocal(base: AppConfig, strictPredict = false): Promise<AppConfig> {
+  async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
     let detected = ""
     let detectedEngine = ""
     try {
@@ -320,7 +320,7 @@ export function SettingsView(props: {
         if (pathChanged) {
           try {
             let next = { ...loadConfig(), hamsterRootPath: selectedPath, hamsterBookmarkName: matched.name }
-            next = await syncSchemeFromLocal(next, true)
+            next = await syncSchemeFromLocal(next)
             setCfg(next)
           } catch { }
         }
@@ -357,7 +357,7 @@ export function SettingsView(props: {
         fixed.hamsterRootPath !== initialHamsterRootPath ||
         fixed.hamsterBookmarkName !== initialHamsterBookmarkName
       if (pathChanged) {
-        fixed = await syncSchemeFromLocal(fixed, false)
+        fixed = await syncSchemeFromLocal(fixed)
       }
       saveConfig(fixed)
       const schemeChanged =
@@ -470,7 +470,7 @@ export function SettingsView(props: {
                         hamsterBookmarkName: b.name,
                       }
                       try {
-                        next = await syncSchemeFromLocal(next, true)
+                        next = await syncSchemeFromLocal(next)
                         setCfg(next)
                       } catch { }
                     })()
