@@ -32,6 +32,7 @@ import { callMaybeAsync, normalizePath, storage } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
 import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
+import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
 import { HomeSectionOrderView } from "./HomeSectionOrderView"
 
 type AlertNode = any
@@ -51,6 +52,7 @@ const RESET_STORAGE_KEYS = [
   "wanxiang_updater_config",
   "wanxiang_meta_store",
   "wanxiang_extracted_files",
+  "wanxiang_check_cache",
 ]
 
 function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
@@ -404,6 +406,18 @@ export function SettingsView(props: {
     }
   }
 
+  async function clearCache() {
+    try {
+      const removedTempFiles = await clearWanxiangTempFiles()
+      showInfo(
+        "已清理缓存",
+        `已清理临时文件 ${removedTempFiles} 个。`
+      )
+    } catch (e: any) {
+      showInfo("清理缓存失败", String(e?.message ?? e))
+    }
+  }
+
   // 供 Picker 渲染用的文本数组（与你示例一致：Text tag={index}）
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
@@ -637,6 +651,31 @@ export function SettingsView(props: {
               prompt={"例如：\nuser.yaml\n*.custom.yaml\ntips_show.txt"}
               textFieldStyle="roundedBorder"
             />
+          </Section>
+
+          <Section
+            footer={(
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                将主动清理临时下载文件，不会清理本地设置或缓存记录。
+              </Text>
+            )}
+          >
+            <Button
+              action={() => {
+                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                void clearCache()
+              }}
+            >
+              <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 6 }}>
+                <Text
+                  font="headline"
+                  foregroundStyle="systemBlue"
+                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
+                >
+                  清理缓存
+                </Text>
+              </HStack>
+            </Button>
           </Section>
 
           <Section

@@ -2,6 +2,7 @@
 import { Navigation, Script } from "scripting"
 import { HomeView } from "./components/HomeView"
 import { runStorageMigration } from "./utils/storage_migration"
+import { clearWanxiangTempFiles } from "./utils/cache_cleanup"
 
 let isPresentingHome = false
 const supportsMinimization =
@@ -28,6 +29,7 @@ async function presentHome() {
 
 async function run() {
   runStorageMigration()
+  await clearWanxiangTempFiles()
 
   const removeResume =
     supportsMinimization && typeof Script.onResume === "function"

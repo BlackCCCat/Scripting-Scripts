@@ -46,6 +46,7 @@ import {
   deployInputMethod,
   type AllUpdateResult,
 } from "../utils/update_tasks"
+import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
 
 const FULLSCREEN_SYMBOL = "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
 
@@ -998,12 +999,19 @@ export function HomeView() {
     } catch { }
   }
 
+  async function cleanupAndExit() {
+    try {
+      await clearWanxiangTempFiles()
+    } catch { }
+    Script.exit()
+  }
+
   function closeScript() {
     try {
       ; (globalThis as any).HapticFeedback?.mediumImpact?.()
     } catch { }
     if (!busy) {
-      Script.exit()
+      void cleanupAndExit()
       return
     }
     setAlert({
@@ -1024,7 +1032,7 @@ export function HomeView() {
             action={() => {
               try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
               closeAlert()
-              Script.exit()
+              void cleanupAndExit()
             }}
           />
         </HStack>
