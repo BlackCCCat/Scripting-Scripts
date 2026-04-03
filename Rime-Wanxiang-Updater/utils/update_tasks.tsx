@@ -197,7 +197,7 @@ async function fetchLatestAssetFromCnb(args: {
   else if (Array.isArray(first.json?.releases)) list = first.json.releases
   else if (Array.isArray(first.json?.data?.releases)) list = first.json.data.releases
 
-  // ✅ 模型需要最后一页（按你 python 逻辑）
+  // ✅ 模型需要最后一页
   if (args.needLastPage) {
     const total = first.headers.get("X-Cnb-Total")
     const pageSize = first.headers.get("X-Cnb-Page-Size")
