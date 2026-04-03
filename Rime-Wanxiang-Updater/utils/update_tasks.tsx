@@ -17,10 +17,11 @@ const GH_REPO = "rime_wanxiang"
 const CNB_REPO = "rime-wanxiang"
 
 const DICT_TAG = "dict-nightly"
+const CNB_PREVIEW_TAG = "v1.0.0"
+const CNB_MODEL_TAG = "model"
 const MODEL_REPO = "RIME-LMDG"
 const MODEL_TAG = "LTS"
 const MODEL_FILE = "wanxiang-lts-zh-hans.gram"
-const CNB_DICT_TITLE = "\u8bcd\u5e93"
 const CNB_SCHEME_TITLE = "\u4e07\u8c61\u62fc\u97f3\u8f93\u5165\u65b9\u6848"
 const HTTP_TIMEOUT_MS = 30 * 1000
 
@@ -168,7 +169,7 @@ async function fetchLatestAssetFromGithub(args: {
         tag: rel.tag_name,
         body: rel.body,
         remoteIdOrSha: pickGithubSha256FromDigest(a?.digest),
-        size: typeof a?.size === "number" ? a.size : undefined, // ✅ GitHub 资产一般带 size
+        size: typeof a?.size === "number" ? a.size : undefined,
       }
     }
   }
@@ -180,7 +181,8 @@ async function fetchLatestAssetFromCnb(args: {
   repo: string
   assetNameExact?: string
   assetNameGlob?: string
-  needLastPage?: boolean
+  traverseAllPages?: boolean
+  releaseTagExact?: string
   releaseTitleIncludes?: string[]
 }): Promise<RemoteAsset | undefined> {
   const headers: Record<string, string> = {
@@ -192,42 +194,44 @@ async function fetchLatestAssetFromCnb(args: {
 
   const first = await httpJson(baseUrl, { headers })
 
-  let list: any[] = []
-  if (Array.isArray(first.json)) list = first.json
-  else if (Array.isArray(first.json?.releases)) list = first.json.releases
-  else if (Array.isArray(first.json?.data?.releases)) list = first.json.data.releases
+  const toReleaseList = (json: any): any[] => {
+    if (Array.isArray(json)) return json
+    if (Array.isArray(json?.releases)) return json.releases
+    if (Array.isArray(json?.data?.releases)) return json.data.releases
+    return []
+  }
 
-  // ✅ 模型需要最后一页
-  if (args.needLastPage) {
-    const total = first.headers.get("X-Cnb-Total")
-    const pageSize = first.headers.get("X-Cnb-Page-Size")
-    if (total && pageSize) {
-      const t = Math.max(0, parseInt(total, 10))
-      const ps = Math.max(1, parseInt(pageSize, 10))
-      const lastPage = Math.max(1, Math.ceil(t / ps))
-      if (lastPage > 1) {
-        const last = await httpJson(`${baseUrl}?page=${lastPage}`, { headers })
-        let lastList: any[] = []
-        if (Array.isArray(last.json)) lastList = last.json
-        else if (Array.isArray(last.json?.releases)) lastList = last.json.releases
-        else if (Array.isArray(last.json?.data?.releases)) lastList = last.json.data.releases
-        const lastRelease = lastList.length ? lastList[lastList.length - 1] : undefined
-        if (lastRelease) list = list.concat([lastRelease])
-      }
+  let list: any[] = toReleaseList(first.json)
+
+  const total = first.headers.get("X-Cnb-Total")
+  const pageSize = first.headers.get("X-Cnb-Page-Size")
+  const totalCount = total ? Math.max(0, parseInt(total, 10)) : 0
+  const perPage = pageSize ? Math.max(1, parseInt(pageSize, 10)) : 1
+  const lastPage = totalCount && perPage ? Math.max(1, Math.ceil(totalCount / perPage)) : 1
+
+  if (args.traverseAllPages && lastPage > 1) {
+    for (let page = 2; page <= lastPage; page++) {
+      const next = await httpJson(`${baseUrl}?page=${page}`, { headers })
+      list = list.concat(toReleaseList(next.json))
     }
   }
 
   const re = args.assetNameGlob ? globToRegExp(args.assetNameGlob) : undefined
   const titleKeywords = (args.releaseTitleIncludes ?? []).map((s) => s.toLowerCase()).filter(Boolean)
+  const exactTag = String(args.releaseTagExact ?? "").trim().toLowerCase()
+  const normalizedTag = (rel: any) =>
+    String(rel?.tag_ref ?? rel?.tag_name ?? rel?.tagName ?? "").split("/").pop()?.trim().toLowerCase() ?? ""
   const matchTitle = (rel: any) => {
     if (!titleKeywords.length) return true
     const title = String(rel?.title ?? rel?.name ?? "").toLowerCase()
     return titleKeywords.some((k) => title.includes(k))
   }
-  const preferred = titleKeywords.length ? list.filter(matchTitle) : []
+  const matchTag = (rel: any) => !exactTag || normalizedTag(rel) === exactTag
+  const preferred = list.filter((rel) => matchTag(rel) && matchTitle(rel))
   const searchList = preferred.length ? preferred : list
 
   for (const rel of searchList) {
+    if (!matchTag(rel)) continue
     const assets = rel?.assets ?? []
     for (const a of assets) {
       const name = a?.name
@@ -254,7 +258,7 @@ async function fetchLatestAssetFromCnb(args: {
             ? a.size
             : typeof a?.fileSize === "number"
               ? a.fileSize
-              : undefined, // ✅ CNB 可能是 size 或 fileSize
+              : undefined,
       }
     }
   }
@@ -284,7 +288,8 @@ async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise
       owner: OWNER,
       repo: CNB_REPO,
       assetNameExact: fileName,
-      needLastPage: true,
+      releaseTagExact: CNB_MODEL_TAG,
+      traverseAllPages: true,
     })
 }
 
@@ -304,7 +309,7 @@ async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | und
       owner: OWNER,
       repo: CNB_REPO,
       assetNameGlob: glob,
-      releaseTitleIncludes: [CNB_DICT_TITLE],
+      releaseTagExact: CNB_PREVIEW_TAG,
     })
   }
   if (cfg.releaseSource === "github") {
@@ -348,8 +353,7 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
         owner: OWNER,
         repo: CNB_REPO,
         assetNameGlob: dictPattern(cfg),
-        needLastPage: false,
-        releaseTitleIncludes: [CNB_DICT_TITLE],
+        releaseTagExact: CNB_PREVIEW_TAG,
       })
 
   const model = await fetchModelReleaseAsset(cfg, MODEL_FILE)
@@ -538,8 +542,7 @@ export async function updateDict(
         owner: OWNER,
         repo: CNB_REPO,
         assetNameGlob: dictPattern(cfg),
-        needLastPage: false,
-        releaseTitleIncludes: [CNB_DICT_TITLE],
+        releaseTagExact: CNB_PREVIEW_TAG,
       })
 
   if (!dict?.url) throw new Error("未找到可用的词库资产")
