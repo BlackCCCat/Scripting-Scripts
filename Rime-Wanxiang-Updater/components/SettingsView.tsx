@@ -48,6 +48,17 @@ const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "元书输入法", value: "hamster3" },
 ]
 
+const PRO_KEY_LABELS: Record<ProSchemeKey, string> = {
+  moqi: "moqi-墨奇",
+  flypy: "flypy-小鹤",
+  zrm: "zrm-自然码",
+  tiger: "tiger-虎码",
+  wubi: "wubi-五笔",
+  hanxin: "hanxin-汉心",
+  shouyou: "shouyou-首右",
+  wx: "wx-万象",
+}
+
 const RESET_STORAGE_KEYS = [
   "wanxiang_updater_config",
   "wanxiang_meta_store",
@@ -421,7 +432,7 @@ export function SettingsView(props: {
   // 供 Picker 渲染用的文本数组（与你示例一致：Text tag={index}）
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
-  const proLabels = useMemo<string[]>(() => PRO_KEYS.slice(), [])
+  const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
 
   return (
     <NavigationStack>

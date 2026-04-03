@@ -3,11 +3,11 @@ import { Runtime } from "./runtime"
 
 export type ReleaseSource = "cnb" | "github"
 export type SchemeEdition = "base" | "pro"
-export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou"
+export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou" | "wx"
 export type InputMethod = "hamster" | "hamster3"
 export type HomeSectionKey = "local" | "remote" | "notes" | "actions" | "status"
 
-export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou"]
+export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou", "wx"]
 export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "notes", "actions", "status"]
 export const HOME_SECTION_LABELS: Record<HomeSectionKey, string> = {
   local: "本地信息",
