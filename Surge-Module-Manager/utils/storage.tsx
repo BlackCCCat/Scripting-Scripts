@@ -259,6 +259,32 @@ function resolveModulePath(target: ModuleInfo | string): string {
   return target.filePath ?? moduleFilePath(target.name)
 }
 
+export async function moveModuleFile(
+  target: ModuleInfo | string,
+  nextDir?: string,
+  nextName?: string
+): Promise<string> {
+  const fm = fmOrThrow()
+  const from = resolveModulePath(target)
+  const name = String(nextName ?? (typeof target === "string" ? target : target.name)).trim()
+  const baseDir = nextDir ?? Path.dirname(from)
+  const to = moduleFilePath(name, baseDir)
+
+  if (normalizePath(from) === normalizePath(to)) return to
+  await ensureDir(baseDir)
+  if (!(await exists(from))) return to
+
+  if (typeof fm.rename === "function") {
+    await fm.rename(from, to)
+    return to
+  }
+  if (typeof fm.renameSync === "function") {
+    fm.renameSync(from, to)
+    return to
+  }
+  throw new Error("FileManager.rename 不可用")
+}
+
 export async function detectLinkPrefix(target: ModuleInfo | string): Promise<string | undefined> {
   const fm = fmOrThrow()
   const path = resolveModulePath(target)
@@ -346,6 +372,7 @@ export async function saveLocalModule(info: ModuleInfo, rawContent: string): Pro
   const fm = fmOrThrow()
   if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
   const targetDir = info.saveDir ?? (await getModulesDirResolved())
+  await ensureDir(targetDir)
   const path = moduleFilePath(info.name, targetDir)
   let content = String(rawContent ?? "")
   content = upsertTag(content, "local", "true")

@@ -21,7 +21,6 @@ import {
   loadModules,
   moduleFilePath,
   detectLinkPrefix,
-  renameModuleFile,
   removeModuleFile,
   sortModules,
   type ModuleInfo,
@@ -29,6 +28,7 @@ import {
   listDirectSubDirs,
   saveLocalModule,
   getModulesDirResolved,
+  moveModuleFile,
 } from "../utils/storage"
 import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
@@ -191,12 +191,15 @@ export function HomeView() {
 
   async function modifyModuleFor(target: ModuleInfo) {
     const current = await loadModules()
+    const subDirs = await listDirectSubDirs()
+    const originalSaveDir = inferSaveDir(target)
     const updated = await Navigation.present<ModuleInfo>({
       element: (
         <EditModuleView
           title="编辑模块"
           categories={categories}
-          initial={target}
+          initial={{ ...target, saveDir: originalSaveDir }}
+          saveDirs={subDirs}
         />
       ),
     })
@@ -229,16 +232,22 @@ export function HomeView() {
     setProgress(null)
     try {
       next[idx] = merged
-      if (merged.name && merged.name !== target.name) {
-        await renameModuleFile(target, merged.name)
-      }
+      const finalName = merged.name || target.name
+      const finalSaveDir = merged.saveDir ?? originalSaveDir
+      const needMove =
+        finalName !== target.name ||
+        String(finalSaveDir ?? "") !== String(originalSaveDir ?? "")
+      const finalFilePath = needMove
+        ? await moveModuleFile(target, finalSaveDir, finalName)
+        : (target.filePath ?? moduleFilePath(finalName, finalSaveDir))
+
       if (merged.isLocal || !merged.link) {
         await saveLocalModule(
-          { ...merged, saveDir: inferSaveDir(merged) },
+          { ...merged, name: finalName, saveDir: finalSaveDir, filePath: finalFilePath },
           merged.content ?? ""
         )
       } else {
-        await updateModuleMetadata(merged, {
+        await updateModuleMetadata({ ...merged, name: finalName, filePath: finalFilePath }, {
           link: merged.link,
           category: merged.category,
           local: false,

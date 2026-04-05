@@ -65,6 +65,16 @@ export function EditModuleView(props: {
   }, [showLibrary])
 
   useEffect(() => {
+    const currentDir = initial?.saveDir ?? ""
+    if (!saveDirOptions.length || !currentDir) {
+      setSaveDirIdx(0)
+      return
+    }
+    const idx = saveDirOptions.findIndex((dir) => dir === currentDir)
+    setSaveDirIdx(idx >= 0 ? idx : 0)
+  }, [initial?.saveDir, saveDirOptions])
+
+  useEffect(() => {
     if (!initial || initial.link || !initial.filePath) return
     const fm: any = (globalThis as any).FileManager
     if (!fm?.readAsString) return
@@ -336,7 +346,7 @@ export function EditModuleView(props: {
             </Picker>
           </Section>
 
-          {showLibrary && saveDirOptions.length ? (
+          {saveDirOptions.length ? (
             <Section header={<Text>保存路径</Text>}>
               <Picker
                 title={"保存路径"}
