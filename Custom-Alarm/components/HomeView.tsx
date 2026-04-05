@@ -32,11 +32,20 @@ import {
   reconcileAlarmRecords,
   scheduleAlarm,
 } from "../utils/alarm_runtime"
-import { syncHolidayCalendarSource } from "../utils/holiday_calendar"
+import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
 import { DEFAULT_HOLIDAY_SOURCE_ID, loadCustomAlarmState, saveCustomAlarmState } from "../utils/storage"
 
-type ContentTab = "status" | "alarms" | "calendars"
-type RootTab = ContentTab | "add"
+const STATUS_TAB = 0
+const ALARMS_TAB = 1
+const CALENDARS_TAB = 2
+const ACTION_TAB = 3
+
+type ContentTab = typeof STATUS_TAB | typeof ALARMS_TAB | typeof CALENDARS_TAB
+type RootTab = ContentTab | typeof ACTION_TAB
+
+function isContentTab(value: RootTab): value is ContentTab {
+  return value === STATUS_TAB || value === ALARMS_TAB || value === CALENDARS_TAB
+}
 
 function repeatIcon(record: AlarmRecord): string {
   switch (record.repeatRule.kind) {
@@ -171,13 +180,12 @@ export function HomeView() {
   const [initialState] = useState(() => loadCustomAlarmState())
   const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
-  const [systemAlarms, setSystemAlarms] = useState<AlarmManager.Alarm[]>([])
   const [globalBusy, setGlobalBusy] = useState(false)
   const [busyRecordId, setBusyRecordId] = useState<string | null>(null)
-  const activeTab = useObservable<RootTab>("alarms")
-  const [lastContentTab, setLastContentTab] = useState<ContentTab>("alarms")
-  const [pendingAction, setPendingAction] = useState<ContentTab | null>(null)
-  const [accessoryActionRunning, setAccessoryActionRunning] = useState(false)
+  const [calendarRefreshing, setCalendarRefreshing] = useState(false)
+  const activeTab = useObservable<RootTab>(ALARMS_TAB)
+  const [lastContentTab, setLastContentTab] = useState<ContentTab>(ALARMS_TAB)
+  const [actionRunning, setActionRunning] = useState(false)
 
   const holidaySourceMap = useMemo(() => {
     return new Map(holidaySources.map((item) => [item.id, item]))
@@ -189,7 +197,24 @@ export function HomeView() {
       return sum + countExpectedRingsInYear(item, holidaySourceMap)
     }, 0)
   }, [records, holidaySourceMap])
-  const selectedHolidaySource = holidaySources[0] ?? null
+  const selectedHolidaySource = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
+  const currentMonthSummary = useMemo(() => {
+    if (!selectedHolidaySource) return { off: 0, work: 0 }
+
+    const dayMap = buildHolidayDayMap(selectedHolidaySource)
+    const now = new Date()
+    const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-`
+    let off = 0
+    let work = 0
+
+    for (const [dateKey, info] of dayMap.entries()) {
+      if (!dateKey.startsWith(prefix)) continue
+      if (info.kind === "off") off += 1
+      if (info.kind === "work") work += 1
+    }
+
+    return { off, work }
+  }, [selectedHolidaySource])
 
   function saveStateSnapshot(nextRecords: AlarmRecord[], nextHolidaySources = holidaySources) {
     saveCustomAlarmState({
@@ -209,7 +234,6 @@ export function HomeView() {
     if (!AlarmManager.isAvailable) return
 
     const listener = (alarms: AlarmManager.Alarm[]) => {
-      setSystemAlarms(alarms)
       const alarmMap = new Map(alarms.map((item) => [item.id, item]))
       setRecords((current) => {
         const stored = loadCustomAlarmState().alarms
@@ -242,49 +266,39 @@ export function HomeView() {
     )
 
     if (!alreadySyncedToday) {
-      void refreshBuiltinHolidayCalendar()
+      void refreshBuiltinHolidayCalendar({ showLoading: false })
     }
   }, [holidaySources])
 
   useEffect(() => {
-    if (activeTab.value === "add") {
-      if (!pendingAction && !accessoryActionRunning) {
-        setPendingAction(lastContentTab)
-      }
+    if (isContentTab(activeTab.value)) {
+      setLastContentTab(activeTab.value)
       return
     }
 
-    setLastContentTab(activeTab.value)
-  }, [activeTab.value, lastContentTab, pendingAction, accessoryActionRunning])
-
-  useEffect(() => {
-    if (!pendingAction || accessoryActionRunning) return
-
-    const action = pendingAction
-    setAccessoryActionRunning(true)
+    if (actionRunning) return
+    setActionRunning(true)
 
     void (async () => {
       try {
-        if (action === "status") {
+        if (lastContentTab === STATUS_TAB) {
           await refreshStatusPanel()
-        } else if (action === "alarms") {
+        } else if (lastContentTab === ALARMS_TAB) {
           await addAlarm()
-        } else if (action === "calendars") {
-          await refreshBuiltinHolidayCalendar()
+        } else {
+          if (!calendarRefreshing) await refreshBuiltinHolidayCalendar({ showLoading: true })
         }
       } finally {
-        setPendingAction(null)
-        activeTab.setValue(action)
-        setAccessoryActionRunning(false)
+        activeTab.setValue(lastContentTab)
+        setActionRunning(false)
       }
     })()
-  }, [pendingAction, accessoryActionRunning])
+  }, [activeTab.value, lastContentTab, actionRunning, calendarRefreshing])
 
   async function refreshSystemState() {
     if (!AlarmManager.isAvailable) return
     try {
       const alarms = await AlarmManager.alarms()
-      setSystemAlarms(alarms)
       const alarmMap = new Map(alarms.map((item) => [item.id, item]))
       setRecords((current) => {
         const stored = loadCustomAlarmState().alarms
@@ -309,6 +323,7 @@ export function HomeView() {
       const movingItems = indices.map((index) => current[index]).filter(Boolean)
       const next = current.filter((_, index) => !indices.includes(index))
       next.splice(newOffset, 0, ...movingItems)
+      saveStateSnapshot(next)
       return next
     })
   }
@@ -467,6 +482,8 @@ export function HomeView() {
           managedInstanceCount={managedInstanceCount}
           currentHolidayTitle={selectedHolidaySource?.title || ""}
           syncedHolidayCount={selectedHolidaySource?.holidayDates.length ?? 0}
+          currentMonthOffCount={currentMonthSummary.off}
+          currentMonthWorkCount={currentMonthSummary.work}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
         />
       </NavigationStack>
@@ -512,7 +529,7 @@ export function HomeView() {
               }}
             />
           ) : (
-            <Text foregroundStyle="secondaryLabel">点击底部加号创建一个闹钟。</Text>
+            <Text foregroundStyle="secondaryLabel">点击底部右侧按钮创建一个闹钟。</Text>
           )}
         </List>
       </NavigationStack>
@@ -525,6 +542,7 @@ export function HomeView() {
         <CalendarSettingsView
           embedded
           sources={holidaySources}
+          isRefreshing={calendarRefreshing}
         />
       </NavigationStack>
     )
@@ -552,18 +570,25 @@ export function HomeView() {
     await refreshSystemState()
   }
 
-  async function refreshBuiltinHolidayCalendar() {
+  async function refreshBuiltinHolidayCalendar(options?: { showLoading?: boolean }) {
     if (busyRecordId) return
     const source = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
     if (!source) return
 
+    if (options?.showLoading !== false) setCalendarRefreshing(true)
     try {
       const synced = await syncHolidayCalendarSource(source)
       const updatedSources = holidaySources.map((item) => (item.id === synced.id ? synced : item))
       await applyHolidaySources(updatedSources, { muteBusy: true })
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
+    } finally {
+      if (options?.showLoading !== false) setCalendarRefreshing(false)
     }
+  }
+
+  function accessoryIconName() {
+    return lastContentTab === ALARMS_TAB ? "plus" : "arrow.clockwise"
   }
 
   return (
@@ -576,7 +601,7 @@ export function HomeView() {
       <Tab
         title="状态"
         systemImage="chart.bar.fill"
-        value="status"
+        value={STATUS_TAB}
       >
         {renderStatusTab()}
       </Tab>
@@ -584,7 +609,7 @@ export function HomeView() {
       <Tab
         title="闹钟"
         systemImage="alarm.fill"
-        value="alarms"
+        value={ALARMS_TAB}
       >
         {renderAlarmsTab()}
       </Tab>
@@ -592,20 +617,20 @@ export function HomeView() {
       <Tab
         title="日历"
         systemImage="calendar"
-        value="calendars"
+        value={CALENDARS_TAB}
       >
         {renderCalendarsTab()}
       </Tab>
 
       <Tab
-        title="添加"
-        systemImage={lastContentTab === "alarms" ? "plus" : "arrow.clockwise"}
-        value="add"
+        title=""
+        systemImage={accessoryIconName()}
+        value={ACTION_TAB}
         role="search"
       >
-        {lastContentTab === "status"
+        {lastContentTab === STATUS_TAB
           ? renderStatusTab()
-          : lastContentTab === "alarms"
+          : lastContentTab === ALARMS_TAB
             ? renderAlarmsTab()
             : renderCalendarsTab()}
       </Tab>

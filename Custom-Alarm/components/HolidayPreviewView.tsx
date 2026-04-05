@@ -1,13 +1,11 @@
 import {
   Button,
-  Form,
   HStack,
   Image,
-  NavigationStack,
-  Section,
   Spacer,
   Text,
   VStack,
+  useColorScheme,
   useState,
 } from "scripting"
 
@@ -112,6 +110,7 @@ function DayCell(props: { day: number | null; kind: "off" | "work" | "unknown" |
 export function HolidayCalendarMonthView(props: {
   source: HolidayCalendarSource
 }) {
+  const colorScheme = useColorScheme()
   const now = new Date()
   const currentYear = now.getFullYear()
   const currentMonth = now.getMonth() + 1
@@ -180,8 +179,13 @@ export function HolidayCalendarMonthView(props: {
         spacing={10}
         padding={{ top: 12, bottom: 12, leading: 12, trailing: 12 }}
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        shadow={{
+          color: colorScheme === "dark" ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.06)",
+          radius: colorScheme === "dark" ? 10 : 14,
+          y: colorScheme === "dark" ? 4 : 6,
+        }}
         background={{
-          style: "secondarySystemBackground",
+          style: colorScheme === "dark" ? "#1C1C1E" : "#F2F2F7",
           shape: { type: "rect", cornerRadius: 18 },
         }}
       >
@@ -229,23 +233,5 @@ export function HolidayCalendarMonthView(props: {
         </HStack>
       </HStack>
     </VStack>
-  )
-}
-
-export function HolidayPreviewView(props: {
-  source: HolidayCalendarSource
-}) {
-  return (
-    <NavigationStack>
-      <Form
-        navigationTitle={props.source.title || "未命名日历"}
-        navigationBarTitleDisplayMode="inline"
-        formStyle="grouped"
-      >
-        <Section footer={<Text>这里只显示休息日和调班工作日。橙色是休息日，蓝色是调班工作日；其他普通节日不会显示，也不会影响闹钟触发。</Text>}>
-          <HolidayCalendarMonthView source={props.source} />
-        </Section>
-      </Form>
-    </NavigationStack>
   )
 }

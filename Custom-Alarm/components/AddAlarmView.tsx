@@ -59,7 +59,6 @@ const SOUND_OPTIONS = [
   { label: "Summit", value: "Summit" },
 ] as const
 const MONTHLY_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1)
-const NUMBER_OPTIONS = Array.from({ length: 999 }, (_, index) => index + 1)
 const OCCURRENCE_LIMIT_OPTIONS = Array.from({ length: 99 }, (_, index) => index + 1)
 const CUSTOM_DAY_OPTIONS = Array.from({ length: 50 }, (_, index) => index + 1)
 
@@ -80,6 +79,21 @@ function supportsOccurrenceLimit(mode: DraftRepeatMode): boolean {
   return mode === "daily" || mode === "weekly" || mode === "monthly" || mode === "custom"
 }
 
+function isTimedRepeatRule(
+  rule: AlarmDraft["repeatRule"] | null | undefined
+): rule is Exclude<AlarmDraft["repeatRule"], { kind: "once" }> {
+  return Boolean(
+    rule
+    && (
+      rule.kind === "daily"
+      || rule.kind === "weekly"
+      || rule.kind === "monthly"
+      || rule.kind === "holiday"
+      || rule.kind === "custom"
+    )
+  )
+}
+
 export function AddAlarmView(props: {
   holidaySources: HolidayCalendarSource[]
   initial?: AlarmDraft | null
@@ -91,6 +105,7 @@ export function AddAlarmView(props: {
     ? initialDraft.repeatRule.timestamp
     : nextRoundedTimestamp()
   const initialTime = extractTimeParts(initialTimestamp)
+  const initialRepeatTime = isTimedRepeatRule(initialDraft?.repeatRule) ? initialDraft.repeatRule : null
   const initialRepeatEnabled = initialDraft?.repeatRule.kind !== "once"
   let initialRepeatMode: DraftRepeatMode = "daily"
   if (
@@ -115,20 +130,8 @@ export function AddAlarmView(props: {
   const [oneTimeTimestamp, setOneTimeTimestamp] = useState<number>(initialTimestamp)
   const [timeSeedTimestamp, setTimeSeedTimestamp] = useState<number>(
     makeTimeSeed(
-      initialDraft?.repeatRule.kind === "daily"
-      || initialDraft?.repeatRule.kind === "weekly"
-      || initialDraft?.repeatRule.kind === "monthly"
-      || initialDraft?.repeatRule.kind === "holiday"
-      || initialDraft?.repeatRule.kind === "custom"
-        ? initialDraft.repeatRule.hour
-        : initialTime.hour,
-      initialDraft?.repeatRule.kind === "daily"
-      || initialDraft?.repeatRule.kind === "weekly"
-      || initialDraft?.repeatRule.kind === "monthly"
-      || initialDraft?.repeatRule.kind === "holiday"
-      || initialDraft?.repeatRule.kind === "custom"
-        ? initialDraft.repeatRule.minute
-        : initialTime.minute
+      initialRepeatTime ? initialRepeatTime.hour : initialTime.hour,
+      initialRepeatTime ? initialRepeatTime.minute : initialTime.minute
     )
   )
   const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>(
@@ -165,8 +168,6 @@ export function AddAlarmView(props: {
   const [showCustomRingPicker, setShowCustomRingPicker] = useState(false)
   const [showCustomSkipPicker, setShowCustomSkipPicker] = useState(false)
 
-  const holidaySources = props.holidaySources
-
   async function onSave() {
     const fixedTitle = title.trim()
     if (!fixedTitle) {
@@ -179,7 +180,7 @@ export function AddAlarmView(props: {
       return
     }
 
-    if (repeatEnabled && repeatMode === "holiday" && !holidaySources.length) {
+    if (repeatEnabled && repeatMode === "holiday" && !props.holidaySources.length) {
       await Dialog.alert({ message: "请先在日历设置里同步中国节假日日历。" })
       return
     }
@@ -435,7 +436,7 @@ export function AddAlarmView(props: {
                 onChanged={setTimeSeedTimestamp}
               />
 
-              {!holidaySources.length ? (
+              {!props.holidaySources.length ? (
                 <Text foregroundStyle="secondaryLabel">
                   还没有可用的中国节假日日历，请先回到首页日历页里同步。
                 </Text>

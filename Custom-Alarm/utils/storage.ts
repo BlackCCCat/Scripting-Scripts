@@ -42,6 +42,17 @@ function defaultHolidaySource(): HolidayCalendarSource {
   }
 }
 
+function emptyState(): CustomAlarmState {
+  return {
+    alarms: [],
+    holidaySources: [defaultHolidaySource()],
+  }
+}
+
+function builtinHolidaySource(sources: HolidayCalendarSource[]): HolidayCalendarSource {
+  return sources.find((item: HolidayCalendarSource) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? defaultHolidaySource()
+}
+
 function clampHour(value: unknown): number {
   const num = Number(value)
   if (!Number.isFinite(num)) return 8
@@ -256,12 +267,7 @@ function normalizeHolidaySource(value: any): HolidayCalendarSource | null {
 
 export function loadCustomAlarmState(): CustomAlarmState {
   const raw = readStorage(STORAGE_KEY)
-  if (!raw) {
-    return {
-      alarms: [],
-      holidaySources: [defaultHolidaySource()],
-    }
-  }
+  if (!raw) return emptyState()
 
   try {
     const data = JSON.parse(raw)
@@ -277,28 +283,21 @@ export function loadCustomAlarmState(): CustomAlarmState {
           .filter((item: HolidayCalendarSource | null): item is HolidayCalendarSource => Boolean(item))
       : []
 
-    const builtinSource = normalizedSources.find((item: HolidayCalendarSource) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? defaultHolidaySource()
-    const holidaySources = [builtinSource]
-
     return {
       alarms,
-      holidaySources,
+      holidaySources: [builtinHolidaySource(normalizedSources)],
     }
   } catch {
-    return {
-      alarms: [],
-      holidaySources: [defaultHolidaySource()],
-    }
+    return emptyState()
   }
 }
 
 export function saveCustomAlarmState(state: CustomAlarmState): void {
-  const builtinSource = state.holidaySources.find((item: HolidayCalendarSource) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? defaultHolidaySource()
   writeStorage(
     STORAGE_KEY,
     JSON.stringify({
       alarms: state.alarms,
-      holidaySources: [builtinSource],
+      holidaySources: [builtinHolidaySource(state.holidaySources)],
     }, null, 2)
   )
 }

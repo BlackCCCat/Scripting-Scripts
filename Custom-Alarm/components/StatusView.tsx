@@ -41,6 +41,8 @@ export function StatusView(props: {
   managedInstanceCount: number
   currentHolidayTitle: string
   syncedHolidayCount: number
+  currentMonthOffCount: number
+  currentMonthWorkCount: number
   lastSyncedAt: number | null
   embedded?: boolean
 }) {
@@ -68,6 +70,11 @@ export function StatusView(props: {
         <MetricRow icon="calendar" title="当前日历" value={props.currentHolidayTitle || "未配置"} />
         <MetricRow icon="flag.fill" title="已同步节假日" value={String(props.syncedHolidayCount)} tint="#EA580C" />
         <MetricRow icon="clock.arrow.circlepath" title="上次同步" value={props.lastSyncedAt ? formatDateTime(props.lastSyncedAt) : "尚未同步"} />
+      </Section>
+
+      <Section header={<Text>本月信息</Text>}>
+        <MetricRow icon="sun.max.fill" title="可休假天数" value={String(props.currentMonthOffCount)} tint="#EA580C" />
+        <MetricRow icon="briefcase.fill" title="调班天数" value={String(props.currentMonthWorkCount)} tint="#2563EB" />
       </Section>
 
       {!props.embedded && (
