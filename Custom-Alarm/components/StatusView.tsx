@@ -39,6 +39,7 @@ export function StatusView(props: {
   logicalAlarmCount: number
   enabledCount: number
   managedInstanceCount: number
+  cleanupCandidateCount: number
   currentHolidayTitle: string
   syncedHolidayCount: number
   currentMonthOffCount: number
@@ -64,6 +65,7 @@ export function StatusView(props: {
         <MetricRow icon="alarm.fill" title="逻辑闹钟" value={String(props.logicalAlarmCount)} />
         <MetricRow icon="checkmark.circle.fill" title="已启用" value={String(props.enabledCount)} tint="#16A34A" />
         <MetricRow icon="bell.and.waves.left.and.right.fill" title="注册到系统闹钟" value={String(props.managedInstanceCount)} />
+        <MetricRow icon="exclamationmark.triangle.fill" title="残留闹钟" value={String(props.cleanupCandidateCount)} tint="#DC2626" />
       </Section>
 
       <Section header={<Text>节假日日历</Text>}>

@@ -42,10 +42,31 @@ function defaultHolidaySource(): HolidayCalendarSource {
   }
 }
 
+function normalizeStringIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(
+    new Set(
+      value
+        .map((item: unknown) => String(item ?? "").trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+export function collectRecordSystemAlarmIds(records: AlarmRecord[]): string[] {
+  return Array.from(new Set(records.flatMap((record) => record.systemAlarmIds)))
+}
+
+export function mergeManagedSystemAlarmIds(currentIds: string[], extraIds: string[]): string[] {
+  return Array.from(new Set([...currentIds, ...extraIds]))
+}
+
 function emptyState(): CustomAlarmState {
   return {
     alarms: [],
     holidaySources: [defaultHolidaySource()],
+    managedSystemAlarmIds: [],
+    cleanupCandidateAlarmIds: [],
   }
 }
 
@@ -286,6 +307,11 @@ export function loadCustomAlarmState(): CustomAlarmState {
     return {
       alarms,
       holidaySources: [builtinHolidaySource(normalizedSources)],
+      managedSystemAlarmIds: mergeManagedSystemAlarmIds(
+        normalizeStringIdList(data?.managedSystemAlarmIds),
+        collectRecordSystemAlarmIds(alarms)
+      ),
+      cleanupCandidateAlarmIds: normalizeStringIdList(data?.cleanupCandidateAlarmIds),
     }
   } catch {
     return emptyState()
@@ -293,11 +319,17 @@ export function loadCustomAlarmState(): CustomAlarmState {
 }
 
 export function saveCustomAlarmState(state: CustomAlarmState): void {
+  const managedSystemAlarmIds = mergeManagedSystemAlarmIds(
+    normalizeStringIdList(state.managedSystemAlarmIds),
+    collectRecordSystemAlarmIds(state.alarms)
+  )
   writeStorage(
     STORAGE_KEY,
     JSON.stringify({
       alarms: state.alarms,
       holidaySources: [builtinHolidaySource(state.holidaySources)],
+      managedSystemAlarmIds,
+      cleanupCandidateAlarmIds: normalizeStringIdList(state.cleanupCandidateAlarmIds),
     }, null, 2)
   )
 }

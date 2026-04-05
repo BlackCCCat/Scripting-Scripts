@@ -79,4 +79,6 @@ export type AlarmDraft = {
 export type CustomAlarmState = {
   alarms: AlarmRecord[]
   holidaySources: HolidayCalendarSource[]
+  managedSystemAlarmIds: string[]
+  cleanupCandidateAlarmIds: string[]
 }

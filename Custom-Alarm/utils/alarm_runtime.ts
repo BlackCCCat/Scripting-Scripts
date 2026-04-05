@@ -186,6 +186,10 @@ async function cancelSystemAlarmIds(ids: string[]): Promise<void> {
   }
 }
 
+export async function cancelManagedSystemAlarmIds(ids: string[]): Promise<void> {
+  await cancelSystemAlarmIds(ids)
+}
+
 function dateKey(date: Date): string {
   const yyyy = date.getFullYear()
   const mm = twoDigits(date.getMonth() + 1)

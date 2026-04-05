@@ -1,7 +1,11 @@
 import { AppIntentManager, AppIntentProtocol, Widget } from "scripting"
 
 import type { AlarmRecord } from "./types"
-import { loadCustomAlarmState, saveCustomAlarmState } from "./utils/storage"
+import {
+  loadCustomAlarmState,
+  mergeManagedSystemAlarmIds,
+  saveCustomAlarmState,
+} from "./utils/storage"
 
 type SnoozeIntentParams = {
   alarmId: string
@@ -106,6 +110,8 @@ export const SnoozeCustomAlarmIntent = AppIntentManager.register<SnoozeIntentPar
     saveCustomAlarmState({
       ...state,
       alarms: nextAlarms,
+      managedSystemAlarmIds: mergeManagedSystemAlarmIds(state.managedSystemAlarmIds, [nextAlarmId]),
+      cleanupCandidateAlarmIds: state.cleanupCandidateAlarmIds,
     })
 
     try {
