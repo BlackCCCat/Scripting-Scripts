@@ -25,12 +25,14 @@ function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
   }
 }
 
-const DEFAULT_SETTINGS: TranslatorSettings = {
-  engines: [
-    builtInEntry("apple_intelligence"),
-    builtInEntry("system_translation"),
-    builtInEntry("google_translate"),
-  ],
+function createDefaultSettings(): TranslatorSettings {
+  return {
+    engines: [
+      builtInEntry("apple_intelligence"),
+      builtInEntry("system_translation"),
+      builtInEntry("google_translate"),
+    ],
+  }
 }
 
 const REQUIRED_BUILT_INS: BuiltInTranslationEngineKind[] = [
@@ -95,6 +97,12 @@ function applyAvailabilityRules(entry: TranslatorEngineEntry): TranslatorEngineE
   return entry
 }
 
+function applyAvailabilityRulesToSettings(settings: TranslatorSettings): TranslatorSettings {
+  return {
+    engines: settings.engines.map((entry) => applyAvailabilityRules(entry)),
+  }
+}
+
 function migrateLegacySettings(raw: any): TranslatorSettings | null {
   if (!raw || typeof raw !== "object") return null
   if (!Array.isArray(raw.engineOrder) || typeof raw.engineEnabled !== "object") return null
@@ -124,7 +132,7 @@ function migrateLegacySettings(raw: any): TranslatorSettings | null {
 export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | null): TranslatorSettings {
   const legacy = migrateLegacySettings(raw)
   if (legacy) {
-    return legacy
+    return applyAvailabilityRulesToSettings(legacy)
   }
 
   const defaults = defaultBuiltInMap()
@@ -148,20 +156,20 @@ export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | 
     normalized.push(applyAvailabilityRules(entry))
   }
 
-  return {
+  return applyAvailabilityRulesToSettings({
     engines: normalized,
-  }
+  })
 }
 
 export function loadTranslatorSettings(): TranslatorSettings {
   const st = storage()
   if (!st?.get) {
-    return DEFAULT_SETTINGS
+    return applyAvailabilityRulesToSettings(createDefaultSettings())
   }
 
   const raw = st.get(STORAGE_KEY, { shared: true }) as TranslatorSettings | null | undefined
   if (raw == null) {
-    return DEFAULT_SETTINGS
+    return applyAvailabilityRulesToSettings(createDefaultSettings())
   }
   return normalizeTranslatorSettings(raw)
 }

@@ -186,11 +186,27 @@ function detectByScript(text: string) {
   return ""
 }
 
+function getRawLanguageModelAvailabilityValue() {
+  if (typeof LanguageModelSession === "undefined") {
+    return undefined
+  }
+
+  return (LanguageModelSession as any).isAvailable
+}
+
+function resolveLanguageModelAvailability() {
+  const raw = getRawLanguageModelAvailabilityValue()
+  if (typeof raw === "function") {
+    return !!raw.call(LanguageModelSession)
+  }
+  return !!raw
+}
+
 export async function detectSourceLanguageCode(sourceText: string) {
   const text = sourceText.trim()
   if (!text) return undefined
 
-  if (LanguageModelSession.isAvailable) {
+  if (resolveLanguageModelAvailability()) {
     const session = new LanguageModelSession({
       instructions: "Identify the source language of the given text. Return only one language code from the allowed list.",
     })
@@ -226,7 +242,7 @@ export async function detectSourceLanguageCode(sourceText: string) {
 
 export function isLocalTranslationAvailable() {
   try {
-    return typeof LanguageModelSession !== "undefined" && !!LanguageModelSession.isAvailable
+    return resolveLanguageModelAvailability()
   } catch {
     return false
   }
@@ -289,7 +305,7 @@ export function createTranslationEngine() {
 
   return {
     prewarm() {
-      if (!LanguageModelSession.isAvailable) return
+      if (!resolveLanguageModelAvailability()) return
       if (!prewarmSession) {
         prewarmSession = new LanguageModelSession({
           instructions: SESSION_INSTRUCTIONS,
