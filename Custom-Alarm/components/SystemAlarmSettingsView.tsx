@@ -92,7 +92,7 @@ export function SystemAlarmSettingsView(props: {
           ),
         }}
       >
-        <Section footer={<Text>这里只显示首页删除后仍残留在系统里的闹钟实例。首页还存在的闹钟不会出现在这里，也不能在这里清理。</Text>}>
+        <Section footer={<Text>首页删除后由于意外错误仍残留在系统中的闹钟实例</Text>}>
           <Text foregroundStyle="secondaryLabel">
             当前共发现 {items.length} 个残留实例
           </Text>
