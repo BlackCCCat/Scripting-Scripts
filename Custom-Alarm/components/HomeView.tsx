@@ -332,6 +332,7 @@ export function HomeView() {
         title: draft.title,
         enabled: true,
         snoozeMinutes: draft.snoozeMinutes,
+        soundName: draft.soundName,
         repeatRule: draft.repeatRule,
         systemAlarmIds: [],
         lastScheduledAt: null,
@@ -391,6 +392,7 @@ export function HomeView() {
           initial={{
             title: record.title,
             snoozeMinutes: record.snoozeMinutes,
+            soundName: record.soundName,
             repeatRule: record.repeatRule,
           }}
         />
@@ -404,6 +406,7 @@ export function HomeView() {
         ...record,
         title: draft.title,
         snoozeMinutes: draft.snoozeMinutes,
+        soundName: draft.soundName,
         repeatRule: draft.repeatRule,
         enabled: record.enabled,
         updatedAt: Date.now(),

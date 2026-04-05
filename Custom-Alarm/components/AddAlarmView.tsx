@@ -38,6 +38,26 @@ const WEEKDAY_OPTIONS: Array<{ value: number; label: string }> = [
 ]
 const HOLIDAY_MODE_OPTIONS: HolidayMatchMode[] = ["nonHoliday", "holiday"]
 const SNOOZE_OPTIONS = [3, 5, 10, 15, 20, 30]
+const SOUND_OPTIONS = [
+  { label: "Default", value: "" },
+  { label: "Radar", value: "Radar" },
+  { label: "Beacon", value: "Beacon" },
+  { label: "Bulletin", value: "Bulletin" },
+  { label: "By The Seaside", value: "By The Seaside" },
+  { label: "Chimes", value: "Chimes" },
+  { label: "Circuit", value: "Circuit" },
+  { label: "Crickets", value: "Crickets" },
+  { label: "Hillside", value: "Hillside" },
+  { label: "Night Owl", value: "Night Owl" },
+  { label: "Opening", value: "Opening" },
+  { label: "Playtime", value: "Playtime" },
+  { label: "Presto", value: "Presto" },
+  { label: "Sencha", value: "Sencha" },
+  { label: "Signal", value: "Signal" },
+  { label: "Silk", value: "Silk" },
+  { label: "Slow Rise", value: "Slow Rise" },
+  { label: "Summit", value: "Summit" },
+] as const
 const MONTHLY_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1)
 const NUMBER_OPTIONS = Array.from({ length: 999 }, (_, index) => index + 1)
 const OCCURRENCE_LIMIT_OPTIONS = Array.from({ length: 99 }, (_, index) => index + 1)
@@ -85,6 +105,11 @@ export function AddAlarmView(props: {
 
   const [title, setTitle] = useState(initialDraft?.title ?? "闹钟")
   const [snoozeMinutes, setSnoozeMinutes] = useState(initialDraft?.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES)
+  const [soundIndex, setSoundIndex] = useState<number>(() => {
+    const initialSoundName = initialDraft?.soundName ?? ""
+    const index = SOUND_OPTIONS.findIndex((item) => item.value === initialSoundName)
+    return index >= 0 ? index : 0
+  })
   const [repeatEnabled, setRepeatEnabled] = useState(initialRepeatEnabled)
   const [repeatMode, setRepeatMode] = useState<DraftRepeatMode>(initialRepeatMode)
   const [oneTimeTimestamp, setOneTimeTimestamp] = useState<number>(initialTimestamp)
@@ -170,12 +195,14 @@ export function AddAlarmView(props: {
     const occurrenceLimit = repeatEnabled && supportsOccurrenceLimit(repeatMode) && occurrenceLimitValue > 0
       ? Math.max(1, Math.min(99, occurrenceLimitValue))
       : null
+    const soundName = SOUND_OPTIONS[soundIndex]?.value || null
     let result: AlarmDraft
 
     if (!repeatEnabled) {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "once",
           timestamp: oneTimeTimestamp,
@@ -185,6 +212,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "daily",
           hour,
@@ -196,6 +224,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "weekly",
           hour,
@@ -208,6 +237,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "monthly",
           hour,
@@ -220,6 +250,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "holiday",
           hour,
@@ -232,6 +263,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "custom",
           hour,
@@ -278,6 +310,18 @@ export function AddAlarmView(props: {
               </Text>
             ))}
           </Picker>
+          <Picker
+            title="闹钟声音"
+            pickerStyle="menu"
+            value={soundIndex}
+            onChanged={setSoundIndex}
+          >
+            {SOUND_OPTIONS.map((option, index) => (
+              <Text key={`sound-${option.value || "default"}`} tag={index}>
+                {option.label}
+              </Text>
+            ))}
+          </Picker>
         </Section>
 
         <Section header={<Text>重复</Text>}>
@@ -310,42 +354,7 @@ export function AddAlarmView(props: {
                 <Text tag={3}>节假日</Text>
                 <Text tag={4}>自定义</Text>
               </Picker>
-
-              <DatePicker
-                title="时间"
-                displayedComponents={["hourAndMinute"]}
-                value={timeSeedTimestamp}
-                onChanged={setTimeSeedTimestamp}
-              />
             </>
-          )}
-
-          {repeatEnabled && repeatMode === "weekly" && WEEKDAY_OPTIONS.map((option) => (
-            <Toggle
-              key={option.value}
-              value={selectedWeekdays.includes(option.value)}
-              onChanged={(enabled: boolean) => {
-                setSelectedWeekdays((current) => nextWeekdaySelection(current, option.value, enabled))
-              }}
-              toggleStyle="switch"
-            >
-              <Text>{option.label}</Text>
-            </Toggle>
-          ))}
-
-          {repeatEnabled && repeatMode === "monthly" && (
-            <Picker
-              title="每月日期"
-              pickerStyle="menu"
-              value={MONTHLY_DAY_OPTIONS.indexOf(monthlyDay)}
-              onChanged={(index: number) => setMonthlyDay(MONTHLY_DAY_OPTIONS[index] ?? 1)}
-            >
-              {MONTHLY_DAY_OPTIONS.map((day, index) => (
-                <Text key={`monthly-day-${day}`} tag={index}>
-                  每月 {day} 日
-                </Text>
-              ))}
-            </Picker>
           )}
 
           {repeatEnabled && supportsOccurrenceLimit(repeatMode) && (
@@ -389,8 +398,43 @@ export function AddAlarmView(props: {
             </Button>
           )}
 
+          {repeatEnabled && repeatMode === "weekly" && WEEKDAY_OPTIONS.map((option) => (
+            <Toggle
+              key={option.value}
+              value={selectedWeekdays.includes(option.value)}
+              onChanged={(enabled: boolean) => {
+                setSelectedWeekdays((current) => nextWeekdaySelection(current, option.value, enabled))
+              }}
+              toggleStyle="switch"
+            >
+              <Text>{option.label}</Text>
+            </Toggle>
+          ))}
+
+          {repeatEnabled && repeatMode === "monthly" && (
+            <Picker
+              title="每月日期"
+              pickerStyle="menu"
+              value={MONTHLY_DAY_OPTIONS.indexOf(monthlyDay)}
+              onChanged={(index: number) => setMonthlyDay(MONTHLY_DAY_OPTIONS[index] ?? 1)}
+            >
+              {MONTHLY_DAY_OPTIONS.map((day, index) => (
+                <Text key={`monthly-day-${day}`} tag={index}>
+                  每月 {day} 日
+                </Text>
+              ))}
+            </Picker>
+          )}
+
           {repeatEnabled && repeatMode === "holiday" && (
             <>
+              <DatePicker
+                title="时间"
+                displayedComponents={["hourAndMinute"]}
+                value={timeSeedTimestamp}
+                onChanged={setTimeSeedTimestamp}
+              />
+
               {!holidaySources.length ? (
                 <Text foregroundStyle="secondaryLabel">
                   还没有可用的中国节假日日历，请先回到首页日历页里同步。
@@ -493,7 +537,23 @@ export function AddAlarmView(props: {
                   <Text foregroundStyle="accentColor">{customSkipDays}</Text>
                 </HStack>
               </Button>
+
+              <DatePicker
+                title="时间"
+                displayedComponents={["hourAndMinute"]}
+                value={timeSeedTimestamp}
+                onChanged={setTimeSeedTimestamp}
+              />
             </>
+          )}
+
+          {repeatEnabled && repeatMode !== "holiday" && repeatMode !== "custom" && (
+            <DatePicker
+              title="时间"
+              displayedComponents={["hourAndMinute"]}
+              value={timeSeedTimestamp}
+              onChanged={setTimeSeedTimestamp}
+            />
           )}
         </Section>
 

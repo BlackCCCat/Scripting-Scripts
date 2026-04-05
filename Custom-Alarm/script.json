@@ -1,44 +1,44 @@
 {
-  "version": "",
-  "localizedDescriptions": {
-    "pt": "",
-    "de": "",
-    "en": "Create and manage one-time, daily, and weekly custom alarms.",
-    "ja": "",
-    "zh": "创建和管理单次、每日、每周的自定义闹钟。",
-    "fr": "",
-    "es": "",
-    "it": "",
-    "ru": ""
+  "version" : "1.0.0",
+  "localizedDescriptions" : {
+    "pt" : "",
+    "de" : "",
+    "en" : "Create and manage one-time, daily, and weekly custom alarms.",
+    "ja" : "",
+    "zh" : "创建和管理单次、每日、每周的自定义闹钟。",
+    "fr" : "",
+    "es" : "",
+    "it" : "",
+    "ru" : ""
   },
-  "color": "rgba(255, 149, 0,1)",
-  "localizedNames": {
-    "pt": "",
-    "en": "Custom Alarm",
-    "fr": "",
-    "ru": "",
-    "de": "",
-    "zh": "自定义闹钟",
-    "it": "",
-    "es": "",
-    "ja": ""
+  "color" : "rgba(255, 149, 0,1)",
+  "localizedNames" : {
+    "pt" : "",
+    "en" : "Custom Alarm",
+    "fr" : "",
+    "ru" : "",
+    "de" : "",
+    "zh" : "自定义闹钟",
+    "it" : "",
+    "es" : "",
+    "ja" : ""
   },
-  "icon": "clock",
-  "name": "Custom Alarm",
-  "contributors": [],
-  "iconImage": null,
-  "description": "Create one-time, daily, and weekly custom alarms with AlarmManager.",
-  "runInApp": true,
-  "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Custom-Alarm.zip",
-    "hash": "",
-    "autoUpdateInterval": null
+  "icon" : "clock",
+  "name" : "Custom Alarm",
+  "contributors" : [
+
+  ],
+  "iconImage" : null,
+  "description" : "Create one-time, daily, and weekly custom alarms with AlarmManager.",
+  "runInApp" : true,
+  "remoteResource" : null,
+  "entry" : "index.tsx",
+  "author" : {
+    "homepage" : "https:\/\/github.com\/BlackCCCat",
+    "name" : "BlackCCCat",
+    "email" : null
   },
-  "entry": "index.tsx",
-  "author": {
-    "homepage": "https:\/\/github.com\/BlackCCCat",
-    "name": "BlackCCCat",
-    "email": null
-  },
-  "intentInputTypes": []
+  "intentInputTypes" : [
+
+  ]
 }

@@ -73,6 +73,11 @@ function clampSnoozeMinutes(value: unknown): number {
   return Math.min(60, Math.max(1, Math.floor(num)))
 }
 
+function normalizeSoundName(value: unknown): string | null {
+  const soundName = String(value ?? "").trim()
+  return soundName ? soundName : null
+}
+
 function normalizeWeekdays(value: unknown): number[] {
   if (!Array.isArray(value)) return []
   const deduped = Array.from(
@@ -184,6 +189,7 @@ function normalizeRecord(value: any): AlarmRecord | null {
     title,
     enabled: Boolean(value.enabled ?? true),
     snoozeMinutes: clampSnoozeMinutes(value.snoozeMinutes),
+    soundName: normalizeSoundName(value.soundName),
     repeatRule,
     systemAlarmIds: Array.isArray(value.systemAlarmIds)
       ? (value.systemAlarmIds as unknown[]).map((item: unknown) => String(item)).filter(Boolean)
