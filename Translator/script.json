@@ -1,0 +1,39 @@
+{
+  "intentInputTypes": [],
+  "runInApp": false,
+  "contributors": [],
+  "name": "Translator",
+  "description": "一个支持系统翻译、Apple Intelligence、Google 网页翻译和可配置 AI 接口的翻译脚本。",
+  "version": "",
+  "localizedNames": {
+    "en": "Translator",
+    "de": "",
+    "es": "",
+    "pt": "",
+    "ru": "",
+    "fr": "",
+    "zh": "翻译器",
+    "ja": "",
+    "it": ""
+  },
+  "localizedDescriptions": {
+    "en": "A translation script with system translation, Apple Intelligence, Google web translation, and configurable AI APIs.",
+    "de": "",
+    "es": "",
+    "pt": "",
+    "ru": "",
+    "fr": "",
+    "zh": "一个支持系统翻译、Apple Intelligence、Google 网页翻译和可配置 AI 接口的翻译脚本。",
+    "ja": "",
+    "it": ""
+  },
+  "remoteResource": {
+    "autoUpdateInterval": "",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Translator.zip",
+    "hash": ""
+  },
+  "iconImage": null,
+  "icon": "translate",
+  "author": null,
+  "color": "systemBlue"
+}
