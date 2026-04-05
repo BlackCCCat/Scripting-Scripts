@@ -6,17 +6,21 @@ import type {
   TranslatorEngineEntry,
   TranslatorSettings,
 } from "../types"
+import { isLocalTranslationAvailable } from "./translation_engine"
 
 const STORAGE_KEY = "translator_settings_v2"
 
 function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
   const option = TRANSLATION_ENGINE_OPTIONS.find((item) => item.id === kind)!
+  const defaultEnabled = option.isDefault ?? false
   return {
     id: kind,
     kind,
     label: option.label,
     systemImage: option.systemImage,
-    enabled: option.isDefault ?? false,
+    enabled: kind === "apple_intelligence"
+      ? defaultEnabled && isLocalTranslationAvailable()
+      : defaultEnabled,
     isBuiltIn: kind === "apple_intelligence" || kind === "system_translation",
   }
 }
@@ -80,6 +84,17 @@ function normalizeEngineEntry(raw: Partial<TranslatorEngineEntry> | null | undef
   return null
 }
 
+function applyAvailabilityRules(entry: TranslatorEngineEntry): TranslatorEngineEntry {
+  if (entry.kind === "apple_intelligence" && !isLocalTranslationAvailable()) {
+    return {
+      ...entry,
+      enabled: false,
+    }
+  }
+
+  return entry
+}
+
 function migrateLegacySettings(raw: any): TranslatorSettings | null {
   if (!raw || typeof raw !== "object") return null
   if (!Array.isArray(raw.engineOrder) || typeof raw.engineEnabled !== "object") return null
@@ -125,12 +140,12 @@ export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | 
     }
 
     if (!normalized.find((existing) => existing.id === entry.id)) {
-      normalized.push(entry)
+      normalized.push(applyAvailabilityRules(entry))
     }
   }
 
   for (const entry of defaults.values()) {
-    normalized.push(entry)
+    normalized.push(applyAvailabilityRules(entry))
   }
 
   return {
