@@ -15,7 +15,7 @@ import {
   useState,
 } from "scripting"
 
-import type { AlarmDraft, HolidayCalendarSource, HolidayMatchMode } from "../types"
+import type { AlarmDraft, AlarmRepeatRule, HolidayCalendarSource, HolidayMatchMode } from "../types"
 import {
   extractTimeParts,
   makeTimeSeed,
@@ -94,8 +94,71 @@ function isTimedRepeatRule(
   )
 }
 
+function normalizeRepeatRule(rule: AlarmRepeatRule): string {
+  switch (rule.kind) {
+    case "once":
+      return JSON.stringify({
+        kind: rule.kind,
+        timestamp: rule.timestamp,
+      })
+    case "daily":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    case "weekly":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        weekdays: [...rule.weekdays].sort((a, b) => a - b),
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    case "monthly":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        dayOfMonth: rule.dayOfMonth,
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    case "holiday":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        sourceId: rule.sourceId,
+        matchMode: rule.matchMode,
+      })
+    case "custom":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        startDateTimestamp: rule.startDateTimestamp,
+        skipDays: rule.skipDays,
+        ringDays: rule.ringDays,
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    default:
+      return JSON.stringify(rule)
+  }
+}
+
+function draftKey(draft: AlarmDraft): string {
+  return JSON.stringify({
+    title: draft.title.trim(),
+    snoozeMinutes: draft.snoozeMinutes,
+    soundName: draft.soundName ?? null,
+    repeatRule: normalizeRepeatRule(draft.repeatRule),
+  })
+}
+
 export function AddAlarmView(props: {
   holidaySources: HolidayCalendarSource[]
+  existingDrafts?: AlarmDraft[]
   initial?: AlarmDraft | null
   mode?: "create" | "edit"
 }) {
@@ -282,6 +345,11 @@ export function AddAlarmView(props: {
       return
     }
 
+    if ((props.existingDrafts ?? []).some((item) => draftKey(item) === draftKey(result))) {
+      await Dialog.alert({ message: "闹钟已存在。" })
+      return
+    }
+
     dismiss(result)
   }
 
@@ -451,10 +519,6 @@ export function AddAlarmView(props: {
                 <Text tag={0}>工作日</Text>
                 <Text tag={1}>休息日</Text>
               </Picker>
-
-              <Text font="caption" foregroundStyle="secondaryLabel">
-                工作日默认按周一到周五计算，并包含明确标成“班”的日期；休息日默认按周六周日计算，并包含明确标成“休”的日期。未来 120 天内的命中日期会被展开成多个系统级固定闹钟。
-              </Text>
             </>
           )}
 

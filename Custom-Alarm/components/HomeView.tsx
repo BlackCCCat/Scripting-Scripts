@@ -19,7 +19,7 @@ import {
   useState,
 } from "scripting"
 
-import type { AlarmDraft, AlarmRecord, HolidayCalendarSource } from "../types"
+import type { AlarmDraft, AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { AddAlarmView } from "./AddAlarmView"
 import { CalendarSettingsView } from "./CalendarSettingsView"
 import { StatusView } from "./StatusView"
@@ -98,6 +98,77 @@ function mergeStoredRecords(current: AlarmRecord[], stored: AlarmRecord[]): Alar
     if (!existingIds.has(item.id)) merged.push(item)
   }
   return merged
+}
+
+function normalizeRepeatRule(rule: AlarmRepeatRule): string {
+  switch (rule.kind) {
+    case "once":
+      return JSON.stringify({
+        kind: rule.kind,
+        timestamp: rule.timestamp,
+      })
+    case "daily":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    case "weekly":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        weekdays: [...rule.weekdays].sort((a, b) => a - b),
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    case "monthly":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        dayOfMonth: rule.dayOfMonth,
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    case "holiday":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        sourceId: rule.sourceId,
+        matchMode: rule.matchMode,
+      })
+    case "custom":
+      return JSON.stringify({
+        kind: rule.kind,
+        hour: rule.hour,
+        minute: rule.minute,
+        startDateTimestamp: rule.startDateTimestamp,
+        skipDays: rule.skipDays,
+        ringDays: rule.ringDays,
+        occurrenceLimit: rule.occurrenceLimit ?? null,
+      })
+    default:
+      return JSON.stringify(rule)
+  }
+}
+
+function alarmDraftKey(draft: AlarmDraft): string {
+  return JSON.stringify({
+    title: draft.title.trim(),
+    snoozeMinutes: draft.snoozeMinutes,
+    soundName: draft.soundName ?? null,
+    repeatRule: normalizeRepeatRule(draft.repeatRule),
+  })
+}
+
+function toAlarmDraft(record: AlarmRecord): AlarmDraft {
+  return {
+    title: record.title,
+    snoozeMinutes: record.snoozeMinutes,
+    soundName: record.soundName,
+    repeatRule: record.repeatRule,
+  }
 }
 
 function twoDigits(value: number): string {
@@ -471,9 +542,25 @@ export function HomeView() {
   async function addAlarm() {
     if (globalBusy) return
     const draft = await Navigation.present<AlarmDraft>({
-      element: <AddAlarmView holidaySources={holidaySources} mode="create" />,
+      element: (
+        <AddAlarmView
+          holidaySources={holidaySources}
+          existingDrafts={records.map(toAlarmDraft)}
+          mode="create"
+        />
+      ),
     })
     if (!draft) return
+
+    if (records.some((item) => alarmDraftKey({
+      title: item.title,
+      snoozeMinutes: item.snoozeMinutes,
+      soundName: item.soundName,
+      repeatRule: item.repeatRule,
+    }) === alarmDraftKey(draft))) {
+      await Dialog.alert({ message: "闹钟已存在。" })
+      return
+    }
 
     if (!AlarmManager.isAvailable) {
       await Dialog.alert({ message: "当前系统不支持 AlarmManager。" })
@@ -545,6 +632,7 @@ export function HomeView() {
       element: (
         <AddAlarmView
           holidaySources={holidaySources}
+          existingDrafts={records.filter((item) => item.id !== record.id).map(toAlarmDraft)}
           mode="edit"
           initial={{
             title: record.title,
@@ -556,6 +644,19 @@ export function HomeView() {
       ),
     })
     if (!draft || !AlarmManager.isAvailable) return
+
+    if (records.some((item) => {
+      if (item.id === record.id) return false
+      return alarmDraftKey({
+        title: item.title,
+        snoozeMinutes: item.snoozeMinutes,
+        soundName: item.soundName,
+        repeatRule: item.repeatRule,
+      }) === alarmDraftKey(draft)
+    })) {
+      await Dialog.alert({ message: "闹钟已存在。" })
+      return
+    }
 
     setGlobalBusy(true)
     try {
@@ -717,18 +818,20 @@ export function HomeView() {
   async function removeAlarm(record: AlarmRecord) {
     if (globalBusy || busyRecordId) return
     setGlobalBusy(true)
+    const nextCleanupCandidateIds = mergeManagedSystemAlarmIds(cleanupCandidateAlarmIds, record.systemAlarmIds)
+    const nextRecords = records.filter((item) => item.id !== record.id)
     try {
-      const nextCleanupCandidateIds = mergeManagedSystemAlarmIds(cleanupCandidateAlarmIds, record.systemAlarmIds)
+      setRecords(nextRecords)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      saveStateSnapshot(records, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
+      saveStateSnapshot(nextRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       // 先取消系统里已经注册的实例，再从首页记录里删掉它。
       await deleteAlarm(record)
-      const nextRecords = records.filter((item) => item.id !== record.id)
-      setRecords(nextRecords)
-      saveStateSnapshot(nextRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
       await refreshSystemState()
     } catch (error: any) {
+      setRecords(records)
+      setCleanupCandidateAlarmIds(cleanupCandidateAlarmIds)
+      saveStateSnapshot(records, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setGlobalBusy(false)
@@ -810,6 +913,7 @@ export function HomeView() {
       tint="systemOrange"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
+      tabViewSearchActivation="searchTabSelection"
     >
       <Tab
         title="状态"
