@@ -598,20 +598,28 @@ export function HomeView() {
 
     setBusyRecordId(record.id)
     try {
+      const optimisticRecord: AlarmRecord = {
+        ...record,
+        enabled,
+        updatedAt: Date.now(),
+      }
+      const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
+      setRecords(optimisticRecords)
+      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+
       const nextRecord = enabled
-        ? await scheduleAlarm({
-            ...record,
-            enabled: true,
-            updatedAt: Date.now(),
-          }, holidaySourceMap)
+        ? await scheduleAlarm(optimisticRecord, holidaySourceMap)
         : await disableAlarm(record)
-      const nextRecords = records.map((item) => (item.id === record.id ? nextRecord : item))
+      const nextRecords = optimisticRecords.map((item) => (item.id === record.id ? nextRecord : item))
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
       saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
-      await refreshSystemState()
+      void refreshSystemState()
     } catch (error: any) {
+      const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
+      setRecords(rollbackRecords)
+      saveStateSnapshot(rollbackRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setBusyRecordId(null)
