@@ -47,6 +47,12 @@ export const TRANSLATION_ENGINE_OPTIONS: TranslationEngineOption[] = [
     isDefault: true,
   },
   {
+    id: "assistant",
+    label: "Scripting Assistant",
+    systemImage: "chevron.left.forwardslash.chevron.right",
+    isDefault: false,
+  },
+  {
     id: "system_translation",
     label: "System Translate",
     systemImage: "apple.logo",

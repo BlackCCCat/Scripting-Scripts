@@ -123,12 +123,22 @@ function splitIntoChunks(text: string, maxLength = 700) {
 }
 
 function normalizeStreamContent(content: string) {
-  return content
+  const normalized = content
     .replace(/^```[\w-]*\n?/, "")
     .replace(/\n?```$/, "")
-    .replace(/^\s*<text>\s*/i, "")
-    .replace(/\s*<\/text>\s*$/i, "")
+    .replace(/^(?:\s*<text>\s*)+/i, "")
+    .replace(/(?:\s*<\/text>\s*)+$/i, "")
     .trim()
+
+  const lines = normalized.split("\n")
+  while (lines.length && lines[0].trim().toLowerCase() === "<text>") {
+    lines.shift()
+  }
+  while (lines.length && lines[lines.length - 1].trim().toLowerCase() === "</text>") {
+    lines.pop()
+  }
+
+  return lines.join("\n").trim()
 }
 
 function isSuspiciouslyShort(sourceText: string, translatedText: string) {

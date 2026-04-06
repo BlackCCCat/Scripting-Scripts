@@ -6,6 +6,7 @@ import type {
   TranslatorEngineEntry,
   TranslatorSettings,
 } from "../types"
+import { isAssistantTranslationAvailable } from "./assistant_translation_engine"
 import { isLocalTranslationAvailable } from "./translation_engine"
 
 const STORAGE_KEY = "translator_settings_v2"
@@ -21,7 +22,7 @@ function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
     enabled: kind === "apple_intelligence"
       ? defaultEnabled && isLocalTranslationAvailable()
       : defaultEnabled,
-    isBuiltIn: kind === "apple_intelligence" || kind === "system_translation",
+    isBuiltIn: kind === "apple_intelligence" || kind === "assistant" || kind === "system_translation",
   }
 }
 
@@ -29,6 +30,7 @@ function createDefaultSettings(): TranslatorSettings {
   return {
     engines: [
       builtInEntry("apple_intelligence"),
+      builtInEntry("assistant"),
       builtInEntry("system_translation"),
       builtInEntry("google_translate"),
     ],
@@ -37,6 +39,7 @@ function createDefaultSettings(): TranslatorSettings {
 
 const REQUIRED_BUILT_INS: BuiltInTranslationEngineKind[] = [
   "apple_intelligence",
+  "assistant",
   "system_translation",
 ]
 
@@ -91,6 +94,15 @@ function applyAvailabilityRules(entry: TranslatorEngineEntry): TranslatorEngineE
     return {
       ...entry,
       enabled: false,
+    }
+  }
+
+  if (entry.kind === "assistant") {
+    if (!isAssistantTranslationAvailable()) {
+      return {
+        ...entry,
+        enabled: false,
+      }
     }
   }
 

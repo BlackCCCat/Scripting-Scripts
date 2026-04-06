@@ -23,6 +23,10 @@ import type {
   LanguageOption,
 } from "../types"
 import {
+  createAssistantTranslationEngine,
+  isAssistantTranslationAvailable,
+} from "../utils/assistant_translation_engine"
+import {
   createTranslationEngine,
   detectSourceLanguageCode,
   isLocalTranslationAvailable,
@@ -188,12 +192,15 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const sourceFingerprintRef = useRef("")
   const targetTouchedRef = useRef(false)
   const [appleEngine] = useState(() => createTranslationEngine())
+  const [assistantEngine] = useState(() => createAssistantTranslationEngine())
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
 
   const executableEngines = getExecutableEngines(settings)
   const visibleEngines = executableEngines.filter((engine) => {
     const available = engine.kind === "apple_intelligence"
       ? isLocalTranslationAvailable()
+      : engine.kind === "assistant"
+        ? isAssistantTranslationAvailable()
       : engine.kind === "system_translation"
         ? isSystemTranslationAvailable()
         : isExternalEngineConfigured(engine)
@@ -221,6 +228,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
     const result = engine.kind === "apple_intelligence"
       ? await appleEngine.translate(request)
+      : engine.kind === "assistant"
+        ? await assistantEngine.translate(request)
       : engine.kind === "system_translation"
         ? await systemEngine.translate(request)
         : await translateWithExternalEngine(engine, request)

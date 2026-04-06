@@ -6,6 +6,7 @@ export type LanguageOption = {
 
 export type BuiltInTranslationEngineKind =
   | "apple_intelligence"
+  | "assistant"
   | "system_translation"
 
 export type ExternalTranslationEngineKind =

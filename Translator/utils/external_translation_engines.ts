@@ -166,6 +166,58 @@ function buildAiUserPrompt(request: TranslationRequest) {
   ].join("\n")
 }
 
+function normalizeAiTranslatedText(value: string) {
+  const normalized = String(value ?? "")
+    .replace(/^```[\w-]*\n?/, "")
+    .replace(/\n?```$/, "")
+    .replace(/^(?:\s*<text>\s*)+/i, "")
+    .replace(/(?:\s*<\/text>\s*)+$/i, "")
+    .trim()
+
+  const lines = normalized.split("\n")
+  while (lines.length && lines[0].trim().toLowerCase() === "<text>") {
+    lines.shift()
+  }
+  while (lines.length && lines[lines.length - 1].trim().toLowerCase() === "</text>") {
+    lines.pop()
+  }
+
+  const cleaned = lines.join("\n").trim()
+  if (!cleaned) return ""
+  if (looksLikeHtmlDocument(cleaned)) return ""
+  if (/^\s*<(?:html|head|body|script|style|meta|link)\b/i.test(cleaned)) return ""
+  return cleaned
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
+function buildAiEndpointCandidates(mode: AiApiCompatibilityMode, baseUrl: string) {
+  if (mode === "gemini") {
+    return uniqueStrings([
+      joinBaseUrl(baseUrl, "/v1beta/openai/chat/completions"),
+      joinBaseUrl(baseUrl, "/openai/chat/completions"),
+      joinBaseUrl(baseUrl, "/chat/completions"),
+    ])
+  }
+
+  if (mode === "newapi") {
+    return uniqueStrings([
+      joinBaseUrl(baseUrl, "/v1/responses"),
+      joinBaseUrl(baseUrl, "/responses"),
+      joinBaseUrl(baseUrl, "/v1/chat/completions"),
+      joinBaseUrl(baseUrl, "/chat/completions"),
+    ])
+  }
+
+  return uniqueStrings([
+    joinBaseUrl(baseUrl, "/v1/responses"),
+    joinBaseUrl(baseUrl, "/v1/chat/completions"),
+    joinBaseUrl(baseUrl, "/chat/completions"),
+  ])
+}
+
 function buildAiHeaders(mode: AiApiCompatibilityMode, apiKey: string) {
   const common = {
     "Content-Type": "application/json",
@@ -193,6 +245,124 @@ function buildAiHeaders(mode: AiApiCompatibilityMode, apiKey: string) {
       Authorization: `Bearer ${apiKey}`,
     },
   ]
+}
+
+function buildChatCompletionBody(model: string, request: TranslationRequest) {
+  return JSON.stringify({
+    model,
+    temperature: 0.1,
+    stream: false,
+    messages: [
+      { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
+      { role: "user", content: buildAiUserPrompt(request) },
+    ],
+  })
+}
+
+function buildResponsesBody(model: string, request: TranslationRequest) {
+  return JSON.stringify({
+    model,
+    temperature: 0.1,
+    stream: false,
+    instructions: AI_TRANSLATION_SYSTEM_PROMPT,
+    input: buildAiUserPrompt(request),
+  })
+}
+
+function parseAiTranslatedText(payload: any) {
+  const direct = normalizeAiTranslatedText(String(
+    payload?.output_text
+    ?? payload?.choices?.[0]?.message?.content
+    ?? payload?.choices?.[0]?.text
+    ?? ""
+  ))
+  if (direct) return direct
+
+  const outputItems = Array.isArray(payload?.output) ? payload.output : []
+  for (const item of outputItems) {
+    const contents = Array.isArray(item?.content) ? item.content : []
+    for (const content of contents) {
+      const value = normalizeAiTranslatedText(String(
+        content?.text
+        ?? content?.content?.[0]?.text
+        ?? content?.content
+        ?? ""
+      ))
+      if (value) return value
+    }
+  }
+
+  return ""
+}
+
+function parseAiSseResponse(raw: string) {
+  const lines = raw.split(/\r?\n/)
+  let text = ""
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith("data:")) continue
+
+    const data = trimmed.slice(5).trim()
+    if (!data || data === "[DONE]") continue
+
+    try {
+      const payload = JSON.parse(data)
+      const piece = parseAiTranslatedText(payload)
+      if (piece) {
+        text += piece
+      }
+      continue
+    } catch {}
+
+    text += data
+  }
+
+  return normalizeAiTranslatedText(text)
+}
+
+function looksLikeHtmlDocument(raw: string) {
+  const trimmed = String(raw ?? "").trim().toLowerCase()
+  if (!trimmed.startsWith("<")) return false
+
+  return (
+    trimmed.startsWith("<!doctype html") ||
+    trimmed.startsWith("<html") ||
+    trimmed.includes("<head") ||
+    trimmed.includes("<body") ||
+    trimmed.includes("<meta") ||
+    trimmed.includes("<title")
+  )
+}
+
+function isHtmlResponse(response: Response) {
+  const contentType = String(response.headers.get("content-type") ?? "").toLowerCase()
+  return contentType.includes("text/html") || contentType.includes("application/xhtml+xml")
+}
+
+function parseAiResponseText(raw: string) {
+  const trimmed = String(raw ?? "").trim()
+  if (!trimmed) return ""
+
+  if (looksLikeHtmlDocument(trimmed)) {
+    return ""
+  }
+
+  try {
+    const payload = JSON.parse(trimmed)
+    return parseAiTranslatedText(payload)
+  } catch {}
+
+  if (trimmed.includes("\ndata:") || trimmed.startsWith("data:")) {
+    const sseText = parseAiSseResponse(trimmed)
+    if (sseText) return sseText
+  }
+
+  if (looksLikeHtmlDocument(trimmed) || (/^\s*</.test(trimmed) && /<\/?[a-z][^>]*>/i.test(trimmed))) {
+    return ""
+  }
+
+  return normalizeAiTranslatedText(trimmed)
 }
 
 async function translateWithGoogleWeb(request: TranslationRequest): Promise<TranslationResult> {
@@ -237,32 +407,59 @@ async function translateWithAiApi(
   const baseUrl = ensureConfigured(resolveAiBaseUrl(mode, engine.config?.baseUrl), "请先配置 AI 接口地址。")
   const apiKey = ensureConfigured(engine.config?.apiKey, "请先配置 AI 接口 API Key。")
   const model = ensureConfigured(engine.config?.model, "请先配置 AI 接口模型名称。")
-  const endpoint = mode === "gemini"
-    ? joinBaseUrl(baseUrl, "/v1beta/openai/chat/completions")
-    : joinBaseUrl(baseUrl, "/v1/chat/completions")
-  const body = JSON.stringify({
-    model,
-    temperature: 0.1,
-    messages: [
-      { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
-      { role: "user", content: buildAiUserPrompt(request) },
-    ],
-  })
+  const endpoints = buildAiEndpointCandidates(mode, baseUrl)
 
   let response: Response | null = null
-  for (const headers of buildAiHeaders(mode, apiKey)) {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body,
-    })
+  let translatedText = ""
+  let sawSuccessfulResponse = false
+  let sawHtmlResponse = false
 
-    if (response.ok) break
-    if (response.status !== 401 && response.status !== 403) break
+  endpointLoop:
+  for (const endpoint of endpoints) {
+    const body = endpoint.endsWith("/responses")
+      ? buildResponsesBody(model, request)
+      : buildChatCompletionBody(model, request)
+
+    for (const headers of buildAiHeaders(mode, apiKey)) {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body,
+      })
+
+      if (!response.ok) {
+        if ([401, 403, 404, 405].includes(response.status)) {
+          continue
+        }
+        break
+      }
+
+      sawSuccessfulResponse = true
+      if (isHtmlResponse(response)) {
+        sawHtmlResponse = true
+        continue
+      }
+      const raw = await readResponseString(response)
+      if (looksLikeHtmlDocument(raw)) {
+        sawHtmlResponse = true
+        continue
+      }
+      translatedText = parseAiResponseText(raw)
+      if (translatedText) {
+        break endpointLoop
+      }
+    }
   }
 
   if (!response) {
     throw new Error("AI 接口翻译请求没有返回响应。")
+  }
+
+  if (sawSuccessfulResponse && !translatedText) {
+    if (sawHtmlResponse) {
+      throw new Error("AI 接口返回了网页内容，请检查 Base URL 是否指向实际的 API 根地址，而不是站点前端页面。")
+    }
+    throw new Error("AI 接口没有返回可用译文。")
   }
 
   if (!response.ok) {
@@ -271,9 +468,6 @@ async function translateWithAiApi(
       ? `${normalizeErrorMessage(response, "AI 接口翻译请求失败")}：${detail}`
       : normalizeErrorMessage(response, "AI 接口翻译请求失败"))
   }
-
-  const payload = await readJsonWithFallback(response)
-  const translatedText = String(payload?.choices?.[0]?.message?.content ?? "").trim()
 
   if (!translatedText) {
     throw new Error("AI 接口没有返回可用译文。")
