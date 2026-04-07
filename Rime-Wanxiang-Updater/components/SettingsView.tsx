@@ -55,6 +55,7 @@ const PRO_KEY_LABELS: Record<ProSchemeKey, string> = {
   wubi: "wubi-五笔",
   hanxin: "hanxin-汉心",
   shouyou: "shouyou-首右",
+  shyplus: "shyplus-首右+",
   wx: "wx-万象",
 }
 
