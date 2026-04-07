@@ -25,7 +25,7 @@
   "remoteResource": {
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Calendar-Pomodoro.zip",
     "hash": "",
-    "autoUpdateInterval": null
+    "autoUpdateInterval": 86400
   },
   "runInApp": false,
   "author": {

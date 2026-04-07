@@ -27,7 +27,7 @@
   "remoteResource": {
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Rime-Wanxiang-Updater.zip",
     "hash": "",
-    "autoUpdateInterval": null
+    "autoUpdateInterval": 86400
   },
   "localizedDescriptions": {
     "en": "",

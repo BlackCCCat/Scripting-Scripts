@@ -14,7 +14,7 @@
   "intentInputTypes": ["Text", "URLs", "Images", "FileURLs"],
   "color": "rgba(71, 102, 194,1)",
   "remoteResource": {
-    "autoUpdateInterval": "",
+    "autoUpdateInterval": 86400,
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Vision-OCR.zip",
     "hash": ""
   },

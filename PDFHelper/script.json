@@ -35,7 +35,7 @@
   "remoteResource": {
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/PDFHelper.zip",
     "hash": "",
-    "autoUpdateInterval": null
+    "autoUpdateInterval": 86400
   },
   "runInApp": true,
   "color": "rgba(0, 198, 165,1)",

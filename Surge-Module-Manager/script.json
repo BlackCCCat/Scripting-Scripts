@@ -4,7 +4,7 @@
   "remoteResource": {
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Surge-Module-Manager.zip",
     "hash": "",
-    "autoUpdateInterval": null
+    "autoUpdateInterval": 86400
   },
   "localizedNames": {
     "de": "",

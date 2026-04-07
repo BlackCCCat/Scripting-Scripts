@@ -35,7 +35,7 @@
   "remoteResource": {
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/API-Manager.zip",
     "hash": "",
-    "autoUpdateInterval": null
+    "autoUpdateInterval": 86400
   },
   "runInApp": true,
   "color": "rgba(30, 136, 229,1)",

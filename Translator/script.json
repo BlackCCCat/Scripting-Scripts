@@ -28,7 +28,7 @@
     "it": ""
   },
   "remoteResource": {
-    "autoUpdateInterval": "",
+    "autoUpdateInterval": 86400,
     "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Translator.zip",
     "hash": ""
   },
