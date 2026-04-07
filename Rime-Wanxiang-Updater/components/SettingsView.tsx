@@ -135,6 +135,7 @@ export function SettingsView(props: {
   onDone?: (cfg: AppConfig) => void
   registerSaveAction?: (fn: (() => void) | null) => void
   leadingToolbar?: any
+  trailingToolbar?: any
 }) {
   const initialCfg = props.initial ?? loadConfig()
   const initialSchemeEdition = initialCfg.schemeEdition
@@ -705,9 +706,10 @@ export function SettingsView(props: {
       navigationTitle={"设置"}
       navigationBarTitleDisplayMode={"inline"}
       toolbar={
-        props.leadingToolbar
+        props.leadingToolbar || props.trailingToolbar
           ? {
               topBarLeading: props.leadingToolbar,
+              topBarTrailing: props.trailingToolbar,
             }
           : undefined
       }

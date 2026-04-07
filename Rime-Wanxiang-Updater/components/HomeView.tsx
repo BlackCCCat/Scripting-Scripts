@@ -50,7 +50,7 @@ import {
   type AllUpdateResult,
 } from "../utils/update_tasks"
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
-import { normalizePath } from "../utils/common"
+import { normalizePath, sleep } from "../utils/common"
 
 const FULLSCREEN_SYMBOL = "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
 
@@ -264,19 +264,11 @@ type HomeSessionState = {
 const EDITOR_TAB = 0
 const MAIN_TAB = 1
 const SETTINGS_TAB = 2
-const ACTION_TAB = 3
-
-type ContentTab = typeof EDITOR_TAB | typeof MAIN_TAB | typeof SETTINGS_TAB
-type RootTab = ContentTab | typeof ACTION_TAB
 
 type FileBrowserEntry = {
   name: string
   path: string
   isDirectory: boolean
-}
-
-function isContentTab(value: RootTab): value is ContentTab {
-  return value === EDITOR_TAB || value === MAIN_TAB || value === SETTINGS_TAB
 }
 
 const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
@@ -691,8 +683,7 @@ function isSameEditorPath(a: string, b: string): boolean {
 export function HomeView() {
   const supportsMinimization =
     typeof Script.supportsMinimization === "function" && Script.supportsMinimization()
-  const activeTab = useObservable<RootTab>(MAIN_TAB)
-  const [lastContentTab, setLastContentTab] = useState<ContentTab>(MAIN_TAB)
+  const activeTab = useObservable<number>(MAIN_TAB)
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
   const logProxyRef = useRef<any>()
   const settingsSaveRef = useRef<(() => void) | null>(null)
@@ -776,23 +767,6 @@ export function HomeView() {
       setEditorCurrentPath(root)
     }
   }, [editorCurrentPath, editorRootPath])
-
-  useEffect(() => {
-    if (isContentTab(activeTab.value)) {
-      setLastContentTab(activeTab.value)
-      return
-    }
-
-    if (lastContentTab === EDITOR_TAB) {
-      void reselectEditorFolder()
-    } else if (lastContentTab === MAIN_TAB) {
-      if (!busy && pathUsable) void onAutoUpdate()
-    } else if (lastContentTab === SETTINGS_TAB) {
-      settingsSaveRef.current?.()
-    }
-
-    activeTab.setValue(lastContentTab)
-  }, [activeTab.value, lastContentTab, busy, pathUsable])
 
   function resetRemote() {
     setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer)
@@ -1044,11 +1018,14 @@ export function HomeView() {
   }, [cfg.showVerboseLog, busy, logs.length])
 
   useEffect(() => {
-    const current = loadConfig()
-    setCfg(current)
     void (async () => {
+      const current = cfg
       await guardPathAccess(true)
-      await refreshLocal(current)
+      const found = await refreshLocal(current)
+      if (!found) {
+        await sleep(120)
+        await refreshLocal(loadConfig())
+      }
       applySharedCheckCache(current)
     })()
   }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
@@ -1211,10 +1188,28 @@ export function HomeView() {
     )
   }
 
-  function actionTabIconName() {
-    if (lastContentTab === EDITOR_TAB) return "folder.badge.gearshape"
-    if (lastContentTab === SETTINGS_TAB) return "checkmark"
-    return "bolt.fill"
+  function renderEditorTrailingToolbar() {
+    return (
+      <Button
+        title=""
+        systemImage="folder.badge.gearshape"
+        action={() => {
+          void reselectEditorFolder()
+        }}
+      />
+    )
+  }
+
+  function renderSettingsTrailingToolbar() {
+    return (
+      <Button
+        title=""
+        systemImage="checkmark"
+        action={() => {
+          settingsSaveRef.current?.()
+        }}
+      />
+    )
   }
 
   async function openFullscreenLogs() {
@@ -1505,6 +1500,7 @@ export function HomeView() {
           listStyle={"insetGroup"}
           toolbar={{
             topBarLeading: renderLeadingToolbar(),
+            topBarTrailing: renderEditorTrailingToolbar(),
           }}
         >
           <Section header={<Text>当前目录</Text>}>
@@ -1761,7 +1757,6 @@ export function HomeView() {
         tint="systemBlue"
         tabViewStyle="sidebarAdaptable"
         tabBarMinimizeBehavior="onScrollDown"
-        tabViewSearchActivation="searchTabSelection"
       >
         <Tab title="文件" systemImage="folder.fill" value={EDITOR_TAB}>
           {renderEditorTab()}
@@ -1787,6 +1782,7 @@ export function HomeView() {
             <SettingsView
               initial={cfg}
               leadingToolbar={renderLeadingToolbar()}
+              trailingToolbar={renderSettingsTrailingToolbar()}
               registerSaveAction={(fn) => {
                 settingsSaveRef.current = fn
               }}
@@ -1795,43 +1791,6 @@ export function HomeView() {
               }}
             />
           </NavigationStack>
-        </Tab>
-
-        <Tab
-          title=""
-          systemImage={actionTabIconName()}
-          value={ACTION_TAB}
-          role="search"
-        >
-          {lastContentTab === EDITOR_TAB ? (
-            renderEditorTab()
-          ) : lastContentTab === SETTINGS_TAB ? (
-            <NavigationStack>
-              <SettingsView
-                initial={cfg}
-                leadingToolbar={renderLeadingToolbar()}
-                registerSaveAction={(fn) => {
-                  settingsSaveRef.current = fn
-                }}
-                onDone={(newCfg) => {
-                  void handleSettingsSaved(newCfg)
-                }}
-              />
-            </NavigationStack>
-          ) : (
-            <NavigationStack>
-              <List
-                navigationTitle={"万象工具"}
-                navigationBarTitleDisplayMode={"inline"}
-                listStyle={"insetGroup"}
-                toolbar={{
-                  topBarLeading: renderLeadingToolbar(),
-                }}
-              >
-                {cfg.homeSectionOrder.map(renderSection)}
-              </List>
-            </NavigationStack>
-          )}
         </Tab>
       </TabView>
     </VStack>
