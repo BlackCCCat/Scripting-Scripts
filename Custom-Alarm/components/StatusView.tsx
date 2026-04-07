@@ -42,8 +42,10 @@ export function StatusView(props: {
   cleanupCandidateCount: number
   currentHolidayTitle: string
   syncedHolidayCount: number
-  currentMonthOffCount: number
-  currentMonthWorkCount: number
+  currentMonthTotalOffCount: number
+  currentMonthRemainingOffCount: number
+  currentMonthTotalWorkCount: number
+  currentMonthRemainingWorkCount: number
   lastSyncedAt: number | null
   embedded?: boolean
 }) {
@@ -77,8 +79,10 @@ export function StatusView(props: {
       </Section>
 
       <Section header={<Text>本月信息</Text>}>
-        <MetricRow icon="sun.max.fill" title="可休假天数" value={String(props.currentMonthOffCount)} tint="#EA580C" />
-        <MetricRow icon="briefcase.fill" title="调班天数" value={String(props.currentMonthWorkCount)} tint="#2563EB" />
+        <MetricRow icon="calendar.badge.clock" title="总休假天数" value={String(props.currentMonthTotalOffCount)} tint="#F97316" />
+        <MetricRow icon="sun.max.fill" title="可休假天数" value={String(props.currentMonthRemainingOffCount)} tint="#EA580C" />
+        <MetricRow icon="calendar.badge.exclamationmark" title="总调班天数" value={String(props.currentMonthTotalWorkCount)} tint="#3B82F6" />
+        <MetricRow icon="briefcase.fill" title="剩余调班天数" value={String(props.currentMonthRemainingWorkCount)} tint="#2563EB" />
       </Section>
 
       {!props.embedded && (

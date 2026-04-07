@@ -337,21 +337,30 @@ export function HomeView() {
   }, [records, holidaySourceMap])
   const selectedHolidaySource = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
   const currentMonthSummary = useMemo(() => {
-    if (!selectedHolidaySource) return { off: 0, work: 0 }
+    if (!selectedHolidaySource) return { totalOff: 0, remainingOff: 0, totalWork: 0, remainingWork: 0 }
 
     const dayMap = buildHolidayDayMap(selectedHolidaySource)
     const now = new Date()
     const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-`
-    let off = 0
-    let work = 0
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+    let totalOff = 0
+    let remainingOff = 0
+    let totalWork = 0
+    let remainingWork = 0
 
     for (const [dateKey, info] of dayMap.entries()) {
       if (!dateKey.startsWith(prefix)) continue
-      if (info.kind === "off") off += 1
-      if (info.kind === "work") work += 1
+      if (info.kind === "off") {
+        totalOff += 1
+        if (dateKey >= todayKey) remainingOff += 1
+      }
+      if (info.kind === "work") {
+        totalWork += 1
+        if (dateKey >= todayKey) remainingWork += 1
+      }
     }
 
-    return { off, work }
+    return { totalOff, remainingOff, totalWork, remainingWork }
   }, [selectedHolidaySource])
 
   function saveStateSnapshot(
@@ -738,8 +747,10 @@ export function HomeView() {
           cleanupCandidateCount={cleanupCandidateAlarmIds.length}
           currentHolidayTitle={selectedHolidaySource?.title || ""}
           syncedHolidayCount={selectedHolidaySource?.holidayDates.length ?? 0}
-          currentMonthOffCount={currentMonthSummary.off}
-          currentMonthWorkCount={currentMonthSummary.work}
+          currentMonthTotalOffCount={currentMonthSummary.totalOff}
+          currentMonthRemainingOffCount={currentMonthSummary.remainingOff}
+          currentMonthTotalWorkCount={currentMonthSummary.totalWork}
+          currentMonthRemainingWorkCount={currentMonthSummary.remainingWork}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
         />
       </NavigationStack>
