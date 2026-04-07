@@ -3,7 +3,6 @@ import {
   Button,
   Form,
   Navigation,
-  NavigationStack,
   Section,
   Text,
   TextField,
@@ -134,9 +133,9 @@ async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): P
 export function SettingsView(props: {
   initial?: AppConfig
   onDone?: (cfg: AppConfig) => void
+  registerSaveAction?: (fn: (() => void) | null) => void
+  leadingToolbar?: any
 }) {
-  const dismiss = Navigation.useDismiss()
-
   const initialCfg = props.initial ?? loadConfig()
   const initialSchemeEdition = initialCfg.schemeEdition
   const initialProSchemeKey = initialCfg.proSchemeKey
@@ -387,7 +386,6 @@ export function SettingsView(props: {
         } catch { }
       }
       props.onDone?.(fixed)
-      dismiss()
     } catch (e: any) {
       showInfo("保存失败", String(e?.message ?? e))
     }
@@ -434,288 +432,295 @@ export function SettingsView(props: {
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
 
-  return (
-    <NavigationStack>
-      <VStack
-        navigationTitle={"设置"}
-        navigationBarTitleDisplayMode={"inline"}
-        toolbar={{
-          topBarTrailing: (
-            <Button
-              title="保存"
-              action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                void saveAndClose()
-              }}
-            />
-          ),
-        }}
-        alert={{
-          title: alert.title,
-          isPresented: alert.isPresented,
-          onChanged: (v) => setAlert((a) => ({ ...a, isPresented: v })),
-          message: alert.message,
-          actions: alert.actions,
-        }}
-      >
-        <Form formStyle="grouped">
-          <Section header={<Text>Hamster 路径</Text>}>
-            <TextField
-              label={<Text>路径</Text>}
-              value={cfg.hamsterRootPath}
-              onChanged={(v: string) => setCfg((c) => ({ ...c, hamsterRootPath: v, hamsterBookmarkName: "" }))}
-              prompt="粘贴或选择 Hamster 根目录"
-              textFieldStyle="roundedBorder"
-            />
-            <Text font="caption" foregroundStyle="secondaryLabel">
-              请在 工具-文件书签 中添加相应文件夹，并在此选择该文件夹
-            </Text>
-            {bookmarks.length ? (
-              <Picker
-                title={"书签文件夹"}
-                pickerStyle="menu"
-                value={bookmarkIdx}
-                onChanged={(idx: number) => {
-                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                  setBookmarkIdx(idx)
-                  const b = bookmarks[idx]
-                  if (b?.path) {
-                    ; (async () => {
-                      const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
-                      const canUseByName = fm?.bookmarkExists
-                        ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
-                        : true
-                      const resolved = fm?.bookmarkedPath && canUseByName
-                        ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
-                        : (b.name ? "" : b.path)
-                      const selectedPath = normalizePath(resolved || b.path)
-                      let next: AppConfig = {
-                        ...cfg,
-                        hamsterRootPath: selectedPath,
-                        hamsterBookmarkName: b.name,
-                      }
-                      try {
-                        next = await syncSchemeFromLocal(next)
-                        setCfg(next)
-                      } catch { }
-                    })()
+  useEffect(() => {
+    props.registerSaveAction?.(() => {
+      void saveAndClose()
+    })
+    return () => {
+      props.registerSaveAction?.(null)
+    }
+  }, [cfg, releaseIdx, schemeIdx, proKeyIdx, inputIdx])
+
+  const formContent = (
+    <Form formStyle="grouped">
+      <Section header={<Text>Hamster 路径</Text>}>
+        <TextField
+          label={<Text>路径</Text>}
+          value={cfg.hamsterRootPath}
+          onChanged={(v: string) => setCfg((c) => ({ ...c, hamsterRootPath: v, hamsterBookmarkName: "" }))}
+          prompt="粘贴或选择 Hamster 根目录"
+          textFieldStyle="roundedBorder"
+        />
+        <Text font="caption" foregroundStyle="secondaryLabel">
+          请在 工具-文件书签 中添加相应文件夹，并在此选择该文件夹
+        </Text>
+        {bookmarks.length ? (
+          <Picker
+            title={"书签文件夹"}
+            pickerStyle="menu"
+            value={bookmarkIdx}
+            onChanged={(idx: number) => {
+              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+              setBookmarkIdx(idx)
+              const b = bookmarks[idx]
+              if (b?.path) {
+                ; (async () => {
+                  const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
+                  const canUseByName = fm?.bookmarkExists
+                    ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
+                    : true
+                  const resolved = fm?.bookmarkedPath && canUseByName
+                    ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
+                    : (b.name ? "" : b.path)
+                  const selectedPath = normalizePath(resolved || b.path)
+                  let next: AppConfig = {
+                    ...cfg,
+                    hamsterRootPath: selectedPath,
+                    hamsterBookmarkName: b.name,
                   }
-                }}
-              >
-                {bookmarks.map((b, index) => (
-                  <Text key={b.name} tag={index}>
-                    {b.name}
-                  </Text>
-                ))}
-              </Picker>
-            ) : null}
-          </Section>
-
-          <Section header={<Text>发布源</Text>}>
-            {/* ✅ 参考你示例：必须有 title；menu 样式 */}
-            <Picker
-              title={"发布源"}
-              pickerStyle="menu"
-              value={releaseIdx}
-              onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setReleaseIdx(v)
-              }}
-            >
-              {releaseLabels.map((label, index) => (
-                <Text key={label} tag={index}>
-                  {label}
-                </Text>
-              ))}
-            </Picker>
-
-            <Toggle
-              title={"预发布版本"}
-              value={cfg.usePrereleaseScheme}
-              onChanged={(v: boolean) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setCfg((c) => ({ ...c, usePrereleaseScheme: v }))
-              }}
-              toggleStyle="switch"
-            />
-
-            {releaseIdx === 1 ? (
-              <TextField
-                label={<Text>GitHub Token</Text>}
-                value={cfg.githubToken}
-                onChanged={(v: string) => setCfg((c) => ({ ...c, githubToken: v }))}
-                prompt="GitHub Token（可选）：提高请求限额"
-                textFieldStyle="roundedBorder"
-              />
-            ) : null}
-          </Section>
-
-          <Section header={<Text>方案选项</Text>}>
-            <Picker
-              title={"方案"}
-              pickerStyle="menu"
-              value={schemeIdx}
-              onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setSchemeIdx(v)
-              }}
-            >
-              {schemeLabels.map((label, index) => (
-                <Text key={label} tag={index}>
-                  {label}
-                </Text>
-              ))}
-            </Picker>
-
-            {schemeIdx === 1 ? (
-              <Picker
-                title={"Pro 辅助码"}
-                pickerStyle="menu"
-                value={proKeyIdx}
-                onChanged={(v: number) => {
-                  try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                  setProKeyIdx(v)
-                }}
-              >
-                {proLabels.map((label, index) => (
-                  <Text key={label} tag={index}>
-                    {label}
-                  </Text>
-                ))}
-              </Picker>
-            ) : null}
-          </Section>
-
-          <Section header={<Text>输入法</Text>}>
-            <Picker
-              title={"输入法"}
-              pickerStyle="menu"
-              value={inputIdx}
-              onChanged={(v: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setInputIdx(v)
-              }}
-            >
-              {INPUT_METHODS.map((m, index) => (
-                <Text key={m.value} tag={index}>
-                  {m.label}
-                </Text>
-              ))}
-            </Picker>
-          </Section>
-
-          <Section header={<Text>更新设置</Text>}>
-            <Toggle
-              title={"启动时自动检查更新"}
-              value={cfg.autoCheckOnLaunch}
-              onChanged={(v: boolean) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setCfg((c) => ({ ...c, autoCheckOnLaunch: v }))
-              }}
-              toggleStyle="switch"
-            />
-            <Toggle
-              title={"更新时显示详细日志"}
-              value={cfg.showVerboseLog}
-              onChanged={(v: boolean) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setCfg((c) => ({ ...c, showVerboseLog: v }))
-              }}
-              toggleStyle="switch"
-            />
-            <Toggle
-              title={"不清理部署目录(build)"}
-              value={cfg.skipBuildCleanup}
-              onChanged={(v: boolean) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setCfg((c) => ({ ...c, skipBuildCleanup: v }))
-              }}
-              toggleStyle="switch"
-            />
-          </Section>
-
-          <Section header={<Text>页面显示设置</Text>}>
-            <Button
-              action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                void openHomeSectionOrderSettings()
-              }}
-            >
-              <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 10 }}>
-                <VStack spacing={4} frame={{ maxWidth: "infinity" }}>
-                  <Text>主页区块排序</Text>
-                  <Text font="caption" foregroundStyle="secondaryLabel">
-                    {cfg.homeSectionOrder.map((key) => HOME_SECTION_LABELS[key]).join(" / ")}
-                  </Text>
-                </VStack>
-              </HStack>
-            </Button>
-          </Section>
-
-          <Section header={<Text>排除文件（按行）</Text>}>
-            <TextField
-              label={<Text>规则</Text>}
-              value={cfg.excludePatternsText}
-              onChanged={(v: string) => setCfg((c) => ({ ...c, excludePatternsText: v }))}
-              axis="vertical"
-              lineLimit={{ min: 6, max: 10 }}
-              prompt={"例如：\nuser.yaml\n*.custom.yaml\ntips_show.txt"}
-              textFieldStyle="roundedBorder"
-            />
-          </Section>
-
-          <Section
-            footer={(
-              <Text font="caption" foregroundStyle="secondaryLabel">
-                将主动清理临时下载文件，不会清理本地设置或缓存记录。
-              </Text>
-            )}
+                  try {
+                    next = await syncSchemeFromLocal(next)
+                    setCfg(next)
+                  } catch { }
+                })()
+              }
+            }}
           >
-            <Button
-              action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                void clearCache()
-              }}
-            >
-              <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 6 }}>
-                <Text
-                  font="headline"
-                  foregroundStyle="systemBlue"
-                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
-                >
-                  清理缓存
-                </Text>
-              </HStack>
-            </Button>
-          </Section>
-
-          <Section
-            footer={(
-              <Text font="caption" foregroundStyle="secondaryLabel">
-                将清理本地设置、更新记录和解压缓存记录。重置后需要重新选择路径并按需重新配置。
+            {bookmarks.map((b, index) => (
+              <Text key={b.name} tag={index}>
+                {b.name}
               </Text>
-            )}
+            ))}
+          </Picker>
+        ) : null}
+      </Section>
+
+      <Section header={<Text>发布源</Text>}>
+        <Picker
+          title={"发布源"}
+          pickerStyle="menu"
+          value={releaseIdx}
+          onChanged={(v: number) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setReleaseIdx(v)
+          }}
+        >
+          {releaseLabels.map((label, index) => (
+            <Text key={label} tag={index}>
+              {label}
+            </Text>
+          ))}
+        </Picker>
+
+        <Toggle
+          title={"预发布版本"}
+          value={cfg.usePrereleaseScheme}
+          onChanged={(v: boolean) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setCfg((c) => ({ ...c, usePrereleaseScheme: v }))
+          }}
+          toggleStyle="switch"
+        />
+
+        {releaseIdx === 1 ? (
+          <TextField
+            label={<Text>GitHub Token</Text>}
+            value={cfg.githubToken}
+            onChanged={(v: string) => setCfg((c) => ({ ...c, githubToken: v }))}
+            prompt="GitHub Token（可选）：提高请求限额"
+            textFieldStyle="roundedBorder"
+          />
+        ) : null}
+      </Section>
+
+      <Section header={<Text>方案选项</Text>}>
+        <Picker
+          title={"方案"}
+          pickerStyle="menu"
+          value={schemeIdx}
+          onChanged={(v: number) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setSchemeIdx(v)
+          }}
+        >
+          {schemeLabels.map((label, index) => (
+            <Text key={label} tag={index}>
+              {label}
+            </Text>
+          ))}
+        </Picker>
+
+        {schemeIdx === 1 ? (
+          <Picker
+            title={"Pro 辅助码"}
+            pickerStyle="menu"
+            value={proKeyIdx}
+            onChanged={(v: number) => {
+              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+              setProKeyIdx(v)
+            }}
           >
-            <Button
-              role="destructive"
-              action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                void resetSettings()
-              }}
+            {proLabels.map((label, index) => (
+              <Text key={label} tag={index}>
+                {label}
+              </Text>
+            ))}
+          </Picker>
+        ) : null}
+      </Section>
+
+      <Section header={<Text>输入法</Text>}>
+        <Picker
+          title={"输入法"}
+          pickerStyle="menu"
+          value={inputIdx}
+          onChanged={(v: number) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setInputIdx(v)
+          }}
+        >
+          {INPUT_METHODS.map((m, index) => (
+            <Text key={m.value} tag={index}>
+              {m.label}
+            </Text>
+          ))}
+        </Picker>
+      </Section>
+
+      <Section header={<Text>更新设置</Text>}>
+        <Toggle
+          title={"启动时自动检查更新"}
+          value={cfg.autoCheckOnLaunch}
+          onChanged={(v: boolean) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setCfg((c) => ({ ...c, autoCheckOnLaunch: v }))
+          }}
+          toggleStyle="switch"
+        />
+        <Toggle
+          title={"更新时显示详细日志"}
+          value={cfg.showVerboseLog}
+          onChanged={(v: boolean) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setCfg((c) => ({ ...c, showVerboseLog: v }))
+          }}
+          toggleStyle="switch"
+        />
+        <Toggle
+          title={"不清理部署目录(build)"}
+          value={cfg.skipBuildCleanup}
+          onChanged={(v: boolean) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setCfg((c) => ({ ...c, skipBuildCleanup: v }))
+          }}
+          toggleStyle="switch"
+        />
+      </Section>
+
+      <Section header={<Text>页面显示设置</Text>}>
+        <Button
+          action={() => {
+            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+            void openHomeSectionOrderSettings()
+          }}
+        >
+          <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 10 }}>
+            <VStack spacing={4} frame={{ maxWidth: "infinity" }}>
+              <Text>主页区块排序</Text>
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                {cfg.homeSectionOrder.map((key) => HOME_SECTION_LABELS[key]).join(" / ")}
+              </Text>
+            </VStack>
+          </HStack>
+        </Button>
+      </Section>
+
+      <Section header={<Text>排除文件（按行）</Text>}>
+        <TextField
+          label={<Text>规则</Text>}
+          value={cfg.excludePatternsText}
+          onChanged={(v: string) => setCfg((c) => ({ ...c, excludePatternsText: v }))}
+          axis="vertical"
+          lineLimit={{ min: 6, max: 10 }}
+          prompt={"例如：\nuser.yaml\n*.custom.yaml\ntips_show.txt"}
+          textFieldStyle="roundedBorder"
+        />
+      </Section>
+
+      <Section
+        footer={(
+          <Text font="caption" foregroundStyle="secondaryLabel">
+            将主动清理临时下载文件，不会清理本地设置或缓存记录。
+          </Text>
+        )}
+      >
+        <Button
+          action={() => {
+            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+            void clearCache()
+          }}
+        >
+          <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 6 }}>
+            <Text
+              font="headline"
+              foregroundStyle="systemBlue"
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
             >
-              <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 6 }}>
-                <Text
-                  font="headline"
-                  foregroundStyle="systemRed"
-                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
-                >
-                  重置设置
-                </Text>
-              </HStack>
-            </Button>
-          </Section>
-        </Form>
-      </VStack>
-    </NavigationStack>
+              清理缓存
+            </Text>
+          </HStack>
+        </Button>
+      </Section>
+
+      <Section
+        footer={(
+          <Text font="caption" foregroundStyle="secondaryLabel">
+            将清理本地设置、更新记录和解压缓存记录。重置后需要重新选择路径并按需重新配置。
+          </Text>
+        )}
+      >
+        <Button
+          role="destructive"
+          action={() => {
+            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+            void resetSettings()
+          }}
+        >
+          <HStack frame={{ width: "100%" as any }} padding={{ top: 10, bottom: 6 }}>
+            <Text
+              font="headline"
+              foregroundStyle="systemRed"
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
+            >
+              重置设置
+            </Text>
+          </HStack>
+        </Button>
+      </Section>
+    </Form>
   )
+
+  const screen = (
+    <VStack
+      navigationTitle={"设置"}
+      navigationBarTitleDisplayMode={"inline"}
+      toolbar={
+        props.leadingToolbar
+          ? {
+              topBarLeading: props.leadingToolbar,
+            }
+          : undefined
+      }
+      alert={{
+        title: alert.title,
+        isPresented: alert.isPresented,
+        onChanged: (v) => setAlert((a) => ({ ...a, isPresented: v })),
+        message: alert.message,
+        actions: alert.actions,
+      }}
+    >
+      {formContent}
+    </VStack>
+  )
+  return screen
 }

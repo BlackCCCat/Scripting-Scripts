@@ -6,6 +6,8 @@ import {
   Navigation,
   NavigationStack,
   Script,
+  Tab,
+  TabView,
   Rectangle,
   RoundedRectangle,
   Section,
@@ -20,6 +22,7 @@ import {
   ProgressView,
   useColorScheme,
   useEffect,
+  useObservable,
   useRef,
   useState,
   Markdown,
@@ -47,6 +50,7 @@ import {
   type AllUpdateResult,
 } from "../utils/update_tasks"
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
+import { normalizePath } from "../utils/common"
 
 const FULLSCREEN_SYMBOL = "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
 
@@ -255,6 +259,24 @@ type HomeSessionState = {
   lastCheckDecision: UpdateDecision | null
   lastCheckKey: string
   logs: LogEntry[]
+}
+
+const EDITOR_TAB = 0
+const MAIN_TAB = 1
+const SETTINGS_TAB = 2
+const ACTION_TAB = 3
+
+type ContentTab = typeof EDITOR_TAB | typeof MAIN_TAB | typeof SETTINGS_TAB
+type RootTab = ContentTab | typeof ACTION_TAB
+
+type FileBrowserEntry = {
+  name: string
+  path: string
+  isDirectory: boolean
+}
+
+function isContentTab(value: RootTab): value is ContentTab {
+  return value === EDITOR_TAB || value === MAIN_TAB || value === SETTINGS_TAB
 }
 
 const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
@@ -581,11 +603,103 @@ function progressStageLabel(stage: string): string {
   return "处理中"
 }
 
+async function listFileBrowserEntries(dir: string): Promise<FileBrowserEntry[]> {
+  const fm: any = (globalThis as any).FileManager
+  if (!fm || !dir) return []
+  const base = dir.endsWith("/") ? dir : dir + "/"
+  let raw: any[] = []
+  if (typeof fm.readDirectory === "function") {
+    raw = await fm.readDirectory(dir)
+  } else if (typeof fm.readDirectorySync === "function") {
+    raw = fm.readDirectorySync(dir)
+  } else {
+    return []
+  }
+  const names = (Array.isArray(raw) ? raw : [])
+    .map(String)
+    .map((p) => (p.startsWith(base) ? p.slice(base.length) : p))
+    .filter((p) => p && p !== "." && p !== "..")
+
+  const entries: FileBrowserEntry[] = []
+  for (const name of names) {
+    const path = Path.join(dir, name)
+    let isDirectory = false
+    try {
+      if (typeof fm.isDirectory === "function") isDirectory = !!(await fm.isDirectory(path))
+      else if (typeof fm.isDir === "function") isDirectory = !!(await fm.isDir(path))
+      else if (typeof fm.stat === "function") {
+        const st = await fm.stat(path)
+        isDirectory = String(st?.type ?? "") === "directory"
+      } else if (typeof fm.statSync === "function") {
+        const st = fm.statSync(path)
+        isDirectory = String(st?.type ?? "") === "directory"
+      }
+    } catch { }
+    entries.push({ name, path, isDirectory })
+  }
+  return entries.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+    return a.name.localeCompare(b.name, "zh-Hans-CN")
+  })
+}
+
+async function resolveEditorRootFromConfig(current: AppConfig): Promise<string> {
+  const fm: any = (globalThis as any).FileManager
+  let root = String(current.hamsterRootPath ?? "").trim()
+  if (current.hamsterBookmarkName && fm?.bookmarkedPath) {
+    try {
+      const canUseByName = fm?.bookmarkExists
+        ? !!(await fm.bookmarkExists(current.hamsterBookmarkName))
+        : true
+      if (canUseByName) {
+        const resolved = await fm.bookmarkedPath(current.hamsterBookmarkName)
+        if (resolved) root = String(resolved).trim()
+      }
+    } catch { }
+  }
+  return root
+}
+
+function editorPathVariants(path: string): string[] {
+  const normalized = normalizePath(path)
+  if (!normalized) return []
+  const set = new Set<string>([normalized])
+  if (normalized.startsWith("/private/")) set.add(normalized.slice("/private".length))
+  else if (normalized.startsWith("/")) set.add(`/private${normalized}`)
+  return Array.from(set)
+}
+
+function isAtOrBelowEditorRoot(path: string, root: string): boolean {
+  const pathVariants = editorPathVariants(path)
+  const rootVariants = editorPathVariants(root)
+  if (!pathVariants.length || !rootVariants.length) return false
+  for (const p of pathVariants) {
+    for (const r of rootVariants) {
+      if (p === r || p.startsWith(`${r}/`)) return true
+    }
+  }
+  return false
+}
+
+function isSameEditorPath(a: string, b: string): boolean {
+  if (!a || !b) return false
+  const av = editorPathVariants(a)
+  const bv = new Set(editorPathVariants(b))
+  return av.some((item) => bv.has(item))
+}
+
 export function HomeView() {
   const supportsMinimization =
     typeof Script.supportsMinimization === "function" && Script.supportsMinimization()
+  const activeTab = useObservable<RootTab>(MAIN_TAB)
+  const [lastContentTab, setLastContentTab] = useState<ContentTab>(MAIN_TAB)
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
   const logProxyRef = useRef<any>()
+  const settingsSaveRef = useRef<(() => void) | null>(null)
+  const [editorRootPath, setEditorRootPath] = useState(() => String(loadConfig().hamsterRootPath ?? "").trim())
+  const [editorCurrentPath, setEditorCurrentPath] = useState(() => String(loadConfig().hamsterRootPath ?? "").trim())
+  const [editorEntries, setEditorEntries] = useState<FileBrowserEntry[]>([])
+  const [editorLoading, setEditorLoading] = useState(false)
 
   // 本地信息
   const [localSelectedScheme, setLocalSelectedScheme] = useState("暂无法获取")
@@ -618,6 +732,67 @@ export function HomeView() {
 
   // ✅ 只在“真正下载”时显示进度
   const [showProgress, setShowProgress] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      const root = await resolveEditorRootFromConfig(cfg)
+      if (disposed) return
+      setEditorRootPath(root)
+      setEditorCurrentPath(root)
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [cfg.hamsterRootPath, cfg.hamsterBookmarkName])
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      if (!editorCurrentPath) {
+        setEditorEntries([])
+        return
+      }
+      setEditorLoading(true)
+      try {
+        const items = await listFileBrowserEntries(editorCurrentPath)
+        if (!disposed) setEditorEntries(items)
+      } catch {
+        if (!disposed) setEditorEntries([])
+      } finally {
+        if (!disposed) setEditorLoading(false)
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [editorCurrentPath])
+
+  useEffect(() => {
+    const root = normalizePath(editorRootPath)
+    const current = normalizePath(editorCurrentPath)
+    if (!root || !current) return
+    if (!isAtOrBelowEditorRoot(current, root)) {
+      setEditorCurrentPath(root)
+    }
+  }, [editorCurrentPath, editorRootPath])
+
+  useEffect(() => {
+    if (isContentTab(activeTab.value)) {
+      setLastContentTab(activeTab.value)
+      return
+    }
+
+    if (lastContentTab === EDITOR_TAB) {
+      void reselectEditorFolder()
+    } else if (lastContentTab === MAIN_TAB) {
+      if (!busy && pathUsable) void onAutoUpdate()
+    } else if (lastContentTab === SETTINGS_TAB) {
+      settingsSaveRef.current?.()
+    }
+
+    activeTab.setValue(lastContentTab)
+  }, [activeTab.value, lastContentTab, busy, pathUsable])
 
   function resetRemote() {
     setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer)
@@ -905,70 +1080,29 @@ export function HomeView() {
     })()
   }, [])
 
-  async function openSettings() {
+  async function handleSettingsSaved(newCfg: AppConfig) {
     const before = loadConfig()
     const beforeKey = checkKey(before)
-    await Navigation.present({
-      element: (
-        <SettingsView
-          initial={loadConfig()}
-          onDone={(newCfg) => {
-            const changed = checkKey(newCfg) !== checkKey(cfg)
-            setCfg(newCfg)
-            void (async () => {
-              await guardPathAccess(false)
-              await refreshLocal(newCfg)
-            })()
-            if (changed) resetRemote()
-          }}
-        />
-      ),
-    })
-    const current = loadConfig()
-    setCfg(current)
+    setCfg(newCfg)
     await guardPathAccess(false)
-    const hasLocal = await refreshLocal(current)
-    const afterKey = checkKey(current)
+    const hasLocal = await refreshLocal(newCfg)
+    const afterKey = checkKey(newCfg)
     if (afterKey !== beforeKey) {
       resetRemote()
       const pathChanged =
-        current.hamsterRootPath !== before.hamsterRootPath ||
-        current.hamsterBookmarkName !== before.hamsterBookmarkName
-      if (pathChanged && current.autoCheckOnLaunch && hasLocal) {
+        newCfg.hamsterRootPath !== before.hamsterRootPath ||
+        newCfg.hamsterBookmarkName !== before.hamsterBookmarkName
+      if (pathChanged && newCfg.autoCheckOnLaunch && hasLocal) {
         await onCheckUpdate()
       }
     }
   }
 
-  async function openTextEditor() {
+  async function openEditorFile(filePath: string) {
     try {
-      const current = loadConfig()
-      const fm: any = (globalThis as any).FileManager
-      let initialDirectory = String(current.hamsterRootPath ?? "").trim()
-      if (current.hamsterBookmarkName && fm?.bookmarkedPath) {
-        try {
-          const canUseByName = fm?.bookmarkExists
-            ? !!(await fm.bookmarkExists(current.hamsterBookmarkName))
-            : true
-          if (canUseByName) {
-            const resolved = await fm.bookmarkedPath(current.hamsterBookmarkName)
-            if (resolved) initialDirectory = String(resolved).trim()
-          }
-        } catch { }
-      }
-
-      const files = await DocumentPicker.pickFiles({
-        types: ["public.text"],
-        initialDirectory: initialDirectory || undefined,
-      })
-      if (!Array.isArray(files) || files.length === 0) return
-
-      const filePath = String(files[0] ?? "")
       if (!filePath) return
-
       const ext = Path.extname(filePath).slice(1) || "md"
       const content = await FileManager.readAsString(filePath, "utf-8")
-
       const editor = new EditorController({
         ext: ext as any,
       })
@@ -977,15 +1111,28 @@ export function HomeView() {
         try {
           await FileManager.writeAsString(filePath, newContent, "utf-8")
         } catch (error: any) {
-          console.error("保存文件失败：", error)
           setStageAndMaybeLog(`保存文件失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
         }
       }
-
       await editor.present()
       editor.dispose()
+      const items = await listFileBrowserEntries(editorCurrentPath)
+      setEditorEntries(items)
     } catch (error: any) {
       setStageAndMaybeLog(`打开编辑器失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
+    }
+  }
+
+  async function reselectEditorFolder() {
+    try {
+      const initialDirectory = editorCurrentPath || editorRootPath || cfg.hamsterRootPath || undefined
+      const picked = await (DocumentPicker as any).pickDirectory?.(initialDirectory)
+      const nextPath = String(picked ?? "").trim()
+      if (!nextPath) return
+      setEditorRootPath(nextPath)
+      setEditorCurrentPath(nextPath)
+    } catch (error: any) {
+      setStageAndMaybeLog(`选择文件夹失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
     }
   }
 
@@ -1038,6 +1185,36 @@ export function HomeView() {
         </HStack>
       ),
     })
+  }
+
+  function renderLeadingToolbar() {
+    return (
+      <HStack spacing={8}>
+        <Button
+          title=""
+          systemImage="xmark.circle"
+          foregroundStyle="systemRed"
+          action={closeScript}
+        />
+        {supportsMinimization ? (
+          <Button
+            title=""
+            systemImage="minus.circle"
+            foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}
+            disabled={busy}
+            action={() => {
+              void minimizeScript()
+            }}
+          />
+        ) : null}
+      </HStack>
+    )
+  }
+
+  function actionTabIconName() {
+    if (lastContentTab === EDITOR_TAB) return "folder.badge.gearshape"
+    if (lastContentTab === SETTINGS_TAB) return "checkmark"
+    return "bolt.fill"
   }
 
   async function openFullscreenLogs() {
@@ -1306,6 +1483,85 @@ export function HomeView() {
     return <LogEntryRow key={entry.id} entry={entry} />
   }
 
+  function renderEditorTab() {
+    const atRoot = !editorRootPath || isSameEditorPath(editorCurrentPath, editorRootPath)
+    const title = editorCurrentPath ? (Path.basename(editorCurrentPath) || "编辑") : "编辑"
+    const goEditorParent = () => {
+      const root = normalizePath(editorRootPath)
+      const current = normalizePath(editorCurrentPath)
+      if (!current || !root) return
+      const parent = normalizePath(Path.dirname(current))
+      if (!parent || !isAtOrBelowEditorRoot(parent, root)) {
+        setEditorCurrentPath(root)
+        return
+      }
+      setEditorCurrentPath(parent)
+    }
+    return (
+      <NavigationStack>
+        <List
+          navigationTitle={title}
+          navigationBarTitleDisplayMode={"inline"}
+          listStyle={"insetGroup"}
+          toolbar={{
+            topBarLeading: renderLeadingToolbar(),
+          }}
+        >
+          <Section header={<Text>当前目录</Text>}>
+            <Text>{editorCurrentPath || "未选择文件夹"}</Text>
+          </Section>
+
+          <Section
+            header={(
+              <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                <Text>目录内容</Text>
+                <Spacer />
+                {editorCurrentPath && !atRoot ? (
+                  <Button action={goEditorParent}>
+                    <Image systemName="arrow.up.circle" foregroundStyle="systemBlue" />
+                  </Button>
+                ) : null}
+              </HStack>
+            )}
+          >
+            {!editorCurrentPath ? (
+              <Text foregroundStyle="secondaryLabel">当前没有可浏览的书签目录。</Text>
+            ) : editorLoading ? (
+              <Text foregroundStyle="secondaryLabel">加载中...</Text>
+            ) : editorEntries.length ? (
+              editorEntries.map((entry) => (
+                <Button
+                  key={entry.path}
+                  action={() => {
+                    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                    if (entry.isDirectory) {
+                      setEditorCurrentPath(entry.path)
+                    } else {
+                      void openEditorFile(entry.path)
+                    }
+                  }}
+                >
+                  <HStack>
+                    <Image
+                      systemName={entry.isDirectory ? "folder" : "doc.text"}
+                      foregroundStyle={entry.isDirectory ? "systemBlue" : "secondaryLabel"}
+                    />
+                    <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                      {entry.name}
+                    </Text>
+                    {entry.isDirectory ? <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" /> : null}
+                  </HStack>
+                </Button>
+              ))
+            ) : (
+              <Text foregroundStyle="secondaryLabel">当前目录为空。</Text>
+            )}
+          </Section>
+        </List>
+      </NavigationStack>
+    )
+  }
+
   function renderSection(key: HomeSectionKey) {
     if (key === "local") {
       return (
@@ -1490,72 +1746,94 @@ export function HomeView() {
   }
 
   return (
-    <NavigationStack>
-      <VStack
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        alert={{
-          title: alert.title,
-          isPresented: alert.isPresented,
-          onChanged: (v) => setAlert((a) => ({ ...a, isPresented: v })),
-          message: alert.message,
-          actions: alert.actions,
-        }}
+    <VStack
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      alert={{
+        title: alert.title,
+        isPresented: alert.isPresented,
+        onChanged: (v) => setAlert((a) => ({ ...a, isPresented: v })),
+        message: alert.message,
+        actions: alert.actions,
+      }}
+    >
+      <TabView
+        selection={activeTab as any}
+        tint="systemBlue"
+        tabViewStyle="sidebarAdaptable"
+        tabBarMinimizeBehavior="onScrollDown"
+        tabViewSearchActivation="searchTabSelection"
       >
-        <List
-          navigationTitle={"万象工具"}
-          navigationBarTitleDisplayMode={"inline"}
-          listStyle={"insetGroup"}
-          toolbar={{
-            topBarLeading: (
-              <HStack spacing={8}>
-                <Button
-                  title=""
-                  systemImage="xmark.circle"
-                  foregroundStyle="systemRed"
-                  action={closeScript}
-                />
-                {supportsMinimization ? (
-                  <Button
-                    title=""
-                    systemImage="minus.circle"
-                    foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}
-                    disabled={busy}
-                    action={() => {
-                      void minimizeScript()
-                    }}
-                  />
-                ) : null}
-              </HStack>
-            ),
-            topBarTrailing: (
-              <HStack spacing={8}>
-                <Button
-                  title=""
-                  systemImage="square.and.pencil"
-                  action={() => {
-                    try {
-                      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-                    } catch { }
-                    void openTextEditor()
-                  }}
-                />
-                <Button
-                  title=""
-                  systemImage="gearshape"
-                  action={() => {
-                    try {
-                      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-                    } catch { }
-                    void openSettings()
-                  }}
-                />
-              </HStack>
-            ),
-          }}
+        <Tab title="文件" systemImage="folder.fill" value={EDITOR_TAB}>
+          {renderEditorTab()}
+        </Tab>
+
+        <Tab title="主页" systemImage="house.fill" value={MAIN_TAB}>
+          <NavigationStack>
+            <List
+              navigationTitle={"万象工具"}
+              navigationBarTitleDisplayMode={"inline"}
+              listStyle={"insetGroup"}
+              toolbar={{
+                topBarLeading: renderLeadingToolbar(),
+              }}
+            >
+              {cfg.homeSectionOrder.map(renderSection)}
+            </List>
+          </NavigationStack>
+        </Tab>
+
+        <Tab title="设置" systemImage="gearshape" value={SETTINGS_TAB}>
+          <NavigationStack>
+            <SettingsView
+              initial={cfg}
+              leadingToolbar={renderLeadingToolbar()}
+              registerSaveAction={(fn) => {
+                settingsSaveRef.current = fn
+              }}
+              onDone={(newCfg) => {
+                void handleSettingsSaved(newCfg)
+              }}
+            />
+          </NavigationStack>
+        </Tab>
+
+        <Tab
+          title=""
+          systemImage={actionTabIconName()}
+          value={ACTION_TAB}
+          role="search"
         >
-          {cfg.homeSectionOrder.map(renderSection)}
-        </List>
-      </VStack>
-    </NavigationStack>
+          {lastContentTab === EDITOR_TAB ? (
+            renderEditorTab()
+          ) : lastContentTab === SETTINGS_TAB ? (
+            <NavigationStack>
+              <SettingsView
+                initial={cfg}
+                leadingToolbar={renderLeadingToolbar()}
+                registerSaveAction={(fn) => {
+                  settingsSaveRef.current = fn
+                }}
+                onDone={(newCfg) => {
+                  void handleSettingsSaved(newCfg)
+                }}
+              />
+            </NavigationStack>
+          ) : (
+            <NavigationStack>
+              <List
+                navigationTitle={"万象工具"}
+                navigationBarTitleDisplayMode={"inline"}
+                listStyle={"insetGroup"}
+                toolbar={{
+                  topBarLeading: renderLeadingToolbar(),
+                }}
+              >
+                {cfg.homeSectionOrder.map(renderSection)}
+              </List>
+            </NavigationStack>
+          )}
+        </Tab>
+      </TabView>
+    </VStack>
   )
 }
