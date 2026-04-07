@@ -6,7 +6,6 @@ import {
   Navigation,
   NavigationStack,
   Section,
-  Text,
   Toggle,
   useState,
 } from "scripting"
@@ -21,7 +20,6 @@ import { isLocalTranslationAvailable } from "../utils/translation_engine"
 import { isSystemTranslationAvailable } from "../utils/system_translation_engine"
 import {
   addAiApiEngine,
-  addKnownEngine,
   loadTranslatorSettings,
   removeEngine,
   reorderEngines,
@@ -29,7 +27,6 @@ import {
   updateEngineConfig,
   updateEngineEnabled,
 } from "../utils/translator_settings"
-import { AddEngineView } from "./AddEngineView"
 import { EngineEditorView } from "./EngineEditorView"
 
 function isEngineEditable(engine: TranslatorEngineEntry) {
@@ -37,10 +34,7 @@ function isEngineEditable(engine: TranslatorEngineEntry) {
 }
 
 function canDeleteEngine(engine: TranslatorEngineEntry) {
-  return (
-    engine.kind === "google_translate" ||
-    engine.kind === "ai_api"
-  )
+  return engine.kind === "ai_api"
 }
 
 function isEngineAvailable(engine: TranslatorEngineEntry) {
@@ -77,27 +71,43 @@ export function TranslatorSettingsView() {
     saveTranslatorSettings(next)
   }
 
-  async function openAddEngine() {
-    const selection = await Navigation.present({
-      element: <AddEngineView existingKinds={settings.engines.map((item) => item.kind)} />,
+  async function openCreateAiEngine() {
+    const draftSettings = addAiApiEngine(settings)
+    const draft = draftSettings.engines[draftSettings.engines.length - 1]
+    if (!draft || draft.kind !== "ai_api") return
+
+    const result = await Navigation.present({
+      element: (
+        <EngineEditorView
+          title="添加 AI 接口"
+          initial={{
+            config: draft.config,
+            label: draft.label,
+            systemImage: draft.systemImage,
+          }}
+        />
+      ),
     })
 
-    if (selection?.kind === "ai_api") {
-      const next = addAiApiEngine(settings)
-      persist(next)
+    if (!result) return
 
-      const added = next.engines[next.engines.length - 1]
-      if (added?.kind === "ai_api") {
-        void openEditEngine(added, next)
-      }
-      return
-    }
+    const nextWithConfig = updateEngineConfig(
+      draftSettings,
+      draft.id,
+      result.config as TranslationEngineConfig
+    )
 
-    if (
-      selection?.kind === "google_translate"
-    ) {
-      persist(addKnownEngine(settings, selection.kind))
-    }
+    persist({
+      engines: nextWithConfig.engines.map((item) => (
+        item.id === draft.id
+          ? {
+              ...item,
+              label: String(result.label ?? item.label).trim() || item.label,
+              systemImage: String(result.systemImage ?? item.systemImage).trim() || item.systemImage,
+            }
+          : item
+      )),
+    })
   }
 
   async function openEditEngine(
@@ -221,7 +231,7 @@ export function TranslatorSettingsView() {
             title="添加引擎"
             systemImage="plus"
             action={() => {
-              void openAddEngine()
+              void openCreateAiEngine()
             }}
           />
         </Section>

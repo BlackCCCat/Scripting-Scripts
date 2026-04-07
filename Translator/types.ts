@@ -8,15 +8,18 @@ export type BuiltInTranslationEngineKind =
   | "apple_intelligence"
   | "assistant"
   | "system_translation"
-
-export type ExternalTranslationEngineKind =
   | "google_translate"
 
 export type KnownTranslationEngineKind =
   | BuiltInTranslationEngineKind
-  | ExternalTranslationEngineKind
 
-export type AiApiCompatibilityMode = "newapi" | "openai" | "gemini"
+export type AiApiCompatibilityMode =
+  | "custom"
+  | "newapi"
+  | "openai"
+  | "gemini"
+  | "siliconflow"
+  | "qwen"
 
 export type TranslationEngineKind =
   | KnownTranslationEngineKind

@@ -282,8 +282,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
     setEngineResults(createLoadingStates())
 
     try {
-      // 这里先给每个引擎建独立加载态，再逐条回填结果，避免只看到单一引擎在转。
-      const results = await Promise.all(
+      // 这里逐条回填每个引擎的状态，不再在最后整体覆盖，避免未完成项丢掉自己的加载态。
+      await Promise.allSettled(
         visibleEngines.map(async (engine) => {
           try {
             const result = await translateEngine(engine)
@@ -313,11 +313,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
       )
 
       if (requestId !== requestIdRef.current) return
-
-      const finalized = results.filter(Boolean) as EngineTranslationState[]
-      if (finalized.length === visibleEngines.length) {
-        setEngineResults(finalized)
-      }
       try {
         HapticFeedback.notificationSuccess()
       } catch {}

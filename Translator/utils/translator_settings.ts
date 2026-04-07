@@ -22,7 +22,7 @@ function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
     enabled: kind === "apple_intelligence"
       ? defaultEnabled && isLocalTranslationAvailable()
       : defaultEnabled,
-    isBuiltIn: kind === "apple_intelligence" || kind === "assistant" || kind === "system_translation",
+    isBuiltIn: true,
   }
 }
 
@@ -41,6 +41,7 @@ const REQUIRED_BUILT_INS: BuiltInTranslationEngineKind[] = [
   "apple_intelligence",
   "assistant",
   "system_translation",
+  "google_translate",
 ]
 
 function storage() {
@@ -234,19 +235,6 @@ export function reorderEngines(
   })
 }
 
-export function addKnownEngine(
-  settings: TranslatorSettings,
-  kind: KnownTranslationEngineKind
-): TranslatorSettings {
-  if (settings.engines.some((item) => item.kind === kind)) {
-    return normalizeTranslatorSettings(settings)
-  }
-
-  return normalizeTranslatorSettings({
-    engines: [...settings.engines, builtInEntry(kind)],
-  })
-}
-
 export function getExecutableEngines(settings: TranslatorSettings) {
   return settings.engines
 }
@@ -263,7 +251,7 @@ export function addAiApiEngine(settings: TranslatorSettings): TranslatorSettings
         enabled: false,
         isBuiltIn: false,
         config: {
-          compatibilityMode: "newapi",
+          compatibilityMode: "custom",
           baseUrl: "",
           apiKey: "",
           model: "",

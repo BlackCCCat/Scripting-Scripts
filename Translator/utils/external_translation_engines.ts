@@ -1,4 +1,5 @@
 import { fetch, type Response } from "scripting"
+import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
   AiApiCompatibilityMode,
   TranslationRequest,
@@ -9,6 +10,9 @@ import type {
 const GOOGLE_WEB_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com"
 const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+const SILICONFLOW_DEFAULT_BASE_URL = "https://api.siliconflow.cn"
+const QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode"
+const SUCCESSFUL_AI_ENDPOINT_CACHE = new Map<string, string>()
 
 const AI_TRANSLATION_SYSTEM_PROMPT = [
   "You are a translation engine for an iOS translation panel.",
@@ -18,6 +22,7 @@ const AI_TRANSLATION_SYSTEM_PROMPT = [
   "Preserve paragraph breaks, bullet structure, code blocks, URLs, emoji, and numbers.",
   "Do not omit, shorten, or paraphrase away any part of the input.",
   "Always output the full translation in the requested target language.",
+  "If the source language and target language differ, never return the source text unchanged.",
 ].join(" ")
 
 function ensureConfigured(value: string | undefined, message: string) {
@@ -143,9 +148,12 @@ function mapGoogleLanguage(code: string, isSource = false) {
 }
 
 function normalizeAiMode(mode: unknown): AiApiCompatibilityMode {
+  if (mode === "custom") return "custom"
   if (mode === "openai") return "openai"
   if (mode === "gemini") return "gemini"
-  return "newapi"
+  if (mode === "siliconflow") return "siliconflow"
+  if (mode === "qwen") return "qwen"
+  return "custom"
 }
 
 function resolveAiBaseUrl(mode: AiApiCompatibilityMode, configBaseUrl?: string) {
@@ -153,17 +161,50 @@ function resolveAiBaseUrl(mode: AiApiCompatibilityMode, configBaseUrl?: string) 
   if (normalized) return normalized
   if (mode === "openai") return OPENAI_DEFAULT_BASE_URL
   if (mode === "gemini") return GEMINI_DEFAULT_BASE_URL
+  if (mode === "siliconflow") return SILICONFLOW_DEFAULT_BASE_URL
+  if (mode === "qwen") return QWEN_DEFAULT_BASE_URL
   return ""
+}
+
+function stripKnownEndpointSuffix(baseUrl: string) {
+  return normalizeBaseUrl(baseUrl).replace(
+    /\/(?:v1\/models|models|v1\/chat\/completions|chat\/completions|v1\/responses|responses|v1\/messages|messages)\/?$/i,
+    ""
+  )
+}
+
+function buildCustomRootCandidates(baseUrl: string) {
+  const stripped = stripKnownEndpointSuffix(baseUrl)
+  if (!stripped) return []
+
+  if (/\/v1$/i.test(stripped)) {
+    return uniqueStrings([stripped, stripped.replace(/\/v1$/i, "")])
+  }
+
+  return uniqueStrings([stripped, `${stripped}/v1`])
 }
 
 function buildAiUserPrompt(request: TranslationRequest) {
   return [
-    `Source language: ${request.sourceLanguageCode}`,
-    `Target language: ${request.targetLanguageCode}`,
-    "Translate the following text:",
+    `Translate the following text into ${promptNameForLanguage(request.targetLanguageCode)}.`,
+    `Source language: ${promptNameForLanguage(request.sourceLanguageCode)}.`,
+    `Target language: ${promptNameForLanguage(request.targetLanguageCode)}.`,
+    "Only return the translated text.",
     "",
     request.sourceText,
   ].join("\n")
+}
+
+function promptNameForLanguage(code: string) {
+  if (code === AUTO_LANGUAGE.code) return "auto"
+  return LANGUAGE_OPTIONS.find((item) => item.code === code)?.promptName ?? code
+}
+
+function qwenLanguageName(code: string) {
+  if (code === AUTO_LANGUAGE.code) return "auto"
+  if (code === "zh-Hans") return "Chinese"
+  if (code === "zh-Hant") return "Traditional Chinese"
+  return promptNameForLanguage(code)
 }
 
 function normalizeAiTranslatedText(value: string) {
@@ -193,25 +234,80 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
 }
 
+function normalizeComparableText(value: string) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+}
+
+function isLikelyUntranslated(request: TranslationRequest, translatedText: string) {
+  const source = normalizeComparableText(request.sourceText)
+  const translated = normalizeComparableText(translatedText)
+  if (!source || !translated) return false
+  if (source !== translated) return false
+  if (request.sourceLanguageCode !== AUTO_LANGUAGE.code && request.sourceLanguageCode === request.targetLanguageCode) {
+    return false
+  }
+
+  return source.length >= 12 || /\s/.test(source)
+}
+
+function aiEndpointCacheKey(mode: AiApiCompatibilityMode, baseUrl: string) {
+  return `${mode}::${normalizeBaseUrl(baseUrl)}`
+}
+
 function buildAiEndpointCandidates(mode: AiApiCompatibilityMode, baseUrl: string) {
+  const cacheKey = aiEndpointCacheKey(mode, baseUrl)
+  const cached = SUCCESSFUL_AI_ENDPOINT_CACHE.get(cacheKey)
+
   if (mode === "gemini") {
     return uniqueStrings([
+      cached ?? "",
       joinBaseUrl(baseUrl, "/v1beta/openai/chat/completions"),
       joinBaseUrl(baseUrl, "/openai/chat/completions"),
       joinBaseUrl(baseUrl, "/chat/completions"),
     ])
   }
 
-  if (mode === "newapi") {
+  if (mode === "siliconflow") {
     return uniqueStrings([
-      joinBaseUrl(baseUrl, "/v1/responses"),
-      joinBaseUrl(baseUrl, "/responses"),
+      cached ?? "",
       joinBaseUrl(baseUrl, "/v1/chat/completions"),
-      joinBaseUrl(baseUrl, "/chat/completions"),
+    ])
+  }
+
+  if (mode === "qwen") {
+    return uniqueStrings([
+      cached ?? "",
+      joinBaseUrl(baseUrl, "/v1/chat/completions"),
+    ])
+  }
+
+  if (mode === "custom" || mode === "newapi") {
+    return uniqueStrings([
+      cached ?? "",
+      ...buildCustomRootCandidates(baseUrl).flatMap((root) => (
+        /\/v1$/i.test(root)
+          ? [
+              joinBaseUrl(root, "/responses"),
+              joinBaseUrl(root, "/chat/completions"),
+              joinBaseUrl(root, "/messages"),
+            ]
+          : [
+              joinBaseUrl(root, "/v1/responses"),
+              joinBaseUrl(root, "/responses"),
+              joinBaseUrl(root, "/v1/chat/completions"),
+              joinBaseUrl(root, "/chat/completions"),
+              joinBaseUrl(root, "/v1/messages"),
+              joinBaseUrl(root, "/messages"),
+            ]
+      )),
     ])
   }
 
   return uniqueStrings([
+    cached ?? "",
     joinBaseUrl(baseUrl, "/v1/responses"),
     joinBaseUrl(baseUrl, "/v1/chat/completions"),
     joinBaseUrl(baseUrl, "/chat/completions"),
@@ -224,7 +320,7 @@ function buildAiHeaders(mode: AiApiCompatibilityMode, apiKey: string) {
     Accept: "application/json",
   }
 
-  if (mode === "newapi") {
+  if (mode === "custom" || mode === "newapi") {
     return [
       {
         ...common,
@@ -247,7 +343,41 @@ function buildAiHeaders(mode: AiApiCompatibilityMode, apiKey: string) {
   ]
 }
 
-function buildChatCompletionBody(model: string, request: TranslationRequest) {
+function buildChatCompletionBody(
+  mode: AiApiCompatibilityMode,
+  model: string,
+  request: TranslationRequest
+) {
+  if (mode === "qwen") {
+    return JSON.stringify({
+      model,
+      stream: false,
+      messages: [
+        { role: "user", content: request.sourceText },
+      ],
+      translation_options: {
+        source_lang: qwenLanguageName(request.sourceLanguageCode),
+        target_lang: qwenLanguageName(request.targetLanguageCode),
+      },
+    })
+  }
+
+  if (mode === "siliconflow") {
+    return JSON.stringify({
+      model,
+      temperature: 0.1,
+      stream: false,
+      enable_thinking: false,
+      response_format: {
+        type: "text",
+      },
+      messages: [
+        { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
+        { role: "user", content: buildAiUserPrompt(request) },
+      ],
+    })
+  }
+
   return JSON.stringify({
     model,
     temperature: 0.1,
@@ -269,14 +399,37 @@ function buildResponsesBody(model: string, request: TranslationRequest) {
   })
 }
 
+function buildMessagesBody(model: string, request: TranslationRequest) {
+  return JSON.stringify({
+    model,
+    temperature: 0.1,
+    stream: false,
+    messages: [
+      { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
+      { role: "user", content: buildAiUserPrompt(request) },
+    ],
+  })
+}
+
 function parseAiTranslatedText(payload: any) {
   const direct = normalizeAiTranslatedText(String(
     payload?.output_text
     ?? payload?.choices?.[0]?.message?.content
     ?? payload?.choices?.[0]?.text
+    ?? payload?.content?.[0]?.text
     ?? ""
   ))
   if (direct) return direct
+
+  const topLevelContents = Array.isArray(payload?.content) ? payload.content : []
+  for (const content of topLevelContents) {
+    const value = normalizeAiTranslatedText(String(
+      content?.text
+      ?? content?.content
+      ?? ""
+    ))
+    if (value) return value
+  }
 
   const outputItems = Array.isArray(payload?.output) ? payload.output : []
   for (const item of outputItems) {
@@ -408,23 +561,28 @@ async function translateWithAiApi(
   const apiKey = ensureConfigured(engine.config?.apiKey, "请先配置 AI 接口 API Key。")
   const model = ensureConfigured(engine.config?.model, "请先配置 AI 接口模型名称。")
   const endpoints = buildAiEndpointCandidates(mode, baseUrl)
+  const cacheKey = aiEndpointCacheKey(mode, baseUrl)
 
   let response: Response | null = null
   let translatedText = ""
   let sawSuccessfulResponse = false
   let sawHtmlResponse = false
+  let sawUntranslatedResponse = false
 
   endpointLoop:
   for (const endpoint of endpoints) {
     const body = endpoint.endsWith("/responses")
       ? buildResponsesBody(model, request)
-      : buildChatCompletionBody(model, request)
+      : endpoint.endsWith("/messages")
+        ? buildMessagesBody(model, request)
+        : buildChatCompletionBody(mode, model, request)
 
     for (const headers of buildAiHeaders(mode, apiKey)) {
       response = await fetch(endpoint, {
         method: "POST",
         headers,
         body,
+        timeout: 25,
       })
 
       if (!response.ok) {
@@ -445,7 +603,13 @@ async function translateWithAiApi(
         continue
       }
       translatedText = parseAiResponseText(raw)
+      if (translatedText && isLikelyUntranslated(request, translatedText)) {
+        translatedText = ""
+        sawUntranslatedResponse = true
+        continue
+      }
       if (translatedText) {
+        SUCCESSFUL_AI_ENDPOINT_CACHE.set(cacheKey, endpoint)
         break endpointLoop
       }
     }
@@ -457,7 +621,10 @@ async function translateWithAiApi(
 
   if (sawSuccessfulResponse && !translatedText) {
     if (sawHtmlResponse) {
-      throw new Error("AI 接口返回了网页内容，请检查 Base URL 是否指向实际的 API 根地址，而不是站点前端页面。")
+      throw new Error("AI 接口返回了网页内容，请检查链接是否指向实际的 API 根地址，而不是站点前端页面。")
+    }
+    if (sawUntranslatedResponse) {
+      throw new Error("AI 接口返回了与原文相同的内容，没有执行实际翻译。")
     }
     throw new Error("AI 接口没有返回可用译文。")
   }
@@ -480,8 +647,9 @@ async function translateWithAiApi(
 
 export function isExternalEngineConfigured(engine: TranslatorEngineEntry) {
   if (engine.kind === "ai_api") {
+    const mode = normalizeAiMode(engine.config?.compatibilityMode)
     return (
-      !!String(engine.config?.baseUrl ?? "").trim() &&
+      (mode !== "custom" || !!String(engine.config?.baseUrl ?? "").trim()) &&
       !!String(engine.config?.apiKey ?? "").trim() &&
       !!String(engine.config?.model ?? "").trim()
     )
