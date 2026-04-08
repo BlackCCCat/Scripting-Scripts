@@ -1,11 +1,15 @@
 import {
   Button,
   Form,
+  HStack,
+  Image,
+  Menu,
   Navigation,
   NavigationStack,
   Picker,
   ProgressView,
   Section,
+  Spacer,
   Text,
   TextField,
   useEffect,
@@ -58,6 +62,50 @@ function shouldSyncLabelWithMode(currentLabel: string, currentMode: AiApiCompati
   const normalized = String(currentLabel ?? "").trim()
   if (!normalized) return true
   return normalized === "AI 接口" || normalized === modeLabel(currentMode)
+}
+
+function ModelMenu(props: {
+  value: string
+  selectedIndex: number
+  options: string[]
+  onChanged: (index: number) => void
+}) {
+  return (
+    <Menu
+      label={
+        <HStack spacing={4}>
+          <Text
+            font="subheadline"
+            foregroundStyle="accentColor"
+            lineLimit={1}
+            truncationMode="tail"
+            allowsTightening
+            frame={{ maxWidth: 220, alignment: "trailing" as any }}
+            multilineTextAlignment="trailing"
+          >
+            {props.value}
+          </Text>
+          <Image
+            systemName="chevron.down"
+            font="caption2"
+            foregroundStyle="accentColor"
+          />
+        </HStack>
+      }
+    >
+      <Picker
+        title="模型"
+        value={props.selectedIndex}
+        onChanged={props.onChanged}
+      >
+        {props.options.map((item, index) => (
+          <Text key={item} tag={index}>
+            {item}
+          </Text>
+        ))}
+      </Picker>
+    </Menu>
+  )
 }
 
 export function EngineEditorView(props: {
@@ -265,24 +313,25 @@ export function EngineEditorView(props: {
             prompt="API Key"
           />
           {isLoadingModels ? (
-            <>
+            <HStack spacing={12}>
+              <Text>模型</Text>
+              <Spacer />
               {/* 这里保持原地刷新模型，避免保存前还要再做一遍可用性检查。 */}
               <ProgressView />
-              <Text foregroundStyle="secondaryLabel">{modelStatus}</Text>
-            </>
+            </HStack>
           ) : modelIds.length > 0 ? (
-            <Picker
-              title="模型"
-              pickerStyle="menu"
-              value={selectedModelIndex}
-              onChanged={(index: number) => {
-                setModel(modelIds[index] ?? "")
-              }}
-            >
-              {modelIds.map((item, index) => (
-                <Text key={item} tag={index}>{item}</Text>
-              ))}
-            </Picker>
+            <HStack spacing={12}>
+              <Text>模型</Text>
+              <Spacer />
+              <ModelMenu
+                value={model || modelIds[0] || ""}
+                selectedIndex={selectedModelIndex}
+                options={modelIds}
+                onChanged={(index: number) => {
+                  setModel(modelIds[index] ?? "")
+                }}
+              />
+            </HStack>
           ) : (
             <Text foregroundStyle="secondaryLabel">{modelStatus}</Text>
           )}
