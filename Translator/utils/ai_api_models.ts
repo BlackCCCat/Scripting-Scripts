@@ -85,10 +85,10 @@ function buildModelUrls(mode: AiApiCompatibilityMode, baseUrl: string, apiKey: s
   ])
 }
 
-function buildModelHeaders(mode: AiApiCompatibilityMode, apiKey: string) {
+function buildModelHeaders(mode: AiApiCompatibilityMode, apiKey: string): Array<Record<string, string>> | undefined {
   if (mode === "gemini") return undefined
 
-  const headers = [
+  const headers: Array<Record<string, string>> = [
     {
       Authorization: `Bearer ${apiKey}`,
     },

@@ -116,13 +116,19 @@ function CopyableTextRow(props: {
   text: string
   emptyText?: string
   foregroundStyle?: any
+  lineLimit?: number
+  extraMenuButtons?: Array<{
+    title: string
+    systemImage: string
+    action: () => void | Promise<void>
+  }>
   canReplace?: boolean
   onTapWhenEmpty?: () => void | Promise<void>
   onRetranslate?: () => void | Promise<void>
   onReplace?: () => void | Promise<void>
 }) {
   const hasText = props.text.trim().length > 0
-  const hasMenu = hasText || !!props.onRetranslate || (!!props.onReplace && !!props.canReplace)
+  const hasMenu = hasText || !!props.onRetranslate || (!!props.onReplace && !!props.canReplace) || !!props.extraMenuButtons?.length
   const copyAction = withHaptic(async () => {
     if (!hasText) return
     await Pasteboard.setString(props.text)
@@ -162,6 +168,14 @@ function CopyableTextRow(props: {
                 action={withHaptic(props.onReplace)}
               />
             ) : null}
+            {props.extraMenuButtons?.map((item) => (
+              <Button
+                key={`${item.title}-${item.systemImage}`}
+                title={item.title}
+                systemImage={item.systemImage}
+                action={withHaptic(item.action)}
+              />
+            ))}
           </Group>
         ),
       } : undefined}
@@ -173,10 +187,22 @@ function CopyableTextRow(props: {
       multilineTextAlignment="leading"
       selectionDisabled={false}
       foregroundStyle={props.foregroundStyle}
+      lineLimit={props.lineLimit}
+      truncationMode="tail"
     >
       {hasText ? props.text : (props.emptyText || "")}
     </Text>
   )
+}
+
+function shouldCollapseSourceText(text: string) {
+  const normalized = String(text ?? "").trim()
+  if (!normalized) return false
+
+  const lines = normalized.split(/\r?\n/)
+  if (lines.length > 2) return true
+  if (lines.some((line) => line.trim().length > 56)) return true
+  return normalized.length > 110
 }
 
 export function TranslationPanel(props: TranslationPanelProps) {
@@ -188,8 +214,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const [systemTranslationHost] = useState(() => new Translation())
   const [errorText, setErrorText] = useState("")
   const [engineResults, setEngineResults] = useState<EngineTranslationState[]>([])
+  const [isSourceExpanded, setIsSourceExpanded] = useState(false)
   const requestIdRef = useRef(0)
-  const sourceFingerprintRef = useRef("")
   const targetTouchedRef = useRef(false)
   const [appleEngine] = useState(() => createTranslationEngine())
   const [assistantEngine] = useState(() => createAssistantTranslationEngine())
@@ -331,11 +357,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
   }, [hasInput, runTranslation, sourceLanguageCode, sourceText, targetLanguageCode])
 
   useEffect(() => {
-    const fingerprint = sourceText.trim()
-    if (fingerprint !== sourceFingerprintRef.current) {
-      sourceFingerprintRef.current = fingerprint
-      targetTouchedRef.current = false
-    }
+    targetTouchedRef.current = false
+    setIsSourceExpanded(false)
   }, [sourceText])
 
   useEffect(() => {
@@ -382,6 +405,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
   const rerunAllTranslations = useEffectEvent(async () => {
     await runTranslation()
+  })
+
+  const toggleSourceExpanded = useEffectEvent(() => {
+    setIsSourceExpanded((current) => !current)
   })
 
   const rerunSingleEngine = useEffectEvent(async (engineId: string) => {
@@ -454,6 +481,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
     )
   }
 
+  const sourceShouldCollapse = shouldCollapseSourceText(sourceText)
+
   return (
     <List
       listStyle="insetGroup"
@@ -469,7 +498,9 @@ export function TranslationPanel(props: TranslationPanelProps) {
       translationHost={systemTranslationHost}
     >
       <Section>
-        <HStack spacing={10}>
+        <HStack
+          spacing={10}
+        >
           <Image
             systemName="doc.text"
             font="subheadline"
@@ -487,7 +518,17 @@ export function TranslationPanel(props: TranslationPanelProps) {
             options={[AUTO_LANGUAGE, ...LANGUAGE_OPTIONS]}
           />
         </HStack>
-        <CopyableTextRow text={sourceText} />
+        <CopyableTextRow
+          text={sourceText}
+          lineLimit={sourceShouldCollapse && !isSourceExpanded ? 2 : undefined}
+          extraMenuButtons={sourceShouldCollapse ? [
+            {
+              title: isSourceExpanded ? "收起" : "展开",
+              systemImage: isSourceExpanded ? "chevron.up" : "chevron.down",
+              action: toggleSourceExpanded,
+            },
+          ] : undefined}
+        />
       </Section>
 
       <Section>
