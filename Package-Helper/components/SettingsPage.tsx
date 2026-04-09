@@ -3,6 +3,7 @@ import {
   Form,
   Image,
   Navigation,
+  NavigationLink,
   NavigationStack,
   Picker,
   Slider,
@@ -15,6 +16,7 @@ import {
 } from "scripting"
 
 import { CenterDestructiveRow } from "./common"
+import { DatabaseDebugPage } from "./DatabaseDebugPage"
 import { KeywordEditorPage } from "./KeywordEditorPage"
 import type { Config } from "../types"
 import {
@@ -169,6 +171,14 @@ export function SettingsPage(props: {
           ) : null}
         </Section>
 
+        <Section header={<Text>数据库调试</Text>}>
+          <NavigationLink
+            destination={<DatabaseDebugPage />}
+          >
+            <Text>数据库状态调试</Text>
+          </NavigationLink>
+        </Section>
+
         <Section header={<Text>数据管理</Text>}>
           <CenterDestructiveRow
             title="清除已取记录"
@@ -179,7 +189,7 @@ export function SettingsPage(props: {
                 confirmLabel: "清除",
               })
               if (!ok) return
-              clearPicked()
+              await clearPicked()
               safeRefreshWidget()
               props.onChanged()
               presentToast("已清除")
@@ -195,7 +205,7 @@ export function SettingsPage(props: {
                 confirmLabel: "重置",
               })
               if (!ok) return
-              resetConfig()
+              await resetConfig()
               setAutoDetect(DEFAULT_CONFIG.autoDetectSMS)
               setKeywords(DEFAULT_CONFIG.keywords)
               setShowCount(DEFAULT_CONFIG.widgetShowCount)

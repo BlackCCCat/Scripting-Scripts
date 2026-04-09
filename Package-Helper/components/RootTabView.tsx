@@ -15,7 +15,7 @@ export function RootTabView(props: {
   initialNotice?: string | null
 }) {
   const selection = useObservable(HOME_TAB)
-  const [, setVersion] = useState(0)
+  const [version, setVersion] = useState(0)
 
   function bump() {
     setVersion((current) => current + 1)
@@ -30,9 +30,10 @@ export function RootTabView(props: {
     >
       <Tab title="预览" systemImage="doc.text.magnifyingglass" value={PREVIEW_TAB}>
         <PreviewPage
+          reloadToken={version}
           onChanged={() => bump()}
-          onDelete={(code) => {
-            deletePreviewPickup(code)
+          onDelete={async (code) => {
+            await deletePreviewPickup(code)
             bump()
           }}
           onClear={() => {
@@ -43,19 +44,20 @@ export function RootTabView(props: {
 
       <Tab title="主页" systemImage="house.fill" value={HOME_TAB}>
         <HomePage
+          reloadToken={version}
           onRefresh={() => bump()}
-          onPicked={(code) => {
-            markPicked(code)
+          onPicked={async (code) => {
+            await markPicked(code)
             safeRefreshWidget()
             bump()
           }}
-          onUnpicked={(code) => {
-            unmarkPicked(code)
+          onUnpicked={async (code) => {
+            await unmarkPicked(code)
             safeRefreshWidget()
             bump()
           }}
-          onDelete={(code) => {
-            deleteHomePickup(code)
+          onDelete={async (code) => {
+            await deleteHomePickup(code)
             safeRefreshWidget()
             bump()
           }}

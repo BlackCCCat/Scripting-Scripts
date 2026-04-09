@@ -5,17 +5,36 @@ import {
   NavigationStack,
   Section,
   Text,
+  useEffect,
+  useState,
 } from "scripting"
 import { EmptyPickupBlock, PickupRow } from "./common"
+import type { PickupInfo } from "../types"
 import { clearPreviewResults, getPreviewPickupInfo, handleAnyData, loadConfig, safeRefreshWidget } from "../utils"
 
 export function PreviewPage(props: {
-  onChanged: () => void
-  onDelete: (code: string) => void
-  onClear: () => void
+  reloadToken: number
+  onChanged: () => void | Promise<void>
+  onDelete: (code: string) => void | Promise<void>
+  onClear: () => void | Promise<void>
 }) {
   const cfg = loadConfig()
-  const previewItems = getPreviewPickupInfo(cfg)
+  const [previewItems, setPreviewItems] = useState<PickupInfo[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      const items = await getPreviewPickupInfo(cfg)
+      if (!cancelled) {
+        setPreviewItems(items)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [props.reloadToken])
 
   const groupedItems = [
     {
@@ -81,8 +100,8 @@ export function PreviewPage(props: {
                   confirmLabel: "清空",
                 })
                 if (!ok) return
-                clearPreviewResults()
-                props.onClear()
+                await clearPreviewResults()
+                await props.onClear()
               }}
             />
           ),
@@ -101,9 +120,9 @@ export function PreviewPage(props: {
 
                 if (!text?.trim()) return
 
-                const count = handleAnyData(text.trim())
+                const count = await handleAnyData(text.trim())
                 safeRefreshWidget()
-                props.onChanged()
+                await props.onChanged()
 
                 await Dialog.alert({
                   title: count > 0 ? "导入完成" : "没有新增内容",
@@ -140,7 +159,7 @@ export function PreviewPage(props: {
               onDelete={(indices) => {
                 for (const index of indices) {
                   const item = group.items[index]
-                  if (item) props.onDelete(item.code)
+                  if (item) void props.onDelete(item.code)
                 }
               }}
             />

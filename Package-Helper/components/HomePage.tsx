@@ -7,25 +7,45 @@ import {
   NavigationStack,
   Section,
   Text,
+  useEffect,
   useState,
   VStack,
 } from "scripting"
 
 import { EmptyPickupBlock, MetricTile, PickupRow } from "./common"
+import type { PickupInfo } from "../types"
 import { getHomePickupInfo, loadConfig } from "../utils"
 
 export function HomePage(props: {
-  onRefresh: () => void
-  onPicked: (code: string) => void
-  onUnpicked: (code: string) => void
-  onDelete: (code: string) => void
+  reloadToken: number
+  onRefresh: () => void | Promise<void>
+  onPicked: (code: string) => void | Promise<void>
+  onUnpicked: (code: string) => void | Promise<void>
+  onDelete: (code: string) => void | Promise<void>
 }) {
   const cfg = loadConfig()
-  const allItems = getHomePickupInfo(cfg)
-  const pendingItems = allItems.filter((item) => !item.picked)
-  const pickedItems = allItems.filter((item) => item.picked)
+  const [allItems, setAllItems] = useState<PickupInfo[]>([])
   const [showRefreshToast, setShowRefreshToast] = useState(false)
   const [pickedExpanded, setPickedExpanded] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      const items = await getHomePickupInfo(cfg)
+      if (!cancelled) {
+        setAllItems(items)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [props.reloadToken])
+
+  const pendingItems = allItems.filter((item) => !item.picked)
+  const pickedItems = allItems.filter((item) => item.picked)
+  const shownPendingItems = pendingItems.slice(0, Math.max(cfg.widgetShowCount, 3))
 
   return (
     <NavigationStack>
@@ -45,8 +65,8 @@ export function HomePage(props: {
             <Button
               title=""
               systemImage="arrow.clockwise"
-              action={() => {
-                props.onRefresh()
+              action={async () => {
+                await props.onRefresh()
                 setShowRefreshToast(true)
               }}
             />
@@ -94,9 +114,9 @@ export function HomePage(props: {
             />
           ) : (
             <ForEach
-              count={pendingItems.slice(0, Math.max(cfg.widgetShowCount, 3)).length}
+              count={shownPendingItems.length}
               itemBuilder={(index) => {
-                const item = pendingItems.slice(0, Math.max(cfg.widgetShowCount, 3))[index]
+                const item = shownPendingItems[index]
                 return (
                   <PickupRow
                     key={`pending-${item.code}-${index}`}
@@ -108,10 +128,9 @@ export function HomePage(props: {
                 )
               }}
               onDelete={(indices) => {
-                const shownItems = pendingItems.slice(0, Math.max(cfg.widgetShowCount, 3))
                 for (const index of indices) {
-                  const item = shownItems[index]
-                  if (item) props.onDelete(item.code)
+                  const item = shownPendingItems[index]
+                  if (item) void props.onDelete(item.code)
                 }
               }}
             />
@@ -147,7 +166,7 @@ export function HomePage(props: {
                 onDelete={(indices) => {
                   for (const index of indices) {
                     const item = pickedItems[index]
-                    if (item) props.onDelete(item.code)
+                    if (item) void props.onDelete(item.code)
                   }
                 }}
               />

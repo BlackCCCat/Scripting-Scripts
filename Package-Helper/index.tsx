@@ -49,7 +49,7 @@ async function run() {
   if (incomingTexts.length > 0) {
     let total = 0
     for (const text of incomingTexts) {
-      total += handleAnyData(text)
+      total += await handleAnyData(text)
     }
     safeRefreshWidget()
     Script.exit(total > 0 ? `成功导入 ${total} 条取件码` : "没有新的取件码")

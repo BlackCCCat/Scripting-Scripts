@@ -77,7 +77,7 @@ export function PickupRow(props: {
   item: PickupInfo
   showDate: boolean
   checked: boolean
-  onToggle?: (code: string) => void
+  onToggle?: (code: string) => void | Promise<void>
 }) {
   return (
     <VStack
@@ -100,13 +100,22 @@ export function PickupRow(props: {
             ) : null}
           </HStack>
           <Text font="caption" foregroundStyle={statusColor(props.item)}>{statusText(props.item)}</Text>
-          <Text
-            font="title3"
-            fontWeight="bold"
-            foregroundStyle={props.item.picked ? "#A1A1AA" : "#111111"}
-          >
-            {props.item.code}
-          </Text>
+          {props.item.picked ? (
+            <Text
+              font="title3"
+              fontWeight="bold"
+              foregroundStyle="#A1A1AA"
+            >
+              {props.item.code}
+            </Text>
+          ) : (
+            <Text
+              font="title3"
+              fontWeight="bold"
+            >
+              {props.item.code}
+            </Text>
+          )}
           <Text font="footnote" opacity={0.56} lineLimit={2}>{props.item.snippet}</Text>
         </VStack>
         {props.onToggle ? (
