@@ -1,0 +1,23 @@
+{
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Package-Helper.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "description": "修改自：https://raw.githubusercontent.com/1085481057/Scripting/refs/heads/main/快递小助手.scripting",
+  "color": "rgba(37, 99, 235, 1)",
+  "runInApp": true,
+  "localizedDescriptions": {},
+  "version": "2.0.0",
+  "contributors": [],
+  "localizedNames": {},
+  "icon": "shippingbox.circle.fill",
+  "intentInputTypes": ["Text", "URLs", "Images", "FileURLs"],
+  "author": {
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat"
+  },
+  "iconImage": "",
+  "name": "快递小助手"
+}

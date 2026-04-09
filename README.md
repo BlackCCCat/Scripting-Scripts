@@ -10,6 +10,7 @@
 - [密码生成器](./Password-Generator/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Password-Generator.zip)
 - [Regex Tester](./Regex-Tester/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Regex-Tester.zip)
 - [翻译器](./Translator/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Translator.zip)
+- [快递助手](./Package-Helper/):[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Package-Helper.zip)
 
 
 **ChatGPT完成几乎所有代码**
@@ -19,3 +20,4 @@
 - [LoonKissSurge](https://github.com/QingRex/LoonKissSurge/) Surge模块管理中使用
 - [xream/scripts](https://github.com/xream/scripts) Vision OCR由该仓库中的`Vision`修改而来
 - [万象方案下载更新](./Rime-Wanxiang-Updater/)中的文档查看器复用了`Scripting`群组中分享的`Omni Text Viewer`脚本
+- [快递助手](./Package-Helper/) 修改自 [快递小助手](https://raw.githubusercontent.com/1085481057/Scripting/refs/heads/main/%E5%BF%AB%E9%80%92%E5%B0%8F%E5%8A%A9%E6%89%8B.scripting)
