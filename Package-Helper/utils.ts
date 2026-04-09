@@ -1,5 +1,6 @@
 import { Widget } from "scripting"
 
+import type { Color } from "scripting"
 import type { Config, ImportedRecord, PickupInfo } from "./types"
 
 declare const Storage: {
@@ -375,7 +376,7 @@ export function statusText(item: PickupInfo) {
   return "请尽快领取"
 }
 
-export function statusColor(item: PickupInfo) {
+export function statusColor(item: PickupInfo): Color {
   if (item.picked) return "#A1A1AA"
   if (!item.date) return "#6B7280"
   const diff = (Date.now() - new Date(item.date).getTime()) / 3600000

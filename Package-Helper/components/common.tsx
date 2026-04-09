@@ -6,6 +6,7 @@ import {
   VStack,
 } from "scripting"
 
+import type { Color } from "scripting"
 import type { PickupInfo } from "../types"
 import { formatRelativeTimeText, heroCountText, statusColor, statusText } from "../utils"
 
@@ -30,7 +31,7 @@ export function MetricTile(props: {
   label: string
   value: string
   detail: string
-  tint: string
+  tint: Color
 }) {
   return (
     <VStack

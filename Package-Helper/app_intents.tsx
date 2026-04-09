@@ -22,11 +22,7 @@ function reloadWidgets() {
   try {
     if ((Widget as any)?.reloadAll) {
       ;(Widget as any).reloadAll()
-      return
     }
-  } catch {}
-  try {
-    Widget.refresh()
   } catch {}
 }
 
