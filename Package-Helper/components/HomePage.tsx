@@ -1,5 +1,6 @@
 import {
   Button,
+  DisclosureGroup,
   ForEach,
   HStack,
   List,
@@ -11,7 +12,7 @@ import {
 } from "scripting"
 
 import { EmptyPickupBlock, MetricTile, PickupRow } from "./common"
-import { getAllPickupInfo, loadConfig } from "../utils"
+import { getHomePickupInfo, loadConfig } from "../utils"
 
 export function HomePage(props: {
   onRefresh: () => void
@@ -20,10 +21,11 @@ export function HomePage(props: {
   onDelete: (code: string) => void
 }) {
   const cfg = loadConfig()
-  const allItems = getAllPickupInfo(cfg)
+  const allItems = getHomePickupInfo(cfg)
   const pendingItems = allItems.filter((item) => !item.picked)
   const pickedItems = allItems.filter((item) => item.picked)
   const [showRefreshToast, setShowRefreshToast] = useState(false)
+  const [pickedExpanded, setPickedExpanded] = useState(false)
 
   return (
     <NavigationStack>
@@ -123,28 +125,33 @@ export function HomePage(props: {
               subtitle="标记已取件后，会在这里保留最近状态。"
             />
           ) : (
-            <ForEach
-              count={pickedItems.slice(0, 3).length}
-              itemBuilder={(index) => {
-                const item = pickedItems.slice(0, 3)[index]
-                return (
-                  <PickupRow
-                    key={`picked-${item.code}-${index}`}
-                    item={item}
-                    showDate={cfg.showDate}
-                    checked
-                    onToggle={props.onUnpicked}
-                  />
-                )
-              }}
-              onDelete={(indices) => {
-                const shownItems = pickedItems.slice(0, 3)
-                for (const index of indices) {
-                  const item = shownItems[index]
-                  if (item) props.onDelete(item.code)
-                }
-              }}
-            />
+            <DisclosureGroup
+              title={`最近已处理 (${pickedItems.length})`}
+              isExpanded={pickedExpanded}
+              onChanged={setPickedExpanded}
+            >
+              <ForEach
+                count={pickedItems.length}
+                itemBuilder={(index) => {
+                  const item = pickedItems[index]
+                  return (
+                    <PickupRow
+                      key={`picked-${item.code}-${index}`}
+                      item={item}
+                      showDate={cfg.showDate}
+                      checked
+                      onToggle={props.onUnpicked}
+                    />
+                  )
+                }}
+                onDelete={(indices) => {
+                  for (const index of indices) {
+                    const item = pickedItems[index]
+                    if (item) props.onDelete(item.code)
+                  }
+                }}
+              />
+            </DisclosureGroup>
           )}
         </Section>
       </List>

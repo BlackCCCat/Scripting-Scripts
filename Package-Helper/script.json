@@ -5,7 +5,7 @@
     "autoUpdateInterval": 86400
   },
   "description": "修改自：https://raw.githubusercontent.com/1085481057/Scripting/refs/heads/main/快递小助手.scripting",
-  "color": "rgba(37, 99, 235, 1)",
+  "color": "rgba(102, 196, 235, 1)",
   "runInApp": true,
   "localizedDescriptions": {},
   "version": "",

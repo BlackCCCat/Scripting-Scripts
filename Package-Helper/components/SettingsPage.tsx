@@ -4,6 +4,7 @@ import {
   Image,
   Navigation,
   NavigationStack,
+  Picker,
   Slider,
   Section,
   Text,
@@ -25,6 +26,7 @@ import {
   resetConfig,
   saveConfig,
   safeRefreshWidget,
+  CLEANUP_DAY_OPTIONS,
 } from "../utils"
 
 export function SettingsPage(props: {
@@ -35,6 +37,9 @@ export function SettingsPage(props: {
   const [keywords, setKeywords] = useState<string[]>(cfg.keywords)
   const [showCount, setShowCount] = useState(cfg.widgetShowCount)
   const [showDate, setShowDate] = useState(cfg.showDate)
+  const [autoCleanupPicked, setAutoCleanupPicked] = useState(cfg.autoCleanupPicked)
+  const [autoCleanupPreview, setAutoCleanupPreview] = useState(cfg.autoCleanupPreview)
+  const [cleanupDays, setCleanupDays] = useState(cfg.cleanupDays)
 
   const [showSavedToast, setShowSavedToast] = useState(false)
   const [toastMessage, setToastMessage] = useState("已保存")
@@ -50,6 +55,9 @@ export function SettingsPage(props: {
       keywords: normalizeKeywords(next.keywords ?? keywords),
       widgetShowCount: clampShowCount(Number(next.widgetShowCount ?? showCount)),
       showDate: next.showDate ?? showDate,
+      autoCleanupPicked: next.autoCleanupPicked ?? autoCleanupPicked,
+      autoCleanupPreview: next.autoCleanupPreview ?? autoCleanupPreview,
+      cleanupDays: next.cleanupDays ?? cleanupDays,
     }
 
     saveConfig(merged)
@@ -57,6 +65,9 @@ export function SettingsPage(props: {
     setKeywords(merged.keywords)
     setShowCount(merged.widgetShowCount)
     setShowDate(merged.showDate)
+    setAutoCleanupPicked(merged.autoCleanupPicked)
+    setAutoCleanupPreview(merged.autoCleanupPreview)
+    setCleanupDays(merged.cleanupDays)
     if (!options?.silent) {
       presentToast("已保存")
     }
@@ -120,15 +131,42 @@ export function SettingsPage(props: {
             </HStack>
             <Slider
               min={1}
-              max={50}
+              max={8}
               step={1}
               value={showCount}
               onChanged={setShowCount}
               minValueLabel={<Text>1</Text>}
-              maxValueLabel={<Text>50</Text>}
+              maxValueLabel={<Text>8</Text>}
               label={<Text>显示条数</Text>}
             />
           </VStack>
+        </Section>
+
+        <Section header={<Text>自动清理</Text>}>
+          <Toggle
+            title="已取件过期自动清理"
+            value={autoCleanupPicked}
+            onChanged={setAutoCleanupPicked}
+          />
+
+          <Toggle
+            title="解析预览过期自动清理"
+            value={autoCleanupPreview}
+            onChanged={setAutoCleanupPreview}
+          />
+
+          {autoCleanupPicked || autoCleanupPreview ? (
+            <Picker
+              title="清理周期"
+              pickerStyle="menu"
+              value={cleanupDays}
+              onChanged={setCleanupDays}
+            >
+              {CLEANUP_DAY_OPTIONS.map((days) => (
+                <Text key={`cleanup-${days}`} tag={days}>{days} 天</Text>
+              ))}
+            </Picker>
+          ) : null}
         </Section>
 
         <Section header={<Text>数据管理</Text>}>
@@ -137,7 +175,7 @@ export function SettingsPage(props: {
             onPress={async () => {
               const ok = await Dialog.confirm({
                 title: "清除已取记录",
-                message: "仅清除已处理状态，已导入短信会保留。",
+                message: "会从主页和小组件移除已取件记录，解析预览会保留。",
                 confirmLabel: "清除",
               })
               if (!ok) return
@@ -162,6 +200,9 @@ export function SettingsPage(props: {
               setKeywords(DEFAULT_CONFIG.keywords)
               setShowCount(DEFAULT_CONFIG.widgetShowCount)
               setShowDate(DEFAULT_CONFIG.showDate)
+              setAutoCleanupPicked(DEFAULT_CONFIG.autoCleanupPicked)
+              setAutoCleanupPreview(DEFAULT_CONFIG.autoCleanupPreview)
+              setCleanupDays(DEFAULT_CONFIG.cleanupDays)
               safeRefreshWidget()
               props.onChanged()
               presentToast("已重置")

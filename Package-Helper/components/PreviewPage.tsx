@@ -7,14 +7,62 @@ import {
   Text,
 } from "scripting"
 import { EmptyPickupBlock, PickupRow } from "./common"
-import { getAllPickupInfo, handleAnyData, loadConfig, safeRefreshWidget } from "../utils"
+import { clearPreviewResults, getPreviewPickupInfo, handleAnyData, loadConfig, safeRefreshWidget } from "../utils"
 
 export function PreviewPage(props: {
   onChanged: () => void
   onDelete: (code: string) => void
+  onClear: () => void
 }) {
   const cfg = loadConfig()
-  const previewItems = getAllPickupInfo(cfg).slice(0, cfg.widgetShowCount)
+  const previewItems = getPreviewPickupInfo(cfg)
+
+  const groupedItems = [
+    {
+      title: "今天",
+      items: previewItems.filter((item) => {
+        const value = item.date || item.importedAt
+        if (!value) return false
+        const date = new Date(value)
+        const now = new Date()
+        return date.toDateString() === now.toDateString()
+      }),
+    },
+    {
+      title: "近3天",
+      items: previewItems.filter((item) => {
+        const value = item.date || item.importedAt
+        if (!value) return false
+        const time = new Date(value).getTime()
+        if (!Number.isFinite(time)) return false
+        const now = Date.now()
+        const startOfToday = new Date()
+        startOfToday.setHours(0, 0, 0, 0)
+        return time < startOfToday.getTime() && time >= now - 3 * 24 * 60 * 60 * 1000
+      }),
+    },
+    {
+      title: "近7天",
+      items: previewItems.filter((item) => {
+        const value = item.date || item.importedAt
+        if (!value) return false
+        const time = new Date(value).getTime()
+        if (!Number.isFinite(time)) return false
+        const now = Date.now()
+        return time < now - 3 * 24 * 60 * 60 * 1000 && time >= now - 7 * 24 * 60 * 60 * 1000
+      }),
+    },
+    {
+      title: "更早",
+      items: previewItems.filter((item) => {
+        const value = item.date || item.importedAt
+        if (!value) return true
+        const time = new Date(value).getTime()
+        if (!Number.isFinite(time)) return true
+        return time < Date.now() - 7 * 24 * 60 * 60 * 1000
+      }),
+    },
+  ].filter((group) => group.items.length > 0)
 
   return (
     <NavigationStack>
@@ -23,6 +71,21 @@ export function PreviewPage(props: {
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={{
+          topBarLeading: (
+            <Button
+              title="清空"
+              action={async () => {
+                const ok = await Dialog.confirm({
+                  title: "清空解析结果",
+                  message: "这只会清空预览页中的解析结果，不会影响主页包裹。",
+                  confirmLabel: "清空",
+                })
+                if (!ok) return
+                clearPreviewResults()
+                props.onClear()
+              }}
+            />
+          ),
           topBarTrailing: (
             <Button
               title=""
@@ -52,20 +115,22 @@ export function PreviewPage(props: {
           ),
         }}
       >
-        <Section header={<Text>解析预览</Text>}>
-          {previewItems.length === 0 ? (
+        {groupedItems.length === 0 ? (
+          <Section header={<Text>解析预览</Text>}>
             <EmptyPickupBlock
               title="暂无可预览内容"
               subtitle="添加短信后，这里会展示当前解析出来的包裹结果。"
             />
-          ) : (
+          </Section>
+        ) : groupedItems.map((group) => (
+          <Section key={group.title} header={<Text>{group.title}</Text>}>
             <ForEach
-              count={previewItems.length}
+              count={group.items.length}
               itemBuilder={(index) => {
-                const item = previewItems[index]
+                const item = group.items[index]
                 return (
                   <PickupRow
-                    key={`preview-${item.code}-${index}`}
+                    key={`preview-${group.title}-${item.code}-${index}`}
                     item={item}
                     showDate={cfg.showDate}
                     checked={!!item.picked}
@@ -74,13 +139,13 @@ export function PreviewPage(props: {
               }}
               onDelete={(indices) => {
                 for (const index of indices) {
-                  const item = previewItems[index]
+                  const item = group.items[index]
                   if (item) props.onDelete(item.code)
                 }
               }}
             />
-          )}
-        </Section>
+          </Section>
+        ))}
       </List>
     </NavigationStack>
   )

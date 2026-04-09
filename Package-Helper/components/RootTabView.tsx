@@ -9,7 +9,7 @@ import { HomePage } from "./HomePage"
 import { PreviewPage } from "./PreviewPage"
 import { SettingsPage } from "./SettingsPage"
 import { HOME_TAB, PREVIEW_TAB, SETTINGS_TAB } from "../types"
-import { deletePickup, markPicked, safeRefreshWidget, unmarkPicked } from "../utils"
+import { deleteHomePickup, deletePreviewPickup, markPicked, safeRefreshWidget, unmarkPicked } from "../utils"
 
 export function RootTabView(props: {
   initialNotice?: string | null
@@ -32,8 +32,10 @@ export function RootTabView(props: {
         <PreviewPage
           onChanged={() => bump()}
           onDelete={(code) => {
-            deletePickup(code)
-            safeRefreshWidget()
+            deletePreviewPickup(code)
+            bump()
+          }}
+          onClear={() => {
             bump()
           }}
         />
@@ -53,7 +55,7 @@ export function RootTabView(props: {
             bump()
           }}
           onDelete={(code) => {
-            deletePickup(code)
+            deleteHomePickup(code)
             safeRefreshWidget()
             bump()
           }}

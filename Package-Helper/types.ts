@@ -26,10 +26,14 @@ export interface Config {
   keywords: string[]
   widgetShowCount: number
   showDate: boolean
+  autoCleanupPicked: boolean
+  autoCleanupPreview: boolean
+  cleanupDays: number
   importedMessages: string[]
   importedRecords: ImportedRecord[]
   pickedItems: PickedItem[]
-  deletedCodes: string[]
+  homeDeletedCodes: string[]
+  previewDeletedCodes: string[]
 }
 
 export type ContentTab = typeof PREVIEW_TAB | typeof HOME_TAB | typeof SETTINGS_TAB

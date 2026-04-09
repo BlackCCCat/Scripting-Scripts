@@ -1,5 +1,6 @@
 import { Button, VStack, HStack, Text, Widget } from "scripting"
-import { TogglePickedIntent, MarkAllPickedIntent } from "./app_intents"
+import type { Color } from "scripting"
+import { TogglePickedIntent } from "./app_intents"
 
 declare const Storage: {
   get<T>(key: string): T | undefined
@@ -18,7 +19,7 @@ interface PickupConfig {
   importedMessages?: string[]
   importedRecords?: { text: string; importedAt: string | null }[]
   widgetShowCount?: number
-  deletedCodes?: string[]
+  homeDeletedCodes?: string[]
 }
 
 interface PickupInfo {
@@ -125,7 +126,7 @@ function loadData(): { items: PickupInfo[]; showCount: number } {
     ? cfg.importedRecords
     : (Array.isArray(cfg.importedMessages) ? cfg.importedMessages : []).map((text) => ({ text, importedAt: null }))
   const pickedItems = Array.isArray(cfg.pickedItems) ? cfg.pickedItems : []
-  const deletedCodes = new Set(Array.isArray(cfg.deletedCodes) ? cfg.deletedCodes : [])
+  const deletedCodes = new Set(Array.isArray(cfg.homeDeletedCodes) ? cfg.homeDeletedCodes : [])
   const pickedMap = new Map(pickedItems.map(item => [item.code, item.timestamp]))
   const dedup = new Map<string, PickupInfo>()
 
@@ -146,13 +147,17 @@ function loadData(): { items: PickupInfo[]; showCount: number } {
   }
 
   return {
-    items: Array.from(dedup.values()).slice(0, 10),
-    showCount: Math.max(1, cfg.widgetShowCount || 5),
+    items: Array.from(dedup.values()).filter((item) => !item.picked).slice(0, 8),
+    showCount: Math.max(1, Math.min(8, cfg.widgetShowCount || 5)),
   }
 }
 
-function color(item: PickupInfo) {
-  return item.picked ? "#A1A1AA" : "#6B7280"
+function statusTone(item: PickupInfo): Color {
+  if (!item.date) return "secondaryLabel"
+  const diff = (Date.now() - new Date(item.date).getTime()) / 3600000
+  if (diff <= 12) return "systemGreen"
+  if (diff <= 36) return "systemOrange"
+  return "systemRed"
 }
 
 function badgeText(item: PickupInfo) {
@@ -176,46 +181,118 @@ function EmptyBlock() {
 
 function SmallWidget() {
   const { items } = loadData()
-  const first = items[0]
-
-  if (!first) {
-    return <EmptyBlock />
-  }
-
-  return (
-    <VStack padding={14} alignment="leading" spacing={8}>
-      <Text font="caption" opacity={0.45}>{badgeText(first)}</Text>
-      <Text font="headline" lineLimit={1}>{first.courier || "快递包裹"}</Text>
-      <Text font="title3" fontWeight="bold">{first.code}</Text>
-      <Text font="caption2" opacity={0.5} lineLimit={2}>{first.snippet}</Text>
-      <Button title={first.picked ? "已处理" : "标记取件"} intent={TogglePickedIntent(first.code)} />
-    </VStack>
-  )
-}
-
-function MediumWidget() {
-  const { items, showCount } = loadData()
-  const show = items.slice(0, Math.min(showCount, 4))
+  const show = items.slice(0, 2)
 
   if (show.length === 0) {
     return <EmptyBlock />
   }
 
   return (
-    <VStack padding={16} alignment="leading" spacing={12}>
-      <HStack>
-        <VStack alignment="leading" spacing={2}>
-          <Text font="headline">待取件</Text>
-          <Text font="caption2" opacity={0.45}>共 {show.length} 条展示中</Text>
-        </VStack>
-        <Button title="全部已取" intent={MarkAllPickedIntent()} />
-      </HStack>
-      {show.map((item, i) => (
-        <VStack key={i} alignment="leading" spacing={4}>
-          <Text font="caption" opacity={0.42}>{badgeText(item)}</Text>
-          <Text lineLimit={1}>{item.courier || "快递"} · {item.code}</Text>
-          <Text font="caption2" opacity={0.52} lineLimit={1}>{item.snippet}</Text>
-        </VStack>
+    <VStack padding={12} alignment="leading" spacing={8}>
+      {show.map((item, index) => (
+        <PickupTile
+          key={`${item.code}-${index}`}
+          item={item}
+          compact={show.length > 1}
+        />
+      ))}
+    </VStack>
+  )
+}
+
+function columnsForLayout(count: number) {
+  if (count <= 2) return count
+  return 2
+}
+
+function chunkItems<T>(items: T[], size: number) {
+  const rows: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    rows.push(items.slice(index, index + size))
+  }
+  return rows
+}
+
+function PickupTile(props: {
+  item: PickupInfo
+  compact: boolean
+}) {
+  return (
+    <Button
+      buttonStyle="plain"
+      intent={TogglePickedIntent(props.item.code)}
+    >
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        alignment="leading"
+        spacing={props.compact ? 4 : 6}
+        padding={props.compact ? 10 : 12}
+        background={{
+          style: "secondarySystemBackground",
+          shape: { type: "rect", cornerRadius: props.compact ? 16 : 18 },
+        }}
+      >
+        <Text
+          font="caption2"
+          foregroundStyle={statusTone(props.item)}
+          lineLimit={1}
+        >
+          {badgeText(props.item)}
+        </Text>
+        <Text
+          font={props.compact ? "caption" : "subheadline"}
+          fontWeight="semibold"
+          lineLimit={1}
+        >
+          {props.item.courier || "快递包裹"}
+        </Text>
+        <Text
+          font={props.compact ? "subheadline" : "headline"}
+          fontWeight="bold"
+          lineLimit={1}
+        >
+          {props.item.code}
+        </Text>
+        {!props.compact ? (
+          <Text font="caption2" opacity={0.52} lineLimit={2}>
+            {props.item.snippet}
+          </Text>
+        ) : null}
+      </VStack>
+    </Button>
+  )
+}
+
+function CollectionWidget(props: {
+  family: "systemMedium" | "systemLarge" | "systemExtraLarge"
+}) {
+  const { items, showCount } = loadData()
+  const limit = props.family === "systemMedium" ? 4 : 8
+  const show = items.slice(0, Math.min(showCount, limit))
+
+  if (show.length === 0) {
+    return <EmptyBlock />
+  }
+
+  const columns = columnsForLayout(show.length)
+  const rows = chunkItems(show, columns)
+  const compact = show.length >= 3
+
+  return (
+    <VStack padding={12} alignment="leading" spacing={8}>
+      {rows.map((row, rowIndex) => (
+        <HStack key={`row-${rowIndex}`} spacing={8}>
+          {row.map((item, index) => (
+            <PickupTile
+              key={`${item.code}-${index}`}
+              item={item}
+              compact={compact}
+            />
+          ))}
+          {columns === 2 && row.length === 1 ? (
+            <VStack key={`empty-${rowIndex}`} frame={{ maxWidth: "infinity", alignment: "leading" as any }} />
+          ) : null}
+        </HStack>
       ))}
     </VStack>
   )
@@ -225,6 +302,8 @@ const family = Widget.family
 
 if (family === "systemSmall") {
   Widget.present(<SmallWidget />)
+} else if (family === "systemLarge" || family === "systemExtraLarge") {
+  Widget.present(<CollectionWidget family={family} />)
 } else {
-  Widget.present(<MediumWidget />)
+  Widget.present(<CollectionWidget family="systemMedium" />)
 }

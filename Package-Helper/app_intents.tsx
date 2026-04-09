@@ -35,7 +35,7 @@ export const TogglePickedIntent = AppIntentManager.register({
     const index = pickedItems.findIndex(item => item.code === code)
 
     if (index >= 0) {
-      pickedItems[index].timestamp = 1
+      pickedItems.splice(index, 1)
     } else {
       pickedItems.push({ code, timestamp: Date.now() })
     }
@@ -67,7 +67,7 @@ export const MarkAllPickedIntent = AppIntentManager.register({
           const code = singleCodeMatch[0]
           if (code && !existing.has(code)) {
             existing.add(code)
-            pickedItems.push({ code, timestamp: 1 })
+            pickedItems.push({ code, timestamp: Date.now() })
           }
         }
       }
