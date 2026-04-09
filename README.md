@@ -10,7 +10,7 @@
 - [密码生成器](./Password-Generator/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Password-Generator.zip)
 - [Regex Tester](./Regex-Tester/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Regex-Tester.zip)
 - [翻译器](./Translator/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Translator.zip)
-- [快递助手](./Package-Helper/):[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Package-Helper.zip)
+- [快递助手](./Package-Helper/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Package-Helper.zip)
 
 
 **ChatGPT完成几乎所有代码**
