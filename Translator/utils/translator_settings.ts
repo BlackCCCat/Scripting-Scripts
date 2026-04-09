@@ -48,6 +48,24 @@ function storage() {
   return (globalThis as any).Storage
 }
 
+function readPrivateSettings(st: any): TranslatorSettings | null | undefined {
+  return st?.get?.(STORAGE_KEY) as TranslatorSettings | null | undefined
+}
+
+function readSharedSettings(st: any): TranslatorSettings | null | undefined {
+  return st?.get?.(STORAGE_KEY, { shared: true }) as TranslatorSettings | null | undefined
+}
+
+function writePrivateSettings(st: any, settings: TranslatorSettings) {
+  st?.set?.(STORAGE_KEY, settings)
+}
+
+function removeSharedSettings(st: any) {
+  try {
+    st?.remove?.(STORAGE_KEY, { shared: true })
+  } catch { }
+}
+
 function defaultBuiltInMap() {
   return new Map(REQUIRED_BUILT_INS.map((kind) => [kind, builtInEntry(kind)]))
 }
@@ -180,17 +198,30 @@ export function loadTranslatorSettings(): TranslatorSettings {
     return applyAvailabilityRulesToSettings(createDefaultSettings())
   }
 
-  const raw = st.get(STORAGE_KEY, { shared: true }) as TranslatorSettings | null | undefined
-  if (raw == null) {
-    return applyAvailabilityRulesToSettings(createDefaultSettings())
+  const privateRaw = readPrivateSettings(st)
+  if (privateRaw != null) {
+    removeSharedSettings(st)
+    return normalizeTranslatorSettings(privateRaw)
   }
-  return normalizeTranslatorSettings(raw)
+
+  const sharedRaw = readSharedSettings(st)
+  if (sharedRaw != null) {
+    // 旧版本把配置写进 shared 域，这里迁回脚本私有域，并顺手清掉旧数据。
+    const migrated = normalizeTranslatorSettings(sharedRaw)
+    writePrivateSettings(st, migrated)
+    removeSharedSettings(st)
+    return migrated
+  }
+
+  removeSharedSettings(st)
+  return applyAvailabilityRulesToSettings(createDefaultSettings())
 }
 
 export function saveTranslatorSettings(settings: TranslatorSettings) {
   const st = storage()
   if (!st?.set) return
-  st.set(STORAGE_KEY, normalizeTranslatorSettings(settings), { shared: true })
+  writePrivateSettings(st, normalizeTranslatorSettings(settings))
+  removeSharedSettings(st)
 }
 
 export function updateEngineEnabled(
