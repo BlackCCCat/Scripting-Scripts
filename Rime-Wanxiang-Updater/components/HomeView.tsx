@@ -1206,6 +1206,7 @@ export function HomeView() {
         title=""
         systemImage="checkmark"
         action={() => {
+          try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
           settingsSaveRef.current?.()
         }}
       />

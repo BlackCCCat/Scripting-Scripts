@@ -177,6 +177,8 @@ export function SettingsView(props: {
     message: <Text>{" "}</Text>,
     actions: <Text>{" "}</Text>,
   })
+  const [showSavedToast, setShowSavedToast] = useState(false)
+  const [toastMessage, setToastMessage] = useState("已保存")
   const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>([])
   const [bookmarkIdx, setBookmarkIdx] = useState<number>(0)
 
@@ -213,6 +215,11 @@ export function SettingsView(props: {
         />
       ),
     })
+  }
+
+  function presentToast(message: string) {
+    setToastMessage(message)
+    setShowSavedToast(true)
   }
 
   async function openHomeSectionOrderSettings() {
@@ -388,6 +395,7 @@ export function SettingsView(props: {
         } catch { }
       }
       props.onDone?.(fixed)
+      presentToast("已保存")
     } catch (e: any) {
       showInfo("保存失败", String(e?.message ?? e))
     }
@@ -706,6 +714,13 @@ export function SettingsView(props: {
     <VStack
       navigationTitle={"设置"}
       navigationBarTitleDisplayMode={"inline"}
+      toast={{
+        isPresented: showSavedToast,
+        onChanged: setShowSavedToast,
+        message: toastMessage,
+        duration: 1.5,
+        position: "bottom",
+      }}
       toolbar={
         props.leadingToolbar || props.trailingToolbar
           ? {
