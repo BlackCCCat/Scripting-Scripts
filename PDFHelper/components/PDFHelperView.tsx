@@ -49,7 +49,14 @@ async function buildPreviewFilePath(data: Data, fileName: string): Promise<strin
 
 async function previewExportedPdf(data: Data, fileName: string) {
   const previewPath = await buildPreviewFilePath(data, fileName)
-  await QuickLook.previewURLs([previewPath], true)
+  try {
+    await QuickLook.previewURLs([previewPath], true)
+  } finally {
+    try {
+      await FileManager.remove(previewPath)
+    } catch {
+    }
+  }
 }
 
 async function presentExportActionSheet(data: Data, fileName: string, summary: string) {
