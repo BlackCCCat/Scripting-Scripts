@@ -20,6 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ env.TAG_NAME }}
 
       - name: Prepare release metadata
@@ -88,6 +89,54 @@ jobs:
           echo "Generated archives:"
           ls -lh dist
 
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CURRENT_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${CURRENT_COMMIT}^" 2>/dev/null || true)"
+          NOTES_FILE="release-notes.md"
+
+          {
+            echo "## 更新内容"
+            echo
+
+            if [[ -n "$PREVIOUS_TAG" ]]; then
+              echo "基于 \`$PREVIOUS_TAG\` 到 \`$TAG_NAME\` 的提交："
+              echo
+              LOG_RANGE="${PREVIOUS_TAG}..${TAG_NAME}"
+            else
+              echo "首个版本，包含以下提交："
+              echo
+              LOG_RANGE="$TAG_NAME"
+            fi
+          } > "$NOTES_FILE"
+
+          COMMITS_FOUND=0
+          while IFS= read -r line; do
+            if [[ -z "$line" ]]; then
+              continue
+            fi
+
+            echo "$line" >> "$NOTES_FILE"
+            COMMITS_FOUND=1
+          done < <(git log --no-merges --reverse --pretty=format:"- %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" "$LOG_RANGE")
+
+          if [[ "$COMMITS_FOUND" -eq 0 ]]; then
+            echo "- No commits found." >> "$NOTES_FILE"
+          fi
+
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            {
+              echo
+              echo "**完整对比**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG_NAME}"
+            } >> "$NOTES_FILE"
+          fi
+
+          echo "Release notes preview:"
+          cat "$NOTES_FILE"
+
       - name: Create or update release
         if: github.event_name != 'release'
         uses: softprops/action-gh-release@v2
@@ -95,7 +144,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           files: dist/*.zip
           overwrite_files: true
-          generate_release_notes: true
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -106,5 +155,6 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           files: dist/*.zip
           overwrite_files: true
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
