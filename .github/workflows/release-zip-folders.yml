@@ -14,6 +14,9 @@ jobs:
   zip-and-upload:
     if: github.event_name != 'release' || github.event.sender.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+      cancel-in-progress: false
     env:
       TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
     steps:
@@ -121,7 +124,7 @@ jobs:
 
             echo "$line" >> "$NOTES_FILE"
             COMMITS_FOUND=1
-          done < <(git log --no-merges --reverse --pretty=format:"- %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" "$LOG_RANGE")
+          done < <(git log --reverse --pretty=format:"- %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" "$LOG_RANGE")
 
           if [[ "$COMMITS_FOUND" -eq 0 ]]; then
             echo "- No commits found." >> "$NOTES_FILE"
@@ -137,24 +140,16 @@ jobs:
           echo "Release notes preview:"
           cat "$NOTES_FILE"
 
-      - name: Create or update release
-        if: github.event_name != 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG_NAME }}
-          files: dist/*.zip
-          overwrite_files: true
-          body_path: release-notes.md
+      - name: Create or update GitHub release
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
 
-      - name: Upload archives to existing release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG_NAME }}
-          files: dist/*.zip
-          overwrite_files: true
-          body_path: release-notes.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md
+            gh release upload "$TAG_NAME" dist/*.zip --clobber
+          else
+            gh release create "$TAG_NAME" dist/*.zip --title "$TAG_NAME" --notes-file release-notes.md
+          fi
