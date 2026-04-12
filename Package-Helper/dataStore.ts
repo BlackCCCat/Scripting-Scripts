@@ -1,7 +1,7 @@
 import { Path } from "scripting"
 
 import type { Config, ImportedRecord, PickupInfo } from "./types"
-import { extractPickupFromText, splitMessages } from "./parser"
+import { buildPickupSnippetText, extractPickupFromText, splitMessages } from "./parser"
 
 declare const Storage: {
   get<T>(key: string): T | null
@@ -30,6 +30,7 @@ type PickupRow = {
   date: string | null
   importedAt: string | null
   pickedAt: number | null
+  rawText: string | null
 }
 
 type RawConfig = Partial<Config> & {
@@ -327,12 +328,16 @@ function mapRows(rows: PickupRow[]): PickupInfo[] {
   const items: PickupInfo[] = []
 
   for (const row of rows) {
+    const snippet = row.rawText
+      ? buildPickupSnippetText(row.rawText, row.courier, row.code, row.courier)
+      : row.snippet
+
     if (row.pickedAt != null) {
       if (now - row.pickedAt < RECENTLY_PICKED_MS) {
         items.push({
           courier: row.courier,
           code: row.code,
-          snippet: row.snippet,
+          snippet,
           date: row.date,
           importedAt: row.importedAt,
           picked: true,
@@ -344,7 +349,7 @@ function mapRows(rows: PickupRow[]): PickupInfo[] {
     items.push({
       courier: row.courier,
       code: row.code,
-      snippet: row.snippet,
+      snippet,
       date: row.date,
       importedAt: row.importedAt,
       picked: false,
@@ -365,7 +370,8 @@ async function fetchScopedPickups(scope: "home" | "preview"): Promise<PickupInfo
         p.snippet AS snippet,
         p.event_time AS date,
         p.imported_at AS importedAt,
-        pk.picked_at AS pickedAt
+        pk.picked_at AS pickedAt,
+        p.raw_text AS rawText
       FROM pickups p
       LEFT JOIN picked_items pk ON pk.code = p.code
       LEFT JOIN deleted_items d ON d.code = p.code AND d.scope = ?
