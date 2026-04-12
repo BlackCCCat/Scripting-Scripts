@@ -2,7 +2,6 @@ import type { AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../typ
 import { SnoozeCustomAlarmIntent } from "../app_intents"
 import { buildHolidayDayMap } from "./holiday_calendar"
 
-export const HOLIDAY_HORIZON_DAYS = 120
 export const EXPANDED_RULE_HORIZON_DAYS = 365
 
 type LimitedRepeatRule =
@@ -175,15 +174,68 @@ function buildConfiguration(
   return configuration
 }
 
-async function cancelSystemAlarmIds(ids: string[]): Promise<void> {
-  for (const id of ids) {
-    try {
-      await AlarmManager.stop(id)
-    } catch {}
+const SYSTEM_ALARM_CONCURRENCY = 6
+
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  if (!items.length) return
+
+  const safeLimit = Math.max(1, Math.min(limit, items.length))
+  let nextIndex = 0
+  let firstError: unknown = null
+
+  async function consume() {
+    while (firstError === null) {
+      const currentIndex = nextIndex
+      if (currentIndex >= items.length) return
+      nextIndex += 1
+      try {
+        await worker(items[currentIndex]!, currentIndex)
+      } catch (error) {
+        firstError = error
+        return
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: safeLimit }, () => consume()))
+  if (firstError) throw firstError
+}
+
+function shouldStopBeforeCancel(alarm: AlarmManager.Alarm | null | undefined): boolean {
+  return alarm?.state === "alerting" || alarm?.state === "countdown" || alarm?.state === "paused"
+}
+
+async function loadSystemAlarmMap(): Promise<Map<string, AlarmManager.Alarm>> {
+  try {
+    const alarms = await AlarmManager.alarms()
+    return new Map(alarms.map((item) => [item.id, item]))
+  } catch {
+    return new Map()
+  }
+}
+
+async function cancelSystemAlarmIds(
+  ids: string[],
+  existingAlarmMap?: Map<string, AlarmManager.Alarm>
+): Promise<void> {
+  if (!ids.length) return
+
+  const alarmMap = existingAlarmMap ?? await loadSystemAlarmMap()
+  await runWithConcurrency(ids, SYSTEM_ALARM_CONCURRENCY, async (id) => {
+    const alarm = alarmMap.get(id)
+    if (shouldStopBeforeCancel(alarm)) {
+      try {
+        await AlarmManager.stop(id)
+      } catch {}
+    }
     try {
       await AlarmManager.cancel(id)
     } catch {}
-  }
+  })
 }
 
 export async function cancelManagedSystemAlarmIds(ids: string[]): Promise<void> {
@@ -260,8 +312,7 @@ function buildHolidayTimestamps(
   now = Date.now()
 ): number[] {
   const today = startOfToday()
-  const end = new Date(today.getTime())
-  end.setDate(end.getDate() + HOLIDAY_HORIZON_DAYS)
+  const end = endOfYear(today.getFullYear())
   const { offSet, workSet } = buildHolidaySets(source)
   const timestamps: number[] = []
 
@@ -389,6 +440,26 @@ function buildCustomTimestamps(
   return timestamps
 }
 
+async function scheduleFixedTimestamps(
+  record: AlarmRecord,
+  timestamps: number[],
+  createdIds: string[]
+): Promise<void> {
+  await runWithConcurrency(timestamps, SYSTEM_ALARM_CONCURRENCY, async (timestamp) => {
+    const systemId = UUID.string()
+    const configuration = buildConfiguration(
+      systemId,
+      record.id,
+      record.title,
+      AlarmManager.Schedule.fixed(new Date(timestamp)),
+      record.snoozeMinutes,
+      record.soundName
+    )
+    await AlarmManager.schedule(systemId, configuration)
+    createdIds.push(systemId)
+  })
+}
+
 export function countExpectedRingsInYear(
   record: AlarmRecord,
   holidaySourceMap: Map<string, HolidayCalendarSource>,
@@ -476,8 +547,11 @@ export function countExpectedRingsInYear(
   }
 }
 
-export async function disableAlarm(record: AlarmRecord): Promise<AlarmRecord> {
-  await cancelSystemAlarmIds(record.systemAlarmIds)
+export async function disableAlarm(
+  record: AlarmRecord,
+  existingAlarmMap?: Map<string, AlarmManager.Alarm>
+): Promise<AlarmRecord> {
+  await cancelSystemAlarmIds(record.systemAlarmIds, existingAlarmMap)
   return {
     ...record,
     enabled: false,
@@ -486,8 +560,11 @@ export async function disableAlarm(record: AlarmRecord): Promise<AlarmRecord> {
   }
 }
 
-export async function deleteAlarm(record: AlarmRecord): Promise<void> {
-  await cancelSystemAlarmIds(record.systemAlarmIds)
+export async function deleteAlarm(
+  record: AlarmRecord,
+  existingAlarmMap?: Map<string, AlarmManager.Alarm>
+): Promise<void> {
+  await cancelSystemAlarmIds(record.systemAlarmIds, existingAlarmMap)
 }
 
 export async function scheduleAlarm(
@@ -528,19 +605,7 @@ export async function scheduleAlarm(
       case "daily": {
         const timestamps = buildDailyTimestamps(record.repeatRule, scheduledAt)
         if (timestamps.length) {
-          for (const timestamp of timestamps) {
-            const systemId = UUID.string()
-            const configuration = buildConfiguration(
-              systemId,
-              record.id,
-              record.title,
-              AlarmManager.Schedule.fixed(new Date(timestamp)),
-              record.snoozeMinutes,
-              record.soundName
-            )
-            await AlarmManager.schedule(systemId, configuration)
-            createdIds.push(systemId)
-          }
+          await scheduleFixedTimestamps(record, timestamps, createdIds)
         } else {
           const systemId = UUID.string()
           const configuration = buildConfiguration(
@@ -559,19 +624,7 @@ export async function scheduleAlarm(
       case "weekly": {
         const timestamps = buildWeeklyTimestamps(record.repeatRule, scheduledAt)
         if (timestamps.length) {
-          for (const timestamp of timestamps) {
-            const systemId = UUID.string()
-            const configuration = buildConfiguration(
-              systemId,
-              record.id,
-              record.title,
-              AlarmManager.Schedule.fixed(new Date(timestamp)),
-              record.snoozeMinutes,
-              record.soundName
-            )
-            await AlarmManager.schedule(systemId, configuration)
-            createdIds.push(systemId)
-          }
+          await scheduleFixedTimestamps(record, timestamps, createdIds)
         } else {
           const systemId = UUID.string()
           const configuration = buildConfiguration(
@@ -594,19 +647,7 @@ export async function scheduleAlarm(
       case "monthly": {
         const timestamps = buildMonthlyTimestamps(record.repeatRule, scheduledAt)
         if (!timestamps.length) throw new Error("未来 18 个月内没有可安排的每月闹钟。")
-        for (const timestamp of timestamps) {
-          const systemId = UUID.string()
-          const configuration = buildConfiguration(
-            systemId,
-            record.id,
-            record.title,
-            AlarmManager.Schedule.fixed(new Date(timestamp)),
-            record.snoozeMinutes,
-            record.soundName
-          )
-          await AlarmManager.schedule(systemId, configuration)
-          createdIds.push(systemId)
-        }
+        await scheduleFixedTimestamps(record, timestamps, createdIds)
         break
       }
       case "holiday": {
@@ -617,39 +658,15 @@ export async function scheduleAlarm(
         }
         const timestamps = buildHolidayTimestamps(record.repeatRule, source, scheduledAt)
         if (!timestamps.length) {
-          throw new Error("未来 120 天内没有可安排的班休日闹钟。")
+          throw new Error("今年剩余时间内没有可安排的班休日闹钟。")
         }
-        for (const timestamp of timestamps) {
-          const systemId = UUID.string()
-          const configuration = buildConfiguration(
-            systemId,
-            record.id,
-            record.title,
-            AlarmManager.Schedule.fixed(new Date(timestamp)),
-            record.snoozeMinutes,
-            record.soundName
-          )
-          await AlarmManager.schedule(systemId, configuration)
-          createdIds.push(systemId)
-        }
+        await scheduleFixedTimestamps(record, timestamps, createdIds)
         break
       }
       case "custom": {
         const timestamps = buildCustomTimestamps(record.repeatRule, scheduledAt)
         if (!timestamps.length) throw new Error("未来一年内没有可安排的自定义周期闹钟。")
-        for (const timestamp of timestamps) {
-          const systemId = UUID.string()
-          const configuration = buildConfiguration(
-            systemId,
-            record.id,
-            record.title,
-            AlarmManager.Schedule.fixed(new Date(timestamp)),
-            record.snoozeMinutes,
-            record.soundName
-          )
-          await AlarmManager.schedule(systemId, configuration)
-          createdIds.push(systemId)
-        }
+        await scheduleFixedTimestamps(record, timestamps, createdIds)
         break
       }
       default:

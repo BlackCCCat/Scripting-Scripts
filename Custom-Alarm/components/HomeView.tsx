@@ -6,11 +6,13 @@ import {
   List,
   Navigation,
   NavigationStack,
+  ProgressView,
   Tab,
   TabView,
   Text,
   Toggle,
   VStack,
+  ZStack,
   modifiers,
   useEffect,
   useColorScheme,
@@ -22,6 +24,7 @@ import {
 import type { AlarmDraft, AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { AddAlarmView } from "./AddAlarmView"
 import { CalendarSettingsView } from "./CalendarSettingsView"
+import { SoundSettingsView } from "./SoundSettingsView"
 import { StatusView } from "./StatusView"
 import { SystemAlarmSettingsView } from "./SystemAlarmSettingsView"
 import {
@@ -37,6 +40,7 @@ import {
 import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
 import {
   collectRecordSystemAlarmIds,
+  DEFAULT_SOUND_OPTIONS,
   DEFAULT_HOLIDAY_SOURCE_ID,
   loadCustomAlarmState,
   mergeManagedSystemAlarmIds,
@@ -312,15 +316,19 @@ function AlarmRow(props: {
 }
 
 export function HomeView() {
+  const colorScheme = useColorScheme()
   const [initialState] = useState(() => loadCustomAlarmState())
   const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
+  const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
   const [managedSystemAlarmIds, setManagedSystemAlarmIds] = useState<string[]>(() => initialState.managedSystemAlarmIds)
   const [cleanupCandidateAlarmIds, setCleanupCandidateAlarmIds] = useState<string[]>(() => initialState.cleanupCandidateAlarmIds)
   const [systemAlarms, setSystemAlarms] = useState<AlarmManager.Alarm[]>([])
   const [globalBusy, setGlobalBusy] = useState(false)
   const [busyRecordId, setBusyRecordId] = useState<string | null>(null)
   const [calendarRefreshing, setCalendarRefreshing] = useState(false)
+  const [alarmWriting, setAlarmWriting] = useState(false)
+  const [alarmDeleting, setAlarmDeleting] = useState(false)
   const activeTab = useObservable<RootTab>(ALARMS_TAB)
   const [lastContentTab, setLastContentTab] = useState<ContentTab>(ALARMS_TAB)
   const [actionRunning, setActionRunning] = useState(false)
@@ -366,12 +374,14 @@ export function HomeView() {
   function saveStateSnapshot(
     nextRecords: AlarmRecord[],
     nextHolidaySources = holidaySources,
+    nextAvailableSounds = availableSounds,
     nextManagedSystemAlarmIds = managedSystemAlarmIds,
     nextCleanupCandidateAlarmIds = cleanupCandidateAlarmIds
   ) {
     saveCustomAlarmState({
       alarms: nextRecords,
       holidaySources: nextHolidaySources,
+      availableSounds: nextAvailableSounds,
       managedSystemAlarmIds: nextManagedSystemAlarmIds,
       cleanupCandidateAlarmIds: nextCleanupCandidateAlarmIds,
     })
@@ -406,10 +416,11 @@ export function HomeView() {
     saveCustomAlarmState({
       alarms: records,
       holidaySources,
+      availableSounds,
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds,
     })
-  }, [records, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds])
+  }, [records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds])
 
   useEffect(() => {
     if (!AlarmManager.isAvailable) return
@@ -502,7 +513,8 @@ export function HomeView() {
         .filter((id) => cleanupCandidateSet.has(id) && !referencedIdSet.has(id))
       setManagedSystemAlarmIds(referencedIds)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      saveStateSnapshot(nextRecordsSnapshot, holidaySources, referencedIds, nextCleanupCandidateIds)
+      setAvailableSounds(storedState.availableSounds.length ? storedState.availableSounds : DEFAULT_SOUND_OPTIONS)
+      saveStateSnapshot(nextRecordsSnapshot, holidaySources, storedState.availableSounds.length ? storedState.availableSounds : DEFAULT_SOUND_OPTIONS, referencedIds, nextCleanupCandidateIds)
       return {
         items: buildAdvancedCleanupItems(alarms, nextRecordsSnapshot, nextCleanupCandidateIds),
       }
@@ -533,7 +545,7 @@ export function HomeView() {
         : [...current, nextRecord]
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(next))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(next, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(next, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
       return next
     })
   }
@@ -543,7 +555,7 @@ export function HomeView() {
       const movingItems = indices.map((index) => current[index]).filter(Boolean)
       const next = current.filter((_, index) => !indices.includes(index))
       next.splice(newOffset, 0, ...movingItems)
-      saveStateSnapshot(next, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(next, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       return next
     })
   }
@@ -554,6 +566,7 @@ export function HomeView() {
       element: (
         <AddAlarmView
           holidaySources={holidaySources}
+          availableSounds={availableSounds}
           existingDrafts={records.map(toAlarmDraft)}
           mode="create"
         />
@@ -577,6 +590,7 @@ export function HomeView() {
     }
 
     setGlobalBusy(true)
+    setAlarmWriting(true)
     try {
       const baseRecord: AlarmRecord = {
         id: UUID.string(),
@@ -596,8 +610,24 @@ export function HomeView() {
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
+      setAlarmWriting(false)
       setGlobalBusy(false)
     }
+  }
+
+  async function openSoundSettings() {
+    await Navigation.present({
+      element: (
+        <SoundSettingsView
+          sounds={availableSounds}
+          onSave={async (sounds) => {
+            const nextSounds = sounds.map((item) => item.trim()).filter(Boolean)
+            setAvailableSounds(nextSounds)
+            saveStateSnapshot(records, holidaySources, nextSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+          }}
+        />
+      ),
+    })
   }
 
   async function applyHolidaySources(updatedSources: HolidayCalendarSource[], options?: { muteBusy?: boolean }) {
@@ -611,6 +641,7 @@ export function HomeView() {
 
     if (!options?.muteBusy) setGlobalBusy(true)
     try {
+      const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
       const updatedRecords: AlarmRecord[] = []
       for (const record of records) {
         if (record.repeatRule.kind !== "holiday" || !record.enabled) {
@@ -618,7 +649,7 @@ export function HomeView() {
           continue
         }
         if (!holidaySourceMapAfterUpdate.has(record.repeatRule.sourceId)) {
-          updatedRecords.push(await disableAlarm(record))
+          updatedRecords.push(await disableAlarm(record, systemAlarmMap))
           continue
         }
         updatedRecords.push(await scheduleAlarm(record, holidaySourceMapAfterUpdate))
@@ -626,7 +657,7 @@ export function HomeView() {
       setRecords(updatedRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(updatedRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(updatedRecords, updatedSources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(updatedRecords, updatedSources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
       await refreshSystemState()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
@@ -641,6 +672,7 @@ export function HomeView() {
       element: (
         <AddAlarmView
           holidaySources={holidaySources}
+          availableSounds={availableSounds}
           existingDrafts={records.filter((item) => item.id !== record.id).map(toAlarmDraft)}
           mode="edit"
           initial={{
@@ -680,19 +712,19 @@ export function HomeView() {
       }
       const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
       setRecords(optimisticRecords)
-      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(optimisticRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
 
       const nextRecord = await scheduleAlarm(optimisticRecord, holidaySourceMap)
       const nextRecords = optimisticRecords.map((item) => (item.id === record.id ? nextRecord : item))
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(nextRecords, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
       await refreshSystemState()
     } catch (error: any) {
       const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
       setRecords(rollbackRecords)
-      saveStateSnapshot(rollbackRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(rollbackRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setGlobalBusy(false)
@@ -708,6 +740,7 @@ export function HomeView() {
 
     setBusyRecordId(record.id)
     try {
+      const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
       const optimisticRecord: AlarmRecord = {
         ...record,
         enabled,
@@ -715,21 +748,21 @@ export function HomeView() {
       }
       const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
       setRecords(optimisticRecords)
-      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(optimisticRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
 
       const nextRecord = enabled
         ? await scheduleAlarm(optimisticRecord, holidaySourceMap)
-        : await disableAlarm(record)
+        : await disableAlarm(record, systemAlarmMap)
       const nextRecords = optimisticRecords.map((item) => (item.id === record.id ? nextRecord : item))
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(nextRecords, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
       void refreshSystemState()
     } catch (error: any) {
       const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
       setRecords(rollbackRecords)
-      saveStateSnapshot(rollbackRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(rollbackRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setBusyRecordId(null)
@@ -745,6 +778,7 @@ export function HomeView() {
           enabledCount={enabledCount}
           managedInstanceCount={managedInstanceCount}
           cleanupCandidateCount={cleanupCandidateAlarmIds.length}
+          soundCount={availableSounds.length}
           currentHolidayTitle={selectedHolidaySource?.title || ""}
           syncedHolidayCount={selectedHolidaySource?.holidayDates.length ?? 0}
           currentMonthTotalOffCount={currentMonthSummary.totalOff}
@@ -752,6 +786,7 @@ export function HomeView() {
           currentMonthTotalWorkCount={currentMonthSummary.totalWork}
           currentMonthRemainingWorkCount={currentMonthSummary.remainingWork}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
+          onOpenSoundSettings={openSoundSettings}
         />
       </NavigationStack>
     )
@@ -829,22 +864,25 @@ export function HomeView() {
   async function removeAlarm(record: AlarmRecord) {
     if (globalBusy || busyRecordId) return
     setGlobalBusy(true)
+    setAlarmDeleting(true)
+    const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
     const nextCleanupCandidateIds = mergeManagedSystemAlarmIds(cleanupCandidateAlarmIds, record.systemAlarmIds)
     const nextRecords = records.filter((item) => item.id !== record.id)
     try {
       setRecords(nextRecords)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      saveStateSnapshot(nextRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
+      saveStateSnapshot(nextRecords, holidaySources, availableSounds, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       // 先取消系统里已经注册的实例，再从首页记录里删掉它。
-      await deleteAlarm(record)
+      await deleteAlarm(record, systemAlarmMap)
       await refreshSystemState()
     } catch (error: any) {
       setRecords(records)
       setCleanupCandidateAlarmIds(cleanupCandidateAlarmIds)
-      saveStateSnapshot(records, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
+      setAlarmDeleting(false)
       setGlobalBusy(false)
     }
   }
@@ -879,7 +917,7 @@ export function HomeView() {
       setRecords(nextRecords)
       setManagedSystemAlarmIds(nextManagedIds)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, nextCleanupCandidateIds)
+      saveStateSnapshot(nextRecords, holidaySources, availableSounds, nextManagedIds, nextCleanupCandidateIds)
       const snapshot = await refreshSystemState()
       return snapshot
     } catch (error: any) {
@@ -919,49 +957,78 @@ export function HomeView() {
   }
 
   return (
-    <TabView
-      selection={activeTab as any}
-      tint="systemOrange"
-      tabViewStyle="sidebarAdaptable"
-      tabBarMinimizeBehavior="onScrollDown"
-      tabViewSearchActivation="searchTabSelection"
-    >
-      <Tab
-        title="状态"
-        systemImage="chart.bar.fill"
-        value={STATUS_TAB}
+    <ZStack>
+      <TabView
+        selection={activeTab as any}
+        tint="systemOrange"
+        tabViewStyle="sidebarAdaptable"
+        tabBarMinimizeBehavior="onScrollDown"
+        tabViewSearchActivation="searchTabSelection"
       >
-        {renderStatusTab()}
-      </Tab>
+        <Tab
+          title="状态"
+          systemImage="chart.bar.fill"
+          value={STATUS_TAB}
+        >
+          {renderStatusTab()}
+        </Tab>
 
-      <Tab
-        title="闹钟"
-        systemImage="alarm.fill"
-        value={ALARMS_TAB}
-      >
-        {renderAlarmsTab()}
-      </Tab>
+        <Tab
+          title="闹钟"
+          systemImage="alarm.fill"
+          value={ALARMS_TAB}
+        >
+          {renderAlarmsTab()}
+        </Tab>
 
-      <Tab
-        title="日历"
-        systemImage="calendar"
-        value={CALENDARS_TAB}
-      >
-        {renderCalendarsTab()}
-      </Tab>
+        <Tab
+          title="日历"
+          systemImage="calendar"
+          value={CALENDARS_TAB}
+        >
+          {renderCalendarsTab()}
+        </Tab>
 
-      <Tab
-        title=""
-        systemImage={accessoryIconName()}
-        value={ACTION_TAB}
-        role="search"
-      >
-        {lastContentTab === STATUS_TAB
-          ? renderStatusTab()
-          : lastContentTab === ALARMS_TAB
-            ? renderAlarmsTab()
-            : renderCalendarsTab()}
-      </Tab>
-    </TabView>
+        <Tab
+          title=""
+          systemImage={accessoryIconName()}
+          value={ACTION_TAB}
+          role="search"
+        >
+          {lastContentTab === STATUS_TAB
+            ? renderStatusTab()
+            : lastContentTab === ALARMS_TAB
+              ? renderAlarmsTab()
+              : renderCalendarsTab()}
+        </Tab>
+      </TabView>
+
+      {alarmWriting || alarmDeleting ? (
+        <VStack
+          spacing={12}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+          contentShape="rect"
+        >
+          <VStack
+            spacing={12}
+            padding={{ top: 20, bottom: 20, leading: 24, trailing: 24 }}
+            shadow={{
+              color: colorScheme === "dark" ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.12)",
+              radius: 20,
+              y: 8,
+            }}
+            background={{
+              style: colorScheme === "dark" ? "#1F1F22" : "#FFFFFF",
+              shape: { type: "rect", cornerRadius: 20 },
+            }}
+          >
+            <ProgressView progressViewStyle="circular" />
+            <Text font="subheadline" foregroundStyle="secondaryLabel">
+              {alarmWriting ? "正在写入闹钟..." : "正在删除闹钟..."}
+            </Text>
+          </VStack>
+        </VStack>
+      ) : null}
+    </ZStack>
   )
 }

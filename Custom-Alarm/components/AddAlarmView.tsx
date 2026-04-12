@@ -38,26 +38,6 @@ const WEEKDAY_OPTIONS: Array<{ value: number; label: string }> = [
 ]
 const HOLIDAY_MODE_OPTIONS: HolidayMatchMode[] = ["nonHoliday", "holiday"]
 const SNOOZE_OPTIONS = [3, 5, 10, 15, 20, 30]
-const SOUND_OPTIONS = [
-  { label: "Default", value: "" },
-  { label: "Radar", value: "Radar" },
-  { label: "Beacon", value: "Beacon" },
-  { label: "Bulletin", value: "Bulletin" },
-  { label: "By The Seaside", value: "By The Seaside" },
-  { label: "Chimes", value: "Chimes" },
-  { label: "Circuit", value: "Circuit" },
-  { label: "Crickets", value: "Crickets" },
-  { label: "Hillside", value: "Hillside" },
-  { label: "Night Owl", value: "Night Owl" },
-  { label: "Opening", value: "Opening" },
-  { label: "Playtime", value: "Playtime" },
-  { label: "Presto", value: "Presto" },
-  { label: "Sencha", value: "Sencha" },
-  { label: "Signal", value: "Signal" },
-  { label: "Silk", value: "Silk" },
-  { label: "Slow Rise", value: "Slow Rise" },
-  { label: "Summit", value: "Summit" },
-] as const
 const MONTHLY_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1)
 const OCCURRENCE_LIMIT_OPTIONS = Array.from({ length: 99 }, (_, index) => index + 1)
 const CUSTOM_DAY_OPTIONS = Array.from({ length: 50 }, (_, index) => index + 1)
@@ -158,6 +138,7 @@ function draftKey(draft: AlarmDraft): string {
 
 export function AddAlarmView(props: {
   holidaySources: HolidayCalendarSource[]
+  availableSounds: string[]
   existingDrafts?: AlarmDraft[]
   initial?: AlarmDraft | null
   mode?: "create" | "edit"
@@ -181,11 +162,16 @@ export function AddAlarmView(props: {
     initialRepeatMode = initialDraft.repeatRule.kind
   }
 
+  const soundOptions = (() => {
+    const base = props.availableSounds.length ? props.availableSounds : ["Default"]
+    const initialSound = initialDraft?.soundName?.trim() || "Default"
+    return base.includes(initialSound) ? base : [...base, initialSound]
+  })()
   const [title, setTitle] = useState(initialDraft?.title ?? "闹钟")
   const [snoozeMinutes, setSnoozeMinutes] = useState(initialDraft?.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES)
   const [soundIndex, setSoundIndex] = useState<number>(() => {
-    const initialSoundName = initialDraft?.soundName ?? ""
-    const index = SOUND_OPTIONS.findIndex((item) => item.value === initialSoundName)
+    const initialSoundName = initialDraft?.soundName?.trim() || "Default"
+    const index = soundOptions.findIndex((item) => item === initialSoundName)
     return index >= 0 ? index : 0
   })
   const [repeatEnabled, setRepeatEnabled] = useState(initialRepeatEnabled)
@@ -259,7 +245,8 @@ export function AddAlarmView(props: {
     const occurrenceLimit = repeatEnabled && supportsOccurrenceLimit(repeatMode) && occurrenceLimitValue > 0
       ? Math.max(1, Math.min(99, occurrenceLimitValue))
       : null
-    const soundName = SOUND_OPTIONS[soundIndex]?.value || null
+    const selectedSound = soundOptions[soundIndex] ?? "Default"
+    const soundName = selectedSound === "Default" ? null : selectedSound
     let result: AlarmDraft
 
     if (!repeatEnabled) {
@@ -385,9 +372,9 @@ export function AddAlarmView(props: {
             value={soundIndex}
             onChanged={setSoundIndex}
           >
-            {SOUND_OPTIONS.map((option, index) => (
-              <Text key={`sound-${option.value || "default"}`} tag={index}>
-                {option.label}
+            {soundOptions.map((option, index) => (
+              <Text key={`sound-${option || "default"}`} tag={index}>
+                {option}
               </Text>
             ))}
           </Picker>
