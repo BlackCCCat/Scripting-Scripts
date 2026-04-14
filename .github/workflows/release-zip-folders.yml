@@ -94,11 +94,23 @@ jobs:
 
       - name: Generate release notes
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          CURRENT_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"
-          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${CURRENT_COMMIT}^" 2>/dev/null || true)"
+          mapfile -t TAGS < <(git tag --list 'v*' --sort=-version:refname)
+          PREVIOUS_TAG=""
+          for i in "${!TAGS[@]}"; do
+            if [[ "${TAGS[$i]}" == "$TAG_NAME" ]]; then
+              NEXT_INDEX=$((i + 1))
+              if [[ "$NEXT_INDEX" -lt "${#TAGS[@]}" ]]; then
+                PREVIOUS_TAG="${TAGS[$NEXT_INDEX]}"
+              fi
+              break
+            fi
+          done
+
           NOTES_FILE="release-notes.md"
 
           {
@@ -108,26 +120,44 @@ jobs:
             if [[ -n "$PREVIOUS_TAG" ]]; then
               echo "基于 \`$PREVIOUS_TAG\` 到 \`$TAG_NAME\` 的提交："
               echo
-              LOG_RANGE="${PREVIOUS_TAG}..${TAG_NAME}"
             else
               echo "首个版本，包含以下提交："
               echo
-              LOG_RANGE="$TAG_NAME"
             fi
           } > "$NOTES_FILE"
 
-          COMMITS_FOUND=0
-          while IFS= read -r line; do
-            if [[ -z "$line" ]]; then
-              continue
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG_NAME}" > compare.json
+
+            python3 - <<'PY'
+          import json
+          import os
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          notes_file = "release-notes.md"
+
+          with open("compare.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          commits = data.get("commits", [])
+
+          with open(notes_file, "a", encoding="utf-8") as f:
+              if commits:
+                  for commit in commits:
+                      sha = commit["sha"]
+                      short_sha = sha[:7]
+                      message = commit["commit"]["message"].splitlines()[0]
+                      f.write(f"- {message} ([{short_sha}](https://github.com/{repo}/commit/{sha}))\n")
+              else:
+                  f.write("- No commits found.\n")
+          PY
+          else
+            COMMITS="$(git log --reverse --pretty=format:"- %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" "$TAG_NAME" || true)"
+            if [[ -n "$COMMITS" ]]; then
+              printf '%s\n' "$COMMITS" >> "$NOTES_FILE"
+            else
+              echo "- No commits found." >> "$NOTES_FILE"
             fi
-
-            echo "$line" >> "$NOTES_FILE"
-            COMMITS_FOUND=1
-          done < <(git log --reverse --pretty=format:"- %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" "$LOG_RANGE")
-
-          if [[ "$COMMITS_FOUND" -eq 0 ]]; then
-            echo "- No commits found." >> "$NOTES_FILE"
           fi
 
           if [[ -n "$PREVIOUS_TAG" ]]; then
