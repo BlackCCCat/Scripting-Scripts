@@ -208,9 +208,9 @@ function shouldCollapseSourceText(text: string) {
 export function TranslationPanel(props: TranslationPanelProps) {
   const sourceText = props.inputText ?? ""
   const hasInput = sourceText.trim().length > 0
-  const [sourceLanguageCode, setSourceLanguageCode] = useState(AUTO_LANGUAGE.code)
-  const [targetLanguageCode, setTargetLanguageCode] = useState("zh-Hans")
   const [settings] = useState(() => loadTranslatorSettings())
+  const [sourceLanguageCode, setSourceLanguageCode] = useState(AUTO_LANGUAGE.code)
+  const [targetLanguageCode, setTargetLanguageCode] = useState(() => settings.defaultTargetLanguageCode)
   const [systemTranslationHost] = useState(() => new Translation())
   const [errorText, setErrorText] = useState("")
   const [engineResults, setEngineResults] = useState<EngineTranslationState[]>([])
@@ -365,6 +365,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
     if (!hasInput) return
     if (sourceLanguageCode !== AUTO_LANGUAGE.code) return
     if (targetTouchedRef.current) return
+    if (settings.defaultTargetLanguageCode !== "zh-Hans") return
 
     let cancelled = false
 
@@ -385,7 +386,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [hasInput, sourceLanguageCode, sourceText, targetLanguageCode])
+  }, [hasInput, settings.defaultTargetLanguageCode, sourceLanguageCode, sourceText, targetLanguageCode])
 
   const selectSourceLanguage = useEffectEvent((code: string) => {
     setSourceLanguageCode(code)

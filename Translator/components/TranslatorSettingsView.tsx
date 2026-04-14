@@ -2,14 +2,21 @@ import {
   Button,
   EditButton,
   ForEach,
+  HStack,
+  Image,
   List,
+  Menu,
   Navigation,
   NavigationStack,
+  Picker,
   Section,
+  Spacer,
+  Text,
   Toggle,
   useState,
 } from "scripting"
 
+import { LANGUAGE_OPTIONS } from "../constants"
 import type {
   TranslationEngineConfig,
   TranslatorEngineEntry,
@@ -25,6 +32,7 @@ import {
   reorderEngines,
   saveTranslatorSettings,
   updateEngineConfig,
+  updateDefaultTargetLanguage,
   updateEngineEnabled,
 } from "../utils/translator_settings"
 import { EngineEditorView } from "./EngineEditorView"
@@ -63,6 +71,16 @@ function isEngineAvailable(engine: TranslatorEngineEntry) {
   return false
 }
 
+function targetLanguageLabel(code: string) {
+  const option = LANGUAGE_OPTIONS.find((item) => item.code === code) ?? LANGUAGE_OPTIONS[0]
+  const promptName = option.promptName === "Simplified Chinese"
+    ? "Chinese Simplified"
+    : option.promptName === "Traditional Chinese"
+      ? "Chinese Traditional"
+      : option.promptName
+  return `${option.label}-${promptName}`
+}
+
 export function TranslatorSettingsView() {
   const [settings, setSettings] = useState(() => loadTranslatorSettings())
 
@@ -98,6 +116,7 @@ export function TranslatorSettingsView() {
     )
 
     persist({
+      defaultTargetLanguageCode: nextWithConfig.defaultTargetLanguageCode,
       engines: nextWithConfig.engines.map((item) => (
         item.id === draft.id
           ? {
@@ -136,6 +155,7 @@ export function TranslatorSettingsView() {
       : baseSettings
 
     persist({
+      defaultTargetLanguageCode: nextWithConfig.defaultTargetLanguageCode,
       engines: nextWithConfig.engines.map((item) => (
         item.id === engine.id
           ? {
@@ -175,6 +195,48 @@ export function TranslatorSettingsView() {
           ],
         }}
       >
+        <Section header={<Text>翻译设置</Text>}>
+          <HStack spacing={12}>
+            <Text>默认目标语言</Text>
+            <Spacer />
+            <Menu
+              label={
+                <HStack spacing={4}>
+                  <Text
+                    foregroundStyle="accentColor"
+                    lineLimit={1}
+                    truncationMode="tail"
+                    allowsTightening
+                    frame={{ maxWidth: 160, alignment: "trailing" as any }}
+                    multilineTextAlignment="trailing"
+                  >
+                    {targetLanguageLabel(settings.defaultTargetLanguageCode)}
+                  </Text>
+                  <Image
+                    systemName="chevron.down"
+                    font="caption2"
+                    foregroundStyle="accentColor"
+                  />
+                </HStack>
+              }
+            >
+              <Picker
+                title="默认目标语言"
+                value={settings.defaultTargetLanguageCode}
+                onChanged={(value: string) => {
+                  persist(updateDefaultTargetLanguage(settings, value))
+                }}
+              >
+                {LANGUAGE_OPTIONS.map((option) => (
+                  <Text key={option.code} tag={option.code}>
+                    {targetLanguageLabel(option.code)}
+                  </Text>
+                ))}
+              </Picker>
+            </Menu>
+          </HStack>
+        </Section>
+
         <Section>
           <ForEach
             count={settings.engines.length}

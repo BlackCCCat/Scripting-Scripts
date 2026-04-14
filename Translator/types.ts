@@ -51,6 +51,7 @@ export type TranslatorEngineEntry = {
 
 export type TranslatorSettings = {
   engines: TranslatorEngineEntry[]
+  defaultTargetLanguageCode: string
 }
 
 export type TranslationRequest = {

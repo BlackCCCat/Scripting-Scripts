@@ -1,4 +1,4 @@
-import { TRANSLATION_ENGINE_OPTIONS } from "../constants"
+import { LANGUAGE_OPTIONS, TRANSLATION_ENGINE_OPTIONS } from "../constants"
 import type {
   BuiltInTranslationEngineKind,
   KnownTranslationEngineKind,
@@ -10,6 +10,7 @@ import { isAssistantTranslationAvailable } from "./assistant_translation_engine"
 import { isLocalTranslationAvailable } from "./translation_engine"
 
 const STORAGE_KEY = "translator_settings_v2"
+const DEFAULT_TARGET_LANGUAGE_CODE = "zh-Hans"
 
 function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
   const option = TRANSLATION_ENGINE_OPTIONS.find((item) => item.id === kind)!
@@ -28,6 +29,7 @@ function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
 
 function createDefaultSettings(): TranslatorSettings {
   return {
+    defaultTargetLanguageCode: DEFAULT_TARGET_LANGUAGE_CODE,
     engines: [
       builtInEntry("apple_intelligence"),
       builtInEntry("assistant"),
@@ -68,6 +70,14 @@ function removeSharedSettings(st: any) {
 
 function defaultBuiltInMap() {
   return new Map(REQUIRED_BUILT_INS.map((kind) => [kind, builtInEntry(kind)]))
+}
+
+function normalizeDefaultTargetLanguageCode(code: unknown) {
+  const normalized = String(code ?? "").trim()
+  if (LANGUAGE_OPTIONS.some((item) => item.code === normalized)) {
+    return normalized
+  }
+  return DEFAULT_TARGET_LANGUAGE_CODE
 }
 
 function isKnownEngineKind(kind: unknown): kind is KnownTranslationEngineKind {
@@ -130,6 +140,7 @@ function applyAvailabilityRules(entry: TranslatorEngineEntry): TranslatorEngineE
 
 function applyAvailabilityRulesToSettings(settings: TranslatorSettings): TranslatorSettings {
   return {
+    defaultTargetLanguageCode: normalizeDefaultTargetLanguageCode(settings.defaultTargetLanguageCode),
     engines: settings.engines.map((entry) => applyAvailabilityRules(entry)),
   }
 }
@@ -163,7 +174,10 @@ function migrateLegacySettings(raw: any): TranslatorSettings | null {
 export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | null): TranslatorSettings {
   const legacy = migrateLegacySettings(raw)
   if (legacy) {
-    return applyAvailabilityRulesToSettings(legacy)
+    return applyAvailabilityRulesToSettings({
+      ...legacy,
+      defaultTargetLanguageCode: DEFAULT_TARGET_LANGUAGE_CODE,
+    })
   }
 
   const defaults = defaultBuiltInMap()
@@ -188,6 +202,7 @@ export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | 
   }
 
   return applyAvailabilityRulesToSettings({
+    defaultTargetLanguageCode: normalizeDefaultTargetLanguageCode(raw?.defaultTargetLanguageCode),
     engines: normalized,
   })
 }
@@ -235,6 +250,16 @@ export function updateEngineEnabled(
         ? { ...item, enabled }
         : item
     )),
+  })
+}
+
+export function updateDefaultTargetLanguage(
+  settings: TranslatorSettings,
+  code: string
+): TranslatorSettings {
+  return normalizeTranslatorSettings({
+    ...settings,
+    defaultTargetLanguageCode: code,
   })
 }
 
