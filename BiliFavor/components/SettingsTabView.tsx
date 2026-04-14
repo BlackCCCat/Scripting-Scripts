@@ -14,7 +14,7 @@ import {
 } from "scripting"
 
 import { LoginCenterView } from "./LoginCenterView"
-import type { BiliAuthSession, BiliPlaybackMode, QrLoginState } from "../types"
+import type { BiliAuthSession, BiliLoginMode, BiliPlaybackMode, QrLoginState } from "../types"
 
 async function confirmDialog(options: { title: string; message: string }): Promise<boolean> {
   const runtimeDialog = (globalThis as any).Dialog
@@ -27,6 +27,7 @@ async function confirmDialog(options: { title: string; message: string }): Promi
 function AccountHeader(props: {
   auth: BiliAuthSession | null
   validating: boolean
+  loginMode: BiliLoginMode
 }) {
   const user = props.auth?.user
 
@@ -63,13 +64,17 @@ function AccountHeader(props: {
 
   return (
     <VStack spacing={8} padding={{ top: 8, bottom: 8 }} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-      <Text font="headline">
-        {props.auth?.cookieHeader ? "正在同步账号状态…" : "当前未登录"}
+      <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+        {props.validating ? "正在同步账号状态…" : "当前未登录"}
       </Text>
-      <Text font="subheadline" foregroundStyle="secondaryLabel">
+      <Text
+        font="subheadline"
+        foregroundStyle="secondaryLabel"
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      >
         {props.validating
-          ? "正在使用已保存的 Cookie 校验账号有效性。"
-          : "登录页支持二维码登录。"}
+          ? (props.loginMode === "webview" ? "正在校验当前网页登录状态。" : "正在使用已保存的 Cookie 校验账号有效性。")
+          : props.loginMode === "webview" ? "当前已切换到网页登录模式。" : "登录页支持二维码登录和网页登录。"}
       </Text>
     </VStack>
   )
@@ -138,6 +143,7 @@ function AccountRow(props: {
 export function SettingsTabView(props: {
   auth: BiliAuthSession | null
   accounts: BiliAuthSession[]
+  loginMode: BiliLoginMode
   validating: boolean
   loginBusy: boolean
   qrLogin: QrLoginState | null
@@ -145,7 +151,9 @@ export function SettingsTabView(props: {
   playbackMode: BiliPlaybackMode
   onExit: () => void
   onPlaybackModeChange: (mode: BiliPlaybackMode) => Promise<void>
+  onLoginModeChange: (mode: BiliLoginMode) => Promise<void>
   onStartQrLogin: () => Promise<void>
+  onStartWebViewLogin: () => Promise<void>
   onRefreshAccount: () => Promise<void>
   onClearAuth: () => Promise<void>
   onCancelQrLogin: () => void
@@ -174,7 +182,7 @@ export function SettingsTabView(props: {
         }}
       >
         <Section header={<Text>账号</Text>} footer={props.authMessage ? <Text>{props.authMessage}</Text> : undefined}>
-          <AccountHeader auth={props.auth} validating={props.validating} />
+          <AccountHeader auth={props.auth} validating={props.validating} loginMode={props.loginMode} />
         </Section>
 
         <Section
@@ -183,10 +191,13 @@ export function SettingsTabView(props: {
           <NavigationLink
             destination={
               <LoginCenterView
+                loginMode={props.loginMode}
                 qrLogin={props.qrLogin}
                 loginBusy={props.loginBusy}
                 onStartQrLogin={props.onStartQrLogin}
                 onCancelQrLogin={props.onCancelQrLogin}
+                onStartWebViewLogin={props.onStartWebViewLogin}
+                onChangeLoginMode={props.onLoginModeChange}
               />
             }
           >
@@ -200,7 +211,7 @@ export function SettingsTabView(props: {
                   foregroundStyle="secondaryLabel"
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
-                  进入独立登录页，使用二维码登录
+                  进入独立登录页，切换模式并完成二维码或网页登录
                 </Text>
               </VStack>
             </HStack>
@@ -274,7 +285,7 @@ export function SettingsTabView(props: {
 
         <Section
           header={<Text>已保存账号</Text>}
-          footer={<Text>当前请求会使用“当前”账号的 Cookie。登录新账号后会自动加入这里。</Text>}
+          footer={<Text>{props.loginMode === "webview" ? "网页登录模式不会直接使用这里的账号，但你仍可点击任一账号切回二维码账号模式。" : "当前请求会使用“当前”账号的 Cookie。登录新账号后会自动加入这里。"}</Text>}
         >
           {props.accounts.length > 0 ? props.accounts.map((item) => (
             <AccountRow
@@ -292,14 +303,14 @@ export function SettingsTabView(props: {
           <Button
             title={props.validating ? "正在刷新账号状态…" : "刷新账号状态"}
             systemImage="person.crop.circle.badge.checkmark"
-            disabled={!props.auth?.cookieHeader || props.validating}
+            disabled={!props.auth || props.validating}
             action={() => void props.onRefreshAccount()}
           />
           <Button
             title="删除当前账号"
             systemImage="trash"
             role="destructive"
-            disabled={!props.auth?.cookieHeader}
+            disabled={!props.auth?.cookieHeader || props.loginMode === "webview"}
             action={() => void confirmClearAuth()}
           />
         </Section>

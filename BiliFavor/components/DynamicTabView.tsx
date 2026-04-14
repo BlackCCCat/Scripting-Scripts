@@ -25,6 +25,7 @@ import type {
   BiliAuthSession,
   BiliAuthorFilterRule,
   BiliFollowedAuthor,
+  BiliLoginMode,
   BiliPlaybackMode,
   VideoDynamicItem,
 } from "../types"
@@ -301,6 +302,9 @@ function VideoDynamicCard(props: {
 
 export function DynamicTabView(props: {
   auth: BiliAuthSession | null
+  loginMode: BiliLoginMode
+  isLoggedIn: boolean
+  isAuthChecking: boolean
   items: VideoDynamicItem[]
   totalItemCount: number
   isFilterActive: boolean
@@ -336,7 +340,7 @@ export function DynamicTabView(props: {
   }
 
   function handleOpenItem(item: VideoDynamicItem) {
-    if (props.playbackMode === "inline" && props.auth?.cookieHeader) {
+    if (props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && props.auth?.cookieHeader) {
       setFilterPresented(false)
       setPlayingItem(item)
       return
@@ -370,7 +374,7 @@ export function DynamicTabView(props: {
               background="systemGroupedBackground"
               listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
-              refreshable={props.auth?.cookieHeader ? props.onRefresh : undefined}
+              refreshable={props.isLoggedIn ? props.onRefresh : undefined}
               navigationDestination={{
                 isPresented: filterPresented || playingItem != null,
                 onChanged: (value) => {
@@ -400,7 +404,7 @@ export function DynamicTabView(props: {
                     systemImage="xmark"
                     action={props.onExit}
                   />,
-                  ...(props.auth?.cookieHeader ? [
+                  ...(props.isLoggedIn ? [
                     <Button
                       key="refresh"
                       title=""
@@ -409,7 +413,7 @@ export function DynamicTabView(props: {
                     />,
                   ] : []),
                 ],
-                topBarTrailing: props.auth?.cookieHeader
+                topBarTrailing: props.isLoggedIn
                   ? (
                     <Button
                       title=""
@@ -420,7 +424,7 @@ export function DynamicTabView(props: {
                   : undefined,
               }}
             >
-              {!props.auth?.cookieHeader ? (
+              {!props.isLoggedIn && !props.isAuthChecking ? (
                 <Section listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}>
                   <VStack
                     key="dynamic-state-top"
@@ -443,7 +447,23 @@ export function DynamicTabView(props: {
                 </Section>
               ) : null}
 
-              {props.isLoading && props.totalItemCount === 0 ? (
+              {props.isAuthChecking && props.totalItemCount === 0 ? (
+                <Section listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}>
+                  <VStack
+                    key="dynamic-state-top"
+                    spacing={10}
+                    padding={{ top: 24, bottom: 24 }}
+                    frame={{ maxWidth: "infinity", alignment: "center" as any }}
+                    listRowBackground={<EmptyView />}
+                    listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
+                  >
+                    <ProgressView progressViewStyle="circular" />
+                    <Text foregroundStyle="secondaryLabel">正在检测登录状态…</Text>
+                  </VStack>
+                </Section>
+              ) : null}
+
+              {props.isLoading && props.totalItemCount === 0 && !props.isAuthChecking ? (
                 <Section listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}>
                   <VStack
                     key="dynamic-state-top"
@@ -459,7 +479,7 @@ export function DynamicTabView(props: {
                 </Section>
               ) : null}
 
-              {props.errorMessage && props.totalItemCount === 0 && props.auth?.cookieHeader ? (
+              {props.errorMessage && props.totalItemCount === 0 && props.isLoggedIn ? (
                 <Section listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}>
                   <VStack
                     key="dynamic-state-top"
@@ -479,7 +499,7 @@ export function DynamicTabView(props: {
                 props.items.map((item, index) => {
                   const externalUrl = resolveVideoUrl(item)
                   const authorUrl = resolveAuthorSpaceUrl(item)
-                  const canInlinePlay = props.playbackMode === "inline" && Boolean(props.auth?.cookieHeader)
+                  const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
 
                   return (
                     <VideoDynamicCard
@@ -523,7 +543,7 @@ export function DynamicTabView(props: {
                 </VStack>
               ) : null}
 
-              {!props.isLoading && !props.errorMessage && props.auth?.cookieHeader && props.totalItemCount === 0 ? (
+              {!props.isLoading && !props.errorMessage && props.isLoggedIn && props.totalItemCount === 0 ? (
                 <Section listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}>
                   <VStack
                     key="dynamic-state-top"
@@ -540,7 +560,7 @@ export function DynamicTabView(props: {
                 </Section>
               ) : null}
 
-              {!props.isLoading && !props.errorMessage && props.auth?.cookieHeader && props.totalItemCount > 0 && props.items.length === 0 ? (
+              {!props.isLoading && !props.errorMessage && props.isLoggedIn && props.totalItemCount > 0 && props.items.length === 0 ? (
                 <Section listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}>
                   <VStack
                     key="dynamic-state-top"

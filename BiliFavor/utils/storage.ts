@@ -30,6 +30,7 @@ function sanitizeSession(raw: any): BiliAuthSession | null {
     refreshToken: String(raw?.refreshToken ?? "").trim(),
     updatedAt: Number(raw?.updatedAt ?? Date.now()) || Date.now(),
     user,
+    loginMethod: raw?.loginMethod === "webview" ? "webview" : "cookie",
   }
 }
 

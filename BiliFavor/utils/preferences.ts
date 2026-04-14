@@ -1,5 +1,6 @@
 import type {
   BiliAuthorFilterRule,
+  BiliLoginMode,
   BiliPlaybackMode,
   BiliPreferences,
 } from "../types"
@@ -8,6 +9,10 @@ const STORAGE_KEY = "bili_scripting_preferences_v1"
 
 function sanitizePlaybackMode(raw: any): BiliPlaybackMode {
   return raw === "inline" ? "inline" : "external"
+}
+
+function sanitizeLoginMode(raw: any): BiliLoginMode {
+  return raw === "webview" ? "webview" : "cookie"
 }
 
 function sanitizeFilterRule(raw: any): BiliAuthorFilterRule {
@@ -35,6 +40,7 @@ function sanitizePreferences(raw: any): BiliPreferences {
   }
 
   return {
+    loginMode: sanitizeLoginMode(raw?.loginMode),
     playbackMode: sanitizePlaybackMode(raw?.playbackMode),
     authorFiltersByAccount,
   }
@@ -45,6 +51,7 @@ export function loadStoredPreferences(): BiliPreferences {
     return sanitizePreferences(Storage.get<any>(STORAGE_KEY))
   } catch {
     return {
+      loginMode: "cookie",
       playbackMode: "external",
       authorFiltersByAccount: {},
     }
@@ -116,5 +123,15 @@ export function setPlaybackMode(
   return {
     ...preferences,
     playbackMode: sanitizePlaybackMode(playbackMode),
+  }
+}
+
+export function setLoginMode(
+  preferences: BiliPreferences,
+  loginMode: BiliLoginMode
+): BiliPreferences {
+  return {
+    ...preferences,
+    loginMode: sanitizeLoginMode(loginMode),
   }
 }

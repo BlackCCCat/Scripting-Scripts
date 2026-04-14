@@ -6,12 +6,15 @@ export type BiliUserProfile = {
   vipLabel: string
 }
 
+export type BiliLoginMode = "cookie" | "webview"
+
 export type BiliAuthSession = {
   id: string
   cookieHeader: string
   refreshToken: string
   updatedAt: number
   user: BiliUserProfile | null
+  loginMethod: BiliLoginMode
 }
 
 export type BiliAuthStore = {
@@ -35,6 +38,7 @@ export type BiliAuthorFilterRule = {
 }
 
 export type BiliPreferences = {
+  loginMode: BiliLoginMode
   playbackMode: BiliPlaybackMode
   authorFiltersByAccount: Record<string, BiliAuthorFilterRule>
 }

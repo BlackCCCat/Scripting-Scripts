@@ -16,6 +16,7 @@ import type {
   BiliAuthStore,
   BiliAuthorFilterRule,
   BiliFollowedAuthor,
+  BiliLoginMode,
   BiliPreferences,
   QrLoginState,
   VideoDynamicItem,
@@ -23,9 +24,13 @@ import type {
 import {
   BiliAuthError,
   fetchAllFollowedAuthors,
+  fetchAllFollowedAuthorsViaWebView,
   fetchCurrentUser,
+  fetchCurrentUserViaWebView,
   fetchVideoDynamicsPage,
+  fetchVideoDynamicsPageViaWebView,
   pollQrLogin,
+  presentBiliWebViewLogin,
   requestQrLogin,
 } from "../utils/bilibili"
 import {
@@ -34,6 +39,7 @@ import {
   removeAccountPreferences,
   saveStoredPreferences,
   setAuthorFilterRule,
+  setLoginMode,
   setPlaybackMode,
 } from "../utils/preferences"
 import { loadStoredAuthState, saveStoredAuthState } from "../utils/storage"
@@ -53,7 +59,8 @@ type RootTab = typeof DYNAMIC_TAB | typeof SETTINGS_TAB
 function authMessageFromSession(auth: BiliAuthSession | null): string {
   if (!auth?.updatedAt) return ""
   if (auth.user?.uname) {
-    return `已登录为 ${auth.user.uname} · ${new Date(auth.updatedAt).toLocaleString("zh-CN")}`
+    const prefix = auth.loginMethod === "webview" ? "网页登录为" : "已登录为"
+    return `${prefix} ${auth.user.uname} · ${new Date(auth.updatedAt).toLocaleString("zh-CN")}`
   }
   return new Date(auth.updatedAt).toLocaleString("zh-CN")
 }
@@ -86,7 +93,8 @@ function mergeFeedItems(current: VideoDynamicItem[], incoming: VideoDynamicItem[
 function buildSessionWithUser(
   cookieHeader: string,
   user: BiliAuthSession["user"],
-  existing: BiliAuthSession | null
+  existing: BiliAuthSession | null,
+  loginMethod: BiliLoginMode = "cookie"
 ): BiliAuthSession {
   return {
     id: existing?.id && !existing.id.startsWith("pending_") ? existing.id : (user?.mid ?? existing?.id ?? `pending_${Date.now()}`),
@@ -94,6 +102,21 @@ function buildSessionWithUser(
     refreshToken: existing?.refreshToken ?? "",
     updatedAt: existing?.updatedAt ?? Date.now(),
     user,
+    loginMethod,
+  }
+}
+
+function buildWebViewSession(
+  user: NonNullable<BiliAuthSession["user"]>,
+  existing: BiliAuthSession | null
+): BiliAuthSession {
+  return {
+    id: `webview:${user.mid}`,
+    cookieHeader: "",
+    refreshToken: "",
+    updatedAt: Date.now(),
+    user,
+    loginMethod: "webview",
   }
 }
 
@@ -111,16 +134,30 @@ export function HomeView() {
   const [accounts, setAccounts] = useState<BiliAuthSession[]>(initialStore.accounts)
   const [activeAccountId, setActiveAccountId] = useState<string | null>(initialStore.activeAccountId)
   const [preferences, setPreferences] = useState<BiliPreferences>(initialPreferences)
-  const auth = useMemo(
+  const cookieAuth = useMemo(
     () => accounts.find((item) => item.id === activeAccountId) ?? accounts[0] ?? null,
     [accounts, activeAccountId]
   )
-  const [authValidating, setAuthValidating] = useState(Boolean((accounts.find((item) => item.id === activeAccountId) ?? accounts[0])?.cookieHeader))
-  const [authMessage, setAuthMessage] = useState<string>(() => authMessageFromSession(
-    initialStore.accounts.find((item) => item.id === initialStore.activeAccountId) ?? initialStore.accounts[0] ?? null
-  ))
+  const [webViewAuth, setWebViewAuth] = useState<BiliAuthSession | null>(null)
+  const loginMode = preferences.loginMode
+  const auth = useMemo(
+    () => loginMode === "webview" ? webViewAuth : cookieAuth,
+    [cookieAuth, loginMode, webViewAuth]
+  )
+  const [authValidating, setAuthValidating] = useState(
+    Boolean(initialPreferences.loginMode === "webview" || cookieAuth?.cookieHeader)
+  )
+  const [authMessage, setAuthMessage] = useState<string>(() => {
+    if (initialPreferences.loginMode === "webview") {
+      return "正在校验网页登录状态…"
+    }
+    return authMessageFromSession(
+      initialStore.accounts.find((item) => item.id === initialStore.activeAccountId) ?? initialStore.accounts[0] ?? null
+    )
+  })
   const [qrLogin, setQrLogin] = useState<QrLoginState | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
+  const [webViewRefreshSeed, setWebViewRefreshSeed] = useState(0)
   const [feedItems, setFeedItems] = useState<VideoDynamicItem[]>([])
   const [feedLoading, setFeedLoading] = useState(false)
   const [feedLoadingMore, setFeedLoadingMore] = useState(false)
@@ -132,8 +169,9 @@ export function HomeView() {
   const [followedAuthorsLoading, setFollowedAuthorsLoading] = useState(false)
   const [followedAuthorsErrorMessage, setFollowedAuthorsErrorMessage] = useState("")
   const [followedAuthorsAccountId, setFollowedAuthorsAccountId] = useState<string | null>(null)
-  const latestCookieRef = useRef<string>(auth?.cookieHeader ?? "")
+  const latestCookieRef = useRef<string>(cookieAuth?.cookieHeader ?? "")
   const activeAccountRef = useRef<string | null>(auth?.id ?? null)
+  const activeLoginModeRef = useRef<BiliLoginMode>(loginMode)
   const qrPollTimerRef = useRef<number | null>(null)
   const currentAuthorFilterRule = useMemo(
     () => getAuthorFilterRule(preferences, auth?.id),
@@ -144,8 +182,9 @@ export function HomeView() {
     [feedItems, currentAuthorFilterRule]
   )
 
-  latestCookieRef.current = auth?.cookieHeader ?? ""
+  latestCookieRef.current = cookieAuth?.cookieHeader ?? ""
   activeAccountRef.current = auth?.id ?? null
+  activeLoginModeRef.current = loginMode
 
   function clearQrPollTimer() {
     if (qrPollTimerRef.current != null) {
@@ -185,9 +224,9 @@ export function HomeView() {
     setFollowedAuthorsAccountId(null)
   }
 
-  function clearAuthState(message = "已删除当前账号") {
+  function clearCookieAuthState(message = "已删除当前账号") {
     clearQrPollTimer()
-    const currentId = auth?.id ?? null
+    const currentId = cookieAuth?.id ?? null
     const nextAccounts = currentId ? accounts.filter((item) => item.id !== currentId) : [...accounts]
     const nextActiveAccountId = nextAccounts[0]?.id ?? null
     persistAccountState(nextAccounts, nextActiveAccountId)
@@ -202,25 +241,49 @@ export function HomeView() {
     activeAccountRef.current = nextActiveAccountId
   }
 
+  function clearWebViewAuthState(message = "网页登录已失效，请重新登录") {
+    clearQrPollTimer()
+    setWebViewAuth(null)
+    setQrLogin(null)
+    clearFeedState()
+    clearFollowedAuthorsState()
+    setAuthMessage(message)
+    activeAccountRef.current = null
+  }
+
   function applyIncomingSession(session: BiliAuthSession, message: string) {
     clearQrPollTimer()
     const nextSession: BiliAuthSession = {
       ...session,
       id: session.id && !session.id.startsWith("pending_") ? session.id : `pending_${Date.now()}`,
       updatedAt: session.updatedAt || Date.now(),
+      loginMethod: "cookie",
     }
     latestCookieRef.current = nextSession.cookieHeader
     const nextAccounts = upsertAccount(accounts, nextSession)
     persistAccountState(nextAccounts, nextSession.id)
+    persistPreferences(setLoginMode(preferences, "cookie"))
     setQrLogin(null)
     setAuthMessage(message)
   }
 
-  function syncResolvedUser(cookieHeader: string, user: NonNullable<BiliAuthSession["user"]>): BiliAuthSession {
-    const existing = accounts.find((item) => item.cookieHeader === cookieHeader) ?? auth ?? null
-    const nextSession = buildSessionWithUser(cookieHeader, user, existing)
+  function syncResolvedCookieUser(cookieHeader: string, user: NonNullable<BiliAuthSession["user"]>): BiliAuthSession {
+    const existing = accounts.find((item) => item.cookieHeader === cookieHeader) ?? cookieAuth ?? null
+    const nextSession = buildSessionWithUser(cookieHeader, user, existing, "cookie")
     const nextAccounts = upsertAccount(accounts, nextSession)
     persistAccountState(nextAccounts, nextSession.id)
+    latestCookieRef.current = cookieHeader
+    activeAccountRef.current = nextSession.id
+    activeLoginModeRef.current = "cookie"
+    return nextSession
+  }
+
+  function syncResolvedWebViewUser(user: NonNullable<BiliAuthSession["user"]>): BiliAuthSession {
+    const existing = webViewAuth ?? null
+    const nextSession = buildWebViewSession(user, existing)
+    setWebViewAuth(nextSession)
+    activeAccountRef.current = nextSession.id
+    activeLoginModeRef.current = "webview"
     return nextSession
   }
 
@@ -251,7 +314,7 @@ export function HomeView() {
       if (latestCookieRef.current !== cookieHeader) return
 
       if (error instanceof BiliAuthError) {
-        clearAuthState("登录已失效，请重新扫码")
+        clearCookieAuthState("登录已失效，请重新扫码")
         return
       }
 
@@ -277,14 +340,14 @@ export function HomeView() {
       const user = await fetchCurrentUser(cookieHeader)
       if (latestCookieRef.current !== cookieHeader) return null
 
-      const nextSession = syncResolvedUser(cookieHeader, user)
+      const nextSession = syncResolvedCookieUser(cookieHeader, user)
       setAuthMessage(`已登录为 ${user.uname} · ${new Date(nextSession.updatedAt).toLocaleString("zh-CN")}`)
       return user
     } catch (error: any) {
       if (latestCookieRef.current !== cookieHeader) return null
 
       if (error instanceof BiliAuthError) {
-        clearAuthState("登录已失效，请重新扫码")
+        clearCookieAuthState("登录已失效，请重新扫码")
         return null
       }
 
@@ -297,10 +360,82 @@ export function HomeView() {
     }
   }
 
+  async function refreshFeedWithWebView(
+    options?: {
+      silent?: boolean
+      append?: boolean
+      offset?: string
+    }
+  ) {
+    const append = Boolean(options?.append)
+    const expectedAccountId = activeAccountRef.current
+    if (append) {
+      setFeedLoadingMore(true)
+    } else if (!options?.silent) {
+      setFeedLoading(true)
+    }
+    if (!append) setFeedErrorMessage("")
+
+    try {
+      const feed = await fetchVideoDynamicsPageViaWebView(options?.offset)
+      if (activeLoginModeRef.current !== "webview" || activeAccountRef.current !== expectedAccountId) return
+      setFeedItems((current) => append ? mergeFeedItems(current, feed.items) : feed.items)
+      setLastUpdatedAt(Date.now())
+      setFeedOffset(feed.offset)
+      setFeedHasMore(feed.hasMore)
+    } catch (error: any) {
+      if (activeLoginModeRef.current !== "webview" || activeAccountRef.current !== expectedAccountId) return
+
+      if (error instanceof BiliAuthError) {
+        clearWebViewAuthState("网页登录已失效，请重新登录")
+        return
+      }
+
+      setFeedErrorMessage(String(error?.message ?? error ?? "获取动态失败"))
+    } finally {
+      if (activeLoginModeRef.current === "webview" && activeAccountRef.current === expectedAccountId) {
+        if (append) {
+          setFeedLoadingMore(false)
+        } else {
+          setFeedLoading(false)
+        }
+      }
+    }
+  }
+
+  async function refreshAccountWithWebView(
+    options?: { silent?: boolean }
+  ): Promise<NonNullable<BiliAuthSession["user"]> | null> {
+    const expectedMode = activeLoginModeRef.current
+    if (!options?.silent) setAuthValidating(true)
+
+    try {
+      const user = await fetchCurrentUserViaWebView()
+      if (activeLoginModeRef.current !== expectedMode) return null
+
+      const nextSession = syncResolvedWebViewUser(user)
+      setAuthMessage(`网页登录为 ${user.uname} · ${new Date(nextSession.updatedAt).toLocaleString("zh-CN")}`)
+      return user
+    } catch (error: any) {
+      if (activeLoginModeRef.current !== expectedMode) return null
+
+      if (error instanceof BiliAuthError) {
+        clearWebViewAuthState("网页登录未登录或已失效")
+        return null
+      }
+
+      setAuthMessage(String(error?.message ?? error ?? "校验网页登录状态失败"))
+      return null
+    } finally {
+      if (activeLoginModeRef.current === expectedMode) {
+        setAuthValidating(false)
+      }
+    }
+  }
+
   async function loadFollowedAuthorsForCurrentAccount(options?: { force?: boolean }) {
-    const cookieHeader = auth?.cookieHeader ?? ""
     const accountId = auth?.id ?? null
-    if (!cookieHeader || !accountId) {
+    if (!auth || !accountId) {
       setFollowedAuthorsErrorMessage("请先登录后再筛选 UP 主")
       return
     }
@@ -317,40 +452,56 @@ export function HomeView() {
     setFollowedAuthorsErrorMessage("")
 
     try {
-      const resolvedUser = auth?.user ?? await refreshAccountWithCookie(cookieHeader, { silent: true })
-      if (latestCookieRef.current !== cookieHeader || activeAccountRef.current !== accountId) return
+      const resolvedUser = auth.loginMethod === "webview"
+        ? (auth.user ?? await refreshAccountWithWebView({ silent: true }))
+        : (auth.user ?? await refreshAccountWithCookie(auth.cookieHeader, { silent: true }))
+      if (activeAccountRef.current !== accountId) return
       if (!resolvedUser?.mid) {
         throw new Error("当前账号信息还没有同步完成，请稍后再试")
       }
 
-      const authors = await fetchAllFollowedAuthors(cookieHeader, resolvedUser.mid)
-      if (latestCookieRef.current !== cookieHeader || activeAccountRef.current !== accountId) return
+      const authors = auth.loginMethod === "webview"
+        ? await fetchAllFollowedAuthorsViaWebView(resolvedUser.mid)
+        : await fetchAllFollowedAuthors(auth.cookieHeader, resolvedUser.mid)
+      if (activeAccountRef.current !== accountId) return
 
       setFollowedAuthors(authors)
       setFollowedAuthorsAccountId(accountId)
     } catch (error: any) {
-      if (latestCookieRef.current !== cookieHeader || activeAccountRef.current !== accountId) return
+      if (activeAccountRef.current !== accountId) return
 
       if (error instanceof BiliAuthError) {
-        clearAuthState("登录已失效，请重新扫码")
+        if (auth.loginMethod === "webview") {
+          clearWebViewAuthState("网页登录已失效，请重新登录")
+        } else {
+          clearCookieAuthState("登录已失效，请重新扫码")
+        }
         return
       }
 
       setFollowedAuthorsErrorMessage(String(error?.message ?? error ?? "获取关注列表失败"))
     } finally {
-      if (latestCookieRef.current === cookieHeader && activeAccountRef.current === accountId) {
+      if (activeAccountRef.current === accountId) {
         setFollowedAuthorsLoading(false)
       }
     }
   }
 
   async function refreshAll() {
-    const cookieHeader = auth?.cookieHeader ?? ""
-    if (!cookieHeader) {
+    if (!auth) {
       setFeedErrorMessage("请先在设置里登录")
       return
     }
 
+    if (auth.loginMethod === "webview") {
+      await refreshAccountWithWebView()
+      if (activeLoginModeRef.current === "webview") {
+        await refreshFeedWithWebView({ append: false, offset: "" })
+      }
+      return
+    }
+
+    const cookieHeader = auth.cookieHeader ?? ""
     await refreshAccountWithCookie(cookieHeader)
     if (latestCookieRef.current === cookieHeader) {
       await refreshFeedWithCookie(cookieHeader, { append: false, offset: "" })
@@ -358,13 +509,41 @@ export function HomeView() {
   }
 
   async function loadMoreFeed() {
-    const cookieHeader = auth?.cookieHeader ?? ""
-    if (!cookieHeader || !feedHasMore || feedLoading || feedLoadingMore || !feedOffset) return
+    if (!auth || !feedHasMore || feedLoading || feedLoadingMore || !feedOffset) return
+    if (auth.loginMethod === "webview") {
+      await refreshFeedWithWebView({
+        append: true,
+        offset: feedOffset,
+        silent: true,
+      })
+      return
+    }
+
+    const cookieHeader = auth.cookieHeader ?? ""
+    if (!cookieHeader) return
     await refreshFeedWithCookie(cookieHeader, {
       append: true,
       offset: feedOffset,
       silent: true,
     })
+  }
+
+  async function startWebViewLoginFlow() {
+    clearQrPollTimer()
+    setLoginBusy(true)
+    try {
+      await presentBiliWebViewLogin()
+      const user = await fetchCurrentUserViaWebView()
+      const nextSession = syncResolvedWebViewUser(user)
+      persistPreferences(setLoginMode(preferences, "webview"))
+      activeLoginModeRef.current = "webview"
+      setAuthMessage(`网页登录为 ${user.uname} · ${new Date(nextSession.updatedAt).toLocaleString("zh-CN")}`)
+      setWebViewRefreshSeed((current) => current + 1)
+    } catch (error: any) {
+      setAuthMessage(String(error?.message ?? error ?? "网页登录失败"))
+    } finally {
+      setLoginBusy(false)
+    }
   }
 
   async function startQrLoginFlow() {
@@ -395,11 +574,20 @@ export function HomeView() {
   }
 
   async function clearAuthByUser() {
-    clearAuthState()
+    if (loginMode === "webview") {
+      clearWebViewAuthState("已清除当前网页登录状态")
+      return
+    }
+    clearCookieAuthState()
   }
 
   useEffect(() => {
-    const cookieHeader = auth?.cookieHeader ?? ""
+    if (loginMode !== "cookie") {
+      setAuthValidating(false)
+      return
+    }
+
+    const cookieHeader = cookieAuth?.cookieHeader ?? ""
     latestCookieRef.current = cookieHeader
 
     if (!cookieHeader) {
@@ -415,7 +603,7 @@ export function HomeView() {
         const user = await fetchCurrentUser(cookieHeader)
         if (cancelled || latestCookieRef.current !== cookieHeader) return
 
-        const nextSession = syncResolvedUser(cookieHeader, user)
+        const nextSession = syncResolvedCookieUser(cookieHeader, user)
         setAuthMessage(`已登录为 ${user.uname} · ${new Date(nextSession.updatedAt).toLocaleString("zh-CN")}`)
         clearFeedState()
         await refreshFeedWithCookie(cookieHeader, { silent: false, append: false, offset: "" })
@@ -423,7 +611,7 @@ export function HomeView() {
         if (cancelled || latestCookieRef.current !== cookieHeader) return
 
         if (error instanceof BiliAuthError) {
-          clearAuthState("登录已失效，请重新扫码")
+          clearCookieAuthState("登录已失效，请重新扫码")
           return
         }
 
@@ -438,7 +626,46 @@ export function HomeView() {
     return () => {
       cancelled = true
     }
-  }, [auth?.cookieHeader])
+  }, [cookieAuth?.cookieHeader, loginMode])
+
+  useEffect(() => {
+    if (loginMode !== "webview") {
+      setAuthValidating(false)
+      return
+    }
+
+    let cancelled = false
+
+    ;(async () => {
+      setAuthValidating(true)
+      try {
+        const user = await fetchCurrentUserViaWebView()
+        if (cancelled || activeLoginModeRef.current !== "webview") return
+
+        const nextSession = syncResolvedWebViewUser(user)
+        setAuthMessage(`网页登录为 ${user.uname} · ${new Date(nextSession.updatedAt).toLocaleString("zh-CN")}`)
+        clearFeedState()
+        await refreshFeedWithWebView({ silent: false, append: false, offset: "" })
+      } catch (error: any) {
+        if (cancelled || activeLoginModeRef.current !== "webview") return
+
+        if (error instanceof BiliAuthError) {
+          clearWebViewAuthState("网页登录未登录，请先完成网页登录")
+          return
+        }
+
+        setAuthMessage(String(error?.message ?? error ?? "校验网页登录状态失败"))
+      } finally {
+        if (!cancelled && activeLoginModeRef.current === "webview") {
+          setAuthValidating(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [loginMode, webViewRefreshSeed])
 
   useEffect(() => {
     if (!qrLogin?.qrcodeKey) return
@@ -512,7 +739,7 @@ export function HomeView() {
     activeAccountRef.current = auth.id
     clearFeedState()
     clearFollowedAuthorsState()
-  }, [auth?.id])
+  }, [auth?.id, loginMode])
 
   return (
     <TabView
@@ -524,6 +751,9 @@ export function HomeView() {
       <Tab title="动态" systemImage="play.square.stack.fill" value={DYNAMIC_TAB}>
         <DynamicTabView
           auth={auth}
+          loginMode={loginMode}
+          isLoggedIn={loginMode === "webview" ? Boolean(webViewAuth?.user?.mid) : Boolean(cookieAuth?.cookieHeader)}
+          isAuthChecking={loginMode === "webview" ? authValidating && !webViewAuth?.user?.mid : authValidating && !cookieAuth?.cookieHeader}
           items={filteredFeedItems}
           totalItemCount={feedItems.length}
           isFilterActive={currentAuthorFilterRule.mode === "custom"}
@@ -555,6 +785,7 @@ export function HomeView() {
         <SettingsTabView
           auth={auth}
           accounts={accounts}
+          loginMode={loginMode}
           validating={authValidating}
           loginBusy={loginBusy}
           qrLogin={qrLogin}
@@ -564,14 +795,28 @@ export function HomeView() {
           onPlaybackModeChange={async (mode) => {
             persistPreferences(setPlaybackMode(preferences, mode))
           }}
-          onStartQrLogin={startQrLoginFlow}
-          onRefreshAccount={async () => {
-            const cookieHeader = auth?.cookieHeader ?? ""
-            if (!cookieHeader) {
-              await alertDialog("当前没有可用的登录 Cookie，请先扫码登录")
+          onLoginModeChange={async (mode) => {
+            persistPreferences(setLoginMode(preferences, mode))
+            if (mode === "webview") {
+              setAuthMessage("正在校验网页登录状态…")
+              setWebViewRefreshSeed((current) => current + 1)
               return
             }
-            await refreshAccountWithCookie(cookieHeader)
+            setAuthMessage(authMessageFromSession(cookieAuth))
+          }}
+          onStartQrLogin={startQrLoginFlow}
+          onStartWebViewLogin={startWebViewLoginFlow}
+          onRefreshAccount={async () => {
+            if (!auth) {
+              await alertDialog("当前还没有可用登录，请先完成二维码登录或网页登录")
+              return
+            }
+            if (auth.loginMethod === "webview") {
+              setWebViewRefreshSeed((current) => current + 1)
+              await refreshAccountWithWebView()
+              return
+            }
+            await refreshAccountWithCookie(auth.cookieHeader)
           }}
           onClearAuth={clearAuthByUser}
           onCancelQrLogin={() => {
@@ -589,10 +834,11 @@ export function HomeView() {
             setAuthMessage("已取消当前二维码")
           }}
           onSwitchAccount={async (accountId: string) => {
-            if (accountId === auth?.id) return
+            if (accountId === cookieAuth?.id && loginMode === "cookie") return
             const next = accounts.find((item) => item.id === accountId) ?? null
             if (!next) return
             persistAccountState(accounts, next.id)
+            persistPreferences(setLoginMode(preferences, "cookie"))
             setAuthMessage(`已切换到 ${next.user?.uname ?? "该账号"}`)
           }}
         />

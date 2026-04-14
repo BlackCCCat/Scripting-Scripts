@@ -17,6 +17,11 @@ const DEFAULT_HEADERS: Record<string, string> = {
   "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Scripting/1.0",
 }
 
+export const BILIBILI_WEBVIEW_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15"
+
+const BILIBILI_WEBVIEW_LOGIN_URL = "https://passport.bilibili.com/login"
+
 const WBI_MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
   27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
@@ -121,6 +126,62 @@ type QrPollPayload = {
   timestamp: number
   code: number
   message: string
+}
+
+function buildWebViewSyncGetScript(url: string): string {
+  const escapedUrl = JSON.stringify(url)
+
+  return `
+    return (function () {
+      try {
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", ${escapedUrl}, false)
+        xhr.withCredentials = true
+        xhr.send(null)
+        return xhr.responseText || ""
+      } catch (error) {
+        return "__SCRIPTING_WEBVIEW_ERROR__" + String(error)
+      }
+    })()
+  `
+}
+
+function unwrapWebViewResponse(raw: string, context: string): string {
+  const text = String(raw ?? "")
+  if (text.startsWith("__SCRIPTING_WEBVIEW_ERROR__")) {
+    throw new Error(`${context}：${text.replace("__SCRIPTING_WEBVIEW_ERROR__", "").trim()}`)
+  }
+  return text
+}
+
+async function createPreparedBiliWebViewController(url: string) {
+  const controller = new WebViewController()
+  controller.setCustomUserAgent(BILIBILI_WEBVIEW_USER_AGENT)
+  const loaded = await controller.loadURL(url)
+  if (!loaded) {
+    controller.dispose()
+    throw new Error(`WebView 未能载入 ${url}`)
+  }
+  return controller
+}
+
+async function requestWebViewJsonWithController<T>(
+  controller: any,
+  url: string,
+  context: string
+): Promise<BiliApiResponse<T>> {
+  const raw = await controller.evaluateJavaScript(buildWebViewSyncGetScript(url)) as string
+  const text = unwrapWebViewResponse(raw, context)
+  return JSON.parse(text) as BiliApiResponse<T>
+}
+
+async function requestWebViewJson<T>(url: string, context: string): Promise<BiliApiResponse<T>> {
+  const controller = await createPreparedBiliWebViewController(BILIBILI_WEB_ORIGIN)
+  try {
+    return await requestWebViewJsonWithController<T>(controller, url, context)
+  } finally {
+    controller.dispose()
+  }
 }
 
 export function buildCookieHeader(cookies: Cookie[]): string {
@@ -365,6 +426,38 @@ export async function fetchCurrentUser(cookieHeader: string): Promise<BiliUserPr
   }
 }
 
+export async function presentBiliWebViewLogin(): Promise<void> {
+  const controller = await createPreparedBiliWebViewController(BILIBILI_WEBVIEW_LOGIN_URL)
+  try {
+    await controller.present({
+      fullscreen: false,
+      navigationTitle: "网页登录",
+    })
+  } finally {
+    controller.dispose()
+  }
+}
+
+export async function fetchCurrentUserViaWebView(): Promise<BiliUserProfile> {
+  const payload = await requestWebViewJson<CurrentUserPayload>(
+    "https://api.bilibili.com/x/web-interface/nav",
+    "获取网页登录账号信息失败"
+  )
+  const data = ensureBiliSuccess(payload, "获取网页登录账号信息失败")
+
+  if (!data?.isLogin) {
+    throw new BiliAuthError("当前网页登录未登录")
+  }
+
+  return {
+    mid: String(data?.mid ?? "").trim(),
+    uname: String(data?.uname ?? "").trim() || "哔哩哔哩用户",
+    face: toAbsoluteUrl(String(data?.face ?? "")),
+    level: Number(data?.level_info?.current_level ?? 0) || 0,
+    vipLabel: String(data?.vip_label?.text ?? "").trim(),
+  }
+}
+
 function mapFollowedAuthor(raw: any): BiliFollowedAuthor | null {
   const mid = String(raw?.mid ?? "").trim()
   const uname = String(raw?.uname ?? "").trim()
@@ -433,6 +526,63 @@ export async function fetchAllFollowedAuthors(
     })
 }
 
+export async function fetchAllFollowedAuthorsViaWebView(vmid: string): Promise<BiliFollowedAuthor[]> {
+  const userMid = String(vmid ?? "").trim()
+  if (!userMid) {
+    throw new Error("缺少当前账号 mid，无法获取关注列表")
+  }
+
+  const pageSize = 50
+  const totalPagesLimit = 100
+  const result: BiliFollowedAuthor[] = []
+  const seen = new Set<string>()
+  let expectedTotalPages = totalPagesLimit
+  const controller = await createPreparedBiliWebViewController(BILIBILI_WEB_ORIGIN)
+
+  try {
+    for (let pn = 1; pn <= totalPagesLimit; pn += 1) {
+      const params = buildQueryString({
+        vmid: userMid,
+        order_type: "",
+        ps: pageSize,
+        pn,
+      })
+
+      const payload = await requestWebViewJsonWithController<FollowingsPayload>(
+        controller,
+        `https://api.bilibili.com/x/relation/followings?${params}`,
+        "获取网页登录关注列表失败"
+      )
+      const data = ensureBiliSuccess(payload, "获取网页登录关注列表失败")
+      const total = Number(data?.total ?? 0) || 0
+      if (total > 0) {
+        expectedTotalPages = Math.min(totalPagesLimit, Math.max(1, Math.ceil(total / pageSize)))
+      }
+      const current = Array.isArray(data?.list)
+        ? data.list
+          .map((item) => mapFollowedAuthor(item))
+          .filter(Boolean) as BiliFollowedAuthor[]
+        : []
+
+      for (const item of current) {
+        if (seen.has(item.mid)) continue
+        seen.add(item.mid)
+        result.push(item)
+      }
+
+      if (current.length < pageSize || pn >= expectedTotalPages) break
+    }
+  } finally {
+    controller.dispose()
+  }
+
+  return result
+    .sort((left, right) => {
+      if (left.special !== right.special) return left.special ? -1 : 1
+      return left.uname.localeCompare(right.uname, "zh-Hans-CN")
+    })
+}
+
 export async function fetchVideoDynamics(cookieHeader: string): Promise<VideoDynamicFeed> {
   return fetchVideoDynamicsPage(cookieHeader)
 }
@@ -454,6 +604,37 @@ export async function fetchVideoDynamicsPage(
     { cookieHeader }
   )
   const data = ensureBiliSuccess(payload, "获取视频动态失败")
+
+  const items = Array.isArray(data?.items)
+    ? data.items
+      .map((item) => mapVideoDynamicItem(item))
+      .filter(Boolean) as VideoDynamicItem[]
+    : []
+
+  items.sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0))
+
+  return {
+    items,
+    hasMore: Boolean(data?.has_more),
+    offset: String(data?.offset ?? ""),
+    updateBaseline: String(data?.update_baseline ?? ""),
+  }
+}
+
+export async function fetchVideoDynamicsPageViaWebView(offset?: string): Promise<VideoDynamicFeed> {
+  const params = buildQueryString({
+    type: "video",
+    platform: "web",
+    web_location: "333.1365",
+    features: "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote,decorationCard,onlyfansAssetsV2,forwardListHidden,ugcDelete",
+    offset: String(offset ?? "").trim() || undefined,
+  })
+
+  const payload = await requestWebViewJson<DynamicFeedPayload>(
+    `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all?${params}`,
+    "获取网页登录视频动态失败"
+  )
+  const data = ensureBiliSuccess(payload, "获取网页登录视频动态失败")
 
   const items = Array.isArray(data?.items)
     ? data.items
@@ -664,6 +845,7 @@ export async function pollQrLogin(qrcodeKey: string): Promise<
       refreshToken: String(data?.refresh_token ?? "").trim(),
       updatedAt: Date.now(),
       user: null,
+      loginMethod: "cookie",
     },
   }
 }
