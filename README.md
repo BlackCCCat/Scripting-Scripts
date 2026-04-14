@@ -11,7 +11,7 @@
 - [Regex Tester](./Regex-Tester/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Regex-Tester.zip)
 - [翻译器](./Translator/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Translator.zip)
 - [快递助手](./Package-Helper/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Package-Helper.zip)
-- [BiliFavor](./BiliFavor/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/BiliFavor.zip)，仅支持二维码扫描登录
+- [BiliFavor](./BiliFavor/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/BiliFavor.zip)
 
 
 **Codex完成几乎所有代码**
