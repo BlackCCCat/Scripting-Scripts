@@ -1,0 +1,44 @@
+{
+  "description": "登录哔哩哔哩并查看关注 UP 主的视频动态",
+  "localizedNames": {
+    "en": "BiliFavor",
+    "fr": "",
+    "es": "",
+    "pt": "",
+    "ja": "",
+    "ru": "",
+    "zh": "BiliFavor",
+    "it": "",
+    "de": ""
+  },
+  "iconImage": null,
+  "runInApp": true,
+  "icon": "play.square.stack.fill",
+  "version": "",
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/BiliFavor.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "intentInputTypes": [],
+  "author": {
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat",
+    "email": null
+  },
+  "entry": "index.tsx",
+  "name": "BiliFavor",
+  "localizedDescriptions": {
+    "en": "Sign in to Bilibili and read followed creators' video updates.",
+    "fr": "",
+    "es": "",
+    "pt": "",
+    "ja": "",
+    "ru": "",
+    "zh": "登录哔哩哔哩并查看关注 UP 主的视频动态",
+    "it": "",
+    "de": ""
+  },
+  "contributors": [],
+  "color": "rgba(251, 114, 153, 1)"
+}
