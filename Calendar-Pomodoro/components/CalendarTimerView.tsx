@@ -4,6 +4,7 @@
 // - 系统能力（LiveActivity/Notification/Script）
 import {
   Button,
+  Divider,
   HStack,
   Image,
   List,
@@ -11,8 +12,9 @@ import {
   NavigationStack,
   Section,
   Spacer,
+  Tab,
+  TabView,
   Text,
-  TextField,
   VStack,
   useEffect,
   useMemo,
@@ -21,7 +23,6 @@ import {
   useState,
   LiveActivity,
   type LiveActivityState,
-  Markdown,
   Notification,
   Script,
   ForEach,
@@ -59,6 +60,8 @@ import { formatDateTime, formatDuration } from "../utils/time";
 import { TaskEditView } from "./TaskEditView";
 // 任务统计页面
 import { TaskStatsView } from "./TaskStatsView";
+// 总体报告页
+import { OverallReportView } from "./OverallReportView";
 
 // Live Activity 创建器（用于 start/update/end）
 const createTimerActivity = PomodoroLiveActivity;
@@ -121,6 +124,7 @@ export function CalendarTimerView() {
     const EditMode = (globalThis as any).EditMode;
     return EditMode?.inactive ? EditMode.inactive() : null;
   });
+  const activeTab = useObservable<number>(0);
   const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
@@ -1040,8 +1044,16 @@ export function CalendarTimerView() {
       ? finalSegments[finalSegments.length - 1]!.endAt
       : sessionStartAt.getTime() + total;
 
+    let finalNoteDraft = noteDraft;
+    try {
+      finalNoteDraft = await editNote(finalNoteDraft, "完成笔记");
+      setNoteDraft(finalNoteDraft);
+    } catch {
+      // 若结束时无法弹出编辑器，则回退到当前草稿继续保存
+    }
+
     // 组合笔记内容：用户笔记 + 总结信息
-    const trimmedNote = noteDraft.trim();
+    const trimmedNote = finalNoteDraft.trim();
     const summaryLines = [
       `开始：${formatDateTime(new Date(overallStartAt))}`,
       `结束：${formatDateTime(new Date(overallEndAt))}`,
@@ -1106,25 +1118,27 @@ export function CalendarTimerView() {
     stoppingRef.current = false;
   }
 
-  async function openNoteEditor() {
-    // 打开全屏编辑器（支持 Markdown）
+  async function editNote(content: string, title = "笔记"): Promise<string> {
+    // 打开全屏编辑器（支持 Markdown），返回编辑后的文本
     const controller = new EditorController({
-      content: noteDraft,
+      content,
       ext: "md",
       readOnly: false,
     });
-    controller.onContentChanged = (content) => {
-      setNoteDraft(String(content ?? ""));
-    };
     try {
       await controller.present({
-        navigationTitle: "笔记",
+        navigationTitle: title,
         fullscreen: true,
       });
-      setNoteDraft(String(controller.content ?? ""));
+      return String(controller.content ?? "");
     } finally {
       controller.dispose();
     }
+  }
+
+  async function openNoteEditor() {
+    const next = await editNote(noteDraft, "笔记");
+    setNoteDraft(next);
   }
 
   function moveTasks(indices: number[], newOffset: number) {
@@ -1204,278 +1218,310 @@ export function CalendarTimerView() {
       : sessionStartAt
         ? "已停止"
         : "未开始";
+  const iconPalette = {
+    note: {
+      light: "systemBlue",
+      dark: "systemCyan",
+    },
+    cancel: {
+      light: "systemOrange",
+      dark: "systemYellow",
+    },
+    play: {
+      light: "systemGreen",
+      dark: "systemGreen",
+    },
+    pause: {
+      light: "systemOrange",
+      dark: "systemOrange",
+    },
+    stop: {
+      light: "systemRed",
+      dark: "systemRed",
+    },
+  } as const;
 
   return (
-    <NavigationStack>
-      <List
-        navigationTitle="日历番茄钟"
-        navigationBarTitleDisplayMode="inline"
-        listStyle="insetGroup"
-        environments={{ editMode }}
-        toolbar={{
-          // 左侧退出，右侧编辑 + 新增
-          topBarLeading: (
-            <HStack>
-              <Button
-                title=""
-                systemImage="xmark.circle"
-                action={withButtonHaptic(() => Script.exit())}
-              />
-              {supportsMinimization ? (
-                <Button
-                  title=""
-                  systemImage="minus.circle"
-                  action={withButtonHaptic(minimizeScript)}
-                />
-              ) : null}
-            </HStack>
-          ),
-          topBarTrailing: (
-            <HStack>
-              <Button
-                title=""
-                systemImage="arrow.clockwise"
-                action={withButtonHaptic(refreshLiveActivityManually)}
-              />
-              <Button
-                title=""
-                systemImage="plus.circle"
-                action={withButtonHaptic(addTask)}
-              />
-            </HStack>
-          ),
-        }}
-      >
-        <Section header={<Text>当前计时</Text>}>
-          {activeTask ? (
-            <VStack>
-              {/* 标题 + 关联日历 */}
-              <HStack>
-                <Text font="headline">{activeTask.name}</Text>
-                <Spacer />
-                <Text foregroundStyle="secondaryLabel">
-                  {activeTask.calendarTitle}
-                </Text>
-              </HStack>
-              {/* 计时显示 + 状态 */}
-              <HStack padding={{ top: 6, bottom: 6 }}>
-                <Text font="title">{timerText}</Text>
-                <Spacer />
-                <Text foregroundStyle="secondaryLabel">{statusText}</Text>
-              </HStack>
-              {sessionStartAt ? (
-                <Text foregroundStyle="secondaryLabel">
-                  开始时间：{formatDateTime(sessionStartAt)}
-                </Text>
-              ) : null}
-              {/* 操作按钮：取消/结束/暂停/开始 */}
-              <HStack padding={{ top: 8, bottom: 4 }}>
-                <Button
-                  title="取消"
-                  buttonStyle="borderedProminent"
-                  tint="black"
-                  disabled={(!running && !paused) || saving}
-                  action={withButtonHaptic(cancelTimer)}
-                />
-                <Spacer />
-                <Button
-                  title="结束"
-                  buttonStyle="borderedProminent"
-                  tint="systemRed"
-                  disabled={(!running && !paused) || saving}
-                  action={withButtonHaptic(() => stopTimer())}
-                />
-                <Spacer />
-                <Button
-                  title="暂停"
-                  buttonStyle="borderedProminent"
-                  tint="systemOrange"
-                  disabled={!running || saving}
-                  action={withButtonHaptic(pauseTimer)}
-                />
-                <Spacer />
-                <Button
-                  title={paused ? "继续" : "开始"}
-                  buttonStyle="borderedProminent"
-                  tint="systemGreen"
-                  disabled={saving || (running && !paused)}
-                  action={withButtonHaptic(() => startTask(activeTask))}
-                />
-              </HStack>
-            </VStack>
-          ) : (
-            <Text foregroundStyle="secondaryLabel">
-              还没有选择任务，请在下方点击开始。
-            </Text>
-          )}
-        </Section>
+    <TabView selection={activeTab as any} tabViewStyle="tabBarOnly">
+      <Tab title="计时" systemImage="timer" value={0}>
+        <NavigationStack>
+          <List
+            navigationTitle="日历番茄钟"
+            navigationBarTitleDisplayMode="inline"
+            listStyle="insetGroup"
+            environments={{ editMode }}
+            toolbar={{
+              topBarLeading: (
+                <HStack>
+                  <Button
+                    title=""
+                    systemImage="xmark.circle"
+                    action={withButtonHaptic(() => Script.exit())}
+                  />
+                  {supportsMinimization ? (
+                    <Button
+                      title=""
+                      systemImage="minus.circle"
+                      action={withButtonHaptic(minimizeScript)}
+                    />
+                  ) : null}
+                </HStack>
+              ),
+              topBarTrailing: (
+                <HStack>
+                  <Button
+                    title=""
+                    systemImage="arrow.clockwise"
+                    action={withButtonHaptic(refreshLiveActivityManually)}
+                  />
+                  <Button
+                    title=""
+                    systemImage="plus.circle"
+                    action={withButtonHaptic(addTask)}
+                  />
+                </HStack>
+              ),
+            }}
+          >
+            <Section header={<Text>当前计时</Text>}>
+              {activeTask ? (
+                <VStack spacing={10}>
+                  <HStack alignment="top">
+                    <VStack alignment="leading" spacing={2}>
+                      <Text font="headline">{activeTask.name}</Text>
+                      <Text foregroundStyle="secondaryLabel">
+                        {activeTask.calendarTitle}
+                        {isCountdown ? " · 倒计时" : " · 正计时"}
+                      </Text>
+                    </VStack>
+                    <Spacer />
+                    <Text foregroundStyle="secondaryLabel">{statusText}</Text>
+                  </HStack>
 
-        <Section
-          header={
-            <HStack>
-              <Text>笔记</Text>
-              <Button
-                title=""
-                systemImage={showMarkdown ? "eye.fill" : "eye.slash.fill"}
-                action={withButtonHaptic(() =>
-                  setShowMarkdown((prev) => !prev),
-                )}
-              />
-              <Spacer />
-              <Button
-                title=""
-                systemImage="arrow.down.backward.and.arrow.up.forward"
-                action={withButtonHaptic(openNoteEditor)}
-              />
-            </HStack>
-          }
-        >
-          {/* 笔记编辑框（自动保存） */}
-          <TextField
-            label={<Text>编辑</Text>}
-            value={noteDraft}
-            onChanged={(v: string) => setNoteDraft(v)}
-            prompt="支持 Markdown，自动保存"
-            axis="vertical"
-            frame={{ height: 140 }}
-          />
-          {/* Markdown 预览 */}
-          {showMarkdown && noteDraft.trim() ? (
-            <Markdown content={noteDraft} scrollable={false} />
-          ) : showMarkdown ? (
-            <Text foregroundStyle="secondaryLabel">暂无笔记</Text>
-          ) : (
-            <Text foregroundStyle="secondaryLabel">预览已关闭</Text>
-          )}
-        </Section>
-
-        <Section
-          header={
-            <HStack>
-              <Text>任务列表</Text>
-              <Spacer />
-              <Button
-                title=""
-                systemImage="list.bullet"
-                action={withButtonHaptic(toggleEditMode)}
-              />
-            </HStack>
-          }
-        >
-          {tasks.length ? (
-            <ForEach
-              count={tasks.length}
-              onMove={moveTasks}
-              itemBuilder={(index) => {
-                const task = tasks[index];
-                if (!task) return <Text> </Text>;
-                const isActive = activeTaskId === task.id;
-                const isRunning = running && isActive;
-                const isPaused = paused && isActive;
-                const actionTitle = isPaused ? "继续" : "开始";
-                const countdownSeconds = task.countdownSeconds ?? 0;
-                const countdownLabel = task.useCountdown
-                  ? (COUNTDOWN_OPTIONS.find(
-                      (opt) => opt.seconds === countdownSeconds,
-                    )?.label ?? "倒计时")
-                  : "";
-                const notifyLabel = task.useNotification
-                  ? (NOTIFICATION_INTERVAL_OPTIONS.find(
-                      (opt) => opt.minutes === task.notificationIntervalMinutes,
-                    )?.label ?? "通知")
-                  : "";
-                const isCountdownTask =
-                  task.useCountdown && countdownSeconds > 0;
-                const iconName = isCountdownTask ? "restart" : "play";
-                const iconColor = isCountdownTask
-                  ? "systemBlue"
-                  : "systemGreen";
-                return (
-                  <VStack
-                    key={task.id}
-                    trailingSwipeActions={{
-                      allowsFullSwipe: false,
-                      actions: [
-                        <Button
-                          title="编辑"
-                          action={withButtonHaptic(() => editTask(task))}
-                        />,
-                        <Button
-                          title="删除"
-                          role="destructive"
-                          action={withButtonHaptic(() => removeTask(task))}
-                        />,
-                      ],
-                    }}
-                  >
-                    {/* 单行任务展示 */}
-                    <HStack padding={{ top: 8, bottom: 8 }} spacing={10}>
-                      <Button
-                        buttonStyle="plain"
-                        disabled={saving || isEditing}
-                        action={withButtonHaptic(() => openTaskStats(task))}
-                      >
-                        <HStack spacing={10}>
-                          <Image
-                            systemName={iconName}
-                            foregroundStyle={iconColor}
-                            imageScale="large"
-                            frame={{ width: 22, height: 22 }}
-                          />
-                          <VStack alignment="leading">
-                            <Text font="headline">{task.name}</Text>
-                            <HStack spacing={4}>
-                              <Text foregroundStyle="secondaryLabel">
-                                {task.calendarTitle}
-                              </Text>
-                              {countdownLabel ? (
-                                <Text foregroundStyle="secondaryLabel">
-                                  · {countdownLabel}
-                                </Text>
-                              ) : null}
-                              {notifyLabel ? (
-                                <HStack spacing={4}>
-                                  <Text foregroundStyle="secondaryLabel">·</Text>
-                                  <Image
-                                    systemName="bell.badge.fill"
-                                    foregroundStyle="secondaryLabel"
-                                    imageScale="small"
-                                  />
-                                  <Text foregroundStyle="secondaryLabel">
-                                    {notifyLabel}
-                                  </Text>
-                                </HStack>
-                              ) : null}
-                            </HStack>
-                          </VStack>
-                        </HStack>
-                      </Button>
-                      <Spacer />
-                      {isRunning ? (
-                        <Text foregroundStyle="secondaryLabel">计时中</Text>
-                      ) : isPaused ? (
-                        <Text foregroundStyle="secondaryLabel">暂停中</Text>
-                      ) : (
-                        <Button
-                          title={actionTitle}
-                          buttonStyle="borderedProminent"
-                          tint="systemGreen"
-                          disabled={saving}
-                          action={withButtonHaptic(() => startTask(task))}
-                        />
-                      )}
-                    </HStack>
+                  <VStack spacing={4} alignment="center">
+                    <Text font="largeTitle" monospacedDigit>
+                      {timerText}
+                    </Text>
+                    {sessionStartAt ? (
+                      <Text font="caption" foregroundStyle="secondaryLabel">
+                        开始时间：{formatDateTime(sessionStartAt)}
+                      </Text>
+                    ) : null}
                   </VStack>
-                );
-              }}
-            />
-          ) : (
-            <Text foregroundStyle="secondaryLabel">
-              暂无任务，点击右上角新增。
-            </Text>
-          )}
-        </Section>
-      </List>
-    </NavigationStack>
+
+                  <HStack
+                    spacing={12}
+                    frame={{ maxWidth: "infinity", alignment: "center" as any }}
+                  >
+                    <Button
+                      buttonStyle="plain"
+                      disabled={saving || !sessionStartAt}
+                      action={withButtonHaptic(openNoteEditor)}
+                    >
+                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                        <Image
+                          systemName="square.and.pencil"
+                          foregroundStyle={iconPalette.note}
+                          imageScale="large"
+                        />
+                      </VStack>
+                    </Button>
+                    <Button
+                      buttonStyle="plain"
+                      disabled={(!running && !paused) || saving}
+                      action={withButtonHaptic(cancelTimer)}
+                    >
+                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                        <Image
+                          systemName="xmark"
+                          foregroundStyle={iconPalette.cancel}
+                          imageScale="large"
+                        />
+                      </VStack>
+                    </Button>
+                    <Button
+                      buttonStyle="plain"
+                      disabled={saving || (!running && !paused)}
+                      action={withButtonHaptic(() =>
+                        paused ? startTask(activeTask) : pauseTimer(),
+                      )}
+                    >
+                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                        <Image
+                          systemName={paused ? "play.fill" : "pause.fill"}
+                          foregroundStyle={
+                            paused ? iconPalette.play : iconPalette.pause
+                          }
+                          imageScale="large"
+                        />
+                      </VStack>
+                    </Button>
+                    <Button
+                      buttonStyle="plain"
+                      disabled={(!running && !paused) || saving}
+                      action={withButtonHaptic(() => stopTimer())}
+                    >
+                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                        <Image
+                          systemName="stop.fill"
+                          foregroundStyle={iconPalette.stop}
+                          imageScale="large"
+                        />
+                      </VStack>
+                    </Button>
+                  </HStack>
+                </VStack>
+              ) : (
+                <Text foregroundStyle="secondaryLabel">
+                  还没有选择任务，请在下方点击开始。
+                </Text>
+              )}
+            </Section>
+
+            <Section
+              header={
+                <HStack>
+                  <Text>任务列表</Text>
+                  <Spacer />
+                  <Button
+                    title=""
+                    systemImage="list.bullet"
+                    action={withButtonHaptic(toggleEditMode)}
+                  />
+                </HStack>
+              }
+            >
+              {tasks.length ? (
+                <ForEach
+                  count={tasks.length}
+                  onMove={moveTasks}
+                  itemBuilder={(index) => {
+                    const task = tasks[index];
+                    if (!task) return <Text> </Text>;
+                    const isActive = activeTaskId === task.id;
+                    const isRunning = running && isActive;
+                    const isPaused = paused && isActive;
+                    const actionTitle = isPaused ? "继续" : "开始";
+                    const countdownSeconds = task.countdownSeconds ?? 0;
+                    const countdownLabel = task.useCountdown
+                      ? (COUNTDOWN_OPTIONS.find(
+                          (opt) => opt.seconds === countdownSeconds,
+                        )?.label ?? "倒计时")
+                      : "";
+                    const notifyLabel = task.useNotification
+                      ? (NOTIFICATION_INTERVAL_OPTIONS.find(
+                          (opt) => opt.minutes === task.notificationIntervalMinutes,
+                        )?.label ?? "通知")
+                      : "";
+                    const isCountdownTask =
+                      task.useCountdown && countdownSeconds > 0;
+                    const iconName = isCountdownTask ? "restart" : "play";
+                    const iconColor = isCountdownTask
+                      ? "systemBlue"
+                      : "systemGreen";
+                    return (
+                      <VStack
+                        key={task.id}
+                        trailingSwipeActions={{
+                          allowsFullSwipe: false,
+                          actions: [
+                            <Button
+                              title="编辑"
+                              action={withButtonHaptic(() => editTask(task))}
+                            />,
+                            <Button
+                              title="删除"
+                              role="destructive"
+                              action={withButtonHaptic(() => removeTask(task))}
+                            />,
+                          ],
+                        }}
+                      >
+                        <HStack padding={{ top: 8, bottom: 8 }} spacing={10}>
+                          <Button
+                            buttonStyle="plain"
+                            disabled={saving || isEditing}
+                            action={withButtonHaptic(() => openTaskStats(task))}
+                          >
+                            <HStack spacing={10}>
+                              <Image
+                                systemName={iconName}
+                                foregroundStyle={iconColor}
+                                imageScale="large"
+                                frame={{ width: 22, height: 22 }}
+                              />
+                              <VStack alignment="leading">
+                                <Text font="headline">{task.name}</Text>
+                                <HStack spacing={4}>
+                                  <Text foregroundStyle="secondaryLabel">
+                                    {task.calendarTitle}
+                                  </Text>
+                                  {countdownLabel ? (
+                                    <Text foregroundStyle="secondaryLabel">
+                                      · {countdownLabel}
+                                    </Text>
+                                  ) : null}
+                                  {notifyLabel ? (
+                                    <HStack spacing={4}>
+                                      <Text foregroundStyle="secondaryLabel">·</Text>
+                                      <Image
+                                        systemName="bell.badge.fill"
+                                        foregroundStyle="secondaryLabel"
+                                        imageScale="small"
+                                      />
+                                      <Text foregroundStyle="secondaryLabel">
+                                        {notifyLabel}
+                                      </Text>
+                                    </HStack>
+                                  ) : null}
+                                </HStack>
+                              </VStack>
+                            </HStack>
+                          </Button>
+                          <Spacer />
+                          {isRunning ? (
+                            <Text foregroundStyle="secondaryLabel">计时中</Text>
+                          ) : isPaused ? (
+                            <Button
+                              title={actionTitle}
+                              systemImage={iconName}
+                              buttonStyle="borderedProminent"
+                              tint="systemGreen"
+                              disabled={saving}
+                              action={withButtonHaptic(() => startTask(task))}
+                            />
+                          ) : (
+                            <Button
+                              title={actionTitle}
+                              systemImage={iconName}
+                              buttonStyle="borderedProminent"
+                              tint="systemGreen"
+                              disabled={saving}
+                              action={withButtonHaptic(() => startTask(task))}
+                            />
+                          )}
+                        </HStack>
+                        {index < tasks.length - 1 ? <Divider /> : null}
+                      </VStack>
+                    );
+                  }}
+                />
+              ) : (
+                <Text foregroundStyle="secondaryLabel">
+                  暂无任务，点击右上角新增。
+                </Text>
+              )}
+            </Section>
+          </List>
+        </NavigationStack>
+      </Tab>
+
+      <Tab title="报告" systemImage="chart.bar.xaxis" value={1}>
+        <OverallReportView
+          tasks={tasks}
+          onExit={withButtonHaptic(() => Script.exit())}
+        />
+      </Tab>
+    </TabView>
   );
 }

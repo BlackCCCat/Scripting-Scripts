@@ -277,10 +277,8 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
               prompt="例如：读书"
             />
 
-
-            {/* 日历账户（可展开多选） */}
             <DisclosureGroup
-              label={(
+              label={
                 <HStack>
                   <Text>日历账户</Text>
                   <Spacer />
@@ -288,7 +286,7 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                     已选 {selectedSourceIds.length}/{sources.length}
                   </Text>
                 </HStack>
-              )}
+              }
               isExpanded={sourcesExpanded}
               onChanged={(value: boolean) => {
                 HapticFeedback.heavyImpact()

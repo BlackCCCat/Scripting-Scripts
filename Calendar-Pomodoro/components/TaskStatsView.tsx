@@ -40,15 +40,26 @@ type TaskRecord = {
 type StatCardProps = {
   title: string;
   value: string;
-  tint?: string;
+  tint?: StatTint;
 };
+
+type StatTint =
+  | "primaryLabel"
+  | "secondaryLabel"
+  | "systemGreen"
+  | "systemTeal"
+  | "systemBlue"
+  | "systemOrange"
+  | "systemPink"
+  | "systemPurple"
+  | "systemRed";
 
 function StatCard(props: StatCardProps) {
   return (
     <VStack
       frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
       spacing={6}
-      padding={{ top: 2, bottom: 2 }}
+      padding={{ top: 4, bottom: 4 }}
     >
       <Text
         font="caption"
@@ -60,7 +71,7 @@ function StatCard(props: StatCardProps) {
       </Text>
       <Text
         font="title3"
-        foregroundStyle={props.tint ?? "primaryLabel"}
+        foregroundStyle={(props.tint ?? "primaryLabel") as any}
         monospacedDigit
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         multilineTextAlignment="leading"
@@ -88,7 +99,6 @@ function RecordMarkdownView(props: {
       >
         <VStack
           background="systemGray6"
-          cornerRadius={18}
           padding={16}
           frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         >
@@ -159,9 +169,21 @@ function formatDurationWithUnit(ms: number): string {
   return parts.join("");
 }
 
-function weekdayLabel(weekday: number): string {
-  const labels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-  return labels[weekday] ?? "未知";
+const WEEKDAY_LABELS = [
+  "周日",
+  "周一",
+  "周二",
+  "周三",
+  "周四",
+  "周五",
+  "周六",
+] as const;
+
+type WeekdayLabel = (typeof WEEKDAY_LABELS)[number];
+
+function weekdayLabel(weekday: number): WeekdayLabel {
+  const labels = WEEKDAY_LABELS;
+  return labels[weekday] ?? "周日";
 }
 
 function buildWeekdayColorScale() {
@@ -173,7 +195,7 @@ function buildWeekdayColorScale() {
     周五: "systemPurple",
     周六: "systemTeal",
     周日: "systemRed",
-  };
+  } as const;
 }
 
 function normalizeText(value: string | null | undefined): string {
@@ -375,12 +397,12 @@ export function TaskStatsView(props: { task: Task }) {
   }, [records]);
 
   const weekdayMarks = useMemo(() => {
-    const totals = new Map<string, number>();
+    const totals = new Map<WeekdayLabel, number>();
     for (const item of records) {
       const label = weekdayLabel(item.startAt.getDay());
       totals.set(label, (totals.get(label) ?? 0) + item.durationMs);
     }
-    return ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    return (["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const)
       .map((label) => ({
         category: label,
         value: Math.max(0, Math.round((totals.get(label) ?? 0) / 60000)),
@@ -392,7 +414,10 @@ export function TaskStatsView(props: { task: Task }) {
     return [...records].sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
   }, [records]);
 
-  const overviewColumns = useMemo(() => {
+  const overviewColumns = useMemo<{
+    left: Array<{ title: string; value: string; tint?: StatTint }>;
+    right: Array<{ title: string; value: string; tint?: StatTint }>;
+  }>(() => {
     return {
       left: [
         {
