@@ -208,16 +208,23 @@ function buildWeekdayAxisLabels() {
   return ["日", "一", "二", "三", "四", "五", "六"];
 }
 
-function buildTrendMarks(records: AggregateRecord[], range: ReportRange) {
+function buildTrendMarks(
+  records: AggregateRecord[],
+  range: ReportRange,
+): Array<{ label: string | Date; value: number }> {
   const totals = new Map<string, number>();
+  const now = new Date();
   if (range === "day") {
     for (const item of records) {
-      const label = `${pad2(item.startAt.getHours())}:00`;
+      const label = pad2(item.startAt.getHours());
       totals.set(label, (totals.get(label) ?? 0) + item.durationMs);
     }
     return Array.from({ length: 24 }, (_, hour) => {
-      const label = `${pad2(hour)}:00`;
-      return { label, value: Math.round((totals.get(label) ?? 0) / 60000) };
+      const hourKey = pad2(hour);
+      return {
+        label: new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour),
+        value: Math.round((totals.get(hourKey) ?? 0) / 60000),
+      };
     });
   }
 
@@ -229,6 +236,21 @@ function buildTrendMarks(records: AggregateRecord[], range: ReportRange) {
     return Array.from({ length: 12 }, (_, idx) => {
       const label = `${idx + 1}月`;
       return { label, value: Math.round((totals.get(label) ?? 0) / 60000) };
+    });
+  }
+
+  if (range === "month") {
+    for (const item of records) {
+      const label = dateKey(item.startAt);
+      totals.set(label, (totals.get(label) ?? 0) + item.durationMs);
+    }
+    const start = addDays(startOfDay(now), -29);
+    return Array.from({ length: 30 }, (_, offset) => {
+      const date = addDays(start, offset);
+      return {
+        label: date,
+        value: Math.round((totals.get(dateKey(date)) ?? 0) / 60000),
+      };
     });
   }
 
@@ -246,13 +268,17 @@ function buildTrendMarks(records: AggregateRecord[], range: ReportRange) {
   }
 
   for (const item of records) {
-    const label = `${item.startAt.getMonth() + 1}/${item.startAt.getDate()}`;
+    const label = dateKey(item.startAt);
     totals.set(label, (totals.get(label) ?? 0) + item.durationMs);
   }
-  return [...totals.entries()].map(([label, total]) => ({
-    label,
-    value: Math.round(total / 60000),
-  }));
+  const start = addDays(startOfDay(now), -6);
+  return Array.from({ length: 7 }, (_, offset) => {
+    const date = addDays(start, offset);
+    return {
+      label: `${date.getMonth() + 1}/${date.getDate()}`,
+      value: Math.round((totals.get(dateKey(date)) ?? 0) / 60000),
+    };
+  });
 }
 
 function buildRecentProgress(records: AggregateRecord[]) {

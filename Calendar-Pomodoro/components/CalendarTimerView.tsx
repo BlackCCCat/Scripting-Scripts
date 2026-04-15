@@ -1422,6 +1422,11 @@ export function CalendarTimerView() {
                     return (
                       <VStack
                         key={task.id}
+                        spacing={0}
+                        listRowSeparator={{
+                          visibility: "hidden",
+                          edges: "all" as any,
+                        }}
                         trailingSwipeActions={{
                           allowsFullSwipe: false,
                           actions: [
@@ -1437,7 +1442,10 @@ export function CalendarTimerView() {
                           ],
                         }}
                       >
-                        <HStack padding={{ top: 8, bottom: 8 }} spacing={10}>
+                        <HStack
+                          spacing={10}
+                          frame={{ minHeight: 60, alignment: "center" as any }}
+                        >
                           <Button
                             buttonStyle="plain"
                             disabled={saving || isEditing}
