@@ -1,4 +1,4 @@
-import { Button, Text, VStack } from "scripting"
+import { Text, VStack } from "scripting"
 import { type RegexOutputLine } from "../utils/regex"
 
 function withHaptic(action: () => void | Promise<void>) {
@@ -12,17 +12,17 @@ export function ResultBox(props: {
   text: string
   lines?: RegexOutputLine[]
   placeholder?: string
-  onPress: () => void | Promise<void>
+  onPress?: () => void | Promise<void>
 }) {
   const content = props.text.trim()
   const lines = props.lines ?? []
   const placeholder = props.placeholder ?? "点击开始匹配"
 
   return (
-    <Button
-      action={withHaptic(props.onPress)}
-      buttonStyle="plain"
+    <VStack
       frame={{ maxWidth: "infinity", minHeight: 220 }}
+      contentShape={props.onPress ? "rect" : undefined}
+      onTapGesture={props.onPress ? withHaptic(props.onPress) : undefined}
       background={{
         style: "secondarySystemBackground",
         shape: { type: "rect", cornerRadius: 10 },
@@ -67,6 +67,6 @@ export function ResultBox(props: {
           </Text>
         )}
       </VStack>
-    </Button>
+    </VStack>
   )
 }

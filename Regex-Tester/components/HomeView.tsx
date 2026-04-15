@@ -1,23 +1,27 @@
 import {
   Button,
-  Form,
   HStack,
+  Image,
+  List,
   Navigation,
+  NavigationLink,
   NavigationStack,
   Section,
-  Spacer,
   Text,
-  TextField,
-  Toggle,
+  Toolbar,
+  ToolbarItem,
   VStack,
   useState,
 } from "scripting"
 
-import { HistoryView } from "./HistoryView"
-import { PatternHighlightPreview } from "./PatternHighlightPreview"
-import { ResultBox } from "./ResultBox"
-import { runLineMatch, type MatchMode, type RegexOutputLine } from "../utils/regex"
-import { addRegexHistory, type RegexHistoryItem } from "../utils/history"
+import { RegexEditorView } from "./RegexEditorView"
+import { RegexListRow } from "./RegexListRow"
+import { RegexTemplatePickerView } from "./RegexTemplatePickerView"
+import {
+  loadRegexLibrary,
+  removeRegexItemById,
+  type RegexItem,
+} from "../utils/library"
 
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
@@ -26,182 +30,104 @@ function withHaptic(action: () => void | Promise<void>) {
   }
 }
 
+function matchesQuery(item: RegexItem, query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const haystack = [item.name, item.pattern, item.sampleText, item.replacementTemplate].join("\n").toLowerCase()
+  return haystack.includes(q)
+}
+
 export function HomeView() {
-  const [pattern, setPattern] = useState<string>("")
-  const [text, setText] = useState<string>("")
-  const [result, setResult] = useState<string>("")
-  const [resultLines, setResultLines] = useState<RegexOutputLine[]>([])
-  const [matchedCount, setMatchedCount] = useState<number>(0)
-  const [status, setStatus] = useState<string>("就绪")
-  const [matchMode, setMatchMode] = useState<MatchMode>("search")
+  const dismiss = Navigation.useDismiss()
+  const [query, setQuery] = useState("")
+  const [reloadToken, setReloadToken] = useState(0)
 
-  function setPending(nextPattern?: string) {
-    const p = String(nextPattern ?? pattern).trim()
-    setResult("")
-    setResultLines([])
-    setMatchedCount(0)
-    setStatus(p ? "待匹配，点击输出框开始匹配" : "请输入正则表达式")
+  void reloadToken
+  const items = loadRegexLibrary()
+  const filtered = items.filter((item) => matchesQuery(item, query))
+
+  async function closeHome() {
+    dismiss()
   }
 
-  function clearPattern() {
-    setPattern("")
-    setPending("")
-    setStatus("已清空正则表达式")
-  }
-
-  function clearText() {
-    setText("")
-    setPending()
-    setStatus("已清空待匹配文本")
-  }
-
-  async function copyPatternFromPreview() {
-    const value = pattern.trim()
-    if (!value) return
-    await Pasteboard.setString(pattern)
-    setStatus("已复制正则表达式")
-  }
-
-  function runMatch() {
-    const p = pattern.trim()
-    if (!p) {
-      setResult("")
-      setResultLines([])
-      setMatchedCount(0)
-      setStatus("请输入正则表达式")
-      return
-    }
-    try {
-      const res = runLineMatch(pattern, text, matchMode)
-      setResult(res.output)
-      setResultLines(res.lines)
-      setMatchedCount(res.matchedCount)
-      addRegexHistory({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        createdAt: Date.now(),
-        pattern,
-        text,
-      })
-      if (res.ignoredFlags.length) {
-        setStatus(`完成，已忽略 flags: ${res.ignoredFlags.join(", ")}`)
-      } else {
-        setStatus("完成")
-      }
-    } catch (e: any) {
-      setResult("")
-      setResultLines([])
-      setMatchedCount(0)
-      setStatus(`正则错误：${String(e?.message ?? e)}`)
-    }
-  }
-
-  async function openHistory() {
-    const picked = await Navigation.present<RegexHistoryItem>({
-      element: <HistoryView />,
+  async function openTemplates() {
+    await Navigation.present({
+      element: <RegexTemplatePickerView />,
     })
-    if (!picked) return
-    setPattern(String(picked.pattern ?? ""))
-    setText(String(picked.text ?? ""))
-    setPending(String(picked.pattern ?? ""))
-    setStatus("已从历史记录恢复，点击输出框开始匹配")
+    setReloadToken((value) => value + 1)
+  }
+
+  async function deleteItem(item: RegexItem) {
+    removeRegexItemById(item.id)
+    setReloadToken((value) => value + 1)
   }
 
   return (
     <NavigationStack>
-      <VStack
-        navigationTitle="Regex Tester"
-        navigationBarTitleDisplayMode="inline"
-        toolbar={{
-          topBarTrailing: (
-            <Button
-              title=""
-              systemImage="clock"
-              action={withHaptic(openHistory)}
-            />
-          ),
-        }}
+      <List
+        navigationTitle="RegEx Test"
+        navigationBarTitleDisplayMode="large"
+        searchable={{ value: query, onChanged: setQuery }}
+        toolbar={(
+          <Toolbar>
+            <ToolbarItem placement="topBarLeading">
+              <Button
+                title=""
+                systemImage="xmark"
+                action={withHaptic(closeHome)}
+              />
+            </ToolbarItem>
+            <ToolbarItem placement="topBarTrailing">
+              <HStack spacing={12}>
+                <Button title="" systemImage="text.badge.star" action={withHaptic(openTemplates)} />
+                <NavigationLink destination={<RegexEditorView isNew />}>
+                  <Image systemName="plus.circle.fill" font="title3" />
+                </NavigationLink>
+              </HStack>
+            </ToolbarItem>
+          </Toolbar>
+        )}
+        listStyle="insetGroup"
       >
-        <Form formStyle="grouped">
-          <Section
-            header={(
-              <HStack>
-                <Text>正则表达式</Text>
-                <Spacer />
-                <Button
-                  title=""
-                  systemImage="trash.fill"
-                  role="destructive"
-                  disabled={!pattern.trim()}
-                  foregroundStyle={pattern.trim() ? "#DC2626" : "secondaryLabel"}
-                  action={withHaptic(clearPattern)}
-                />
-              </HStack>
-            )}
-          >
-            <TextField
-              title=""
-              value={pattern}
-              frame={{ height: 44, maxWidth: "infinity", alignment: "leading" }}
-              prompt="输入正则表达式"
-              autofocus
-              onChanged={(v: string) => {
-                setPattern(v)
-                setPending(v)
-              }}
-            />
-            <PatternHighlightPreview
-              pattern={pattern}
-              onPress={withHaptic(copyPatternFromPreview)}
-            />
+        {filtered.length ? (
+          <Section header={<Text>{query.trim() ? `搜索结果 ${filtered.length} 条` : `已保存 ${filtered.length} 条`}</Text>}>
+            {filtered.map((item) => (
+              <NavigationLink
+                key={item.id}
+                destination={<RegexEditorView item={item} />}
+                trailingSwipeActions={{
+                  allowsFullSwipe: true,
+                  actions: [
+                    <Button title="删除" role="destructive" action={withHaptic(() => deleteItem(item))} />,
+                  ],
+                }}
+              >
+                <RegexListRow item={item} />
+              </NavigationLink>
+            ))}
           </Section>
-
-          <Section
-            header={(
-              <HStack>
-                <Text>待匹配文本</Text>
-                <Spacer />
-                <Button
-                  title=""
-                  systemImage="trash.fill"
-                  role="destructive"
-                  disabled={!text.trim()}
-                  foregroundStyle={text.trim() ? "#DC2626" : "secondaryLabel"}
-                  action={withHaptic(clearText)}
-                />
-              </HStack>
-            )}
-          >
-            <TextField
-              title=""
-              value={text}
-              axis="vertical"
-              frame={{ height: 150, maxWidth: "infinity", alignment: "topLeading" }}
-              prompt="输入待匹配文本（支持多行）"
-              onChanged={(v: string) => {
-                setText(v)
-                setPending()
-              }}
-            />
-          </Section>
-
-          <Section header={<Text>匹配模式</Text>}>
-            <Toggle
-              value={matchMode === "full"}
-              onChanged={(v: boolean) => {
-                setMatchMode(v ? "full" : "search")
-                setPending()
-              }}
-              toggleStyle="switch"
+        ) : (
+          <Section>
+            <VStack
+              spacing={12}
+              padding={{ top: 18, bottom: 18 }}
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
             >
-              <Text>{matchMode === "full" ? "整行完全匹配" : "搜索（命中片段高亮）"}</Text>
-            </Toggle>
+              <Text foregroundStyle="secondaryLabel">
+                {query.trim() ? "没有符合条件的正则" : "还没有保存任何正则"}
+              </Text>
+              {!query.trim() ? (
+                <VStack spacing={12}>
+                  <NavigationLink destination={<RegexEditorView isNew />}>
+                    <Text>新建空白</Text>
+                  </NavigationLink>
+                  <Button title="从模板创建" action={withHaptic(openTemplates)} />
+                </VStack>
+              ) : null}
+            </VStack>
           </Section>
-
-          <Section header={<Text>输出</Text>} footer={<Text>状态：{status} ｜ 命中：{matchedCount}</Text>}>
-            <ResultBox text={result} lines={resultLines} onPress={runMatch} />
-          </Section>
-        </Form>
-      </VStack>
+        )}
+      </List>
     </NavigationStack>
   )
 }

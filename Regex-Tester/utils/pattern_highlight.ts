@@ -1,12 +1,12 @@
-import type { StyledText } from "scripting"
+import type { Color, StyledText } from "scripting"
 import { validateRegexPattern } from "./regex"
 
 type Segment = {
   text: string
-  color?: string
+  color?: Color
 }
 
-const COLORS = {
+const COLORS: Record<string, Color> = {
   flags: "#16A34A",
   group: "#9333EA",
   quantifier: "#DC2626",
@@ -15,6 +15,8 @@ const COLORS = {
   alternation: "#0D9488",
   anchor: "#DB2777",
 }
+
+const ERROR_COLOR: Color = "#DC2626"
 
 function pushMerged(list: Segment[], next: Segment) {
   if (!next.text) return
@@ -135,7 +137,7 @@ export function buildPatternPreviewStyledText(pattern: string): StyledText {
   if (!checked.ok) {
     return {
       monospaced: true,
-      content: [{ content: pattern, foregroundColor: "#DC2626" }],
+      content: [{ content: pattern, foregroundColor: ERROR_COLOR }],
     }
   }
   return buildPatternStyledText(pattern)

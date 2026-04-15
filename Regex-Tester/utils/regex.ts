@@ -18,10 +18,20 @@ export type RegexMatchResult = {
   ignoredFlags: string[]
 }
 
+export type RegexReplaceResult = {
+  output: string
+  ignoredFlags: string[]
+}
+
 type CompiledPattern = {
   regex: RegExp
   source: string
   flags: string
+  ignoredFlags: string[]
+}
+
+type RewrittenInlineFlags = {
+  source: string
   ignoredFlags: string[]
 }
 
@@ -51,11 +61,131 @@ function parsePythonLeadingFlags(pattern: string): {
   }
 }
 
+function buildCaseInsensitiveLiteral(ch: string): string {
+  if (!/[A-Za-z]/.test(ch)) return ch
+  const lower = ch.toLowerCase()
+  const upper = ch.toUpperCase()
+  if (lower === upper) return ch
+  return `[${lower}${upper}]`
+}
+
+function detectGroupPrefix(source: string, index: number): string {
+  const prefixes = ["(?<=", "(?<!", "(?:", "(?=", "(?!", "("]
+  for (const prefix of prefixes) {
+    if (source.startsWith(prefix, index)) return prefix
+  }
+  return "("
+}
+
+function parseInlineFlags(flags: string): { enableI: boolean | null; ignoredFlags: string[] } {
+  let enableI: boolean | null = null
+  const ignoredFlags: string[] = []
+  let disabled = false
+  for (const ch of flags.toLowerCase()) {
+    if (ch === "-") {
+      disabled = true
+      continue
+    }
+    if (ch === "i") {
+      enableI = !disabled
+      continue
+    }
+    ignoredFlags.push(ch)
+  }
+  return { enableI, ignoredFlags }
+}
+
+function rewriteInlineFlags(source: string): RewrittenInlineFlags {
+  function walk(index: number, inheritedIgnoreCase: boolean, endChar?: string): {
+    text: string
+    index: number
+    ignoredFlags: string[]
+  } {
+    let out = ""
+    let i = index
+    let localIgnoreCase = inheritedIgnoreCase
+    const ignoredFlags: string[] = []
+
+    while (i < source.length) {
+      const ch = source[i]
+      if (endChar && ch === endChar) break
+
+      const inlineFlags = source.slice(i).match(/^\(\?([a-zA-Z-]+)\)/)
+      if (inlineFlags) {
+        const parsedFlags = parseInlineFlags(String(inlineFlags[1] ?? ""))
+        if (parsedFlags.enableI !== null) localIgnoreCase = parsedFlags.enableI
+        ignoredFlags.push(...parsedFlags.ignoredFlags)
+        i += inlineFlags[0].length
+        continue
+      }
+
+      if (ch === "\\") {
+        const token = i + 1 < source.length ? source.slice(i, i + 2) : ch
+        out += token
+        i += token.length
+        continue
+      }
+
+      if (ch === "[") {
+        let j = i + 1
+        while (j < source.length) {
+          if (source[j] === "\\") {
+            j += 2
+            continue
+          }
+          if (source[j] === "]") {
+            j += 1
+            break
+          }
+          j += 1
+        }
+        out += source.slice(i, j)
+        i = j
+        continue
+      }
+
+      if (ch === "(") {
+        const prefix = detectGroupPrefix(source, i)
+        const inner = walk(i + prefix.length, localIgnoreCase, ")")
+        out += `${prefix}${inner.text}`
+        ignoredFlags.push(...inner.ignoredFlags)
+        i = inner.index
+        if (source[i] === ")") {
+          out += ")"
+          i += 1
+        }
+        continue
+      }
+
+      if (localIgnoreCase) {
+        out += buildCaseInsensitiveLiteral(ch)
+      } else {
+        out += ch
+      }
+      i += 1
+    }
+
+    return { text: out, index: i, ignoredFlags }
+  }
+
+  const walked = walk(0, false)
+  return {
+    source: walked.text,
+    ignoredFlags: walked.ignoredFlags,
+  }
+}
+
 function compileRegexPattern(pattern: string, mode: MatchMode): CompiledPattern {
   const parsed = parsePythonLeadingFlags(pattern)
-  const source = mode === "full" ? `^(?:${parsed.source})$` : parsed.source
+  const rewritten = rewriteInlineFlags(parsed.source)
+  const source = mode === "full" ? `^(?:${rewritten.source})$` : rewritten.source
   const regex = new RegExp(source, parsed.jsFlags)
-  return { regex, source, flags: parsed.jsFlags, ignoredFlags: parsed.ignoredFlags }
+  return {
+    regex,
+    source,
+    flags: parsed.jsFlags,
+    ignoredFlags: [...parsed.ignoredFlags, ...rewritten.ignoredFlags],
+  }
 }
 
 function ensureFlag(flags: string, flag: string): string {
@@ -186,5 +316,24 @@ export function runLineMatch(pattern: string, text: string, mode: MatchMode = "f
     lines: outputLines,
     matchedCount,
     ignoredFlags,
+  }
+}
+
+export function runLineReplace(
+  pattern: string,
+  text: string,
+  replacement: string,
+  mode: MatchMode = "search",
+): RegexReplaceResult {
+  const lines = String(text ?? "").replace(/\r\n/g, "\n").split("\n")
+  const parsed = parsePythonLeadingFlags(pattern)
+  const rewritten = rewriteInlineFlags(parsed.source)
+  const baseSource = mode === "full" ? `^(?:${rewritten.source})$` : rewritten.source
+  const replaceFlags = sortAndUniqueFlags(ensureFlag(parsed.jsFlags, "g"))
+  const regex = new RegExp(baseSource, replaceFlags)
+  const output = lines.map((line) => line.replace(regex, replacement)).join("\n")
+  return {
+    output,
+    ignoredFlags: [...parsed.ignoredFlags, ...rewritten.ignoredFlags],
   }
 }
