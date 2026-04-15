@@ -175,17 +175,17 @@ export function LoginCenterView(props: {
     <List navigationTitle="登录" navigationBarTitleDisplayMode="inline">
       <Section
         header={<Text>登录模式</Text>}
-        footer={<Text>二维码模式使用本地保存的 Cookie 账号；网页登录模式则直接复用 WebView 内部的网页登录状态。</Text>}
+        footer={<Text>可在二维码和网页登录之间切换。</Text>}
       >
         <LoginModeRow
           title="二维码账号模式"
-          subtitle="适合多账号切换，也支持当前已有的应用内播放链路。"
+          subtitle="保存本地账号，适合多账号切换。"
           selected={props.loginMode === "cookie"}
           onPress={() => props.onChangeLoginMode("cookie")}
         />
         <LoginModeRow
           title="网页登录模式"
-          subtitle="适合直接在网页环境里请求动态接口，不强依赖导出完整 Cookie。"
+          subtitle="复用 WebView 登录状态来拉取动态。"
           selected={props.loginMode === "webview"}
           onPress={() => props.onChangeLoginMode("webview")}
         />
@@ -193,7 +193,7 @@ export function LoginCenterView(props: {
 
       <Section
         header={<Text>二维码登录</Text>}
-        footer={<Text>扫码登录成功后会直接保存 Cookie，并加入已保存账号列表。</Text>}
+        footer={<Text>扫码成功后会自动保存到账号列表。</Text>}
       >
         <QrLoginBlock
           qrLogin={props.qrLogin}
@@ -205,7 +205,7 @@ export function LoginCenterView(props: {
 
       <Section
         header={<Text>网页登录</Text>}
-        footer={<Text>网页登录成功后会切到“网页登录模式”，后续动态请求会直接复用 WebView 内部登录态。</Text>}
+        footer={<Text>登录后会自动切到网页登录模式。</Text>}
       >
         <WebViewLoginBlock
           busy={props.loginBusy}

@@ -211,7 +211,7 @@ export function SettingsTabView(props: {
                   foregroundStyle="secondaryLabel"
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
-                  进入独立登录页，切换模式并完成二维码或网页登录
+                  扫描二维码或网页登录
                 </Text>
               </VStack>
             </HStack>
@@ -220,7 +220,6 @@ export function SettingsTabView(props: {
 
         <Section
           header={<Text>播放</Text>}
-          footer={<Text>控制点开动态卡片时，是直接跳到哔哩哔哩，还是优先在 Scripting 里用原生播放器播放。默认推荐跳转播放。</Text>}
         >
           <Button
             buttonStyle="plain"
@@ -272,7 +271,7 @@ export function SettingsTabView(props: {
                   foregroundStyle="secondaryLabel"
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
-                  优先在 Scripting 里直接播放视频
+                  在 Scripting 里直接播放视频
                 </Text>
               </VStack>
               <Spacer />
@@ -283,10 +282,7 @@ export function SettingsTabView(props: {
           </Button>
         </Section>
 
-        <Section
-          header={<Text>已保存账号</Text>}
-          footer={<Text>{props.loginMode === "webview" ? "网页登录模式不会直接使用这里的账号，但你仍可点击任一账号切回二维码账号模式。" : "当前请求会使用“当前”账号的 Cookie。登录新账号后会自动加入这里。"}</Text>}
-        >
+        <Section header={<Text>已保存账号</Text>}>
           {props.accounts.length > 0 ? props.accounts.map((item) => (
             <AccountRow
               key={item.id}
