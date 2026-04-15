@@ -4,7 +4,6 @@
 // - 系统能力（LiveActivity/Notification/Script）
 import {
   Button,
-  Divider,
   HStack,
   Image,
   List,
@@ -24,8 +23,8 @@ import {
   LiveActivity,
   type LiveActivityState,
   Notification,
-  Script,
   ForEach,
+  Script,
 } from "scripting";
 
 // 业务常量（倒计时/通知选项、正计时窗口）
@@ -1422,7 +1421,6 @@ export function CalendarTimerView() {
                     return (
                       <VStack
                         key={task.id}
-                        spacing={0}
                         listRowSeparator={{
                           visibility: "hidden",
                           edges: "all" as any,
@@ -1443,8 +1441,11 @@ export function CalendarTimerView() {
                         }}
                       >
                         <HStack
+                          padding={{
+                            top: 8,
+                            bottom: 8,
+                          }}
                           spacing={10}
-                          frame={{ minHeight: 60, alignment: "center" as any }}
                         >
                           <Button
                             buttonStyle="plain"
@@ -1509,7 +1510,6 @@ export function CalendarTimerView() {
                             />
                           )}
                         </HStack>
-                        {index < tasks.length - 1 ? <Divider /> : null}
                       </VStack>
                     );
                   }}
