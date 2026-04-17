@@ -1,0 +1,44 @@
+{
+  "version": "",
+  "intentInputTypes": [],
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Sleep-Tracker.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "entry": "index.tsx",
+  "icon": "moon",
+  "iconImage": null,
+  "author": {
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat"
+  },
+  "description": "Read sleep data from Health, show trends and widgets.",
+  "localizedNames": {
+    "ja": "",
+    "fr": "",
+    "it": "",
+    "es": "",
+    "de": "",
+    "ru": "",
+    "en": "Sleep Tracker",
+    "pt": "",
+    "zh": "睡眠追踪"
+  },
+  "localizedDescriptions": {
+    "ja": "",
+    "fr": "",
+    "it": "",
+    "es": "",
+    "de": "",
+    "ru": "",
+    "en": "Read sleep data from Health, show trends and widgets.",
+    "pt": "",
+    "zh": "读取健康中的睡眠数据，展示趋势统计和小组件。"
+  },
+  "name": "Sleep Tracker",
+  "color": "rgba(2, 0, 79, 1.00)",
+  "runInApp": true,
+  "contributors": []
+}
