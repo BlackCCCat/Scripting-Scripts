@@ -640,15 +640,15 @@ export function TrendsTab(props: {
   const calendarItems = buildCalendarItems(durationBuckets, mode, !hasRealData)
   const bedtimes = sleepDays.map((day) => wrappedMinutes(day.bedtimeISO)).filter((value): value is number => value != null)
   const wakeTimes = sleepDays.map((day) => wrappedMinutes(day.wakeISO)).filter((value): value is number => value != null)
-  const avgBedtime = hasRealData ? average(bedtimes) : 23 * 60 + 14
-  const avgWake = hasRealData ? average(wakeTimes) : 7 * 60 + 32
+  const avgBedtime = hasRealData ? average(bedtimes) : null
+  const avgWake = hasRealData ? average(wakeTimes) : null
   const earlyBedCount = sleepDays.filter((day) => {
     const bedtime = wrappedMinutes(day.bedtimeISO)
     return bedtime != null && bedtime <= 23 * 60
   }).length
   const regularityColumns = buildRegularityColumns(durationBuckets, !hasRealData)
-  const bedtimeRegularity = hasRealData ? regularityScore(bedtimes) : 88
-  const wakeRegularity = hasRealData ? regularityScore(wakeTimes) : 92
+  const bedtimeRegularity = hasRealData ? regularityScore(bedtimes) : null
+  const wakeRegularity = hasRealData ? regularityScore(wakeTimes) : null
   const durationCurrentKey = currentDurationBucketKey(mode)
   const stageCurrentKey = currentDurationBucketKey(mode)
   const durationAnchor = scrollAnchorForKey(durationChartMarks, durationCurrentKey, (item) => item.key)
@@ -1012,8 +1012,8 @@ export function TrendsTab(props: {
 
           <SoftCard title="睡眠规律" subtitle={`平均入睡 ${formatWrappedClock(avgBedtime)} · 平均起床 ${formatWrappedClock(avgWake)}`}>
             <HStack spacing={12}>
-              <MetricTile label="入睡规律" value={`${bedtimeRegularity}%`} tone={palette.sleepCore} />
-              <MetricTile label="起床规律" value={`${wakeRegularity}%`} tone={palette.accentDeep} />
+              <MetricTile label="入睡规律" value={bedtimeRegularity == null ? "--" : `${bedtimeRegularity}%`} tone={palette.sleepCore} />
+              <MetricTile label="起床规律" value={wakeRegularity == null ? "--" : `${wakeRegularity}%`} tone={palette.accentDeep} />
             </HStack>
 
             <HStack alignment="top" spacing={10}>
