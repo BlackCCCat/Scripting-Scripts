@@ -68,7 +68,7 @@ export type SleepTrackerSnapshot = {
   daily: DailyHealthMetrics[]
 }
 
-export type WidgetStyle = "score" | "duration" | "stages" | "schedule" | "efficiency" | "overview" | "regularity"
+export type WidgetStyle = "score" | "duration" | "stages" | "schedule" | "efficiency" | "overview" | "regularity" | "bedtime"
 
 export type SleepTrackerSettings = {
   sleepGoalMinutes: number

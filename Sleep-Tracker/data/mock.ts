@@ -1,6 +1,6 @@
 import { Widget } from "scripting"
 import type { DailyHealthMetrics, SleepNight, SleepSegment, SleepTrackerSnapshot } from "../types"
-import { addDays, clamp, dateKeyFromDate, startOfDay } from "../utils"
+import { addDays, clamp, dateKeyFromDate, sleepEfficiencyRatio, startOfDay } from "../utils"
 
 const MOCK_CACHE_KEY = "sleep_tracker.mock_snapshot.v1"
 export const MOCK_HISTORY_DAYS = 120
@@ -104,7 +104,7 @@ function buildMockDay(date: Date, offsetFromToday: number): { daily: DailyHealth
     totalSleepMinutes,
     totalInBedMinutes,
     awakeMinutes,
-    efficiency: totalSleepMinutes / Math.max(1, totalInBedMinutes),
+    efficiency: sleepEfficiencyRatio(totalSleepMinutes, totalInBedMinutes),
     stages: {
       inBed: totalInBedMinutes,
       awake: awakeMinutes,

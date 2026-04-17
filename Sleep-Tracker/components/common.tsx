@@ -43,6 +43,8 @@ export function MetricTile(props: {
   value: string
   hint?: string
   tone?: string
+  valueFont?: any
+  valueLineLimit?: number
 }) {
   return (
     <VStack
@@ -54,7 +56,12 @@ export function MetricTile(props: {
       <Text font="caption" foregroundStyle={palette.mutedInk} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
         {props.label}
       </Text>
-      <Text font="title2" foregroundStyle={(props.tone ?? palette.sleepCore) as any} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      <Text
+        font={(props.valueFont ?? "title2") as any}
+        lineLimit={props.valueLineLimit}
+        foregroundStyle={(props.tone ?? palette.sleepCore) as any}
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      >
         {props.value}
       </Text>
       {props.hint ? (

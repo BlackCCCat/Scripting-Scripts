@@ -2,7 +2,7 @@ import type { SleepTrackerSettings, WidgetStyle } from "../types"
 
 const SETTINGS_KEY = "sleep_tracker.settings.v2"
 
-const VALID_WIDGET_STYLES: WidgetStyle[] = ["score", "duration", "stages", "schedule", "efficiency", "overview", "regularity"]
+const VALID_WIDGET_STYLES: WidgetStyle[] = ["score", "duration", "stages", "schedule", "efficiency", "overview", "regularity", "bedtime"]
 
 const DEFAULT_SETTINGS: SleepTrackerSettings = {
   sleepGoalMinutes: 8 * 60,
@@ -16,7 +16,7 @@ function normalizeSettings(raw: any): SleepTrackerSettings {
   const sleepGoalMinutes = Number(raw?.sleepGoalMinutes)
   // backward compat: migrate old single `widgetStyle` into all three sizes
   const validSmallStyles = ["score", "schedule"] as const
-  const validTrendStyles = ["duration", "stages", "regularity"] as const
+  const validTrendStyles = ["duration", "stages", "regularity", "bedtime"] as const
 
   const legacyStyle: WidgetStyle = VALID_WIDGET_STYLES.includes(raw?.widgetStyle) ? raw.widgetStyle : "score"
   const widgetStyleSmall: WidgetStyle = validSmallStyles.includes(raw?.widgetStyleSmall) ? raw.widgetStyleSmall : (validSmallStyles.includes(legacyStyle as any) ? legacyStyle : "score")
@@ -73,10 +73,12 @@ export const WIDGET_STYLE_OPTIONS_MEDIUM: Array<{ key: WidgetStyle; label: strin
   { key: "duration", label: "睡眠时长", hint: "近期时长趋势图表" },
   { key: "stages", label: "睡眠阶段", hint: "近期阶段分布图表" },
   { key: "regularity", label: "睡眠规律", hint: "近期入睡规律图表" },
+  { key: "bedtime", label: "入睡时间", hint: "平均入睡与近期表情日历" },
 ]
 
 export const WIDGET_STYLE_OPTIONS_LARGE: Array<{ key: WidgetStyle; label: string; hint: string }> = [
   { key: "duration", label: "睡眠时长", hint: "近期时长趋势图表" },
   { key: "stages", label: "睡眠阶段", hint: "近期阶段分布图表" },
   { key: "regularity", label: "睡眠规律", hint: "近期入睡规律图表" },
+  { key: "bedtime", label: "入睡时间", hint: "平均入睡与近期表情日历" },
 ]

@@ -8,6 +8,7 @@ import {
   Spacer,
   Text,
   VStack,
+  Script,
   Widget,
   ZStack,
 } from "scripting"
@@ -22,17 +23,20 @@ import {
 } from "./data/mock"
 import {
   loadCachedSleepTrackerSnapshot,
+  refreshSleepTrackerSnapshot,
 } from "./data/health"
 import {
   loadSleepTrackerSettings,
 } from "./data/settings"
-import { palette, scoreTone } from "./theme"
+import { palette, scoreEmoji, scoreTone } from "./theme"
 import {
   average,
+  chunkArray,
   formatClockFromISO,
   formatHours,
   formatHoursMinutes,
   formatShortDateFromKey,
+  sleepEfficiencyPercent,
 } from "./utils"
 
 // ── Constants ──
@@ -41,18 +45,60 @@ const FRAME_FILL = { maxWidth: "infinity" as any, maxHeight: "infinity" as any, 
 const BG_SMALL = { style: "systemBackground" as any, shape: { type: "rect" as const, cornerRadius: 22 } }
 const BG_LARGE = { style: "systemBackground" as any, shape: { type: "rect" as const, cornerRadius: 24 } }
 const CHART_HIDDEN = { chartLegend: "hidden" as const }
+const WIDGET_QUERY_DAYS = 60
 
 // ── Helpers ──
 
 function reloadPolicy() {
   return {
     policy: "after" as const,
-    date: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    date: new Date(Date.now() + 3 * 60 * 60 * 1000),
+  }
+}
+
+type WidgetResolvedData = {
+  settings: ReturnType<typeof loadSleepTrackerSettings>
+  dashboard: DashboardBundle | null
+  latest: DashboardDay | null
+}
+
+let resolvedData: WidgetResolvedData | null = null
+let emptyMessage = "请在 App 中授权 Health，稍后 widget 会自动同步。"
+
+async function resolveWidgetData(): Promise<WidgetResolvedData> {
+  const settings = loadSleepTrackerSettings()
+
+  if (settings.useMockData) {
+    const snapshot = loadMockSleepTrackerSnapshot()
+    const dashboard = buildDashboardBundle(snapshot, settings, 30)
+    return {
+      settings,
+      dashboard,
+      latest: dashboard?.latestDay ?? null,
+    }
+  }
+
+  let snapshot = null
+  try {
+    snapshot = await refreshSleepTrackerSnapshot(WIDGET_QUERY_DAYS)
+  } catch {
+    snapshot = loadCachedSleepTrackerSnapshot()
+  }
+
+  const dashboard = buildDashboardBundle(snapshot, settings, 30)
+  if (snapshot?.generatedAtISO) {
+    emptyMessage = "暂无可展示的睡眠数据。"
+  }
+
+  return {
+    settings,
+    dashboard,
+    latest: dashboard?.latestDay ?? null,
   }
 }
 
 function effLabel(day: DashboardDay): string {
-  return `${Math.round(((day.totalSleepMinutes ?? 0) / Math.max(1, day.totalInBedMinutes ?? 1)) * 100)}%`
+  return `${Math.round(sleepEfficiencyPercent(day.totalSleepMinutes, day.totalInBedMinutes))}%`
 }
 
 function wrappedMinutes(iso: string | null | undefined): number | null {
@@ -135,6 +181,56 @@ function formatWrappedClock(minutes: number | null): string {
   return `${`${Math.floor(n / 60)}`.padStart(2, "0")}:${`${n % 60}`.padStart(2, "0")}`
 }
 
+function bedtimeBadgeTone(score: number | null) {
+  if (score == null) return "tertiarySystemFill"
+  if (score >= 85) return "#80D9B8"
+  if (score >= 75) return "#FDB44E"
+  if (score >= 65) return "#FF9C7B"
+  return "#FF7B7B"
+}
+
+function bedtimeSummary(days: DashboardDay[]) {
+  const sleepDays = days.filter((day) => day.bedtimeISO)
+  const bedtimeValues = sleepDays.map((day) => wrappedMinutes(day.bedtimeISO)).filter((value): value is number => value != null)
+  return {
+    avgBedtime: bedtimeValues.length ? average(bedtimeValues) : null,
+    earliest: bedtimeValues.length ? Math.min(...bedtimeValues) : null,
+    latest: bedtimeValues.length ? Math.max(...bedtimeValues) : null,
+    earlyCount: bedtimeValues.filter((value) => value <= 23 * 60).length,
+  }
+}
+
+function BedtimeStrip(props: { days: DashboardDay[]; count: number; rows?: number }) {
+  const items = props.days.slice(-props.count)
+  const rows = Math.max(1, props.rows ?? 1)
+  const chunks = chunkArray(items, Math.ceil(items.length / rows))
+  return (
+    <VStack spacing={8} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
+      {chunks.map((row, rowIndex) => (
+        <HStack key={rowIndex} spacing={8} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
+          {row.map((day) => (
+            <VStack key={day.dateKey} spacing={4} frame={{ maxWidth: "infinity" as any, alignment: "center" as any }}>
+              <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
+                {formatShortDateFromKey(day.dateKey)}
+              </Text>
+              <Text
+                font={{ size: 22 } as any}
+                frame={{ width: 34, height: 34, alignment: "center" as any }}
+                background={{ style: bedtimeBadgeTone(day.sleepScore) as any, shape: { type: "rect", cornerRadius: 17 } } as any}
+              >
+                {day.bedtimeISO ? scoreEmoji(day.sleepScore) : "—"}
+              </Text>
+              <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
+                {day.bedtimeISO ? formatClockFromISO(day.bedtimeISO) : "--"}
+              </Text>
+            </VStack>
+          ))}
+        </HStack>
+      ))}
+    </VStack>
+  )
+}
+
 // ── Empty Widget ──
 
 function EmptyWidget() {
@@ -148,7 +244,7 @@ function EmptyWidget() {
       <Text font="headline">Sleep Tracker</Text>
       <Spacer />
       <Text font="footnote" foregroundStyle="secondaryLabel">
-        打开 App 生成一份演示数据后，widget 就会同步显示。
+        {emptyMessage}
       </Text>
     </VStack>
   )
@@ -159,12 +255,12 @@ function EmptyWidget() {
 // ══════════════════════════════════════
 
 function SmallWidget() {
-  const settings = loadSleepTrackerSettings()
-  const snapshot = settings.useMockData ? loadMockSleepTrackerSnapshot() : loadCachedSleepTrackerSnapshot()
-  const dashboard = buildDashboardBundle(snapshot, settings, 14)
-  const latest = dashboard?.latestDay ?? null
+  const data = resolvedData
+  const settings = data?.settings
+  const dashboard = data?.dashboard ?? null
+  const latest = data?.latest ?? null
 
-  if (!dashboard || !latest) return <EmptyWidget />
+  if (!settings || !dashboard || !latest) return <EmptyWidget />
 
   const style = settings.widgetStyleSmall
 
@@ -329,12 +425,12 @@ function SmallWidget() {
 // ══════════════════════════════════════
 
 function MediumWidget() {
-  const settings = loadSleepTrackerSettings()
-  const snapshot = settings.useMockData ? loadMockSleepTrackerSnapshot() : loadCachedSleepTrackerSnapshot()
-  const dashboard = buildDashboardBundle(snapshot, settings, 30)
-  const latest = dashboard?.latestDay ?? null
+  const data = resolvedData
+  const settings = data?.settings
+  const dashboard = data?.dashboard ?? null
+  const latest = data?.latest ?? null
 
-  if (!dashboard || !latest) return <EmptyWidget />
+  if (!settings || !dashboard || !latest) return <EmptyWidget />
 
   const style = settings.widgetStyleMedium
   const chartFrame = { maxWidth: "infinity" as any, maxHeight: "infinity" as any }
@@ -384,6 +480,51 @@ function MediumWidget() {
     )
   }
 
+  if (style === "bedtime") {
+    const recentDays = dashboard.days.slice(-5)
+    const sleepDays = dashboard.days.filter((d) => (d.totalSleepMinutes ?? 0) > 0)
+    const summary = bedtimeSummary(sleepDays)
+    return (
+      <VStack padding={12} spacing={8} frame={FRAME_FILL} widgetBackground={BG_SMALL}>
+        <HStack>
+          <HStack spacing={4}>
+            <Image systemName="moon.stars.fill" font="caption" foregroundStyle={palette.okay as any} />
+            <Text font="caption" foregroundStyle="secondaryLabel">入睡时间</Text>
+          </HStack>
+          <Spacer />
+          <Text font="caption" foregroundStyle="secondaryLabel">
+            23:00前 {summary.earlyCount}次
+          </Text>
+        </HStack>
+        <HStack spacing={8}>
+          <VStack
+            spacing={2}
+            padding={10}
+            frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+            background={{ style: "tertiarySystemFill" as any, shape: { type: "rect", cornerRadius: 16 } } as any}
+          >
+            <Text font="caption2" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>平均入睡</Text>
+            <Text font={{ size: 22, weight: "bold", design: "rounded" } as any} foregroundStyle={palette.sleepCore as any} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
+              {formatWrappedClock(summary.avgBedtime)}
+            </Text>
+          </VStack>
+          <VStack
+            spacing={2}
+            padding={10}
+            frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+            background={{ style: "tertiarySystemFill" as any, shape: { type: "rect", cornerRadius: 16 } } as any}
+          >
+            <Text font="caption2" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>最早 / 最晚</Text>
+            <Text font={{ size: 18, weight: "bold", design: "rounded" } as any} foregroundStyle={palette.okay as any} lineLimit={1} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
+              {`${formatWrappedClock(summary.earliest)} / ${formatWrappedClock(summary.latest)}`}
+            </Text>
+          </VStack>
+        </HStack>
+        <BedtimeStrip days={recentDays} count={5} />
+      </VStack>
+    )
+  }
+
   // ── Duration (default) ──
   return (
     <VStack padding={12} spacing={6} frame={FRAME_FILL} widgetBackground={BG_SMALL}>
@@ -409,12 +550,12 @@ function MediumWidget() {
 // ══════════════════════════════════════
 
 function LargeWidget() {
-  const settings = loadSleepTrackerSettings()
-  const snapshot = settings.useMockData ? loadMockSleepTrackerSnapshot() : loadCachedSleepTrackerSnapshot()
-  const dashboard = buildDashboardBundle(snapshot, settings, 30)
-  const latest = dashboard?.latestDay ?? null
+  const data = resolvedData
+  const settings = data?.settings
+  const dashboard = data?.dashboard ?? null
+  const latest = data?.latest ?? null
 
-  if (!dashboard || !latest) return <EmptyWidget />
+  if (!settings || !dashboard || !latest) return <EmptyWidget />
 
   const style = settings.widgetStyleLarge
   const chartFrame = { maxWidth: "infinity" as any, maxHeight: "infinity" as any }
@@ -485,6 +626,51 @@ function LargeWidget() {
     )
   }
 
+  if (style === "bedtime") {
+    const recentDays = dashboard.days.slice(-15)
+    const sleepDays = dashboard.days.filter((d) => (d.totalSleepMinutes ?? 0) > 0)
+    const summary = bedtimeSummary(sleepDays)
+    return (
+      <VStack padding={16} spacing={10} frame={FRAME_FILL} widgetBackground={BG_LARGE}>
+        <HStack>
+          <HStack spacing={4}>
+            <Image systemName="moon.stars.fill" font="subheadline" foregroundStyle={palette.okay as any} />
+            <Text font="subheadline">入睡时间</Text>
+          </HStack>
+          <Spacer />
+          <Text font="caption" foregroundStyle="secondaryLabel">
+            23:00前 {summary.earlyCount}次
+          </Text>
+        </HStack>
+        <HStack spacing={10}>
+          <VStack
+            spacing={3}
+            padding={12}
+            frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+            background={{ style: "tertiarySystemFill" as any, shape: { type: "rect", cornerRadius: 18 } } as any}
+          >
+            <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>平均入睡</Text>
+            <Text font={{ size: 28, weight: "bold", design: "rounded" } as any} foregroundStyle={palette.sleepCore as any} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
+              {formatWrappedClock(summary.avgBedtime)}
+            </Text>
+          </VStack>
+          <VStack
+            spacing={3}
+            padding={12}
+            frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+            background={{ style: "tertiarySystemFill" as any, shape: { type: "rect", cornerRadius: 18 } } as any}
+          >
+            <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>最早 / 最晚</Text>
+            <Text font={{ size: 22, weight: "bold", design: "rounded" } as any} foregroundStyle={palette.okay as any} lineLimit={1} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
+              {`${formatWrappedClock(summary.earliest)} / ${formatWrappedClock(summary.latest)}`}
+            </Text>
+          </VStack>
+        </HStack>
+        <BedtimeStrip days={recentDays} count={15} rows={3} />
+      </VStack>
+    )
+  }
+
   // ── Duration (default) ──
   return (
     <VStack padding={16} spacing={8} frame={FRAME_FILL} widgetBackground={BG_LARGE}>
@@ -518,6 +704,14 @@ function RootWidget() {
   return <SmallWidget />
 }
 
-Widget.present(<RootWidget />, {
-  reloadPolicy: reloadPolicy(),
-})
+async function run() {
+  resolvedData = await resolveWidgetData()
+
+  Widget.present(<RootWidget />, {
+    reloadPolicy: reloadPolicy(),
+  })
+
+  Script.exit()
+}
+
+void run()

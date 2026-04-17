@@ -45,6 +45,23 @@ export function formatPercent(value: number | null | undefined): string {
   return `${Math.round(normalized)}%`
 }
 
+export function sleepEfficiencyRatio(
+  totalSleepMinutes: number | null | undefined,
+  totalInBedMinutes: number | null | undefined
+): number {
+  const sleep = Math.max(0, totalSleepMinutes ?? 0)
+  const inBed = Math.max(0, totalInBedMinutes ?? 0)
+  const denominator = Math.max(1, sleep, inBed)
+  return clamp(sleep / denominator, 0, 1)
+}
+
+export function sleepEfficiencyPercent(
+  totalSleepMinutes: number | null | undefined,
+  totalInBedMinutes: number | null | undefined
+): number {
+  return sleepEfficiencyRatio(totalSleepMinutes, totalInBedMinutes) * 100
+}
+
 export function normalizePercentValue(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null
   return value <= 1.5 ? value * 100 : value

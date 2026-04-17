@@ -32,6 +32,7 @@ import {
   formatMonthDayFromKey,
   formatPercent,
   formatUpdatedAt,
+  sleepEfficiencyRatio,
   startOfDay,
   weekdayLabelFromKey,
 } from "../utils"
@@ -443,7 +444,7 @@ export function DailyTab(props: {
           <SoftCard
             title="睡眠阶段"
             subtitle={`睡眠效率 ${
-              selectedDay?.totalSleepMinutes ? formatPercent((selectedDay.totalSleepMinutes ?? 0) / Math.max(1, selectedDay.totalInBedMinutes ?? 1)) : "--"
+              selectedDay?.totalSleepMinutes ? formatPercent(sleepEfficiencyRatio(selectedDay.totalSleepMinutes, selectedDay.totalInBedMinutes)) : "--"
             }`}
           >
             <Picker

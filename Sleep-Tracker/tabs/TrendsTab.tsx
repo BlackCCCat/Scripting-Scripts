@@ -28,6 +28,7 @@ import {
   formatMonthDayFromKey,
   pad2,
   parseDateKey,
+  sleepEfficiencyPercent,
   startOfDay,
 } from "../utils"
 
@@ -630,7 +631,7 @@ export function TrendsTab(props: {
   const averageScore = Math.round(average(sleepDays.map((day) => day.sleepScore ?? 0)))
   const averageSleep = Math.round(average(sleepDays.map((day) => day.totalSleepMinutes ?? 0)))
   const averageEfficiency = average(
-    sleepDays.map((day) => ((day.totalSleepMinutes ?? 0) / Math.max(1, day.totalInBedMinutes ?? 1)) * 100)
+    sleepDays.map((day) => sleepEfficiencyPercent(day.totalSleepMinutes, day.totalInBedMinutes))
   )
   const stageSummary = hasRealData ? buildStageSummary(sleepDays) : placeholderStageSummary()
   const durationChartMarks = buildDurationChartMarks(durationBuckets, mode, !hasRealData)
@@ -972,6 +973,8 @@ export function TrendsTab(props: {
                 label="最早 / 最晚"
                 value={hasRealData ? `${formatWrappedClock(safeMin(bedtimes))} / ${formatWrappedClock(safeMax(bedtimes))}` : "-- / --"}
                 tone={palette.okay}
+                valueFont="title3"
+                valueLineLimit={1}
               />
             </HStack>
 

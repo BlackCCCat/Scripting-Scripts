@@ -14,6 +14,8 @@ import {
   formatUpdatedAt,
   normalizePercentValue,
   parseDateKey,
+  sleepEfficiencyPercent,
+  sleepEfficiencyRatio,
   startOfDay,
 } from "../utils"
 
@@ -74,8 +76,7 @@ export function computeSleepScore(day: DailyHealthMetrics, settings: SleepTracke
       ? clamp(durationRatio * 100, 0, 100)
       : clamp(100 - (durationRatio - 1) * 38, 72, 100)
 
-  const inBed = day.totalInBedMinutes ?? day.totalSleepMinutes
-  const efficiency = inBed > 0 ? day.totalSleepMinutes / inBed : 0
+  const efficiency = sleepEfficiencyRatio(day.totalSleepMinutes, day.totalInBedMinutes)
   const efficiencyComponent = clamp(efficiency * 100, 0, 100)
 
   const restorative =
@@ -155,7 +156,7 @@ function buildScoreSummaryBars(days: DashboardDay[], settings: SleepTrackerSetti
     )
   )
   const averageEfficiency = average(
-    sleepDays.map((day) => ((day.totalSleepMinutes ?? 0) / Math.max(1, day.totalInBedMinutes ?? 1)) * 100)
+    sleepDays.map((day) => sleepEfficiencyPercent(day.totalSleepMinutes, day.totalInBedMinutes))
   )
   const restorativeRatio = average(
     sleepDays.map((day) =>
@@ -191,10 +192,7 @@ export function buildDashboardBundle(
   const averageSleepMinutes = average(sleepDays.map((day) => day.totalSleepMinutes ?? 0))
   const averageScore = average(sleepDays.map((day) => day.sleepScore ?? 0))
   const averageEfficiency = average(
-    sleepDays.map((day) => {
-      const inBed = day.totalInBedMinutes ?? 0
-      return inBed > 0 ? (day.totalSleepMinutes ?? 0) / inBed : 0
-    })
+    sleepDays.map((day) => sleepEfficiencyRatio(day.totalSleepMinutes, day.totalInBedMinutes))
   )
   const longestSleepMinutes = sleepDays.reduce((max, day) => Math.max(max, day.totalSleepMinutes ?? 0), 0)
   const shortestSleepMinutes = sleepDays.reduce((min, day) => {
