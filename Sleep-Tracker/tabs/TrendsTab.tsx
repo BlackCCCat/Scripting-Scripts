@@ -329,13 +329,15 @@ function buildStageSummary(days: DashboardDay[]) {
     deep: days.reduce((sum, day) => sum + day.sleepStages.asleepDeep, 0),
     restorative: days.reduce((sum, day) => sum + day.sleepStages.asleepDeep + day.sleepStages.asleepREM, 0),
   }
+  const effectiveInBed = Math.max(totalInBed, totalSleep + totals.awake)
+  const awakeRatio = clamp(totals.awake / Math.max(1, effectiveInBed), 0, 1)
 
   return [
-    { label: "清醒", minutes: totals.awake, ratio: totals.awake / Math.max(1, totalInBed), tone: stageColor("awake") },
-    { label: "眼动", minutes: totals.rem, ratio: totals.rem / Math.max(1, totalSleep), tone: stageColor("asleepREM") },
-    { label: "核心", minutes: totals.core, ratio: totals.core / Math.max(1, totalSleep), tone: stageColor("asleepCore") },
-    { label: "深度", minutes: totals.deep, ratio: totals.deep / Math.max(1, totalSleep), tone: stageColor("asleepDeep") },
-    { label: "恢复性", minutes: totals.restorative, ratio: totals.restorative / Math.max(1, totalSleep), tone: palette.accent },
+    { label: "清醒", minutes: totals.awake, ratio: awakeRatio, tone: stageColor("awake") },
+    { label: "眼动", minutes: totals.rem, ratio: clamp(totals.rem / Math.max(1, totalSleep), 0, 1), tone: stageColor("asleepREM") },
+    { label: "核心", minutes: totals.core, ratio: clamp(totals.core / Math.max(1, totalSleep), 0, 1), tone: stageColor("asleepCore") },
+    { label: "深度", minutes: totals.deep, ratio: clamp(totals.deep / Math.max(1, totalSleep), 0, 1), tone: stageColor("asleepDeep") },
+    { label: "恢复性", minutes: totals.restorative, ratio: clamp(totals.restorative / Math.max(1, totalSleep), 0, 1), tone: palette.accent },
   ]
 }
 
