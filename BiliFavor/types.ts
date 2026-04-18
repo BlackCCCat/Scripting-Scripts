@@ -32,6 +32,16 @@ export type BiliFollowedAuthor = {
   special: boolean
 }
 
+export type BiliFavoriteAuthor = {
+  mid: string
+  uname: string
+  face: string
+  sign: string
+  fans: number
+  videos: number
+  officialVerifyDesc: string
+}
+
 export type BiliAuthorFilterRule = {
   mode: "all" | "custom"
   mids: string[]
@@ -41,6 +51,7 @@ export type BiliPreferences = {
   loginMode: BiliLoginMode
   playbackMode: BiliPlaybackMode
   authorFiltersByAccount: Record<string, BiliAuthorFilterRule>
+  favoriteAuthors: BiliFavoriteAuthor[]
 }
 
 export type VideoDynamicItem = {
@@ -100,4 +111,10 @@ export type BiliInlinePlaybackSource = {
   height: number
   rotate: number
   preferredOrientation: "portrait" | "landscape" | "unknown"
+}
+
+export type BiliFavoriteAuthorsExport = {
+  version: 1
+  exportedAt: number
+  authors: BiliFavoriteAuthor[]
 }
