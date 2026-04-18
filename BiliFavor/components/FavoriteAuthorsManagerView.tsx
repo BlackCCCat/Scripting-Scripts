@@ -8,7 +8,6 @@ import {
   Spacer,
   Text,
   useEffect,
-  useMemo,
   useRef,
   useState,
   VStack,
@@ -104,10 +103,7 @@ export function FavoriteAuthorsManagerView(props: {
   const [errorMessage, setErrorMessage] = useState("")
   const searchTimerRef = useRef<number | null>(null)
   const requestIdRef = useRef(0)
-  const favoriteMidSet = useMemo(
-    () => new Set(props.favoriteAuthors.map((item) => item.mid)),
-    [props.favoriteAuthors]
-  )
+  const favoriteMidSet = new Set(props.favoriteAuthors.map((item) => item.mid))
 
   function clearSearchTimer() {
     if (searchTimerRef.current != null) {
@@ -159,7 +155,7 @@ export function FavoriteAuthorsManagerView(props: {
         value: query,
         onChanged: setQuery,
         prompt: "搜索昵称或 UID",
-        placement: "navigationBarDrawerAlwaysDisplay",
+        placement: "navigationBarDrawer",
       }}
       toolbar={{
         topBarTrailing: [
