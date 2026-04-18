@@ -997,6 +997,16 @@ export function CalendarTimerView() {
     await clearNotifications();
     await endLiveActivity(activeTask, now, total);
     await persistSessionState(null);
+
+    // 取消后不应保留本次会话草稿，避免下次启动同任务时带出旧笔记。
+    setTasks((prev) => {
+      const next = prev.map((t) =>
+        t.id === activeTask.id ? { ...t, noteDraft: "" } : t,
+      );
+      void saveTasks(next);
+      return next;
+    });
+    setNoteDraft("");
   }
 
   async function stopTimer(options?: { auto?: boolean }) {
