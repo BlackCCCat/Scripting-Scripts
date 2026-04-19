@@ -1127,7 +1127,7 @@ export function CalendarTimerView() {
     try {
       await controller.present({
         navigationTitle: title,
-        fullscreen: true,
+        fullscreen: false,
       });
       return String(controller.content ?? "");
     } finally {
