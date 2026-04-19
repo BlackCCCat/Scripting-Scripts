@@ -10,11 +10,14 @@ import {
 } from "scripting"
 
 import { DynamicTabView } from "./DynamicTabView"
+import { FavoritesTabView } from "./FavoritesTabView"
 import { SettingsTabView } from "./SettingsTabView"
 import type {
   BiliAuthSession,
   BiliAuthStore,
   BiliAuthorFilterRule,
+  BiliFavoriteAuthor,
+  BiliFavoriteAuthorsExport,
   BiliFollowedAuthor,
   BiliLoginMode,
   BiliPreferences,
@@ -25,8 +28,10 @@ import {
   BiliAuthError,
   fetchAllFollowedAuthors,
   fetchAllFollowedAuthorsViaWebView,
+  fetchFavoriteAuthorVideos,
   fetchCurrentUser,
   fetchCurrentUserViaWebView,
+  searchFavoriteAuthors,
   fetchVideoDynamicsPage,
   fetchVideoDynamicsPageViaWebView,
   pollQrLogin,
@@ -39,13 +44,15 @@ import {
   removeAccountPreferences,
   saveStoredPreferences,
   setAuthorFilterRule,
+  setFavoriteAuthors,
   setLoginMode,
   setPlaybackMode,
 } from "../utils/preferences"
 import { loadStoredAuthState, saveStoredAuthState } from "../utils/storage"
 
-const DYNAMIC_TAB = 0
-const SETTINGS_TAB = 1
+const FAVORITES_TAB = 0
+const DYNAMIC_TAB = 1
+const SETTINGS_TAB = 2
 
 async function alertDialog(message: string): Promise<void> {
   const runtimeDialog = (globalThis as any).Dialog
@@ -54,7 +61,7 @@ async function alertDialog(message: string): Promise<void> {
   }
 }
 
-type RootTab = typeof DYNAMIC_TAB | typeof SETTINGS_TAB
+type RootTab = typeof DYNAMIC_TAB | typeof FAVORITES_TAB | typeof SETTINGS_TAB
 
 function authMessageFromSession(auth: BiliAuthSession | null): string {
   if (!auth?.updatedAt) return ""
@@ -120,10 +127,50 @@ function buildWebViewSession(
   }
 }
 
+function normalizeImportedFavoriteAuthors(raw: any): BiliFavoriteAuthor[] {
+  const source = Array.isArray(raw) ? raw : (Array.isArray(raw?.authors) ? raw.authors : [])
+  const uniqueAuthors = new Map<string, BiliFavoriteAuthor>()
+
+  for (const item of source) {
+    const mid = String(item?.mid ?? "").trim()
+    const uname = String(item?.uname ?? "").trim()
+    if (!mid || !uname) continue
+
+    uniqueAuthors.set(mid, {
+      mid,
+      uname,
+      face: String(item?.face ?? "").trim(),
+      sign: String(item?.sign ?? "").trim(),
+      fans: Math.max(0, Number(item?.fans ?? 0) || 0),
+      videos: Math.max(0, Number(item?.videos ?? 0) || 0),
+      officialVerifyDesc: String(item?.officialVerifyDesc ?? "").trim(),
+    })
+  }
+
+  return [...uniqueAuthors.values()]
+}
+
 function applyAuthorFilter(items: VideoDynamicItem[], rule: BiliAuthorFilterRule): VideoDynamicItem[] {
   if (rule.mode !== "custom") return items
   const allowedMids = new Set(rule.mids)
   return items.filter((item) => allowedMids.has(item.authorMid))
+}
+
+function isPublishedToday(timestampSeconds: number | null | undefined): boolean {
+  if (!timestampSeconds || timestampSeconds <= 0) return false
+  const publishedAt = new Date(timestampSeconds * 1000)
+  const now = new Date()
+  return publishedAt.getFullYear() === now.getFullYear() &&
+    publishedAt.getMonth() === now.getMonth() &&
+    publishedAt.getDate() === now.getDate()
+}
+
+type FavoriteFeedCursorState = {
+  pagingByAuthor: Record<string, {
+    nextPage: number
+    hasMore: boolean
+  }>
+  deferredItems: VideoDynamicItem[]
 }
 
 export function HomeView() {
@@ -158,6 +205,7 @@ export function HomeView() {
   const [qrLogin, setQrLogin] = useState<QrLoginState | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [webViewRefreshSeed, setWebViewRefreshSeed] = useState(0)
+  const favoriteAuthors = preferences.favoriteAuthors
   const [feedItems, setFeedItems] = useState<VideoDynamicItem[]>([])
   const [feedLoading, setFeedLoading] = useState(false)
   const [feedLoadingMore, setFeedLoadingMore] = useState(false)
@@ -165,6 +213,12 @@ export function HomeView() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   const [feedOffset, setFeedOffset] = useState<string>("")
   const [feedHasMore, setFeedHasMore] = useState(false)
+  const [favoriteFeedItems, setFavoriteFeedItems] = useState<VideoDynamicItem[]>([])
+  const [favoriteFeedLoading, setFavoriteFeedLoading] = useState(false)
+  const [favoriteFeedLoadingMore, setFavoriteFeedLoadingMore] = useState(false)
+  const [favoriteFeedHasMore, setFavoriteFeedHasMore] = useState(false)
+  const [favoriteFeedErrorMessage, setFavoriteFeedErrorMessage] = useState("")
+  const [favoriteLastUpdatedAt, setFavoriteLastUpdatedAt] = useState<number | null>(null)
   const [followedAuthors, setFollowedAuthors] = useState<BiliFollowedAuthor[]>([])
   const [followedAuthorsLoading, setFollowedAuthorsLoading] = useState(false)
   const [followedAuthorsErrorMessage, setFollowedAuthorsErrorMessage] = useState("")
@@ -173,6 +227,10 @@ export function HomeView() {
   const activeAccountRef = useRef<string | null>(auth?.id ?? null)
   const activeLoginModeRef = useRef<BiliLoginMode>(loginMode)
   const qrPollTimerRef = useRef<number | null>(null)
+  const favoriteFeedCursorRef = useRef<FavoriteFeedCursorState>({
+    pagingByAuthor: {},
+    deferredItems: [],
+  })
   const currentAuthorFilterRule = useMemo(
     () => getAuthorFilterRule(preferences, auth?.id),
     [preferences, auth?.id]
@@ -207,6 +265,10 @@ export function HomeView() {
     setPreferences(nextPreferences)
   }
 
+  function persistFavoriteAuthors(nextAuthors: BiliFavoriteAuthor[]) {
+    persistPreferences(setFavoriteAuthors(preferences, nextAuthors))
+  }
+
   function clearFeedState() {
     setFeedItems([])
     setFeedLoading(false)
@@ -215,6 +277,19 @@ export function HomeView() {
     setLastUpdatedAt(null)
     setFeedOffset("")
     setFeedHasMore(false)
+  }
+
+  function clearFavoriteFeedState() {
+    favoriteFeedCursorRef.current = {
+      pagingByAuthor: {},
+      deferredItems: [],
+    }
+    setFavoriteFeedItems([])
+    setFavoriteFeedLoading(false)
+    setFavoriteFeedLoadingMore(false)
+    setFavoriteFeedHasMore(false)
+    setFavoriteFeedErrorMessage("")
+    setFavoriteLastUpdatedAt(null)
   }
 
   function clearFollowedAuthorsState() {
@@ -528,6 +603,320 @@ export function HomeView() {
     })
   }
 
+  async function refreshFavoriteFeed(options?: { silent?: boolean }) {
+    if (favoriteAuthors.length === 0) {
+      clearFavoriteFeedState()
+      return
+    }
+
+    favoriteFeedCursorRef.current = {
+      pagingByAuthor: {},
+      deferredItems: [],
+    }
+
+    if (!options?.silent) setFavoriteFeedLoading(true)
+    setFavoriteFeedLoadingMore(false)
+    setFavoriteFeedErrorMessage("")
+
+    const cookieHeader = loginMode === "cookie" ? (cookieAuth?.cookieHeader ?? "") : ""
+
+    try {
+      const feeds = await Promise.all(favoriteAuthors.map((author) =>
+        fetchFavoriteAuthorVideos(author, {
+          page: 1,
+          pageSize: 8,
+          cookieHeader: cookieHeader || undefined,
+        })
+      ))
+
+      const pagingByAuthor: FavoriteFeedCursorState["pagingByAuthor"] = {}
+      favoriteAuthors.forEach((author, index) => {
+        pagingByAuthor[author.mid] = {
+          nextPage: feeds[index]?.hasMore ? 2 : 1,
+          hasMore: Boolean(feeds[index]?.hasMore),
+        }
+      })
+
+      const allItems = feeds
+        .flatMap((feed) => feed.items)
+        .sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0))
+
+      const todayItems = allItems.filter((item) => isPublishedToday(item.publishedTs))
+      const visibleItems = todayItems.length > 0 ? todayItems : allItems
+      const deferredItems = todayItems.length > 0
+        ? allItems.filter((item) => !isPublishedToday(item.publishedTs))
+        : []
+
+      favoriteFeedCursorRef.current = {
+        pagingByAuthor,
+        deferredItems,
+      }
+
+      setFavoriteFeedItems(visibleItems)
+      setFavoriteFeedHasMore(
+        deferredItems.length > 0 ||
+        Object.values(pagingByAuthor).some((item) => item.hasMore)
+      )
+      setFavoriteLastUpdatedAt(Date.now())
+    } catch (error: any) {
+      if (error instanceof BiliAuthError && cookieHeader) {
+        try {
+          const feeds = await Promise.all(favoriteAuthors.map((author) =>
+            fetchFavoriteAuthorVideos(author, {
+              page: 1,
+              pageSize: 8,
+            })
+          ))
+
+          const pagingByAuthor: FavoriteFeedCursorState["pagingByAuthor"] = {}
+          favoriteAuthors.forEach((author, index) => {
+            pagingByAuthor[author.mid] = {
+              nextPage: feeds[index]?.hasMore ? 2 : 1,
+              hasMore: Boolean(feeds[index]?.hasMore),
+            }
+          })
+
+          const allItems = feeds
+            .flatMap((feed) => feed.items)
+            .sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0))
+
+          const todayItems = allItems.filter((item) => isPublishedToday(item.publishedTs))
+          const visibleItems = todayItems.length > 0 ? todayItems : allItems
+          const deferredItems = todayItems.length > 0
+            ? allItems.filter((item) => !isPublishedToday(item.publishedTs))
+            : []
+
+          favoriteFeedCursorRef.current = {
+            pagingByAuthor,
+            deferredItems,
+          }
+
+          setFavoriteFeedItems(visibleItems)
+          setFavoriteFeedHasMore(
+            deferredItems.length > 0 ||
+            Object.values(pagingByAuthor).some((item) => item.hasMore)
+          )
+          setFavoriteLastUpdatedAt(Date.now())
+          return
+        } catch (fallbackError: any) {
+          setFavoriteFeedErrorMessage(String(fallbackError?.message ?? fallbackError ?? "获取收藏视频失败"))
+          return
+        }
+      }
+
+      setFavoriteFeedErrorMessage(String(error?.message ?? error ?? "获取收藏视频失败"))
+    } finally {
+      if (!options?.silent) {
+        setFavoriteFeedLoading(false)
+      }
+    }
+  }
+
+  async function loadMoreFavoriteFeed() {
+    if (
+      favoriteAuthors.length === 0 ||
+      favoriteFeedLoading ||
+      favoriteFeedLoadingMore ||
+      !favoriteFeedHasMore
+    ) {
+      return
+    }
+
+    const currentCursor = favoriteFeedCursorRef.current
+    if (currentCursor.deferredItems.length > 0) {
+      setFavoriteFeedLoadingMore(true)
+      try {
+        const chunk = currentCursor.deferredItems.slice(0, 12)
+        const remaining = currentCursor.deferredItems.slice(chunk.length)
+        favoriteFeedCursorRef.current = {
+          ...currentCursor,
+          deferredItems: remaining,
+        }
+        setFavoriteFeedItems((current) => mergeFeedItems(current, chunk))
+        setFavoriteFeedHasMore(
+          remaining.length > 0 ||
+          Object.values(currentCursor.pagingByAuthor).some((item) => item.hasMore)
+        )
+      } finally {
+        setFavoriteFeedLoadingMore(false)
+      }
+      return
+    }
+
+    const activeAuthors = favoriteAuthors.filter((author) => currentCursor.pagingByAuthor[author.mid]?.hasMore)
+    if (activeAuthors.length === 0) {
+      setFavoriteFeedHasMore(false)
+      return
+    }
+
+    setFavoriteFeedLoadingMore(true)
+    setFavoriteFeedErrorMessage("")
+    const cookieHeader = loginMode === "cookie" ? (cookieAuth?.cookieHeader ?? "") : ""
+
+    try {
+      const feeds = await Promise.all(activeAuthors.map((author) =>
+        fetchFavoriteAuthorVideos(author, {
+          page: currentCursor.pagingByAuthor[author.mid]?.nextPage ?? 1,
+          pageSize: 8,
+          cookieHeader: cookieHeader || undefined,
+        })
+      ))
+
+      const nextPagingByAuthor = { ...currentCursor.pagingByAuthor }
+      activeAuthors.forEach((author, index) => {
+        const currentPage = nextPagingByAuthor[author.mid]?.nextPage ?? 1
+        nextPagingByAuthor[author.mid] = {
+          nextPage: feeds[index]?.hasMore ? currentPage + 1 : currentPage,
+          hasMore: Boolean(feeds[index]?.hasMore),
+        }
+      })
+
+      favoriteFeedCursorRef.current = {
+        pagingByAuthor: nextPagingByAuthor,
+        deferredItems: [],
+      }
+      setFavoriteFeedItems((current) =>
+        mergeFeedItems(
+          current,
+          feeds
+            .flatMap((feed) => feed.items)
+            .sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0))
+        )
+      )
+      setFavoriteFeedHasMore(Object.values(nextPagingByAuthor).some((item) => item.hasMore))
+      setFavoriteLastUpdatedAt(Date.now())
+    } catch (error: any) {
+      if (error instanceof BiliAuthError && cookieHeader) {
+        try {
+          const feeds = await Promise.all(activeAuthors.map((author) =>
+            fetchFavoriteAuthorVideos(author, {
+              page: currentCursor.pagingByAuthor[author.mid]?.nextPage ?? 1,
+              pageSize: 8,
+            })
+          ))
+
+          const nextPagingByAuthor = { ...currentCursor.pagingByAuthor }
+          activeAuthors.forEach((author, index) => {
+            const currentPage = nextPagingByAuthor[author.mid]?.nextPage ?? 1
+            nextPagingByAuthor[author.mid] = {
+              nextPage: feeds[index]?.hasMore ? currentPage + 1 : currentPage,
+              hasMore: Boolean(feeds[index]?.hasMore),
+            }
+          })
+
+          favoriteFeedCursorRef.current = {
+            pagingByAuthor: nextPagingByAuthor,
+            deferredItems: [],
+          }
+          setFavoriteFeedItems((current) =>
+            mergeFeedItems(
+              current,
+              feeds
+                .flatMap((feed) => feed.items)
+                .sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0))
+            )
+          )
+          setFavoriteFeedHasMore(Object.values(nextPagingByAuthor).some((item) => item.hasMore))
+          setFavoriteLastUpdatedAt(Date.now())
+          return
+        } catch (fallbackError: any) {
+          setFavoriteFeedErrorMessage(String(fallbackError?.message ?? fallbackError ?? "获取更早的视频失败"))
+          return
+        }
+      }
+
+      setFavoriteFeedErrorMessage(String(error?.message ?? error ?? "获取更早的视频失败"))
+    } finally {
+      setFavoriteFeedLoadingMore(false)
+    }
+  }
+
+  async function searchFavoriteAuthorsForManager(keyword: string): Promise<BiliFavoriteAuthor[]> {
+    const cookieHeader = loginMode === "cookie" ? (cookieAuth?.cookieHeader ?? "") : ""
+
+    try {
+      return await searchFavoriteAuthors(keyword, cookieHeader || undefined)
+    } catch (error: any) {
+      if (error instanceof BiliAuthError && cookieHeader) {
+        return searchFavoriteAuthors(keyword)
+      }
+      throw error
+    }
+  }
+
+  async function addFavoriteAuthor(author: BiliFavoriteAuthor) {
+    const exists = favoriteAuthors.some((item) => item.mid === author.mid)
+    if (exists) return
+    persistFavoriteAuthors([...favoriteAuthors, author])
+  }
+
+  async function removeFavoriteAuthor(mid: string) {
+    persistFavoriteAuthors(favoriteAuthors.filter((item) => item.mid !== mid))
+  }
+
+  async function exportFavoriteAuthorsToJson() {
+    if (favoriteAuthors.length === 0) {
+      await alertDialog("当前还没有可导出的收藏 UP 主")
+      return
+    }
+
+    const runtimeDocumentPicker = (globalThis as any).DocumentPicker
+    if (!runtimeDocumentPicker?.exportFiles) {
+      await alertDialog("当前环境不支持导出文件")
+      return
+    }
+
+    const payload: BiliFavoriteAuthorsExport = {
+      version: 1,
+      exportedAt: Date.now(),
+      authors: favoriteAuthors,
+    }
+    const data = Data.fromString(JSON.stringify(payload, null, 2))
+    if (!data) {
+      await alertDialog("生成导出文件失败")
+      return
+    }
+
+    await runtimeDocumentPicker.exportFiles({
+      files: [{
+        data,
+        name: `bilifavor-favorites-${new Date().toISOString().slice(0, 10)}.json`,
+      }],
+    })
+  }
+
+  async function importFavoriteAuthorsFromJson() {
+    const runtimeDocumentPicker = (globalThis as any).DocumentPicker
+    const runtimeFileManager = (globalThis as any).FileManager
+    if (!runtimeDocumentPicker?.pickFiles || !runtimeFileManager?.readAsString) {
+      await alertDialog("当前环境不支持导入文件")
+      return
+    }
+
+    try {
+      const selectedPaths = await runtimeDocumentPicker.pickFiles({})
+      const filePath = selectedPaths?.[0]
+      if (!filePath) return
+
+      const fileContent = await runtimeFileManager.readAsString(filePath)
+      const imported = normalizeImportedFavoriteAuthors(JSON.parse(String(fileContent ?? "")))
+      if (imported.length === 0) {
+        await alertDialog("没有在 JSON 里找到可导入的 UP 主")
+        return
+      }
+
+      const merged = new Map<string, BiliFavoriteAuthor>()
+      for (const author of favoriteAuthors) merged.set(author.mid, author)
+      for (const author of imported) merged.set(author.mid, author)
+      persistFavoriteAuthors([...merged.values()])
+      await alertDialog(`已导入 ${imported.length} 位 UP 主`)
+    } catch (error: any) {
+      await alertDialog(String(error?.message ?? error ?? "导入收藏失败"))
+    } finally {
+      runtimeDocumentPicker?.stopAcessingSecurityScopedResources?.()
+    }
+  }
+
   async function startWebViewLoginFlow() {
     clearQrPollTimer()
     setLoginBusy(true)
@@ -741,6 +1130,15 @@ export function HomeView() {
     clearFollowedAuthorsState()
   }, [auth?.id, loginMode])
 
+  useEffect(() => {
+    if (favoriteAuthors.length === 0) {
+      clearFavoriteFeedState()
+      return
+    }
+
+    void refreshFavoriteFeed()
+  }, [favoriteAuthors, loginMode, cookieAuth?.cookieHeader])
+
   return (
     <TabView
       selection={activeTab as any}
@@ -748,6 +1146,28 @@ export function HomeView() {
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
     >
+      <Tab title="收藏" systemImage="heart.fill" value={FAVORITES_TAB}>
+        <FavoritesTabView
+          auth={auth}
+          favoriteAuthors={favoriteAuthors}
+          items={favoriteFeedItems}
+          playbackMode={preferences.playbackMode}
+          isLoading={favoriteFeedLoading}
+          isLoadingMore={favoriteFeedLoadingMore}
+          hasMore={favoriteFeedHasMore}
+          errorMessage={favoriteFeedErrorMessage}
+          lastUpdatedAt={favoriteLastUpdatedAt}
+          onExit={dismiss}
+          onRefresh={refreshFavoriteFeed}
+          onLoadMore={loadMoreFavoriteFeed}
+          onSearchAuthors={searchFavoriteAuthorsForManager}
+          onAddAuthor={addFavoriteAuthor}
+          onRemoveAuthor={removeFavoriteAuthor}
+          onImportAuthors={importFavoriteAuthorsFromJson}
+          onExportAuthors={exportFavoriteAuthorsToJson}
+        />
+      </Tab>
+
       <Tab title="动态" systemImage="play.square.stack.fill" value={DYNAMIC_TAB}>
         <DynamicTabView
           auth={auth}

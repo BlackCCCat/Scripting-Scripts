@@ -2,6 +2,7 @@ import { fetch, type Cookie, type Response } from "scripting"
 
 import type {
   BiliAuthSession,
+  BiliFavoriteAuthor,
   BiliFollowedAuthor,
   BiliInlinePlaybackSource,
   BiliUserProfile,
@@ -44,6 +45,31 @@ function buildSortedQueryString(params: Record<string, string | number | boolean
     .join("&")
 }
 
+function parseCookieHeader(cookieHeader: string): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const part of String(cookieHeader ?? "").split(";")) {
+    const entry = part.trim()
+    if (!entry) continue
+    const index = entry.indexOf("=")
+    if (index <= 0) continue
+    const name = entry.slice(0, index).trim()
+    const value = entry.slice(index + 1).trim()
+    if (!name || !value) continue
+    map.set(name, value)
+  }
+  return map
+}
+
+function mergeCookieHeaders(...headers: Array<string | null | undefined>): string {
+  const map = new Map<string, string>()
+  for (const header of headers) {
+    for (const [name, value] of parseCookieHeader(String(header ?? "")).entries()) {
+      map.set(name, value)
+    }
+  }
+  return [...map.entries()].map(([name, value]) => `${name}=${value}`).join("; ")
+}
+
 export class BiliAuthError extends Error {
 }
 
@@ -81,6 +107,10 @@ type DynamicFeedPayload = {
 type FollowingsPayload = {
   list?: any[]
   total?: number
+}
+
+type SearchUserPayload = {
+  result?: any[]
 }
 
 type VideoViewPayload = {
@@ -249,15 +279,39 @@ async function fetchWbiKeys(cookieHeader: string): Promise<{
   }
 }
 
+async function fetchWbiContext(cookieHeader?: string): Promise<{
+  imgKey: string
+  subKey: string
+  cookieHeader: string
+}> {
+  const { payload, response } = await requestJson<CurrentUserPayload>(
+    "https://api.bilibili.com/x/web-interface/nav",
+    { cookieHeader }
+  )
+  const data = ensureBiliSuccess(payload, "获取 WBI 参数失败")
+  const imgKey = getFileStem(String(data?.wbi_img?.img_url ?? ""))
+  const subKey = getFileStem(String(data?.wbi_img?.sub_url ?? ""))
+
+  if (!imgKey || !subKey) {
+    throw new Error("当前环境未返回可用的 WBI 参数")
+  }
+
+  return {
+    imgKey,
+    subKey,
+    cookieHeader: mergeCookieHeaders(cookieHeader, buildCookieHeader(response.cookies ?? [])),
+  }
+}
+
 async function requestSignedWbiJson<T>(
   path: string,
   params: Record<string, string | number | boolean | null | undefined>,
-  cookieHeader: string
+  cookieHeader?: string
 ): Promise<{
   payload: BiliApiResponse<T>
   response: Response
 }> {
-  const { imgKey, subKey } = await fetchWbiKeys(cookieHeader)
+  const { imgKey, subKey, cookieHeader: resolvedCookieHeader } = await fetchWbiContext(cookieHeader)
   const mixinKey = getWbiMixinKey(imgKey, subKey)
   const preparedParams: Record<string, string> = {}
 
@@ -277,7 +331,7 @@ async function requestSignedWbiJson<T>(
   const wRid = Crypto.md5(signData).toHexString()
   const signedUrl = `${path}?${query}&w_rid=${wRid}`
 
-  return requestJson<T>(signedUrl, { cookieHeader })
+  return requestJson<T>(signedUrl, { cookieHeader: resolvedCookieHeader })
 }
 
 function withCookie(cookieHeader?: string, headers?: Record<string, string>): Record<string, string> {
@@ -362,6 +416,32 @@ function normalizeBadge(raw: any, fallbackText: string) {
     color: String(raw?.color ?? "#FFFFFF").trim() || "#FFFFFF",
     backgroundColor: String(raw?.bg_color ?? "#FB7299").trim() || "#FB7299",
   }
+}
+
+function stripHtmlTags(value: any): string {
+  return String(value ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .trim()
+}
+
+function formatRelativePublishedLabel(timestampSeconds: number): string {
+  const ts = Math.max(0, Math.floor(Number(timestampSeconds) || 0))
+  if (!ts) return ""
+
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts)
+  if (diff < 60) return "刚刚"
+  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
+  if (diff < 172800) return "昨天"
+
+  return new Date(ts * 1000).toLocaleDateString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  })
 }
 
 function mapVideoDynamicItem(raw: any): VideoDynamicItem | null {
@@ -469,6 +549,59 @@ function mapFollowedAuthor(raw: any): BiliFollowedAuthor | null {
     face: toAbsoluteUrl(String(raw?.face ?? "")),
     sign: String(raw?.sign ?? "").trim(),
     special: Number(raw?.special ?? 0) === 1,
+  }
+}
+
+function mapFavoriteAuthor(raw: any): BiliFavoriteAuthor | null {
+  const mid = String(raw?.mid ?? "").trim()
+  const uname = stripHtmlTags(raw?.uname)
+  if (!mid || !uname) return null
+
+  return {
+    mid,
+    uname,
+    face: toAbsoluteUrl(String(raw?.upic ?? raw?.face ?? "")),
+    sign: stripHtmlTags(raw?.usign),
+    fans: Math.max(0, Number(raw?.fans ?? 0) || 0),
+    videos: Math.max(0, Number(raw?.videos ?? 0) || 0),
+    officialVerifyDesc: stripHtmlTags(raw?.official_verify?.desc),
+  }
+}
+
+function mapFavoriteAuthorVideoItem(raw: any, author: BiliFavoriteAuthor): VideoDynamicItem | null {
+  const bvid = String(raw?.bvid ?? "").trim()
+  const aid = String(raw?.aid ?? "").trim()
+  const title = stripHtmlTags(raw?.title)
+  if (!title || (!bvid && !aid)) return null
+
+  const jumpUrl = bvid
+    ? `https://www.bilibili.com/video/${bvid}`
+    : (String(raw?.arcurl ?? "").trim() || (aid ? `https://www.bilibili.com/video/av${aid}` : ""))
+  if (!jumpUrl) return null
+
+  const publishedTs = Math.max(0, Number(raw?.created ?? raw?.pubdate ?? 0) || 0) || null
+
+  return {
+    id: `favorite-${author.mid}-${bvid || aid}`,
+    authorMid: author.mid,
+    authorName: author.uname,
+    authorFace: author.face,
+    authorAction: "投稿了视频",
+    publishedLabel: publishedTs ? formatRelativePublishedLabel(publishedTs) : "",
+    publishedTs,
+    title,
+    description: stripHtmlTags(raw?.description ?? raw?.desc),
+    cover: toAbsoluteUrl(String(raw?.pic ?? "")),
+    durationText: String(raw?.length ?? raw?.duration ?? "").trim(),
+    playText: String(raw?.play ?? "0").trim() || "0",
+    danmakuText: String(raw?.comment ?? raw?.dm ?? "0").trim() || "0",
+    badgeText: "收藏 UP",
+    badgeColor: "#FFFFFF",
+    badgeBackgroundColor: "#FB7299",
+    jumpUrl: toAbsoluteUrl(jumpUrl),
+    bvid,
+    aid,
+    majorType: "MAJOR_TYPE_ARCHIVE",
   }
 }
 
@@ -581,6 +714,127 @@ export async function fetchAllFollowedAuthorsViaWebView(vmid: string): Promise<B
       if (left.special !== right.special) return left.special ? -1 : 1
       return left.uname.localeCompare(right.uname, "zh-Hans-CN")
     })
+}
+
+export async function searchFavoriteAuthors(
+  keyword: string,
+  cookieHeader?: string
+): Promise<BiliFavoriteAuthor[]> {
+  const trimmedKeyword = String(keyword ?? "").trim()
+  if (!trimmedKeyword) return []
+
+  const { payload } = await requestSignedWbiJson<SearchUserPayload>(
+    "https://api.bilibili.com/x/web-interface/wbi/search/type",
+    {
+      search_type: "bili_user",
+      keyword: trimmedKeyword,
+      user_type: 1,
+      order: "fans",
+      order_sort: 0,
+      page: 1,
+    },
+    cookieHeader
+  )
+  const data = ensureBiliSuccess(payload, "搜索 UP 主失败")
+  const seen = new Set<string>()
+
+  return (Array.isArray(data?.result) ? data.result : [])
+    .map((item) => mapFavoriteAuthor(item))
+    .filter((item): item is BiliFavoriteAuthor => Boolean(item))
+    .filter((item) => {
+      if (seen.has(item.mid)) return false
+      seen.add(item.mid)
+      return true
+    })
+}
+
+export async function fetchFavoriteAuthorVideos(
+  author: BiliFavoriteAuthor,
+  options?: {
+    page?: number
+    pageSize?: number
+    keyword?: string
+    cookieHeader?: string
+  }
+): Promise<VideoDynamicFeed> {
+  const mid = String(author?.mid ?? "").trim()
+  if (!mid) {
+    throw new Error("缺少 UP 主 UID")
+  }
+
+  const { payload } = await requestSignedWbiJson<any>(
+    "https://api.bilibili.com/x/space/wbi/arc/search",
+    {
+      mid,
+      pn: Math.max(1, Number(options?.page ?? 1) || 1),
+      ps: Math.max(1, Math.min(30, Number(options?.pageSize ?? 10) || 10)),
+      order: "pubdate",
+      keyword: String(options?.keyword ?? "").trim() || undefined,
+    },
+    options?.cookieHeader
+  )
+  const data = ensureBiliSuccess(payload, "获取收藏 UP 视频失败")
+  const list = data?.list ?? {}
+  const page = data?.page ?? {}
+  const items = Array.isArray(list?.vlist)
+    ? list.vlist
+      .map((item: any) => mapFavoriteAuthorVideoItem(item, author))
+      .filter(Boolean) as VideoDynamicItem[]
+    : []
+
+  items.sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0))
+
+  const currentPage = Math.max(1, Number(page?.pn ?? options?.page ?? 1) || 1)
+  const pageSize = Math.max(1, Number(page?.ps ?? options?.pageSize ?? 10) || 10)
+  const totalCount = Math.max(0, Number(page?.count ?? items.length) || 0)
+  const hasMore = currentPage * pageSize < totalCount
+
+  return {
+    items,
+    hasMore,
+    offset: hasMore ? String(currentPage + 1) : "",
+    updateBaseline: "",
+  }
+}
+
+export async function fetchFavoriteAuthorsFeed(
+  authors: BiliFavoriteAuthor[],
+  options?: {
+    pageSizePerAuthor?: number
+    keyword?: string
+    cookieHeader?: string
+  }
+): Promise<VideoDynamicFeed> {
+  const cleanAuthors = authors.filter((item) => Boolean(String(item?.mid ?? "").trim()))
+  if (cleanAuthors.length === 0) {
+    return {
+      items: [],
+      hasMore: false,
+      offset: "",
+      updateBaseline: "",
+    }
+  }
+
+  const feeds = await Promise.all(cleanAuthors.map((author) =>
+    fetchFavoriteAuthorVideos(author, {
+      page: 1,
+      pageSize: options?.pageSizePerAuthor ?? 8,
+      keyword: options?.keyword,
+      cookieHeader: options?.cookieHeader,
+    })
+  ))
+
+  const map = new Map<string, VideoDynamicItem>()
+  for (const item of feeds.flatMap((feed) => feed.items)) {
+    map.set(item.id, item)
+  }
+
+  return {
+    items: [...map.values()].sort((left, right) => (right.publishedTs ?? 0) - (left.publishedTs ?? 0)),
+    hasMore: false,
+    offset: "",
+    updateBaseline: "",
+  }
 }
 
 export async function fetchVideoDynamics(cookieHeader: string): Promise<VideoDynamicFeed> {

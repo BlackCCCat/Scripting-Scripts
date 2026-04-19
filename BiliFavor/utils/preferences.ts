@@ -1,5 +1,6 @@
 import type {
   BiliAuthorFilterRule,
+  BiliFavoriteAuthor,
   BiliLoginMode,
   BiliPlaybackMode,
   BiliPreferences,
@@ -28,6 +29,36 @@ function sanitizeFilterRule(raw: any): BiliAuthorFilterRule {
   }
 }
 
+function sanitizeFavoriteAuthor(raw: any): BiliFavoriteAuthor | null {
+  const mid = String(raw?.mid ?? "").trim()
+  const uname = String(raw?.uname ?? "").trim()
+  if (!mid || !uname) return null
+
+  return {
+    mid,
+    uname,
+    face: String(raw?.face ?? "").trim(),
+    sign: String(raw?.sign ?? "").trim(),
+    fans: Math.max(0, Number(raw?.fans ?? 0) || 0),
+    videos: Math.max(0, Number(raw?.videos ?? 0) || 0),
+    officialVerifyDesc: String(raw?.officialVerifyDesc ?? "").trim(),
+  }
+}
+
+function sanitizeFavoriteAuthors(raw: any): BiliFavoriteAuthor[] {
+  const seen = new Set<string>()
+  if (!Array.isArray(raw)) return []
+
+  return raw
+    .map((item) => sanitizeFavoriteAuthor(item))
+    .filter((item): item is BiliFavoriteAuthor => Boolean(item))
+    .filter((item) => {
+      if (seen.has(item.mid)) return false
+      seen.add(item.mid)
+      return true
+    })
+}
+
 function sanitizePreferences(raw: any): BiliPreferences {
   const authorFiltersByAccount: Record<string, BiliAuthorFilterRule> = {}
 
@@ -43,6 +74,7 @@ function sanitizePreferences(raw: any): BiliPreferences {
     loginMode: sanitizeLoginMode(raw?.loginMode),
     playbackMode: sanitizePlaybackMode(raw?.playbackMode),
     authorFiltersByAccount,
+    favoriteAuthors: sanitizeFavoriteAuthors(raw?.favoriteAuthors),
   }
 }
 
@@ -54,6 +86,7 @@ export function loadStoredPreferences(): BiliPreferences {
       loginMode: "cookie",
       playbackMode: "external",
       authorFiltersByAccount: {},
+      favoriteAuthors: [],
     }
   }
 }
@@ -133,5 +166,15 @@ export function setLoginMode(
   return {
     ...preferences,
     loginMode: sanitizeLoginMode(loginMode),
+  }
+}
+
+export function setFavoriteAuthors(
+  preferences: BiliPreferences,
+  authors: BiliFavoriteAuthor[]
+): BiliPreferences {
+  return {
+    ...preferences,
+    favoriteAuthors: sanitizeFavoriteAuthors(authors),
   }
 }
