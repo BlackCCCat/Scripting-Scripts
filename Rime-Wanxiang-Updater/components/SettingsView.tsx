@@ -652,7 +652,7 @@ export function SettingsView(props: {
           onChanged={(v: string) => setCfg((c) => ({ ...c, excludePatternsText: v }))}
           axis="vertical"
           lineLimit={{ min: 6, max: 10 }}
-          prompt={"首选正则表达式，例如：\nuser\\.yaml\n.*\\.custom\\.yaml\ntips_show\\.txt\n也可兼容通配符写法：\n*.custom.yaml"}
+          prompt={"例如：\nuser.yaml\n*.custom.yaml\ntips_show.txt"}
           textFieldStyle="roundedBorder"
         />
       </Section>

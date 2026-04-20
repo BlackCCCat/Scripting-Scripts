@@ -801,6 +801,7 @@ export async function autoUpdateAll(
     onStage?: (s: string) => void
     onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
+    onAfterModule?: (kind: "scheme" | "dict" | "model") => void | Promise<void>
   },
   prechecked?: AllUpdateResult,
   preDecision?: UpdateDecision
@@ -852,6 +853,7 @@ export async function autoUpdateAll(
       onProgress: params.onProgress,
       autoDeploy: false,
     })
+    await params.onAfterModule?.("scheme")
   }
   if (needDict) {
     await updateDict(cfg, {
@@ -860,6 +862,7 @@ export async function autoUpdateAll(
       onProgress: params.onProgress,
       autoDeploy: false,
     })
+    await params.onAfterModule?.("dict")
   }
   if (needModel) {
     await updateModel(cfg, {
@@ -871,6 +874,7 @@ export async function autoUpdateAll(
         model: needModel,
       },
     })
+    await params.onAfterModule?.("model")
   }
 
   // 自动更新后统一清理 dicts 下残留的词库子文件夹

@@ -1354,6 +1354,10 @@ export function HomeView() {
           onStage: wrapStageReporter("AUTO"),
           onLog: wrapDetailLogger("AUTO"),
           onProgress: (p) => applyProgress(p),
+          onAfterModule: async () => {
+            await refreshLocal(effective)
+            await refreshLastCheckDecision(effective, pre)
+          },
         },
         pre,
         decision ?? undefined
