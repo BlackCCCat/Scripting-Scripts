@@ -1048,7 +1048,8 @@ export function CalendarTimerView() {
     clearTimer();
     await clearNotifications();
 
-    const overallStartAt = finalSegments[0]?.startAt ?? sessionStartAt.getTime();
+    const overallStartAt =
+      finalSegments[0]?.startAt ?? sessionStartAt.getTime();
     const overallEndAt = finalSegments.length
       ? finalSegments[finalSegments.length - 1]!.endAt
       : sessionStartAt.getTime() + total;
@@ -1327,7 +1328,13 @@ export function CalendarTimerView() {
                       disabled={saving || !sessionStartAt}
                       action={withButtonHaptic(openNoteEditor)}
                     >
-                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                      <VStack
+                        frame={{
+                          width: 56,
+                          height: 44,
+                          alignment: "center" as any,
+                        }}
+                      >
                         <Image
                           systemName="square.and.pencil"
                           foregroundStyle={iconPalette.note}
@@ -1340,7 +1347,13 @@ export function CalendarTimerView() {
                       disabled={(!running && !paused) || saving}
                       action={withButtonHaptic(cancelTimer)}
                     >
-                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                      <VStack
+                        frame={{
+                          width: 56,
+                          height: 44,
+                          alignment: "center" as any,
+                        }}
+                      >
                         <Image
                           systemName="xmark"
                           foregroundStyle={iconPalette.cancel}
@@ -1355,7 +1368,13 @@ export function CalendarTimerView() {
                         paused ? startTask(activeTask) : pauseTimer(),
                       )}
                     >
-                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                      <VStack
+                        frame={{
+                          width: 56,
+                          height: 44,
+                          alignment: "center" as any,
+                        }}
+                      >
                         <Image
                           systemName={paused ? "play.fill" : "pause.fill"}
                           foregroundStyle={
@@ -1370,7 +1389,13 @@ export function CalendarTimerView() {
                       disabled={(!running && !paused) || saving}
                       action={withButtonHaptic(() => stopTimer())}
                     >
-                      <VStack frame={{ width: 56, height: 44, alignment: "center" as any }}>
+                      <VStack
+                        frame={{
+                          width: 56,
+                          height: 44,
+                          alignment: "center" as any,
+                        }}
+                      >
                         <Image
                           systemName="stop.fill"
                           foregroundStyle={iconPalette.stop}
@@ -1419,7 +1444,8 @@ export function CalendarTimerView() {
                       : "";
                     const notifyLabel = task.useNotification
                       ? (NOTIFICATION_INTERVAL_OPTIONS.find(
-                          (opt) => opt.minutes === task.notificationIntervalMinutes,
+                          (opt) =>
+                            opt.minutes === task.notificationIntervalMinutes,
                         )?.label ?? "通知")
                       : "";
                     const isCountdownTask =
@@ -1482,7 +1508,9 @@ export function CalendarTimerView() {
                                   ) : null}
                                   {notifyLabel ? (
                                     <HStack spacing={4}>
-                                      <Text foregroundStyle="secondaryLabel">·</Text>
+                                      <Text foregroundStyle="secondaryLabel">
+                                        ·
+                                      </Text>
                                       <Image
                                         systemName="bell.badge.fill"
                                         foregroundStyle="secondaryLabel"

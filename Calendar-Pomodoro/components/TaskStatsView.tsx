@@ -275,6 +275,27 @@ export function TaskStatsView(props: { task: Task }) {
     }
   }
 
+  async function deleteCalendarRecord(record: TaskRecord) {
+    const confirmed = await Dialog.confirm({
+      message: `确定删除这条记录吗？\n${formatDateTime(record.startAt)} · ${formatDuration(record.durationMs)}`,
+    });
+    if (!confirmed) return;
+
+    try {
+      const event = await CalendarEvent.get(record.id);
+      if (!event) {
+        await Dialog.alert({ message: "未找到对应的日历事件。" });
+        setRecords((prev) => prev.filter((item) => item.id !== record.id));
+        return;
+      }
+      await event.remove();
+      // 直接更新本地记录，避免 loadRecords 进入 loading 态导致列表高度变化和滚动位置跳动。
+      setRecords((prev) => prev.filter((item) => item.id !== record.id));
+    } catch (e: any) {
+      await Dialog.alert({ message: String(e?.message ?? e) });
+    }
+  }
+
   async function openRecordActions(record: TaskRecord) {
     const action = await Dialog.actionSheet({
       title: props.task.name,
@@ -282,6 +303,7 @@ export function TaskStatsView(props: { task: Task }) {
       actions: [
         { label: "查看日历事件" },
         { label: "Markdown 全屏查看" },
+        { label: "删除", destructive: true },
       ],
     });
     if (action === 0) {
@@ -290,6 +312,10 @@ export function TaskStatsView(props: { task: Task }) {
     }
     if (action === 1) {
       await openRecordMarkdown(record);
+      return;
+    }
+    if (action === 2) {
+      await deleteCalendarRecord(record);
     }
   }
 
