@@ -160,27 +160,35 @@ function buildYearHeatMarks(records: AggregateRecord[]) {
   const year = now.getFullYear();
   const start = new Date(year, 0, 1);
   const end = new Date(year + 1, 0, 1);
+  const todayEnd = addDays(startOfDay(now), 1);
   const totals = new Map<string, number>();
   for (const item of records) {
     if (item.startAt < start || item.startAt >= end) continue;
+    // 热力图表示已经发生的专注记录，未来日历事件不应提前着色。
+    if (item.startAt >= todayEnd) continue;
     const key = dateKey(item.startAt);
     totals.set(key, (totals.get(key) ?? 0) + item.durationMs);
   }
 
-  const marks: Array<{ x: string; y: string; value: number }> = [];
-  let cursor = startOfDay(start);
-  while (cursor < end) {
-    const startOfYear = new Date(year, 0, 1);
-    const dayOffset = Math.floor(
-      (startOfDay(cursor).getTime() - startOfYear.getTime()) / 86400000,
-    );
-    const week = Math.floor((dayOffset + startOfYear.getDay()) / 7) + 1;
-    marks.push({
-      x: `W${week}`,
-      y: ["日", "一", "二", "三", "四", "五", "六"][cursor.getDay()]!,
-      value: Math.round((totals.get(dateKey(cursor)) ?? 0) / 60000),
-    });
-    cursor = addDays(cursor, 1);
+  const marks: Array<{ x: string; y: string; value: number; isFuture: boolean }> =
+    [];
+  const firstColumnStart = addDays(startOfDay(start), -start.getDay());
+  const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+  for (let weekIndex = 0; weekIndex < 53; weekIndex += 1) {
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const day = addDays(firstColumnStart, weekIndex * 7 + weekday);
+      const inYear = day >= start && day < end;
+      const isFuture = day >= todayEnd;
+      marks.push({
+        x: `W${weekIndex + 1}`,
+        y: weekdayLabels[weekday]!,
+        isFuture,
+        value:
+          inYear && !isFuture
+            ? Math.round((totals.get(dateKey(day)) ?? 0) / 60000)
+            : 0,
+      });
+    }
   }
   return marks;
 }
@@ -191,14 +199,15 @@ function currentYearLabel() {
 
 function buildMonthAxisLabels() {
   const year = new Date().getFullYear();
-  const startOfYear = new Date(year, 0, 1);
+  const startOfYear = startOfDay(new Date(year, 0, 1));
+  const firstColumnStart = addDays(startOfYear, -startOfYear.getDay());
   const labels = Array.from({ length: 53 }, () => "");
   for (let month = 0; month < 12; month += 1) {
     const firstDay = new Date(year, month, 1);
     const dayOffset = Math.floor(
-      (firstDay.getTime() - startOfYear.getTime()) / 86400000,
+      (firstDay.getTime() - firstColumnStart.getTime()) / 86400000,
     );
-    const week = Math.floor((dayOffset + startOfYear.getDay()) / 7);
+    const week = Math.floor(dayOffset / 7);
     labels[week] = `${month + 1}`;
   }
   return labels;
@@ -393,7 +402,7 @@ export function OverallReportView(props: {
     () =>
       buildYearHeatMarks(records).map((item) => ({
         ...item,
-        foregroundStyle: heatColor(item.value),
+        foregroundStyle: item.isFuture ? "systemGray5" : heatColor(item.value),
       })),
     [records],
   );
