@@ -253,7 +253,9 @@ function buildSleepData(samples: HealthCategorySample[]): {
 
 function mergeSleepIntoDaily(dailyMap: Map<string, DailyHealthMetrics>, nights: SleepNight[]) {
   for (const night of nights) {
-    const target = dailyMap.get(night.nightKey)
+    const wakeDate = new Date(night.wakeISO)
+    const targetKey = dateKeyFromDate(startOfDay(wakeDate))
+    const target = dailyMap.get(targetKey)
     if (!target) continue
     target.sleepNightKey = night.nightKey
     target.bedtimeISO = night.bedtimeISO

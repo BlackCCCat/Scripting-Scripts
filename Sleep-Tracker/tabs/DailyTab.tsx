@@ -110,19 +110,22 @@ function buildPlaceholderStageRows() {
 }
 
 function sleepRatio(day: NonNullable<ReturnType<typeof buildDashboardBundle>>["latestDay"], minutes: number) {
-  return minutes / Math.max(1, day?.totalSleepMinutes ?? 1)
+  return clamp(minutes / Math.max(1, day?.totalSleepMinutes ?? 1), 0, 1)
 }
 
 function buildStageRows(day: NonNullable<ReturnType<typeof buildDashboardBundle>>["latestDay"]) {
   if (!day || !day.totalSleepMinutes) return []
   const restorativeMinutes = day.sleepStages.asleepDeep + day.sleepStages.asleepREM
+  const awakeMinutes = Math.max(0, day.awakeMinutes ?? 0)
+  const effectiveInBed = Math.max(day.totalInBedMinutes ?? 0, day.totalSleepMinutes + awakeMinutes)
+  const awakeRatio = clamp(awakeMinutes / Math.max(1, effectiveInBed), 0, 1)
 
   return [
     {
       label: "清醒",
-      minutes: day.awakeMinutes ?? 0,
-      ratio: (day.awakeMinutes ?? 0) / Math.max(1, day.totalInBedMinutes ?? day.totalSleepMinutes),
-      displayRatio: `${Math.round(((day.awakeMinutes ?? 0) / Math.max(1, day.totalInBedMinutes ?? day.totalSleepMinutes)) * 100)}%`,
+      minutes: awakeMinutes,
+      ratio: awakeRatio,
+      displayRatio: `${Math.round(awakeRatio * 100)}%`,
       tone: stageColor("awake"),
     },
     {
@@ -192,9 +195,27 @@ function filterDailyStageChartMarks(
 }
 
 function buildDailyStageAxisValues(marks: Array<{ value: number }>) {
-  const maxValue = Math.max(1, ...marks.map((item) => item.value))
-  const ceiling = Math.max(1, Math.ceil(maxValue))
-  return [ceiling, Math.round((ceiling * 2) / 3), Math.round(ceiling / 3), 0]
+  const maxValue = Math.max(0.01, ...marks.map((item) => item.value))
+  const ceiling =
+    maxValue <= 0.25
+      ? 0.25
+      : maxValue <= 0.5
+        ? 0.5
+        : maxValue <= 0.75
+          ? 0.75
+          : maxValue <= 1
+            ? 1
+            : maxValue <= 2
+              ? Math.ceil(maxValue * 2) / 2
+              : Math.ceil(maxValue)
+  return [ceiling, ceiling * 0.66, ceiling * 0.33, 0]
+}
+
+function formatStageAxisValue(value: number) {
+  if (value <= 0) return "0"
+  if (value < 1) return `${Math.round(value * 60)}m`
+  if (Number.isInteger(value)) return `${value}h`
+  return `${Math.round(value * 10) / 10}h`
 }
 
 function wrappedMinutes(iso: string | null | undefined): number | null {
@@ -469,7 +490,7 @@ export function DailyTab(props: {
                     foregroundStyle={palette.mutedInk}
                     frame={{ height: 44, alignment: "trailing" as any }}
                   >
-                    {value}h
+                    {formatStageAxisValue(value)}
                   </Text>
                 ))}
               </VStack>

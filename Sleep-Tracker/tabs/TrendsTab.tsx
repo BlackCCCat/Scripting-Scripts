@@ -456,6 +456,32 @@ function buildDurationAxisValues(marks: Array<{ value: number }>) {
   return [ceiling, Math.max(step, roundNearest((ceiling * 2) / 3)), Math.max(step, roundNearest(ceiling / 3)), 0]
 }
 
+const STAGE_CHART_COLOR_SCALE = {
+  深度: stageColor("asleepDeep"),
+  核心: stageColor("asleepCore"),
+  眼动: stageColor("asleepREM"),
+  清醒: stageColor("awake"),
+} as const
+
+function buildStageAxisValues(marks: Array<{ label: string; value: number }>, filter: StageFilter) {
+  if (!marks.length) return [1.5, 1, 0.5, 0]
+  const values =
+    filter === "全部"
+      ? [...marks.reduce((map, item) => map.set(item.label, (map.get(item.label) ?? 0) + item.value), new Map<string, number>()).values()]
+      : marks.map((item) => item.value)
+  const maxValue = Math.max(0.01, ...values)
+  const steps = [1 / 12, 1 / 6, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 10, 20]
+  const step = steps.find((item) => item * 3 >= maxValue) ?? Math.ceil(maxValue / 3)
+  return [step * 3, step * 2, step, 0]
+}
+
+function formatStageAxisValue(value: number) {
+  if (value <= 0) return "0"
+  if (value < 1) return `${Math.round(value * 60)}m`
+  if (Number.isInteger(value)) return `${value}h`
+  return `${Math.round(value * 10) / 10}h`
+}
+
 function buildDurationChartMarks(buckets: TrendBucket[], mode: TrendMode, placeholder = false) {
   if (placeholder) {
     return buckets.map((bucket, index) => ({
@@ -559,15 +585,6 @@ function buildDisplayStageMarks(buckets: TrendBucket[], fallbackDays: DashboardD
                 : stageColor("asleepDeep"),
     }
   })
-}
-
-function buildStageAxisValues(marks: Array<{ label: string; value: number }>, filter: StageFilter) {
-  if (!marks.length) return [1, 0.5, 0, 0]
-  const values =
-    filter === "全部"
-      ? [...marks.reduce((map, item) => map.set(item.label, (map.get(item.label) ?? 0) + item.value), new Map<string, number>()).values()]
-      : marks.map((item) => item.value)
-  return buildDurationAxisValues(values.map((value) => ({ value })))
 }
 
 function buildRegularityColumns(buckets: TrendBucket[], placeholder = false) {
@@ -830,7 +847,7 @@ export function TrendsTab(props: {
                             lineLimit={1}
                             frame={{ width: 32, height: 55, alignment: "trailing" as any }}
                           >
-                            {value}
+                            {formatStageAxisValue(value)}
                           </Text>
                         ))}
                       </VStack>
@@ -850,6 +867,7 @@ export function TrendsTab(props: {
                             chartXAxis="hidden"
                             chartYAxis="hidden"
                             chartYScale={{ from: 0, to: stageAxisValues[0] ?? 1 } as any}
+                            chartForegroundStyleScale={STAGE_CHART_COLOR_SCALE as any}
                           >
                             {stageFilter === "全部" ? (
                               <BarStackChart marks={stageMarks as any} />
@@ -886,7 +904,7 @@ export function TrendsTab(props: {
                             lineLimit={1}
                             frame={{ width: 32, height: 55, alignment: "leading" as any }}
                           >
-                            {value}
+                            {formatStageAxisValue(value)}
                           </Text>
                         ))}
                       </VStack>

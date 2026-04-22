@@ -141,7 +141,7 @@ function buildStageStackMarks(days: DashboardDay[]) {
       {
         label: formatShortDateFromKey(day.dateKey),
         category: "清醒",
-        value: day.sleepStages.awake / 60,
+        value: (day.awakeMinutes ?? day.sleepStages.awake) / 60,
         foregroundStyle: stageColor("awake"),
       },
     ])
