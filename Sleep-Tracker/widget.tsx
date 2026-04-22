@@ -32,6 +32,7 @@ import { palette, scoreEmoji, scoreTone } from "./theme"
 import {
   average,
   chunkArray,
+  effectiveInBedMinutes,
   formatClockFromISO,
   formatHours,
   formatHoursMinutes,
@@ -99,6 +100,10 @@ async function resolveWidgetData(): Promise<WidgetResolvedData> {
 
 function effLabel(day: DashboardDay): string {
   return `${Math.round(sleepEfficiencyPercent(day.totalSleepMinutes, day.totalInBedMinutes))}%`
+}
+
+function inBedLabel(day: DashboardDay): string {
+  return formatHoursMinutes(effectiveInBedMinutes(day.totalSleepMinutes, day.totalInBedMinutes, day.awakeMinutes))
 }
 
 function wrappedMinutes(iso: string | null | undefined): number | null {
@@ -411,7 +416,7 @@ function SmallWidget() {
           </HStack>
           <Spacer />
           <Text font={{ size: 14, weight: "semibold" } as any} foregroundStyle="label">
-            {formatHoursMinutes(latest.totalInBedMinutes)}
+            {inBedLabel(latest)}
           </Text>
         </HStack>
       </VStack>

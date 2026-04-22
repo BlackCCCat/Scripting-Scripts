@@ -27,6 +27,7 @@ import {
   average,
   clamp,
   dateKeyFromDate,
+  effectiveInBedMinutes,
   formatClockFromISO,
   formatHoursMinutes,
   formatMonthDayFromKey,
@@ -117,7 +118,7 @@ function buildStageRows(day: NonNullable<ReturnType<typeof buildDashboardBundle>
   if (!day || !day.totalSleepMinutes) return []
   const restorativeMinutes = day.sleepStages.asleepDeep + day.sleepStages.asleepREM
   const awakeMinutes = Math.max(0, day.awakeMinutes ?? 0)
-  const effectiveInBed = Math.max(day.totalInBedMinutes ?? 0, day.totalSleepMinutes + awakeMinutes)
+  const effectiveInBed = effectiveInBedMinutes(day.totalSleepMinutes, day.totalInBedMinutes, awakeMinutes)
   const awakeRatio = clamp(awakeMinutes / Math.max(1, effectiveInBed), 0, 1)
 
   return [

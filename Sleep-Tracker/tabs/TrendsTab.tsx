@@ -23,6 +23,7 @@ import {
   average,
   clamp,
   dateKeyFromDate,
+  effectiveInBedMinutes,
   formatClockFromISO,
   formatHoursMinutes,
   formatMonthDayFromKey,
@@ -329,7 +330,7 @@ function buildStageSummary(days: DashboardDay[]) {
     deep: days.reduce((sum, day) => sum + day.sleepStages.asleepDeep, 0),
     restorative: days.reduce((sum, day) => sum + day.sleepStages.asleepDeep + day.sleepStages.asleepREM, 0),
   }
-  const effectiveInBed = Math.max(totalInBed, totalSleep + totals.awake)
+  const effectiveInBed = effectiveInBedMinutes(totalSleep, totalInBed, totals.awake)
   const awakeRatio = clamp(totals.awake / Math.max(1, effectiveInBed), 0, 1)
 
   return [

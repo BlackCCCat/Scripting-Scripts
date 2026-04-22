@@ -50,7 +50,7 @@ export function sleepEfficiencyRatio(
   totalInBedMinutes: number | null | undefined
 ): number {
   const sleep = Math.max(0, totalSleepMinutes ?? 0)
-  const inBed = Math.max(0, totalInBedMinutes ?? 0)
+  const inBed = effectiveInBedMinutes(totalSleepMinutes, totalInBedMinutes, 0)
   const denominator = Math.max(1, sleep, inBed)
   return clamp(sleep / denominator, 0, 1)
 }
@@ -65,6 +65,17 @@ export function sleepEfficiencyPercent(
 export function normalizePercentValue(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null
   return value <= 1.5 ? value * 100 : value
+}
+
+export function effectiveInBedMinutes(
+  totalSleepMinutes: number | null | undefined,
+  totalInBedMinutes: number | null | undefined,
+  awakeMinutes: number | null | undefined
+): number {
+  const sleep = Math.max(0, totalSleepMinutes ?? 0)
+  const inBed = Math.max(0, totalInBedMinutes ?? 0)
+  const awake = Math.max(0, awakeMinutes ?? 0)
+  return Math.max(inBed, sleep + awake)
 }
 
 export function formatClock(date: Date): string {
