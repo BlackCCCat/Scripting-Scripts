@@ -11,7 +11,6 @@ import {
   Text,
   Toggle,
   VStack,
-  ZStack,
   useEffect,
   useState,
 } from "scripting"
@@ -118,28 +117,26 @@ function ActionButton(props: {
   )
 }
 
-function KeyboardTopIconButton(props: {
+function IconActionButton(props: {
   icon: string
+  color?: any
   disabled?: boolean
   onPress: () => void | Promise<void>
 }) {
+  const tint: any = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
   return (
     <Button
-      buttonStyle="plain"
+      buttonStyle="bordered"
+      tint={tint}
       disabled={props.disabled}
       action={withHaptic(props.onPress)}
-      frame={{ minWidth: 52, minHeight: 44 }}
+      frame={{ width: 42, minHeight: 42 }}
     >
-      <ZStack
-        frame={{ width: 52, height: 44, alignment: "center" as any }}
-        padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
-      >
-        <Image
-          systemName={props.icon}
-          font="body"
-          frame={{ width: 24, alignment: "center" as any }}
-        />
-      </ZStack>
+      <Image
+        systemName={props.icon}
+        font="subheadline"
+        foregroundStyle={tint}
+      />
     </Button>
   )
 }
@@ -315,37 +312,13 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
 
   const strength = evaluatePasswordStrength(password, options)
   const onlyOneEnabled = enabledCount(options) === 1
-  const topPadding = props.mode === "keyboard" ? 2 : 12
-  const contentSpacing = props.mode === "keyboard" ? 8 : 12
+  const topPadding = props.mode === "keyboard" ? 6 : 12
 
   async function fillFromHistoryItem(item: PasswordHistoryItem) {
     await fillPassword(item.password, item.options, "已从历史记录填入，并写入历史")
     setShowKeyboardHistory(false)
     setKeyboardHistoryItems(loadPasswordHistory())
   }
-
-  const keyboardTopBar = (
-    <HStack frame={{ width: "100%" as any }}>
-      <KeyboardTopIconButton icon="globe" onPress={switchKeyboard} />
-      <Spacer />
-      <ZStack frame={{ width: 52, minHeight: 44, alignment: "center" as any }}>
-        <VStack opacity={showKeyboardHistory ? 0 : 1}>
-          <KeyboardTopIconButton
-            icon="clock.arrow.circlepath"
-            disabled={showKeyboardHistory}
-            onPress={openHistory}
-          />
-        </VStack>
-        <VStack opacity={showKeyboardHistory ? 1 : 0}>
-          <KeyboardTopIconButton
-            icon="chevron.left"
-            disabled={!showKeyboardHistory}
-            onPress={() => setShowKeyboardHistory(false)}
-          />
-        </VStack>
-      </ZStack>
-    </HStack>
-  )
 
   const keyboardHistoryContent = keyboardHistoryItems.length ? (
     keyboardHistoryItems.map((item) => {
@@ -488,8 +461,14 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
       </VStack>
 
       <HStack spacing={8}>
+        {props.mode === "keyboard" ? (
+          <IconActionButton
+            icon="globe"
+            onPress={switchKeyboard}
+          />
+        ) : null}
         <ActionButton
-          title="重新生成"
+          title="刷新"
           icon="arrow.triangle.2.circlepath"
           onPress={() => {
             regenerate()
@@ -513,6 +492,12 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
             onPress={undoLastFill}
           />
         ) : null}
+        {props.mode === "keyboard" ? (
+          <IconActionButton
+            icon={showKeyboardHistory ? "chevron.left" : "clock.arrow.circlepath"}
+            onPress={showKeyboardHistory ? () => setShowKeyboardHistory(false) : openHistory}
+          />
+        ) : null}
       </HStack>
     </Card>
   )
@@ -532,7 +517,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
 
   const appContent = (
     <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      <VStack spacing={contentSpacing} padding={{ top: topPadding, bottom: 20, leading: 12, trailing: 12 }}>
+      <VStack spacing={12} padding={{ top: topPadding, bottom: 20, leading: 12, trailing: 12 }}>
         {firstCard}
 
         <Card>
@@ -576,9 +561,9 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
   if (props.mode === "keyboard") {
     return (
       <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-        <VStack spacing={contentSpacing} padding={{ top: topPadding, bottom: 20, leading: 12, trailing: 12 }}>
-          {keyboardTopBar}
-          {showKeyboardHistory ? keyboardHistoryContent : firstCard}
+        <VStack spacing={12} padding={{ top: topPadding, bottom: 20, leading: 12, trailing: 12 }}>
+          {firstCard}
+          {showKeyboardHistory ? keyboardHistoryContent : null}
         </VStack>
       </ScrollView>
     )
