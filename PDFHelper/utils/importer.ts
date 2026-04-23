@@ -5,6 +5,9 @@ import { buildPdfPagePreview } from "./preview"
 
 /** When per-page count exceeds this threshold, skip preview generation */
 const PREVIEW_THRESHOLD = 20
+const LAST_IMPORT_DIRECTORY_KEY = "PDFHelper.lastImportDirectory"
+
+let importInitialDirectoryCache: string | null = null
 
 function isPdfPath(path: string): boolean {
   return Path.extname(path).toLowerCase() === ".pdf"
@@ -27,6 +30,24 @@ function createImageSource(image: UIImage, name: string, sourcePath?: string): S
     originalPath: sourcePath,
     pages: [page],
   }
+}
+
+export function getImportInitialDirectory(): string | undefined {
+  if (importInitialDirectoryCache) return importInitialDirectoryCache
+  const directory = Storage.get<string>(LAST_IMPORT_DIRECTORY_KEY)
+  return directory || undefined
+}
+
+function setImportInitialDirectory(directory: string) {
+  importInitialDirectoryCache = directory
+  Storage.set(LAST_IMPORT_DIRECTORY_KEY, directory)
+}
+
+export async function chooseImportInitialDirectory(): Promise<string | null> {
+  const directory = await DocumentPicker.pickDirectory(getImportInitialDirectory())
+  if (!directory) return null
+  setImportInitialDirectory(directory)
+  return directory
 }
 
 type PdfImportMode = "whole" | "per-page"
@@ -232,10 +253,16 @@ async function createPdfSourceWhole(
 }
 
 export async function pickSourcesFromFiles(): Promise<ImportResult> {
-  const filePaths = await DocumentPicker.pickFiles({
+  const initialDirectory = getImportInitialDirectory()
+  const pickerOptions: PickFilesOption = {
     types: ["public.image", "com.adobe.pdf"],
     allowsMultipleSelection: true,
-  })
+  }
+  if (initialDirectory) {
+    pickerOptions.initialDirectory = initialDirectory
+  }
+
+  const filePaths = await DocumentPicker.pickFiles(pickerOptions)
 
   if (!filePaths || filePaths.length === 0) {
     return { sources: [], notices: [] }

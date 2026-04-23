@@ -19,7 +19,7 @@ import {
 } from "scripting"
 import type { SourceItem } from "../types"
 import { SourceBlockView } from "./SourceBlockView"
-import { pickSourcesFromFiles, pickSourcesFromPhotos } from "../utils/importer"
+import { chooseImportInitialDirectory, pickSourcesFromFiles, pickSourcesFromPhotos } from "../utils/importer"
 import { buildOutputFileName } from "../utils/id"
 import { convertSelectedImagesToPdf, getSelectedPages, mergeSelectedPagesToPdf } from "../utils/pdf_ops"
 
@@ -256,6 +256,24 @@ export function PDFHelperView() {
     }
   }, [isBusy])
 
+  const setImportDirectory = useCallback(async () => {
+    if (isBusy) return
+    try {
+      const directory = await chooseImportInitialDirectory()
+      if (!directory) return
+      await Dialog.alert({
+        title: "默认导入路径已设置",
+        message: directory,
+      })
+    } catch (error: any) {
+      if (isUserCancelled(error)) return
+      await Dialog.alert({
+        title: "设置失败",
+        message: String(error?.message ?? error),
+      })
+    }
+  }, [isBusy])
+
   const deleteSelected = useCallback(async () => {
     if (!canDeleteSelected) return
     const ok = await Dialog.confirm({
@@ -362,10 +380,19 @@ export function PDFHelperView() {
             </ZStack>
           ),
           topBarTrailing: (
-            <Menu label={<Image systemName="plus" />}>
-              <Button title="添加文件" systemImage="doc.badge.plus" action={() => void addFromFiles()} />
-              <Button title="添加照片" systemImage="photo.on.rectangle.angled" action={() => void addFromPhotos()} />
-            </Menu>
+            <HStack spacing={8}>
+              <Button
+                title=""
+                systemImage="folder"
+                foregroundStyle={isBusy ? "secondaryLabel" : "systemBlue"}
+                disabled={isBusy}
+                action={() => void setImportDirectory()}
+              />
+              <Menu title="" systemImage="plus">
+                <Button title="添加文件" systemImage="doc.badge.plus" action={() => void addFromFiles()} />
+                <Button title="添加照片" systemImage="photo.on.rectangle.angled" action={() => void addFromPhotos()} />
+              </Menu>
+            </HStack>
           ),
         }}
         spacing={0}
