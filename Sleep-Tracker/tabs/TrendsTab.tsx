@@ -16,7 +16,7 @@ import {
 } from "scripting"
 import { buildDashboardBundle, type DashboardDay } from "../data/dashboard"
 import { MetricTile, SoftCard } from "../components/common"
-import { palette, scoreEmoji, scoreLabel, scoreTone, stageColor } from "../theme"
+import { bedtimeEmoji, bedtimeTone, palette, scoreLabel, scoreTone, stageColor } from "../theme"
 import type { SleepTrackerSettings, SleepTrackerSnapshot } from "../types"
 import {
   addDays,
@@ -342,31 +342,20 @@ function buildStageSummary(days: DashboardDay[]) {
   ]
 }
 
-function calendarScoreBackground(score: number | null): string {
-  if (score == null) return "#D9DCE8"
-  if (score >= 85) return "#80D9B8"
-  if (score >= 75) return "#FDB44E"
-  if (score >= 65) return "#FF9C7B"
-  return "#FF7B7B"
-}
-
 function calendarBucketLabel(bucket: TrendBucket, mode: TrendMode): string {
   if (mode === "year" || mode === "all") return bucket.label
   return formatMonthDayFromKey(bucket.key).replace("月", "/").replace("日", "")
 }
 
 function buildCalendarItems(buckets: TrendBucket[], mode: TrendMode, placeholder = false) {
-  const placeholderTimes = ["22:41", "23:14", "22:58", "23:37", "22:26", "23:05"]
-  const placeholderScores = [92, 84, 77, 69, 88, 73]
-
-  return buckets.map((bucket, index) => {
+  return buckets.map((bucket) => {
     if (placeholder) {
       return {
         key: bucket.key,
         label: calendarBucketLabel(bucket, mode),
         bedtime: null,
         emoji: null,
-        background: calendarScoreBackground(null),
+        background: bedtimeTone(null),
       }
     }
 
@@ -374,10 +363,7 @@ function buildCalendarItems(buckets: TrendBucket[], mode: TrendMode, placeholder
     const bedtimeValues = daysWithBedtime
       .map((day) => wrappedMinutes(day.bedtimeISO))
       .filter((value): value is number => value != null)
-    const scores = daysWithBedtime
-      .map((day) => day.sleepScore)
-      .filter((value): value is number => value != null)
-    const averageScore = scores.length ? average(scores) : null
+    const displayBedtime = bedtimeValues.length ? average(bedtimeValues) : null
 
     return {
       key: bucket.key,
@@ -385,9 +371,9 @@ function buildCalendarItems(buckets: TrendBucket[], mode: TrendMode, placeholder
       bedtime:
         mode === "week" || mode === "month"
           ? formatClockFromISO(daysWithBedtime[0]?.bedtimeISO)
-          : formatWrappedClock(bedtimeValues.length ? average(bedtimeValues) : null),
-      emoji: scoreEmoji(averageScore),
-      background: calendarScoreBackground(averageScore),
+          : formatWrappedClock(displayBedtime),
+      emoji: bedtimeEmoji(displayBedtime),
+      background: bedtimeTone(displayBedtime),
     }
   })
 }

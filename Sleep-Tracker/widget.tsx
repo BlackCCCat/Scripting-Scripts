@@ -28,7 +28,7 @@ import {
 import {
   loadSleepTrackerSettings,
 } from "./data/settings"
-import { palette, scoreEmoji, scoreTone } from "./theme"
+import { bedtimeEmoji, bedtimeTone, palette, scoreTone } from "./theme"
 import {
   average,
   chunkArray,
@@ -47,13 +47,37 @@ const BG_SMALL = { style: "systemBackground" as any, shape: { type: "rect" as co
 const BG_LARGE = { style: "systemBackground" as any, shape: { type: "rect" as const, cornerRadius: 24 } }
 const CHART_HIDDEN = { chartLegend: "hidden" as const }
 const WIDGET_QUERY_DAYS = 60
+const WIDGET_RELOAD_TIMES = [
+  { hour: 0, minute: 5 },
+  { hour: 7, minute: 30 },
+  { hour: 9, minute: 30 },
+  { hour: 12, minute: 30 },
+  { hour: 18, minute: 30 },
+]
 
 // ── Helpers ──
+
+function reloadDateAt(base: Date, hour: number, minute: number): Date {
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate(), hour, minute)
+}
+
+function nextReloadDate(now = new Date()): Date {
+  for (const item of WIDGET_RELOAD_TIMES) {
+    const candidate = reloadDateAt(now, item.hour, item.minute)
+    if (candidate.getTime() > now.getTime() + 60 * 1000) {
+      return candidate
+    }
+  }
+
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  const firstReload = WIDGET_RELOAD_TIMES[0]
+  return reloadDateAt(tomorrow, firstReload.hour, firstReload.minute)
+}
 
 function reloadPolicy() {
   return {
     policy: "after" as const,
-    date: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    date: nextReloadDate(),
   }
 }
 
@@ -186,14 +210,6 @@ function formatWrappedClock(minutes: number | null): string {
   return `${`${Math.floor(n / 60)}`.padStart(2, "0")}:${`${n % 60}`.padStart(2, "0")}`
 }
 
-function bedtimeBadgeTone(score: number | null) {
-  if (score == null) return "tertiarySystemFill"
-  if (score >= 85) return "#80D9B8"
-  if (score >= 75) return "#FDB44E"
-  if (score >= 65) return "#FF9C7B"
-  return "#FF7B7B"
-}
-
 function bedtimeSummary(days: DashboardDay[]) {
   const sleepDays = days.filter((day) => day.bedtimeISO)
   const bedtimeValues = sleepDays.map((day) => wrappedMinutes(day.bedtimeISO)).filter((value): value is number => value != null)
@@ -221,9 +237,9 @@ function BedtimeStrip(props: { days: DashboardDay[]; count: number; rows?: numbe
               <Text
                 font={{ size: 22 } as any}
                 frame={{ width: 34, height: 34, alignment: "center" as any }}
-                background={{ style: bedtimeBadgeTone(day.sleepScore) as any, shape: { type: "rect", cornerRadius: 17 } } as any}
+                background={{ style: bedtimeTone(wrappedMinutes(day.bedtimeISO)) as any, shape: { type: "rect", cornerRadius: 17 } } as any}
               >
-                {day.bedtimeISO ? scoreEmoji(day.sleepScore) : "—"}
+                {day.bedtimeISO ? bedtimeEmoji(wrappedMinutes(day.bedtimeISO)) : "—"}
               </Text>
               <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
                 {day.bedtimeISO ? formatClockFromISO(day.bedtimeISO) : "--"}

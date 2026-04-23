@@ -65,6 +65,24 @@ export function scoreEmoji(score: number | null): string {
   return "😣"
 }
 
+export function bedtimeEmoji(minutes: number | null): string {
+  if (minutes == null || !Number.isFinite(minutes)) return "😴"
+  if (minutes <= 23 * 60 + 30) return "😄"
+  if (minutes <= 24 * 60 + 30) return "🙂"
+  if (minutes <= 25 * 60 + 30) return "😐"
+  if (minutes <= 26 * 60 + 30) return "😕"
+  return "😣"
+}
+
+export function bedtimeTone(minutes: number | null): string {
+  if (minutes == null || !Number.isFinite(minutes)) return "#D9DCE8"
+  if (minutes <= 23 * 60 + 30) return "#80D9B8"
+  if (minutes <= 24 * 60 + 30) return "#A9C7FF"
+  if (minutes <= 25 * 60 + 30) return "#FDB44E"
+  if (minutes <= 26 * 60 + 30) return "#FF9C7B"
+  return "#FF7B7B"
+}
+
 export function scoreTone(score: number | null): string {
   if (score == null) return "secondaryLabel"
   if (score >= 85) return palette.accentDeep
