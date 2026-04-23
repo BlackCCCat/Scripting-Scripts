@@ -10,6 +10,7 @@ import {
   Section,
   Spacer,
   Text,
+  Toggle,
   VStack,
   useEffect,
   useMemo,
@@ -33,8 +34,14 @@ import {
 import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
+import { RemoteControlView } from "./RemoteControlView"
 import { SettingsView } from "./SettingsView"
 import { ActionTileButton } from "./ActionTileButton"
+import {
+  fetchEnabledModuleNames,
+  getModuleRemoteName,
+  setRemoteModuleEnabled,
+} from "../utils/remote_control"
 
 export function HomeView() {
   const withButtonHaptic = (action: () => void | Promise<void>) => () => {
@@ -48,6 +55,8 @@ export function HomeView() {
   const [busy, setBusy] = useState(false)
   const [resolvedBaseDir, setResolvedBaseDir] = useState("")
   const [filterCategory, setFilterCategory] = useState("全部")
+  const [enabledModuleNames, setEnabledModuleNames] = useState<Set<string>>(new Set())
+  const [togglingModuleNames, setTogglingModuleNames] = useState<Set<string>>(new Set())
   const categories = cfg.categories ?? []
   const filterOptions = ["全部", ...categories]
   const filterIdx = Math.max(0, filterOptions.indexOf(filterCategory))
@@ -83,6 +92,7 @@ export function HomeView() {
   })
   const onlyLocalFiltered =
     filteredModules.length > 0 && filteredModules.every((m) => m.isLocal || !m.link)
+  const remoteControlReady = !!String(cfg.remotePort ?? "").trim()
 
   function inferSaveDir(m: ModuleInfo): string | undefined {
     if (!m.filePath) return undefined
@@ -112,6 +122,10 @@ export function HomeView() {
   }, [])
 
   useEffect(() => {
+    void refreshRemoteModules(true)
+  }, [cfg.remotePort, cfg.remotePassword])
+
+  useEffect(() => {
     if (filterDir !== "全部" && !dirOptions.includes(filterDir)) {
       setFilterDir("全部")
     }
@@ -138,6 +152,37 @@ export function HomeView() {
     })
     setCfg(loadConfig())
     await refreshModules(true)
+  }
+
+  async function openRemoteSettings() {
+    await Navigation.present({
+      element: (
+        <RemoteControlView
+          initial={loadConfig()}
+          onDone={(next) => {
+            setCfg(next)
+            void refreshRemoteModules(true, next)
+          }}
+        />
+      ),
+    })
+    const next = loadConfig()
+    setCfg(next)
+    await refreshRemoteModules(true, next)
+  }
+
+  async function refreshRemoteModules(silent = false, nextCfg: AppConfig = cfg) {
+    if (!String(nextCfg.remotePort ?? "").trim()) {
+      setEnabledModuleNames(new Set())
+      return
+    }
+    try {
+      const enabled = await fetchEnabledModuleNames(nextCfg)
+      setEnabledModuleNames(enabled)
+    } catch (e: any) {
+      setEnabledModuleNames(new Set())
+      if (!silent) setStage(`远程状态获取失败：${String(e?.message ?? e)}`)
+    }
   }
 
   async function addModule() {
@@ -399,6 +444,48 @@ export function HomeView() {
     await downloadBatch(list, "下载全部模块…")
   }
 
+  async function toggleRemoteModule(target: ModuleInfo, nextValue: boolean) {
+    const remoteName = getModuleRemoteName(target)
+    if (!remoteControlReady) {
+      await Dialog.alert({ message: "请先配置 HTTP 远程控制端口" })
+      return
+    }
+    if (!remoteName) {
+      await Dialog.alert({ message: "未找到模块远程名称" })
+      return
+    }
+
+    HapticFeedback.heavyImpact()
+    setTogglingModuleNames((prev) => new Set([...prev, remoteName]))
+    setEnabledModuleNames((prev) => {
+      const next = new Set(prev)
+      if (nextValue) next.add(remoteName)
+      else next.delete(remoteName)
+      return next
+    })
+
+    try {
+      await setRemoteModuleEnabled(cfg, remoteName, nextValue)
+    } catch (e: any) {
+      setEnabledModuleNames((prev) => {
+        const next = new Set(prev)
+        if (nextValue) next.delete(remoteName)
+        else next.add(remoteName)
+        return next
+      })
+      await Dialog.alert({
+        title: "远程控制失败",
+        message: `${remoteName}\n${String(e?.message ?? e)}`,
+      })
+    } finally {
+      setTogglingModuleNames((prev) => {
+        const next = new Set(prev)
+        next.delete(remoteName)
+        return next
+      })
+    }
+  }
+
 
   return (
     <NavigationStack>
@@ -407,6 +494,7 @@ export function HomeView() {
         navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}
         toolbar={{
+          topBarLeading: <Button title="" systemImage="switch.2" action={withButtonHaptic(openRemoteSettings)} />,
           topBarTrailing: <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />,
         }}
       >
@@ -489,41 +577,61 @@ export function HomeView() {
             <Text>暂无模块</Text>
           ) : (
             filteredModules.map((m) => (
-              <VStack
-                key={`${m.name}-${m.link}`}
-                contextMenu={{
-                  menuItems: (
-                    <Group>
-                      <Button title="查看模块" action={withButtonHaptic(() => viewModuleContent(m))} />
-                      <Button title="复制链接" action={withButtonHaptic(() => copyModuleLink(m))} />
-                      <Button title="删除" role="destructive" action={withButtonHaptic(() => deleteModuleFor(m))} />
-                    </Group>
-                  ),
-                }}
-                leadingSwipeActions={{
-                  allowsFullSwipe: false,
-                  actions: [
-                    <Button
-                      title="更新"
-                      tint={m.link ? "systemGreen" : "systemGray"}
-                      disabled={!m.link}
-                      action={withButtonHaptic(() => downloadSingle(m))}
-                    />,
-                  ],
-                }}
-                trailingSwipeActions={{
-                  allowsFullSwipe: false,
-                  actions: [
-                    <Button title="编辑" tint="systemOrange" action={withButtonHaptic(() => modifyModuleFor(m))} />,
-                  ],
-                }}
-              >
-                <HStack>
-                  <Text font="headline">{m.name}</Text>
-                  <Spacer />
-                  {m.category ? <Text>{m.category}</Text> : null}
-                </HStack>
-              </VStack>
+              (() => {
+                const remoteName = getModuleRemoteName(m)
+                return (
+                  <VStack
+                    key={`${m.name}-${m.link}`}
+                    contextMenu={{
+                      menuItems: (
+                        <Group>
+                          <Button title="查看模块" action={withButtonHaptic(() => viewModuleContent(m))} />
+                          <Button title="复制链接" action={withButtonHaptic(() => copyModuleLink(m))} />
+                          <Button title="删除" role="destructive" action={withButtonHaptic(() => deleteModuleFor(m))} />
+                        </Group>
+                      ),
+                    }}
+                    leadingSwipeActions={{
+                      allowsFullSwipe: false,
+                      actions: [
+                        <Button
+                          title="更新"
+                          tint={m.link ? "systemGreen" : "systemGray"}
+                          disabled={!m.link}
+                          action={withButtonHaptic(() => downloadSingle(m))}
+                        />,
+                      ],
+                    }}
+                    trailingSwipeActions={{
+                      allowsFullSwipe: false,
+                      actions: [
+                        <Button title="编辑" tint="systemOrange" action={withButtonHaptic(() => modifyModuleFor(m))} />,
+                      ],
+                    }}
+                  >
+                    <HStack>
+                      <VStack alignment="leading" spacing={3}>
+                        <Text font="headline">{m.name}</Text>
+                        {m.category ? (
+                          <Text font="caption" foregroundStyle="secondaryLabel">
+                            {m.category}
+                          </Text>
+                        ) : null}
+                      </VStack>
+                      <Spacer />
+                      <Toggle
+                        title=""
+                        value={enabledModuleNames.has(remoteName)}
+                        disabled={!remoteControlReady || togglingModuleNames.has(remoteName)}
+                        toggleStyle="switch"
+                        onChanged={(value: boolean) => {
+                          void toggleRemoteModule(m, value)
+                        }}
+                      />
+                    </HStack>
+                  </VStack>
+                )
+              })()
             ))
           )}
         </Section>

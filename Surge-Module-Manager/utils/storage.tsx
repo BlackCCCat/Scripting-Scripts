@@ -4,6 +4,7 @@ import { loadConfig } from "./config"
 export type ModuleInfo = {
   name: string
   link: string
+  surgeName?: string
   category?: string
   filePath?: string
   saveDir?: string
@@ -244,7 +245,8 @@ export async function loadModules(): Promise<ModuleInfo[]> {
       !["0", "false", "no"].includes(String(localTag).trim().toLowerCase())
     if (!link && !isLocal) continue
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
-    modules.push({ name, link, category, filePath: path, isLocal })
+    const surgeName = parseTag(text, "name") ?? undefined
+    modules.push({ name, link, surgeName, category, filePath: path, isLocal })
   }
   return modules
 }

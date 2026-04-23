@@ -4,6 +4,9 @@ export type AppConfig = {
   categories: string[]
   linkPatternsText: string
   downloadConcurrency: number
+  remoteHost: string
+  remotePort: string
+  remotePassword: string
 }
 
 const KEY = "surge_modules_manager_cfg_v1"
@@ -14,6 +17,9 @@ const DEFAULT_CONFIG: AppConfig = {
   categories: [],
   linkPatternsText: "#!url=",
   downloadConcurrency: 3,
+  remoteHost: "http://127.0.0.1",
+  remotePort: "6171",
+  remotePassword: "",
 }
 
 function normalizeDownloadConcurrency(value: unknown): number {
@@ -46,6 +52,9 @@ export function loadConfig(): AppConfig {
     const baseBookmarkName = String(obj?.baseBookmarkName ?? "").trim()
     const linkPatternsText = String(obj?.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText)
     const downloadConcurrency = normalizeDownloadConcurrency(obj?.downloadConcurrency)
+    const remoteHost = String(obj?.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost
+    const remotePort = String(obj?.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort
+    const remotePassword = String(obj?.remotePassword ?? "")
     return {
       ...DEFAULT_CONFIG,
       ...obj,
@@ -54,6 +63,9 @@ export function loadConfig(): AppConfig {
       baseBookmarkName,
       linkPatternsText,
       downloadConcurrency,
+      remoteHost,
+      remotePort,
+      remotePassword,
     }
   } catch {
     return DEFAULT_CONFIG
@@ -68,6 +80,9 @@ export function saveConfig(cfg: AppConfig): void {
     categories: normalizeCategories(cfg.categories ?? []),
     linkPatternsText: String(cfg.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText),
     downloadConcurrency: normalizeDownloadConcurrency(cfg.downloadConcurrency),
+    remoteHost: String(cfg.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost,
+    remotePort: String(cfg.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort,
+    remotePassword: String(cfg.remotePassword ?? ""),
   }
   const raw = JSON.stringify(fixed)
   if (st?.set) st.set(KEY, raw)
