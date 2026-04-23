@@ -81,8 +81,17 @@ async function askPdfImportOptions(fileName: string, pageCount: number): Promise
 
   const defaultRange = `1-${pageCount}`
 
+  return askPdfPageRange(fileName, pageCount, defaultRange)
+}
+
+async function askPdfPageRange(
+  fileName: string,
+  pageCount: number,
+  defaultRange = `1-${pageCount}`,
+  progressLabel?: string
+): Promise<PdfImportOptions | null> {
   const rangeInput = await Dialog.prompt({
-    title: "选择页码范围",
+    title: progressLabel ? `${fileName} ${progressLabel}` : fileName,
     message: `共 ${pageCount} 页，无页数上限。\n请输入导入范围，例如 "${defaultRange}" 或 "5-20"`,
     placeholder: defaultRange,
     defaultValue: defaultRange,
@@ -235,13 +244,17 @@ export async function pickSourcesFromFiles(): Promise<ImportResult> {
   const pdfPaths = filePaths.filter((p: string) => isPdfPath(p))
   const nonPdfPaths = filePaths.filter((p: string) => !isPdfPath(p))
 
-  let pdfOptions: PdfImportOptions | null = null
+  const pdfOptionsByPath = new Map<string, PdfImportOptions>()
   if (pdfPaths.length > 0) {
     const firstPdf = PDFDocument.fromFilePath(pdfPaths[0])
     const firstPageCount = firstPdf?.pageCount ?? 0
 
     if (pdfPaths.length === 1) {
-      pdfOptions = await askPdfImportOptions(Path.basename(pdfPaths[0]), firstPageCount)
+      const pdfOptions = await askPdfImportOptions(Path.basename(pdfPaths[0]), firstPageCount)
+      if (pdfOptions == null) {
+        return { sources: [], notices: [] }
+      }
+      pdfOptionsByPath.set(pdfPaths[0], pdfOptions)
     } else {
       const usePerPage = await Dialog.confirm({
         title: `导入 ${pdfPaths.length} 个 PDF 文件`,
@@ -251,33 +264,32 @@ export async function pickSourcesFromFiles(): Promise<ImportResult> {
       })
 
       if (usePerPage) {
-        const maxPc = Math.max(...pdfPaths.map((p: string) => {
-          const doc = PDFDocument.fromFilePath(p)
-          return doc?.pageCount ?? 0
-        }))
-        const defaultRange = `1-${maxPc > 0 ? maxPc : 100}`
-        const rangeInput = await Dialog.prompt({
-          title: "选择页码范围",
-          message: `请输入统一的导入范围，例如 "${defaultRange}"`,
-          placeholder: defaultRange,
-          defaultValue: defaultRange,
-        })
+        for (let idx = 0; idx < pdfPaths.length; idx += 1) {
+          const filePath = pdfPaths[idx]
+          const document = PDFDocument.fromFilePath(filePath)
+          const pageCount = document?.pageCount ?? 0
+          if (!document || document.isLocked || pageCount <= 0) {
+            pdfOptionsByPath.set(filePath, { mode: "per-page", startPage: 1, endPage: 99999 })
+            continue
+          }
+          const defaultRange = `1-${pageCount}`
+          const pdfOptions = await askPdfPageRange(
+            Path.basename(filePath),
+            pageCount,
+            defaultRange,
+            `（${idx + 1}/${pdfPaths.length}）`
+          )
 
-        if (rangeInput == null) {
-          pdfOptions = null
-        } else {
-          const parsed = parsePageRange(rangeInput, maxPc > 0 ? maxPc : 99999)
-          pdfOptions = parsed
-            ? { mode: "per-page", startPage: parsed.start, endPage: parsed.end }
-            : { mode: "per-page", startPage: 1, endPage: maxPc > 0 ? maxPc : 99999 }
+          if (pdfOptions == null) {
+            return { sources: [], notices: [] }
+          }
+          pdfOptionsByPath.set(filePath, pdfOptions)
         }
       } else {
-        pdfOptions = { mode: "whole", startPage: 1, endPage: 99999 }
+        for (const filePath of pdfPaths) {
+          pdfOptionsByPath.set(filePath, { mode: "whole", startPage: 1, endPage: 99999 })
+        }
       }
-    }
-
-    if (pdfOptions == null) {
-      return { sources: [], notices: [] }
     }
   }
 
@@ -301,15 +313,18 @@ export async function pickSourcesFromFiles(): Promise<ImportResult> {
   }
 
   for (const filePath of pdfPaths) {
-    if (pdfOptions!.mode === "whole") {
+    const pdfOptions = pdfOptionsByPath.get(filePath)
+    if (!pdfOptions) continue
+
+    if (pdfOptions.mode === "whole") {
       const { source, notice } = await createPdfSourceWhole(filePath)
       if (source) sources.push(source)
       if (notice) notices.push(notice)
     } else {
       const { source, notice } = await createPdfSourcePerPage(
         filePath,
-        pdfOptions!.startPage,
-        pdfOptions!.endPage
+        pdfOptions.startPage,
+        pdfOptions.endPage
       )
       if (source) sources.push(source)
       if (notice) notices.push(notice)
