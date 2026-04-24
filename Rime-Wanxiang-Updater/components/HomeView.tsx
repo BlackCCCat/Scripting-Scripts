@@ -9,22 +9,25 @@ import {
   Tab,
   TabView,
   Rectangle,
+  RoundedRectangle,
   Section,
   Divider,
   Spacer,
   Text,
   HStack,
   VStack,
+  ZStack,
   ScrollView,
   ScrollViewReader,
   ProgressView,
+  useColorScheme,
   useEffect,
   useObservable,
   useRef,
   useState,
   Markdown,
   Path,
-} from "scripting"
+} from "scripting";
 
 import {
   loadConfig,
@@ -32,11 +35,19 @@ import {
   type HomeSectionKey,
   type ProSchemeKey,
   PRO_KEYS,
-} from "../utils/config"
-import { SettingsView } from "./SettingsView"
-import { loadMetaAsync, type MetaBundle } from "../utils/meta"
-import { detectRimeDir, verifyInstallPathAccess, collectRimeCandidates } from "../utils/hamster"
-import { getCheckCacheKey, loadSharedCheckCache, saveSharedCheckCache } from "../utils/check_cache"
+} from "../utils/config";
+import { SettingsView } from "./SettingsView";
+import { loadMetaAsync, type MetaBundle } from "../utils/meta";
+import {
+  detectRimeDir,
+  verifyInstallPathAccess,
+  collectRimeCandidates,
+} from "../utils/hamster";
+import {
+  getCheckCacheKey,
+  loadSharedCheckCache,
+  saveSharedCheckCache,
+} from "../utils/check_cache";
 import {
   checkAllUpdates,
   updateScheme,
@@ -45,125 +56,201 @@ import {
   autoUpdateAll,
   deployInputMethod,
   type AllUpdateResult,
-} from "../utils/update_tasks"
-import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
-import { normalizePath, sleep } from "../utils/common"
+} from "../utils/update_tasks";
+import { clearWanxiangTempFiles } from "../utils/cache_cleanup";
+import { normalizePath, sleep } from "../utils/common";
 
-const FULLSCREEN_SYMBOL = "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left"
+const FULLSCREEN_SYMBOL =
+  "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left";
 
 function clamp01(v: number) {
-  return Math.max(0, Math.min(1, v))
+  return Math.max(0, Math.min(1, v));
 }
 
 function readFraction(x: any): number | undefined {
   const toNum = (v: any) => {
-    if (typeof v === "number" && Number.isFinite(v)) return v
+    if (typeof v === "number" && Number.isFinite(v)) return v;
     if (typeof v === "string") {
-      const n = Number(v)
-      if (Number.isFinite(n)) return n
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
     }
-    return undefined
-  }
+    return undefined;
+  };
 
-  const direct = toNum(x)
-  if (direct !== undefined) return direct
+  const direct = toNum(x);
+  if (direct !== undefined) return direct;
 
-  const p1 = toNum(x?.percent)
-  if (p1 !== undefined) return p1
+  const p1 = toNum(x?.percent);
+  if (p1 !== undefined) return p1;
 
-  const p2 = toNum(x?.fractionCompleted)
-  if (p2 !== undefined) return p2
+  const p2 = toNum(x?.fractionCompleted);
+  if (p2 !== undefined) return p2;
 
-  const p3 = toNum(x?.progress?.fractionCompleted)
-  if (p3 !== undefined) return p3
+  const p3 = toNum(x?.progress?.fractionCompleted);
+  if (p3 !== undefined) return p3;
 
-  return undefined
+  return undefined;
 }
 
 function pctFromFraction(f?: number) {
-  const v = typeof f === "number" && Number.isFinite(f) ? clamp01(f) : 0
-  return `${(v * 100).toFixed(2)}%`
+  const v = typeof f === "number" && Number.isFinite(f) ? clamp01(f) : 0;
+  return `${(v * 100).toFixed(2)}%`;
 }
 
 function selectedSchemeFromConfig(cfg: AppConfig): string {
-  return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`
+  return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`;
 }
 
 function normalizeMetaScheme(
   metaScheme: MetaBundle["scheme"],
-  fallback: AppConfig
+  fallback: AppConfig,
 ): {
-  selected: string
-  schemeEdition?: AppConfig["schemeEdition"]
-  proSchemeKey?: ProSchemeKey
+  selected: string;
+  schemeEdition?: AppConfig["schemeEdition"];
+  proSchemeKey?: ProSchemeKey;
 } {
-  if (!metaScheme) return { selected: selectedSchemeFromConfig(fallback) }
-  const edition = metaScheme.schemeEdition
-  const proKey = metaScheme.proSchemeKey
-  const validProKey = proKey && (PRO_KEYS as string[]).includes(proKey) ? proKey : undefined
+  if (!metaScheme) return { selected: selectedSchemeFromConfig(fallback) };
+  const edition = metaScheme.schemeEdition;
+  const proKey = metaScheme.proSchemeKey;
+  const validProKey =
+    proKey && (PRO_KEYS as string[]).includes(proKey) ? proKey : undefined;
   const selected =
     metaScheme.selectedScheme ??
     (edition === "base"
       ? "base"
       : edition === "pro"
         ? `pro (${validProKey ?? fallback.proSchemeKey})`
-        : selectedSchemeFromConfig(fallback))
+        : selectedSchemeFromConfig(fallback));
   return {
     selected,
     schemeEdition: edition,
-    proSchemeKey: edition === "pro" ? (validProKey ?? fallback.proSchemeKey) : undefined,
-  }
+    proSchemeKey:
+      edition === "pro" ? (validProKey ?? fallback.proSchemeKey) : undefined,
+  };
 }
 
 function GridButton(props: {
-  title: string
-  icon: string
-  disabled?: boolean
-  color?: string
-  onPress: () => void
+  title: string;
+  icon: string;
+  disabled?: boolean;
+  color?: string;
+  onPress: () => void;
 }) {
+  const colorScheme = useColorScheme();
   const haptic = () => {
     try {
-      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-    } catch { }
-  }
-  const tintColor: any = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
+      (globalThis as any).HapticFeedback?.mediumImpact?.();
+    } catch {}
+  };
+  const tintColor: any = props.disabled
+    ? "secondaryLabel"
+    : (props.color ?? "systemBlue");
+  const darkCardFill: any = props.disabled
+    ? "rgba(58,58,60,0.72)"
+    : "rgba(58,58,60,0.96)";
   return (
     <Button
       action={() => {
-        haptic()
-        props.onPress()
+        haptic();
+        props.onPress();
       }}
       disabled={props.disabled}
-      buttonStyle="glass"
+      buttonStyle="plain"
       tint={tintColor}
       frame={{ maxWidth: "infinity", minHeight: 62 }}
     >
-      <VStack
-        spacing={3}
-        frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
-        padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
-      >
-        <Spacer />
-        <Image
-          systemName={props.icon}
-          font="title2"
-          frame={{ height: 22 }}
-          foregroundStyle={tintColor}
-        />
-        <Text
-          font="footnote"
-          frame={{ maxWidth: "infinity", minHeight: 16, alignment: "center" as any }}
-          lineLimit={1}
-          multilineTextAlignment="center"
-          foregroundStyle={tintColor}
+      {colorScheme === "dark" ? (
+        <ZStack
+          frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+          background={"rgba(0,0,0,0.001)"}
         >
-          {props.title}
-        </Text>
-        <Spacer />
-      </VStack>
+          <RoundedRectangle
+            cornerRadius={16}
+            fill={darkCardFill}
+            stroke={"separator"}
+            frame={{
+              maxWidth: "infinity",
+              minHeight: 62,
+              maxHeight: "infinity",
+            }}
+          />
+          <VStack
+            spacing={3}
+            frame={{
+              maxWidth: "infinity",
+              minHeight: 62,
+              maxHeight: "infinity",
+            }}
+            padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
+          >
+            <Spacer />
+            <Image
+              systemName={props.icon}
+              font="title2"
+              frame={{ height: 22 }}
+              foregroundStyle={tintColor}
+            />
+            <Text
+              font="footnote"
+              frame={{
+                maxWidth: "infinity",
+                minHeight: 16,
+                alignment: "center" as any,
+              }}
+              lineLimit={1}
+              multilineTextAlignment="center"
+              foregroundStyle={tintColor}
+            >
+              {props.title}
+            </Text>
+            <Spacer />
+          </VStack>
+        </ZStack>
+      ) : (
+        <VStack
+          spacing={0}
+          frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
+          background={{
+            style: "secondarySystemBackground",
+            shape: { type: "rect", cornerRadius: 16 },
+          }}
+        >
+          <VStack
+            spacing={3}
+            frame={{
+              maxWidth: "infinity",
+              minHeight: 62,
+              maxHeight: "infinity",
+            }}
+            padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
+            background={"rgba(0,0,0,0.001)"}
+          >
+            <Spacer />
+            <Image
+              systemName={props.icon}
+              font="title2"
+              frame={{ height: 22 }}
+              foregroundStyle={tintColor}
+            />
+            <Text
+              font="footnote"
+              frame={{
+                maxWidth: "infinity",
+                minHeight: 16,
+                alignment: "center" as any,
+              }}
+              lineLimit={1}
+              multilineTextAlignment="center"
+              foregroundStyle={tintColor}
+            >
+              {props.title}
+            </Text>
+            <Spacer />
+          </VStack>
+        </VStack>
+      )}
     </Button>
-  )
+  );
 }
 
 function RowKV(props: { k: string; v: string }) {
@@ -173,54 +260,62 @@ function RowKV(props: { k: string; v: string }) {
       <Spacer />
       <Text>{props.v}</Text>
     </HStack>
-  )
+  );
 }
 
-type AlertNode = any
+type AlertNode = any;
 type AlertState = {
-  title: string
-  isPresented: boolean
-  message: AlertNode
-  actions: AlertNode
-}
+  title: string;
+  isPresented: boolean;
+  message: AlertNode;
+  actions: AlertNode;
+};
 
-type LogLevel = "INFO" | "WARN" | "ERROR" | "SUCCESS"
-type LogScope = "SYSTEM" | "CHECK" | "SCHEME" | "DICT" | "MODEL" | "AUTO" | "DEPLOY" | "PATH"
+type LogLevel = "INFO" | "WARN" | "ERROR" | "SUCCESS";
+type LogScope =
+  | "SYSTEM"
+  | "CHECK"
+  | "SCHEME"
+  | "DICT"
+  | "MODEL"
+  | "AUTO"
+  | "DEPLOY"
+  | "PATH";
 
 type LogEntry = {
-  id: string
-  at: string
-  level: LogLevel
-  scope: LogScope
-  message: string
-}
+  id: string;
+  at: string;
+  level: LogLevel;
+  scope: LogScope;
+  message: string;
+};
 
 type UpdateDecision = {
-  scheme: boolean
-  dict: boolean
-  model: boolean
-}
+  scheme: boolean;
+  dict: boolean;
+  model: boolean;
+};
 
 type HomeSessionState = {
-  remoteSchemeVer: string
-  remoteDictMark: string
-  remoteModelMark: string
-  notes: string
-  lastCheck: AllUpdateResult | null
-  lastCheckDecision: UpdateDecision | null
-  lastCheckKey: string
-  logs: LogEntry[]
-}
+  remoteSchemeVer: string;
+  remoteDictMark: string;
+  remoteModelMark: string;
+  notes: string;
+  lastCheck: AllUpdateResult | null;
+  lastCheckDecision: UpdateDecision | null;
+  lastCheckKey: string;
+  logs: LogEntry[];
+};
 
-const EDITOR_TAB = 0
-const MAIN_TAB = 1
-const SETTINGS_TAB = 2
+const EDITOR_TAB = 0;
+const MAIN_TAB = 1;
+const SETTINGS_TAB = 2;
 
 type FileBrowserEntry = {
-  name: string
-  path: string
-  isDirectory: boolean
-}
+  name: string;
+  path: string;
+  isDirectory: boolean;
+};
 
 const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
   remoteSchemeVer: "请检查更新",
@@ -231,153 +326,218 @@ const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
   lastCheckDecision: null,
   lastCheckKey: "",
   logs: [],
-}
+};
 
-let homeSessionState: HomeSessionState = { ...DEFAULT_HOME_SESSION_STATE }
-let launchAutoCheckHandled = false
-let lastHandledLaunchActionKey = ""
+let homeSessionState: HomeSessionState = { ...DEFAULT_HOME_SESSION_STATE };
+let launchAutoCheckHandled = false;
+let lastHandledLaunchActionKey = "";
 
 function nowTimeLabel(date = new Date()) {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function makeLogEntry(level: LogLevel, scope: LogScope, message: string): LogEntry {
+function makeLogEntry(
+  level: LogLevel,
+  scope: LogScope,
+  message: string,
+): LogEntry {
   return {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     at: nowTimeLabel(),
     level,
     scope,
     message: String(message ?? "").trim(),
-  }
+  };
 }
 
 function formatLogEntry(entry: LogEntry): string {
-  return `${entry.at} [${entry.level}] [${entry.scope}] ${entry.message}`
+  return `${entry.at} [${entry.level}] [${entry.scope}] ${entry.message}`;
 }
 
 function replacePathPrefix(message: string, rootPath: string): string {
-  const root = String(rootPath ?? "").trim().replace(/\/+$/, "")
-  if (!root) return message
-  const slash = root.lastIndexOf("/")
-  const rootName = slash >= 0 ? root.slice(slash + 1) : root
-  if (!rootName) return message
-  const variants = new Set<string>([root])
-  if (root.startsWith("/private/")) variants.add(root.slice("/private".length))
-  else if (root.startsWith("/")) variants.add(`/private${root}`)
-  let out = message
+  const root = String(rootPath ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (!root) return message;
+  const slash = root.lastIndexOf("/");
+  const rootName = slash >= 0 ? root.slice(slash + 1) : root;
+  if (!rootName) return message;
+  const variants = new Set<string>([root]);
+  if (root.startsWith("/private/")) variants.add(root.slice("/private".length));
+  else if (root.startsWith("/")) variants.add(`/private${root}`);
+  let out = message;
   for (const variant of variants) {
-    out = out.split(variant).join(rootName)
+    out = out.split(variant).join(rootName);
   }
-  return out
+  return out;
 }
 
 function normalizeMark(value: string | undefined): string {
-  return String(value ?? "").trim().toLowerCase()
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
-function schemeRemoteDisplayMark(cfg: AppConfig, remote: AllUpdateResult["scheme"] | null | undefined): string {
+function schemeRemoteDisplayMark(
+  cfg: AppConfig,
+  remote: AllUpdateResult["scheme"] | null | undefined,
+): string {
   return String(
     (cfg.usePrereleaseScheme
       ? (remote?.remoteIdOrSha ?? remote?.tag ?? remote?.name)
-      : (remote?.tag ?? remote?.name))
-      ?? ""
-  ).trim()
+      : (remote?.tag ?? remote?.name)) ?? "",
+  ).trim();
 }
 
-function schemeLocalDisplayMark(cfg: AppConfig, metaScheme: MetaBundle["scheme"] | undefined): string {
+function schemeLocalDisplayMark(
+  cfg: AppConfig,
+  metaScheme: MetaBundle["scheme"] | undefined,
+): string {
   return String(
     (cfg.usePrereleaseScheme
       ? metaScheme?.remoteIdOrSha
-      : metaScheme?.remoteTagOrName)
-      ?? ""
-  ).trim()
+      : metaScheme?.remoteTagOrName) ?? "",
+  ).trim();
 }
 
-function schemeStoredDisplayMark(metaScheme: MetaBundle["scheme"] | undefined): string {
+function schemeStoredDisplayMark(
+  metaScheme: MetaBundle["scheme"] | undefined,
+): string {
   return String(
-    ((metaScheme?.usePrereleaseScheme ? metaScheme?.remoteIdOrSha : metaScheme?.remoteTagOrName)
-      ?? metaScheme?.remoteTagOrName
-      ?? metaScheme?.remoteIdOrSha
-      ?? "")
-  ).trim()
+    (metaScheme?.usePrereleaseScheme
+      ? metaScheme?.remoteIdOrSha
+      : metaScheme?.remoteTagOrName) ??
+      metaScheme?.remoteTagOrName ??
+      metaScheme?.remoteIdOrSha ??
+      "",
+  ).trim();
 }
 
-function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult, cfg: AppConfig): UpdateDecision {
-  const schemeRemoteMark = normalizeMark(schemeRemoteDisplayMark(cfg, remote.scheme))
-  const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
-  const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
+function buildUpdateDecision(
+  localMeta: MetaBundle | undefined,
+  remote: AllUpdateResult,
+  cfg: AppConfig,
+): UpdateDecision {
+  const schemeRemoteMark = normalizeMark(
+    schemeRemoteDisplayMark(cfg, remote.scheme),
+  );
+  const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha);
+  const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha);
   return {
-    scheme: !!(schemeRemoteMark && normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !== schemeRemoteMark),
-    dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
-    model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
-  }
+    scheme: !!(
+      schemeRemoteMark &&
+      normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !==
+        schemeRemoteMark
+    ),
+    dict: !!(
+      dictRemoteMark &&
+      normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark
+    ),
+    model: !!(
+      modelRemoteMark &&
+      normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark
+    ),
+  };
 }
 
 function decorateLogMessage(message: string): string {
-  const text = String(message ?? "").trim()
-  if (!text) return text
-  if (/^(🟢|🌐|⬇️|🗑️|📝|⏭️|🚀|⏱️|❌|✅|🔎|ℹ️)\s/u.test(text)) return text
-  if (text.includes("可更新") || text.includes("有可用更新")) return `🟢 ${text}`
-  if (text.includes("远程")) return `🌐 ${text}`
-  if (text.includes("下载地址") || text.includes("下载中") || text.includes("资产")) return `⬇️ ${text}`
-  if (text.includes("删除") || text.includes("清理")) return `🗑️ ${text}`
-  if (text.includes("写入") || text.includes("整理")) return `📝 ${text}`
-  if (text.includes("跳过排除文件")) return `⏭️ ${text}`
-  if (text.includes("部署")) return `🚀 ${text}`
-  if (text.includes("超时")) return `⏱️ ${text}`
-  if (text.includes("失败") || text.includes("错误")) return `❌ ${text}`
-  if (text.includes("完成")) return `✅ ${text}`
-  if (text.includes("检查")) return `🔎 ${text}`
-  return `ℹ️ ${text}`
+  const text = String(message ?? "").trim();
+  if (!text) return text;
+  if (/^(🟢|🌐|⬇️|🗑️|📝|⏭️|🚀|⏱️|❌|✅|🔎|ℹ️)\s/u.test(text)) return text;
+  if (text.includes("可更新") || text.includes("有可用更新"))
+    return `🟢 ${text}`;
+  if (text.includes("远程")) return `🌐 ${text}`;
+  if (
+    text.includes("下载地址") ||
+    text.includes("下载中") ||
+    text.includes("资产")
+  )
+    return `⬇️ ${text}`;
+  if (text.includes("删除") || text.includes("清理")) return `🗑️ ${text}`;
+  if (text.includes("写入") || text.includes("整理")) return `📝 ${text}`;
+  if (text.includes("跳过排除文件")) return `⏭️ ${text}`;
+  if (text.includes("部署")) return `🚀 ${text}`;
+  if (text.includes("超时")) return `⏱️ ${text}`;
+  if (text.includes("失败") || text.includes("错误")) return `❌ ${text}`;
+  if (text.includes("完成")) return `✅ ${text}`;
+  if (text.includes("检查")) return `🔎 ${text}`;
+  return `ℹ️ ${text}`;
 }
 
 function logLevelColor(level: LogLevel) {
-  if (level === "SUCCESS") return "systemGreen"
-  if (level === "WARN") return "systemOrange"
-  if (level === "ERROR") return "systemRed"
-  return "systemBlue"
+  if (level === "SUCCESS") return "systemGreen";
+  if (level === "WARN") return "systemOrange";
+  if (level === "ERROR") return "systemRed";
+  return "systemBlue";
 }
 
 function logScopeColor(scope: LogScope) {
-  if (scope === "CHECK") return "systemBlue"
-  if (scope === "AUTO") return "systemPurple"
-  if (scope === "SCHEME") return "systemGreen"
-  if (scope === "DICT") return "systemOrange"
-  if (scope === "MODEL") return "systemPink"
-  if (scope === "DEPLOY") return "systemPink"
-  if (scope === "PATH") return "systemOrange"
-  return "secondaryLabel"
+  if (scope === "CHECK") return "systemBlue";
+  if (scope === "AUTO") return "systemPurple";
+  if (scope === "SCHEME") return "systemGreen";
+  if (scope === "DICT") return "systemOrange";
+  if (scope === "MODEL") return "systemPink";
+  if (scope === "DEPLOY") return "systemPink";
+  if (scope === "PATH") return "systemOrange";
+  return "secondaryLabel";
 }
 
 function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
-  const insetLeft = Math.max(0, Number(props.insetLeft ?? 0))
-  const highlightUpdate = props.entry.message.endsWith("可更新")
-  const updatePrefix = highlightUpdate ? props.entry.message.slice(0, -3).trimEnd() : props.entry.message
+  const insetLeft = Math.max(0, Number(props.insetLeft ?? 0));
+  const highlightUpdate = props.entry.message.endsWith("可更新");
+  const updatePrefix = highlightUpdate
+    ? props.entry.message.slice(0, -3).trimEnd()
+    : props.entry.message;
   return (
-    <HStack key={props.entry.id} spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+    <HStack
+      key={props.entry.id}
+      spacing={0}
+      frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+    >
       {insetLeft > 0 ? (
-        <Rectangle foregroundStyle="clear" frame={{ width: insetLeft, height: 1 }} />
+        <Rectangle
+          foregroundStyle="clear"
+          frame={{ width: insetLeft, height: 1 }}
+        />
       ) : null}
       <VStack
         spacing={2}
         padding={{ top: 1, bottom: 2 }}
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
       >
-        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="footnote" foregroundStyle="secondaryLabel" frame={{ alignment: "leading" as any }}>
+        <HStack
+          spacing={8}
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        >
+          <Text
+            font="footnote"
+            foregroundStyle="secondaryLabel"
+            frame={{ alignment: "leading" as any }}
+          >
             {props.entry.at}
           </Text>
-          <Text font="footnote" foregroundStyle={logLevelColor(props.entry.level)} frame={{ alignment: "leading" as any }}>
+          <Text
+            font="footnote"
+            foregroundStyle={logLevelColor(props.entry.level)}
+            frame={{ alignment: "leading" as any }}
+          >
             [{props.entry.level}]
           </Text>
-          <Text font="footnote" foregroundStyle={logScopeColor(props.entry.scope)} frame={{ alignment: "leading" as any }}>
+          <Text
+            font="footnote"
+            foregroundStyle={logScopeColor(props.entry.scope)}
+            frame={{ alignment: "leading" as any }}
+          >
             [{props.entry.scope}]
           </Text>
           <Spacer />
         </HStack>
         {highlightUpdate ? (
-          <HStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <HStack
+            spacing={4}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          >
             <Text
               font="body"
               frame={{ alignment: "leading" as any }}
@@ -407,26 +567,28 @@ function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
         )}
       </VStack>
     </HStack>
-  )
+  );
 }
 
 function FullscreenLogView(props: { logs: LogEntry[] }) {
-  const dismiss = Navigation.useDismiss()
-  const [visibleLogs, setVisibleLogs] = useState<LogEntry[] | null>(null)
+  const dismiss = Navigation.useDismiss();
+  const [visibleLogs, setVisibleLogs] = useState<LogEntry[] | null>(null);
   const copyAllLogs = () => {
     try {
-      ;(globalThis as any).Clipboard?.copyText?.(props.logs.map(formatLogEntry).join("\n"))
-      ;(globalThis as any).HapticFeedback?.mediumImpact?.()
-    } catch { }
-  }
+      (globalThis as any).Clipboard?.copyText?.(
+        props.logs.map(formatLogEntry).join("\n"),
+      );
+      (globalThis as any).HapticFeedback?.mediumImpact?.();
+    } catch {}
+  };
 
   useEffect(() => {
-    setVisibleLogs(null)
+    setVisibleLogs(null);
     const timer = setTimeout(() => {
-      setVisibleLogs(props.logs)
-    }, 80)
-    return () => clearTimeout(timer)
-  }, [props.logs])
+      setVisibleLogs(props.logs);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [props.logs]);
 
   return (
     <NavigationStack>
@@ -439,26 +601,34 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
               title=""
               systemImage="xmark"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                dismiss()
+                try {
+                  (globalThis as any).HapticFeedback?.mediumImpact?.();
+                } catch {}
+                dismiss();
               }}
             />
           ),
           topBarTrailing: (
-            <Button
-              title=""
-              systemImage="doc.on.doc"
-              action={copyAllLogs}
-            />
+            <Button title="" systemImage="doc.on.doc" action={copyAllLogs} />
           ),
         }}
       >
-        <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding={{ top: 8, bottom: 8, leading: 18, trailing: 14 }}>
-          <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+        <ScrollView
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding={{ top: 8, bottom: 8, leading: 18, trailing: 14 }}
+        >
+          <VStack
+            spacing={2}
+            frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          >
             {visibleLogs == null ? (
               <VStack
                 spacing={10}
-                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+                frame={{
+                  maxWidth: "infinity",
+                  maxHeight: "infinity",
+                  alignment: "center" as any,
+                }}
                 padding={{ top: 20, bottom: 20 }}
               >
                 <ProgressView />
@@ -466,9 +636,19 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
                   加载日志中...
                 </Text>
               </VStack>
-            ) : visibleLogs.length ? visibleLogs.map((entry) => <LogEntryRow key={entry.id} entry={entry} insetLeft={18} />) : (
-              <HStack spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-                <Rectangle foregroundStyle="clear" frame={{ width: 18, height: 1 }} />
+            ) : visibleLogs.length ? (
+              visibleLogs.map((entry) => (
+                <LogEntryRow key={entry.id} entry={entry} insetLeft={18} />
+              ))
+            ) : (
+              <HStack
+                spacing={0}
+                frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+              >
+                <Rectangle
+                  foregroundStyle="clear"
+                  frame={{ width: 18, height: 1 }}
+                />
                 <Text
                   font="footnote"
                   foregroundStyle="secondaryLabel"
@@ -484,20 +664,20 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
         </ScrollView>
       </VStack>
     </NavigationStack>
-  )
+  );
 }
 
 function FullscreenNotesView(props: { content: string }) {
-  const dismiss = Navigation.useDismiss()
-  const [visibleContent, setVisibleContent] = useState<string | null>(null)
+  const dismiss = Navigation.useDismiss();
+  const [visibleContent, setVisibleContent] = useState<string | null>(null);
 
   useEffect(() => {
-    setVisibleContent(null)
+    setVisibleContent(null);
     const timer = setTimeout(() => {
-      setVisibleContent(props.content)
-    }, 80)
-    return () => clearTimeout(timer)
-  }, [props.content])
+      setVisibleContent(props.content);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [props.content]);
 
   return (
     <NavigationStack>
@@ -510,18 +690,27 @@ function FullscreenNotesView(props: { content: string }) {
               title=""
               systemImage="xmark"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                dismiss()
+                try {
+                  (globalThis as any).HapticFeedback?.mediumImpact?.();
+                } catch {}
+                dismiss();
               }}
             />
           ),
         }}
       >
-        <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} padding>
+        <ScrollView
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding
+        >
           {visibleContent == null ? (
             <VStack
               spacing={10}
-              frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+              frame={{
+                maxWidth: "infinity",
+                maxHeight: "infinity",
+                alignment: "center" as any,
+              }}
               padding={{ top: 20, bottom: 20 }}
             >
               <ProgressView />
@@ -535,258 +724,317 @@ function FullscreenNotesView(props: { content: string }) {
         </ScrollView>
       </VStack>
     </NavigationStack>
-  )
+  );
 }
 
 function progressStageLabel(stage: string): string {
-  const text = String(stage ?? "")
-  if (text.includes("下载中")) return "下载中"
-  if (text.includes("清理旧文件")) return "删除中"
-  if (text.includes("解压") || text.includes("整理") || text.includes("写入") || text.includes("校验")) return "写入中"
-  return "处理中"
+  const text = String(stage ?? "");
+  if (text.includes("下载中")) return "下载中";
+  if (text.includes("清理旧文件")) return "删除中";
+  if (
+    text.includes("解压") ||
+    text.includes("整理") ||
+    text.includes("写入") ||
+    text.includes("校验")
+  )
+    return "写入中";
+  return "处理中";
 }
 
-async function listFileBrowserEntries(dir: string): Promise<FileBrowserEntry[]> {
-  const fm: any = (globalThis as any).FileManager
-  if (!fm || !dir) return []
-  const base = dir.endsWith("/") ? dir : dir + "/"
-  let raw: any[] = []
+async function listFileBrowserEntries(
+  dir: string,
+): Promise<FileBrowserEntry[]> {
+  const fm: any = (globalThis as any).FileManager;
+  if (!fm || !dir) return [];
+  const base = dir.endsWith("/") ? dir : dir + "/";
+  let raw: any[] = [];
   if (typeof fm.readDirectory === "function") {
-    raw = await fm.readDirectory(dir)
+    raw = await fm.readDirectory(dir);
   } else if (typeof fm.readDirectorySync === "function") {
-    raw = fm.readDirectorySync(dir)
+    raw = fm.readDirectorySync(dir);
   } else {
-    return []
+    return [];
   }
   const names = (Array.isArray(raw) ? raw : [])
     .map(String)
     .map((p) => (p.startsWith(base) ? p.slice(base.length) : p))
-    .filter((p) => p && p !== "." && p !== "..")
+    .filter((p) => p && p !== "." && p !== "..");
 
-  const entries: FileBrowserEntry[] = []
+  const entries: FileBrowserEntry[] = [];
   for (const name of names) {
-    const path = Path.join(dir, name)
-    let isDirectory = false
+    const path = Path.join(dir, name);
+    let isDirectory = false;
     try {
-      if (typeof fm.isDirectory === "function") isDirectory = !!(await fm.isDirectory(path))
-      else if (typeof fm.isDir === "function") isDirectory = !!(await fm.isDir(path))
+      if (typeof fm.isDirectory === "function")
+        isDirectory = !!(await fm.isDirectory(path));
+      else if (typeof fm.isDir === "function")
+        isDirectory = !!(await fm.isDir(path));
       else if (typeof fm.stat === "function") {
-        const st = await fm.stat(path)
-        isDirectory = String(st?.type ?? "") === "directory"
+        const st = await fm.stat(path);
+        isDirectory = String(st?.type ?? "") === "directory";
       } else if (typeof fm.statSync === "function") {
-        const st = fm.statSync(path)
-        isDirectory = String(st?.type ?? "") === "directory"
+        const st = fm.statSync(path);
+        isDirectory = String(st?.type ?? "") === "directory";
       }
-    } catch { }
-    entries.push({ name, path, isDirectory })
+    } catch {}
+    entries.push({ name, path, isDirectory });
   }
   return entries.sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
-    return a.name.localeCompare(b.name, "zh-Hans-CN")
-  })
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+    return a.name.localeCompare(b.name, "zh-Hans-CN");
+  });
 }
 
-async function resolveEditorRootFromConfig(current: AppConfig): Promise<string> {
-  const fm: any = (globalThis as any).FileManager
-  let root = String(current.hamsterRootPath ?? "").trim()
+async function resolveEditorRootFromConfig(
+  current: AppConfig,
+): Promise<string> {
+  const fm: any = (globalThis as any).FileManager;
+  let root = String(current.hamsterRootPath ?? "").trim();
   if (current.hamsterBookmarkName && fm?.bookmarkedPath) {
     try {
       const canUseByName = fm?.bookmarkExists
         ? !!(await fm.bookmarkExists(current.hamsterBookmarkName))
-        : true
+        : true;
       if (canUseByName) {
-        const resolved = await fm.bookmarkedPath(current.hamsterBookmarkName)
-        if (resolved) root = String(resolved).trim()
+        const resolved = await fm.bookmarkedPath(current.hamsterBookmarkName);
+        if (resolved) root = String(resolved).trim();
       }
-    } catch { }
+    } catch {}
   }
-  return root
+  return root;
 }
 
 function editorPathVariants(path: string): string[] {
-  const normalized = normalizePath(path)
-  if (!normalized) return []
-  const set = new Set<string>([normalized])
-  if (normalized.startsWith("/private/")) set.add(normalized.slice("/private".length))
-  else if (normalized.startsWith("/")) set.add(`/private${normalized}`)
-  return Array.from(set)
+  const normalized = normalizePath(path);
+  if (!normalized) return [];
+  const set = new Set<string>([normalized]);
+  if (normalized.startsWith("/private/"))
+    set.add(normalized.slice("/private".length));
+  else if (normalized.startsWith("/")) set.add(`/private${normalized}`);
+  return Array.from(set);
 }
 
 function isAtOrBelowEditorRoot(path: string, root: string): boolean {
-  const pathVariants = editorPathVariants(path)
-  const rootVariants = editorPathVariants(root)
-  if (!pathVariants.length || !rootVariants.length) return false
+  const pathVariants = editorPathVariants(path);
+  const rootVariants = editorPathVariants(root);
+  if (!pathVariants.length || !rootVariants.length) return false;
   for (const p of pathVariants) {
     for (const r of rootVariants) {
-      if (p === r || p.startsWith(`${r}/`)) return true
+      if (p === r || p.startsWith(`${r}/`)) return true;
     }
   }
-  return false
+  return false;
 }
 
 function isSameEditorPath(a: string, b: string): boolean {
-  if (!a || !b) return false
-  const av = editorPathVariants(a)
-  const bv = new Set(editorPathVariants(b))
-  return av.some((item) => bv.has(item))
+  if (!a || !b) return false;
+  const av = editorPathVariants(a);
+  const bv = new Set(editorPathVariants(b));
+  return av.some((item) => bv.has(item));
 }
 
 export function HomeView() {
   const supportsMinimization =
-    typeof Script.supportsMinimization === "function" && Script.supportsMinimization()
-  const activeTab = useObservable<number>(MAIN_TAB)
-  const [cfg, setCfg] = useState<AppConfig>(() => loadConfig())
-  const logProxyRef = useRef<any>()
-  const settingsSaveRef = useRef<(() => void) | null>(null)
-  const [editorRootPath, setEditorRootPath] = useState(() => String(loadConfig().hamsterRootPath ?? "").trim())
-  const [editorCurrentPath, setEditorCurrentPath] = useState(() => String(loadConfig().hamsterRootPath ?? "").trim())
-  const [editorEntries, setEditorEntries] = useState<FileBrowserEntry[]>([])
-  const [editorLoading, setEditorLoading] = useState(false)
+    typeof Script.supportsMinimization === "function" &&
+    Script.supportsMinimization();
+  const activeTab = useObservable<number>(MAIN_TAB);
+  const [cfg, setCfg] = useState<AppConfig>(() => loadConfig());
+  const logProxyRef = useRef<any>();
+  const settingsSaveRef = useRef<(() => void) | null>(null);
+  const [editorRootPath, setEditorRootPath] = useState(() =>
+    String(loadConfig().hamsterRootPath ?? "").trim(),
+  );
+  const [editorCurrentPath, setEditorCurrentPath] = useState(() =>
+    String(loadConfig().hamsterRootPath ?? "").trim(),
+  );
+  const [editorEntries, setEditorEntries] = useState<FileBrowserEntry[]>([]);
+  const [editorLoading, setEditorLoading] = useState(false);
 
   // 本地信息
-  const [localSelectedScheme, setLocalSelectedScheme] = useState("暂无法获取")
-  const [localSchemeVersion, setLocalSchemeVersion] = useState("暂无法获取")
-  const [localDictMark, setLocalDictMark] = useState("暂无法获取")
-  const [localModelMark, setLocalModelMark] = useState("暂无法获取")
+  const [localSelectedScheme, setLocalSelectedScheme] = useState("暂无法获取");
+  const [localSchemeVersion, setLocalSchemeVersion] = useState("暂无法获取");
+  const [localDictMark, setLocalDictMark] = useState("暂无法获取");
+  const [localModelMark, setLocalModelMark] = useState("暂无法获取");
 
   // 远程信息
-  const [remoteSchemeVer, setRemoteSchemeVer] = useState(() => homeSessionState.remoteSchemeVer)
-  const [remoteDictMark, setRemoteDictMark] = useState(() => homeSessionState.remoteDictMark)
-  const [remoteModelMark, setRemoteModelMark] = useState(() => homeSessionState.remoteModelMark)
-  const [notes, setNotes] = useState(() => homeSessionState.notes)
-  const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(() => homeSessionState.lastCheck)
-  const [lastCheckDecision, setLastCheckDecision] = useState<UpdateDecision | null>(() => homeSessionState.lastCheckDecision)
-  const [lastCheckKey, setLastCheckKey] = useState(() => homeSessionState.lastCheckKey)
-  const [logs, setLogs] = useState<LogEntry[]>(() => homeSessionState.logs)
+  const [remoteSchemeVer, setRemoteSchemeVer] = useState(
+    () => homeSessionState.remoteSchemeVer,
+  );
+  const [remoteDictMark, setRemoteDictMark] = useState(
+    () => homeSessionState.remoteDictMark,
+  );
+  const [remoteModelMark, setRemoteModelMark] = useState(
+    () => homeSessionState.remoteModelMark,
+  );
+  const [notes, setNotes] = useState(() => homeSessionState.notes);
+  const [lastCheck, setLastCheck] = useState<AllUpdateResult | null>(
+    () => homeSessionState.lastCheck,
+  );
+  const [lastCheckDecision, setLastCheckDecision] =
+    useState<UpdateDecision | null>(() => homeSessionState.lastCheckDecision);
+  const [lastCheckKey, setLastCheckKey] = useState(
+    () => homeSessionState.lastCheckKey,
+  );
+  const [logs, setLogs] = useState<LogEntry[]>(() => homeSessionState.logs);
 
   // 状态
-  const [stage, setStage] = useState("就绪")
-  const [progressPct, setProgressPct] = useState("0.00%")
-  const [progressValue, setProgressValue] = useState<number | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
-  const [pathUsable, setPathUsable] = useState(false)
+  const [stage, setStage] = useState("就绪");
+  const [progressPct, setProgressPct] = useState("0.00%");
+  const [progressValue, setProgressValue] = useState<number | undefined>(
+    undefined,
+  );
+  const [busy, setBusy] = useState(false);
+  const [pathUsable, setPathUsable] = useState(false);
   const [alert, setAlert] = useState<AlertState>({
     title: "",
     isPresented: false,
-    message: <Text>{" "}</Text>,
-    actions: <Text>{" "}</Text>,
-  })
+    message: <Text> </Text>,
+    actions: <Text> </Text>,
+  });
 
   // ✅ 只在“真正下载”时显示进度
-  const [showProgress, setShowProgress] = useState(false)
+  const [showProgress, setShowProgress] = useState(false);
 
   useEffect(() => {
-    let disposed = false
+    let disposed = false;
     void (async () => {
-      const root = await resolveEditorRootFromConfig(cfg)
-      if (disposed) return
-      setEditorRootPath(root)
-      setEditorCurrentPath(root)
-    })()
+      const root = await resolveEditorRootFromConfig(cfg);
+      if (disposed) return;
+      setEditorRootPath(root);
+      setEditorCurrentPath(root);
+    })();
     return () => {
-      disposed = true
-    }
-  }, [cfg.hamsterRootPath, cfg.hamsterBookmarkName])
+      disposed = true;
+    };
+  }, [cfg.hamsterRootPath, cfg.hamsterBookmarkName]);
 
   useEffect(() => {
-    let disposed = false
+    let disposed = false;
     void (async () => {
       if (!editorCurrentPath) {
-        setEditorEntries([])
-        return
+        setEditorEntries([]);
+        return;
       }
-      setEditorLoading(true)
+      setEditorLoading(true);
       try {
-        const items = await listFileBrowserEntries(editorCurrentPath)
-        if (!disposed) setEditorEntries(items)
+        const items = await listFileBrowserEntries(editorCurrentPath);
+        if (!disposed) setEditorEntries(items);
       } catch {
-        if (!disposed) setEditorEntries([])
+        if (!disposed) setEditorEntries([]);
       } finally {
-        if (!disposed) setEditorLoading(false)
+        if (!disposed) setEditorLoading(false);
       }
-    })()
+    })();
     return () => {
-      disposed = true
-    }
-  }, [editorCurrentPath])
+      disposed = true;
+    };
+  }, [editorCurrentPath]);
 
   useEffect(() => {
-    const root = normalizePath(editorRootPath)
-    const current = normalizePath(editorCurrentPath)
-    if (!root || !current) return
+    const root = normalizePath(editorRootPath);
+    const current = normalizePath(editorCurrentPath);
+    if (!root || !current) return;
     if (!isAtOrBelowEditorRoot(current, root)) {
-      setEditorCurrentPath(root)
+      setEditorCurrentPath(root);
     }
-  }, [editorCurrentPath, editorRootPath])
+  }, [editorCurrentPath, editorRootPath]);
 
   function resetRemote() {
-    setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer)
-    setRemoteDictMark(DEFAULT_HOME_SESSION_STATE.remoteDictMark)
-    setRemoteModelMark(DEFAULT_HOME_SESSION_STATE.remoteModelMark)
-    setNotes(DEFAULT_HOME_SESSION_STATE.notes)
-    setLastCheck(DEFAULT_HOME_SESSION_STATE.lastCheck)
-    setLastCheckDecision(DEFAULT_HOME_SESSION_STATE.lastCheckDecision)
-    setLastCheckKey(DEFAULT_HOME_SESSION_STATE.lastCheckKey)
+    setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer);
+    setRemoteDictMark(DEFAULT_HOME_SESSION_STATE.remoteDictMark);
+    setRemoteModelMark(DEFAULT_HOME_SESSION_STATE.remoteModelMark);
+    setNotes(DEFAULT_HOME_SESSION_STATE.notes);
+    setLastCheck(DEFAULT_HOME_SESSION_STATE.lastCheck);
+    setLastCheckDecision(DEFAULT_HOME_SESSION_STATE.lastCheckDecision);
+    setLastCheckKey(DEFAULT_HOME_SESSION_STATE.lastCheckKey);
   }
 
   function checkKey(c: AppConfig) {
-    return getCheckCacheKey(c)
+    return getCheckCacheKey(c);
   }
 
   function closeAlert() {
-    setAlert((a) => ({ ...a, isPresented: false }))
+    setAlert((a) => ({ ...a, isPresented: false }));
   }
 
-  function pushLog(level: LogLevel, scope: LogScope, message: string, targetCfg?: AppConfig) {
-    const currentCfg = targetCfg ?? cfg
-    if (!currentCfg.showVerboseLog) return
-    let normalizedMessage = String(message ?? "").trim()
-    normalizedMessage = replacePathPrefix(normalizedMessage, currentCfg.hamsterRootPath)
-    normalizedMessage = decorateLogMessage(normalizedMessage)
-    const entry = makeLogEntry(level, scope, normalizedMessage)
+  function pushLog(
+    level: LogLevel,
+    scope: LogScope,
+    message: string,
+    targetCfg?: AppConfig,
+  ) {
+    const currentCfg = targetCfg ?? cfg;
+    if (!currentCfg.showVerboseLog) return;
+    let normalizedMessage = String(message ?? "").trim();
+    normalizedMessage = replacePathPrefix(
+      normalizedMessage,
+      currentCfg.hamsterRootPath,
+    );
+    normalizedMessage = decorateLogMessage(normalizedMessage);
+    const entry = makeLogEntry(level, scope, normalizedMessage);
     setLogs((prev) => {
-      const next = prev.concat(entry)
-      const trimmed = next.length > 200 ? next.slice(next.length - 200) : next
+      const next = prev.concat(entry);
+      const trimmed = next.length > 200 ? next.slice(next.length - 200) : next;
       homeSessionState = {
         ...homeSessionState,
         logs: trimmed,
-      }
-      return trimmed
-    })
+      };
+      return trimmed;
+    });
   }
 
-  function setStageAndMaybeLog(message: string, scope: LogScope = "SYSTEM", level: LogLevel = "INFO", logIt = false) {
-    setStage(message)
-    if (logIt) pushLog(level, scope, message)
+  function setStageAndMaybeLog(
+    message: string,
+    scope: LogScope = "SYSTEM",
+    level: LogLevel = "INFO",
+    logIt = false,
+  ) {
+    setStage(message);
+    if (logIt) pushLog(level, scope, message);
   }
 
   function wrapStageReporter(scope: LogScope) {
     return (message: string) => {
-      setStageAndMaybeLog(message, scope, "INFO", true)
-    }
+      setStageAndMaybeLog(message, scope, "INFO", true);
+    };
   }
 
   function wrapDetailLogger(scope: LogScope, level: LogLevel = "INFO") {
     return (message: string) => {
-      pushLog(level, scope, message)
-    }
+      pushLog(level, scope, message);
+    };
   }
 
-  function pushCheckResultLog(label: string, remoteMark: string, needUpdate: boolean) {
-    pushLog(needUpdate ? "SUCCESS" : "INFO", "CHECK", `远程${label}：${remoteMark}${needUpdate ? "  可更新" : ""}`)
+  function pushCheckResultLog(
+    label: string,
+    remoteMark: string,
+    needUpdate: boolean,
+  ) {
+    pushLog(
+      needUpdate ? "SUCCESS" : "INFO",
+      "CHECK",
+      `远程${label}：${remoteMark}${needUpdate ? "  可更新" : ""}`,
+    );
   }
 
   async function guardPathAccess(showPopup: boolean): Promise<boolean> {
-    const current = loadConfig()
-    const r = await verifyInstallPathAccess(current)
+    const current = loadConfig();
+    const r = await verifyInstallPathAccess(current);
     if (r.ok) {
-      setPathUsable(true)
-      return true
+      setPathUsable(true);
+      return true;
     }
-    setPathUsable(false)
-    setStageAndMaybeLog("路径不可用，请在设置中添加或重新添加书签文件夹。", "PATH", "WARN", true)
+    setPathUsable(false);
+    setStageAndMaybeLog(
+      "路径不可用，请在设置中添加或重新添加书签文件夹。",
+      "PATH",
+      "WARN",
+      true,
+    );
     if (showPopup) {
-      const msg = r.reason ? `${r.reason}\n请在设置中添加或重新添加书签文件夹。` : "请在设置中添加或重新添加书签文件夹。"
+      const msg = r.reason
+        ? `${r.reason}\n请在设置中添加或重新添加书签文件夹。`
+        : "请在设置中添加或重新添加书签文件夹。";
       setAlert({
         title: "路径不可用",
         isPresented: true,
@@ -796,147 +1044,174 @@ export function HomeView() {
             <Button
               title="取消"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                closeAlert()
+                try {
+                  (globalThis as any).HapticFeedback?.mediumImpact?.();
+                } catch {}
+                closeAlert();
               }}
             />
             <Button
               title="确认"
               action={() => {
-                try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                closeAlert()
-                Script.exit()
+                try {
+                  (globalThis as any).HapticFeedback?.mediumImpact?.();
+                } catch {}
+                closeAlert();
+                Script.exit();
               }}
             />
           </HStack>
         ),
-      })
+      });
     }
-    return false
+    return false;
   }
 
-  async function findLocalMeta(current: AppConfig): Promise<{ meta?: MetaBundle; candidates: string[] }> {
-    const normPath = (s: string) => String(s ?? "").trim().replace(/\/+$/, "")
+  async function findLocalMeta(
+    current: AppConfig,
+  ): Promise<{ meta?: MetaBundle; candidates: string[] }> {
+    const normPath = (s: string) =>
+      String(s ?? "")
+        .trim()
+        .replace(/\/+$/, "");
     const pushCandidate = (arr: string[], p?: string) => {
-      const x = normPath(String(p ?? ""))
-      if (x) arr.push(x)
-    }
+      const x = normPath(String(p ?? ""));
+      if (x) arr.push(x);
+    };
 
-    let installRoot = ""
+    let installRoot = "";
     try {
-      const { rimeDir } = await detectRimeDir(current)
-      if (rimeDir) installRoot = rimeDir
-    } catch { }
+      const { rimeDir } = await detectRimeDir(current);
+      if (rimeDir) installRoot = rimeDir;
+    } catch {}
     if (!installRoot) {
-      installRoot = current.hamsterRootPath
+      installRoot = current.hamsterRootPath;
     }
 
-    const candidates: string[] = []
-    pushCandidate(candidates, installRoot)
-    if (current.hamsterRootPath && normPath(current.hamsterRootPath) !== normPath(installRoot)) {
-      pushCandidate(candidates, current.hamsterRootPath)
+    const candidates: string[] = [];
+    pushCandidate(candidates, installRoot);
+    if (
+      current.hamsterRootPath &&
+      normPath(current.hamsterRootPath) !== normPath(installRoot)
+    ) {
+      pushCandidate(candidates, current.hamsterRootPath);
     }
     if (current.hamsterRootPath) {
-      const rimeCandidates = await collectRimeCandidates(current.hamsterRootPath)
-      for (const c of rimeCandidates) pushCandidate(candidates, c)
+      const rimeCandidates = await collectRimeCandidates(
+        current.hamsterRootPath,
+      );
+      for (const c of rimeCandidates) pushCandidate(candidates, c);
     }
 
     try {
-      const fm: any = (globalThis as any).FileManager
-      if (fm?.bookmarkedPath && (current.hamsterBookmarkName || current.hamsterRootPath)) {
+      const fm: any = (globalThis as any).FileManager;
+      if (
+        fm?.bookmarkedPath &&
+        (current.hamsterBookmarkName || current.hamsterRootPath)
+      ) {
         if (current.hamsterBookmarkName) {
-          const p = fm.bookmarkedPath(current.hamsterBookmarkName)
-          const resolved = p && typeof p.then === "function" ? await p : p
-          if (resolved) pushCandidate(candidates, String(resolved))
+          const p = fm.bookmarkedPath(current.hamsterBookmarkName);
+          const resolved = p && typeof p.then === "function" ? await p : p;
+          if (resolved) pushCandidate(candidates, String(resolved));
         }
       }
       if (fm?.getAllFileBookmarks) {
-        const r = fm.getAllFileBookmarks()
-        const list = r && typeof r.then === "function" ? await r : r
-        const arr = Array.isArray(list) ? list : []
+        const r = fm.getAllFileBookmarks();
+        const list = r && typeof r.then === "function" ? await r : r;
+        const arr = Array.isArray(list) ? list : [];
         if (current.hamsterBookmarkName) {
-          const byName = arr.find((b: any) => String(b?.name ?? "") === current.hamsterBookmarkName)
-          if (byName?.path) pushCandidate(candidates, String(byName.path))
+          const byName = arr.find(
+            (b: any) => String(b?.name ?? "") === current.hamsterBookmarkName,
+          );
+          if (byName?.path) pushCandidate(candidates, String(byName.path));
           if (byName?.name && fm?.bookmarkedPath) {
-            const p = fm.bookmarkedPath(byName.name)
-            const resolved = p && typeof p.then === "function" ? await p : p
-            if (resolved) pushCandidate(candidates, String(resolved))
+            const p = fm.bookmarkedPath(byName.name);
+            const resolved = p && typeof p.then === "function" ? await p : p;
+            if (resolved) pushCandidate(candidates, String(resolved));
           }
         }
         if (current.hamsterRootPath) {
-          const target = normPath(String(current.hamsterRootPath))
-          const byPath = arr.find((b: any) => normPath(String(b?.path ?? "")) === target)
-          if (byPath?.path) pushCandidate(candidates, String(byPath.path))
+          const target = normPath(String(current.hamsterRootPath));
+          const byPath = arr.find(
+            (b: any) => normPath(String(b?.path ?? "")) === target,
+          );
+          if (byPath?.path) pushCandidate(candidates, String(byPath.path));
           if (byPath?.name && fm?.bookmarkedPath) {
-            const p = fm.bookmarkedPath(byPath.name)
-            const resolved = p && typeof p.then === "function" ? await p : p
-            if (resolved) pushCandidate(candidates, String(resolved))
+            const p = fm.bookmarkedPath(byPath.name);
+            const resolved = p && typeof p.then === "function" ? await p : p;
+            if (resolved) pushCandidate(candidates, String(resolved));
           }
         }
       }
-    } catch { }
+    } catch {}
 
-    const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)))
+    const uniq = Array.from(new Set(candidates.map(normPath).filter(Boolean)));
     for (const root of uniq) {
-      const m = await loadMetaAsync(root, current.hamsterBookmarkName)
+      const m = await loadMetaAsync(root, current.hamsterBookmarkName);
       if (m.scheme || m.dict || m.model) {
-        return { meta: m, candidates: uniq }
+        return { meta: m, candidates: uniq };
       }
     }
     if (current.hamsterBookmarkName) {
       try {
-        const byBookmark = await loadMetaAsync("", current.hamsterBookmarkName)
+        const byBookmark = await loadMetaAsync("", current.hamsterBookmarkName);
         if (byBookmark.scheme || byBookmark.dict || byBookmark.model) {
-          return { meta: byBookmark, candidates: uniq }
+          return { meta: byBookmark, candidates: uniq };
         }
-      } catch { }
+      } catch {}
     }
-    return { meta: undefined, candidates: uniq }
+    return { meta: undefined, candidates: uniq };
   }
 
   async function refreshLocal(current: AppConfig): Promise<boolean> {
-    const selected = selectedSchemeFromConfig(current)
-    setLocalSelectedScheme(selected)
+    const selected = selectedSchemeFromConfig(current);
+    setLocalSelectedScheme(selected);
 
-    const { meta, candidates } = await findLocalMeta(current)
+    const { meta, candidates } = await findLocalMeta(current);
     if (!candidates.length || !meta) {
-      setLocalSchemeVersion("暂无法获取")
-      setLocalDictMark("暂无法获取")
-      setLocalModelMark("暂无法获取")
-      return false
+      setLocalSchemeVersion("暂无法获取");
+      setLocalDictMark("暂无法获取");
+      setLocalModelMark("暂无法获取");
+      return false;
     }
 
-    const localScheme = normalizeMetaScheme(meta.scheme, current)
-    setLocalSelectedScheme(localScheme.selected)
+    const localScheme = normalizeMetaScheme(meta.scheme, current);
+    setLocalSelectedScheme(localScheme.selected);
 
-    setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取")
-    setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取")
-    setLocalModelMark(meta.model?.remoteIdOrSha ?? "暂无法获取")
-    return true
+    setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取");
+    setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取");
+    setLocalModelMark(meta.model?.remoteIdOrSha ?? "暂无法获取");
+    return true;
   }
 
-  async function refreshLastCheckDecision(current: AppConfig, remoteOverride?: AllUpdateResult | null) {
-    const remote = remoteOverride ?? ((lastCheckKey === checkKey(current)) ? lastCheck : null)
-    if (!remote) return
-    const { meta } = await findLocalMeta(current)
-    const nextDecision = buildUpdateDecision(meta, remote, current)
-    setLastCheck(remote)
-    setLastCheckDecision(nextDecision)
-    setLastCheckKey(checkKey(current))
-    saveSharedCheckCache(current, remote, nextDecision)
+  async function refreshLastCheckDecision(
+    current: AppConfig,
+    remoteOverride?: AllUpdateResult | null,
+  ) {
+    const remote =
+      remoteOverride ?? (lastCheckKey === checkKey(current) ? lastCheck : null);
+    if (!remote) return;
+    const { meta } = await findLocalMeta(current);
+    const nextDecision = buildUpdateDecision(meta, remote, current);
+    setLastCheck(remote);
+    setLastCheckDecision(nextDecision);
+    setLastCheckKey(checkKey(current));
+    saveSharedCheckCache(current, remote, nextDecision);
   }
 
   function applySharedCheckCache(current: AppConfig) {
-    const cache = loadSharedCheckCache()
-    if (!cache || cache.key !== checkKey(current)) return false
-    setRemoteSchemeVer(schemeRemoteDisplayMark(current, cache.remote.scheme) || "暂无法获取")
-    setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取")
-    setRemoteModelMark(cache.remote.model?.remoteIdOrSha ?? "暂无法获取")
-    setNotes(cache.remote.scheme?.body ?? "")
-    setLastCheck(cache.remote)
-    setLastCheckDecision(cache.decision)
-    setLastCheckKey(cache.key)
-    return true
+    const cache = loadSharedCheckCache();
+    if (!cache || cache.key !== checkKey(current)) return false;
+    setRemoteSchemeVer(
+      schemeRemoteDisplayMark(current, cache.remote.scheme) || "暂无法获取",
+    );
+    setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取");
+    setRemoteModelMark(cache.remote.model?.remoteIdOrSha ?? "暂无法获取");
+    setNotes(cache.remote.scheme?.body ?? "");
+    setLastCheck(cache.remote);
+    setLastCheckDecision(cache.decision);
+    setLastCheckKey(cache.key);
+    return true;
   }
 
   useEffect(() => {
@@ -949,170 +1224,219 @@ export function HomeView() {
       lastCheckDecision,
       lastCheckKey,
       logs,
-    }
-  }, [remoteSchemeVer, remoteDictMark, remoteModelMark, notes, lastCheck, lastCheckDecision, lastCheckKey, logs])
+    };
+  }, [
+    remoteSchemeVer,
+    remoteDictMark,
+    remoteModelMark,
+    notes,
+    lastCheck,
+    lastCheckDecision,
+    lastCheckKey,
+    logs,
+  ]);
 
   useEffect(() => {
-    if (!cfg.showVerboseLog) return
+    if (!cfg.showVerboseLog) return;
     const scrollLatest = () => {
       try {
-        logProxyRef.current?.scrollTo?.("bottomView", "bottom")
-      } catch { }
-    }
-    scrollLatest()
-    const intervalId = busy ? (globalThis as any).setInterval?.(scrollLatest, 100) : undefined
-    const finalTimer = setTimeout(scrollLatest, 120)
+        logProxyRef.current?.scrollTo?.("bottomView", "bottom");
+      } catch {}
+    };
+    scrollLatest();
+    const intervalId = busy
+      ? (globalThis as any).setInterval?.(scrollLatest, 100)
+      : undefined;
+    const finalTimer = setTimeout(scrollLatest, 120);
     return () => {
-      if (intervalId !== undefined) (globalThis as any).clearInterval?.(intervalId)
-      clearTimeout(finalTimer)
-    }
-  }, [cfg.showVerboseLog, busy, logs.length])
+      if (intervalId !== undefined)
+        (globalThis as any).clearInterval?.(intervalId);
+      clearTimeout(finalTimer);
+    };
+  }, [cfg.showVerboseLog, busy, logs.length]);
 
   useEffect(() => {
     void (async () => {
-      const current = cfg
-      await guardPathAccess(true)
-      const found = await refreshLocal(current)
+      const current = cfg;
+      await guardPathAccess(true);
+      const found = await refreshLocal(current);
       if (!found) {
-        await sleep(120)
-        await refreshLocal(loadConfig())
+        await sleep(120);
+        await refreshLocal(loadConfig());
       }
-      applySharedCheckCache(current)
-    })()
-  }, [cfg.schemeEdition, cfg.proSchemeKey, cfg.releaseSource, cfg.hamsterRootPath, cfg.hamsterBookmarkName])
+      applySharedCheckCache(current);
+    })();
+  }, [
+    cfg.schemeEdition,
+    cfg.proSchemeKey,
+    cfg.releaseSource,
+    cfg.hamsterRootPath,
+    cfg.hamsterBookmarkName,
+  ]);
 
   useEffect(() => {
-    const current = loadConfig()
-    if (String(Script.queryParameters?.action ?? "") === "autoUpdate") return
+    const current = loadConfig();
+    if (String(Script.queryParameters?.action ?? "") === "autoUpdate") return;
     if (current.autoCheckOnLaunch && !launchAutoCheckHandled) {
-      launchAutoCheckHandled = true
+      launchAutoCheckHandled = true;
       void (async () => {
         if (await guardPathAccess(false)) {
-          await onCheckUpdate()
+          await onCheckUpdate();
         }
-      })()
+      })();
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
-    const action = String(Script.queryParameters?.action ?? "")
-    const requestId = String(Script.queryParameters?.requestId ?? "")
-    const actionKey = `${action}:${requestId}`
-    if (action !== "autoUpdate" || !requestId || lastHandledLaunchActionKey === actionKey) return
-    lastHandledLaunchActionKey = actionKey
-    launchAutoCheckHandled = true
+    const action = String(Script.queryParameters?.action ?? "");
+    const requestId = String(Script.queryParameters?.requestId ?? "");
+    const actionKey = `${action}:${requestId}`;
+    if (
+      action !== "autoUpdate" ||
+      !requestId ||
+      lastHandledLaunchActionKey === actionKey
+    )
+      return;
+    lastHandledLaunchActionKey = actionKey;
+    launchAutoCheckHandled = true;
     void (async () => {
       if (await guardPathAccess(true)) {
-        await onAutoUpdate()
+        await onAutoUpdate();
       }
-    })()
-  }, [])
+    })();
+  }, []);
 
   async function handleSettingsSaved(newCfg: AppConfig) {
-    const before = loadConfig()
-    const beforeKey = checkKey(before)
-    setCfg(newCfg)
-    await guardPathAccess(false)
-    const hasLocal = await refreshLocal(newCfg)
-    const afterKey = checkKey(newCfg)
+    const before = loadConfig();
+    const beforeKey = checkKey(before);
+    setCfg(newCfg);
+    await guardPathAccess(false);
+    const hasLocal = await refreshLocal(newCfg);
+    const afterKey = checkKey(newCfg);
     if (afterKey !== beforeKey) {
-      resetRemote()
+      resetRemote();
       const pathChanged =
         newCfg.hamsterRootPath !== before.hamsterRootPath ||
-        newCfg.hamsterBookmarkName !== before.hamsterBookmarkName
+        newCfg.hamsterBookmarkName !== before.hamsterBookmarkName;
       if (pathChanged && newCfg.autoCheckOnLaunch && hasLocal) {
-        await onCheckUpdate()
+        await onCheckUpdate();
       }
     }
   }
 
   async function openEditorFile(filePath: string) {
     try {
-      if (!filePath) return
-      const ext = Path.extname(filePath).slice(1) || "md"
-      const content = await FileManager.readAsString(filePath, "utf-8")
+      if (!filePath) return;
+      const ext = Path.extname(filePath).slice(1) || "md";
+      const content = await FileManager.readAsString(filePath, "utf-8");
       const editor = new EditorController({
         ext: ext as any,
-      })
-      editor.content = content
+      });
+      editor.content = content;
       editor.onContentChanged = async (newContent: string) => {
         try {
-          await FileManager.writeAsString(filePath, newContent, "utf-8")
+          await FileManager.writeAsString(filePath, newContent, "utf-8");
         } catch (error: any) {
-          setStageAndMaybeLog(`保存文件失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
+          setStageAndMaybeLog(
+            `保存文件失败：${String(error?.message ?? error)}`,
+            "SYSTEM",
+            "ERROR",
+            true,
+          );
         }
-      }
-      await editor.present()
-      editor.dispose()
-      const items = await listFileBrowserEntries(editorCurrentPath)
-      setEditorEntries(items)
+      };
+      await editor.present();
+      editor.dispose();
+      const items = await listFileBrowserEntries(editorCurrentPath);
+      setEditorEntries(items);
     } catch (error: any) {
-      setStageAndMaybeLog(`打开编辑器失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
+      setStageAndMaybeLog(
+        `打开编辑器失败：${String(error?.message ?? error)}`,
+        "SYSTEM",
+        "ERROR",
+        true,
+      );
     }
   }
 
   async function reselectEditorFolder() {
     try {
-      const initialDirectory = editorCurrentPath || editorRootPath || cfg.hamsterRootPath || undefined
-      const picked = await (DocumentPicker as any).pickDirectory?.(initialDirectory)
-      const nextPath = String(picked ?? "").trim()
-      if (!nextPath) return
-      setEditorRootPath(nextPath)
-      setEditorCurrentPath(nextPath)
+      const initialDirectory =
+        editorCurrentPath || editorRootPath || cfg.hamsterRootPath || undefined;
+      const picked = await (DocumentPicker as any).pickDirectory?.(
+        initialDirectory,
+      );
+      const nextPath = String(picked ?? "").trim();
+      if (!nextPath) return;
+      setEditorRootPath(nextPath);
+      setEditorCurrentPath(nextPath);
     } catch (error: any) {
-      setStageAndMaybeLog(`选择文件夹失败：${String(error?.message ?? error)}`, "SYSTEM", "ERROR", true)
+      setStageAndMaybeLog(
+        `选择文件夹失败：${String(error?.message ?? error)}`,
+        "SYSTEM",
+        "ERROR",
+        true,
+      );
     }
   }
 
   async function minimizeScript() {
-    if (!supportsMinimization || busy) return
+    if (!supportsMinimization || busy) return;
     try {
-      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-    } catch { }
+      (globalThis as any).HapticFeedback?.mediumImpact?.();
+    } catch {}
     try {
-      await Script.minimize()
-    } catch { }
+      await Script.minimize();
+    } catch {}
   }
 
   async function cleanupAndExit() {
     try {
-      await clearWanxiangTempFiles()
-    } catch { }
-    Script.exit()
+      await clearWanxiangTempFiles();
+    } catch {}
+    Script.exit();
   }
 
   function closeScript() {
     try {
-      ; (globalThis as any).HapticFeedback?.mediumImpact?.()
-    } catch { }
+      (globalThis as any).HapticFeedback?.mediumImpact?.();
+    } catch {}
     if (!busy) {
-      void cleanupAndExit()
-      return
+      void cleanupAndExit();
+      return;
     }
     setAlert({
       title: "退出当前更新？",
       isPresented: true,
-      message: <Text>当前有更新任务正在进行，退出后将关闭当前脚本界面。是否继续退出？</Text>,
+      message: (
+        <Text>
+          当前有更新任务正在进行，退出后将关闭当前脚本界面。是否继续退出？
+        </Text>
+      ),
       actions: (
         <HStack>
           <Button
             title="取消"
             action={() => {
-              try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-              closeAlert()
+              try {
+                (globalThis as any).HapticFeedback?.mediumImpact?.();
+              } catch {}
+              closeAlert();
             }}
           />
           <Button
             title="退出"
             action={() => {
-              try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-              closeAlert()
-              void cleanupAndExit()
+              try {
+                (globalThis as any).HapticFeedback?.mediumImpact?.();
+              } catch {}
+              closeAlert();
+              void cleanupAndExit();
             }}
           />
         </HStack>
       ),
-    })
+    });
   }
 
   function renderLeadingToolbar() {
@@ -1131,12 +1455,12 @@ export function HomeView() {
             foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}
             disabled={busy}
             action={() => {
-              void minimizeScript()
+              void minimizeScript();
             }}
           />
         ) : null}
       </HStack>
-    )
+    );
   }
 
   function renderEditorTrailingToolbar() {
@@ -1145,10 +1469,10 @@ export function HomeView() {
         title=""
         systemImage="folder.badge.gearshape"
         action={() => {
-          void reselectEditorFolder()
+          void reselectEditorFolder();
         }}
       />
-    )
+    );
   }
 
   function renderSettingsTrailingToolbar() {
@@ -1157,146 +1481,182 @@ export function HomeView() {
         title=""
         systemImage="checkmark"
         action={() => {
-          try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-          settingsSaveRef.current?.()
+          try {
+            (globalThis as any).HapticFeedback?.mediumImpact?.();
+          } catch {}
+          settingsSaveRef.current?.();
         }}
       />
-    )
+    );
   }
 
   async function openFullscreenLogs() {
     await Navigation.present({
       element: <FullscreenLogView logs={logs} />,
-    })
+    });
   }
 
   async function openFullscreenNotes() {
     await Navigation.present({
       element: <FullscreenNotesView content={notes} />,
-    })
+    });
   }
 
   function applyProgress(p: any) {
     const toNum = (v: any): number | undefined => {
-      if (typeof v === "number" && Number.isFinite(v)) return v
+      if (typeof v === "number" && Number.isFinite(v)) return v;
       if (typeof v === "string") {
-        const n = Number(v)
-        if (Number.isFinite(n)) return n
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
       }
-      return undefined
-    }
-    const received = toNum(p?.received ?? p?.completedUnitCount ?? p?.progress?.completedUnitCount) ?? 0
-    const f = readFraction(p?.percent ?? p?.fractionCompleted ?? p?.progress?.fractionCompleted)
+      return undefined;
+    };
+    const received =
+      toNum(
+        p?.received ?? p?.completedUnitCount ?? p?.progress?.completedUnitCount,
+      ) ?? 0;
+    const f = readFraction(
+      p?.percent ?? p?.fractionCompleted ?? p?.progress?.fractionCompleted,
+    );
     if (received > 0 || (typeof f === "number" && f > 0)) {
-      setShowProgress(true)
+      setShowProgress(true);
     }
     if (typeof f === "number") {
-      const v = clamp01(f)
-      setProgressValue(v)
-      setProgressPct(pctFromFraction(v))
+      const v = clamp01(f);
+      setProgressValue(v);
+      setProgressPct(pctFromFraction(v));
     }
   }
 
   // ===== 操作 =====
 
   async function onCheckUpdate() {
-    if (!(await guardPathAccess(true))) return
-    setBusy(true)
-    setShowProgress(false) // ✅ 检查更新不显示进度
-    setStageAndMaybeLog("检查更新中…", "CHECK", "INFO", true)
-    setProgressPct("0.00%")
-    setProgressValue(undefined)
-    setRemoteSchemeVer("检查更新中...")
-    setRemoteDictMark("检查更新中...")
-    setRemoteModelMark("检查更新中...")
-    setNotes("检查更新中...")
+    if (!(await guardPathAccess(true))) return;
+    setBusy(true);
+    setShowProgress(false); // ✅ 检查更新不显示进度
+    setStageAndMaybeLog("检查更新中…", "CHECK", "INFO", true);
+    setProgressPct("0.00%");
+    setProgressValue(undefined);
+    setRemoteSchemeVer("检查更新中...");
+    setRemoteDictMark("检查更新中...");
+    setRemoteModelMark("检查更新中...");
+    setNotes("检查更新中...");
     try {
-      const current = loadConfig()
-      const { meta: localMeta } = await findLocalMeta(current)
-      await refreshLocal(current)
-      const effective = loadConfig()
+      const current = loadConfig();
+      const { meta: localMeta } = await findLocalMeta(current);
+      await refreshLocal(current);
+      const effective = loadConfig();
 
-      const r = await checkAllUpdates(effective)
-      const decision = buildUpdateDecision(localMeta, r, effective)
-      setRemoteSchemeVer(schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取")
-      setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取")
-      setRemoteModelMark(r.model?.remoteIdOrSha ?? "暂无法获取")
-      setNotes(r.scheme?.body ?? "")
-      setLastCheck(r)
-      setLastCheckDecision(decision)
-      setLastCheckKey(checkKey(effective))
-      saveSharedCheckCache(effective, r, decision)
+      const r = await checkAllUpdates(effective);
+      const decision = buildUpdateDecision(localMeta, r, effective);
+      setRemoteSchemeVer(
+        schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取",
+      );
+      setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取");
+      setRemoteModelMark(r.model?.remoteIdOrSha ?? "暂无法获取");
+      setNotes(r.scheme?.body ?? "");
+      setLastCheck(r);
+      setLastCheckDecision(decision);
+      setLastCheckKey(checkKey(effective));
+      saveSharedCheckCache(effective, r, decision);
 
-      pushCheckResultLog("方案", schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取", decision.scheme)
-      pushCheckResultLog("词库", r.dict?.remoteIdOrSha ?? "暂无法获取", decision.dict)
-      pushCheckResultLog("模型", r.model?.remoteIdOrSha ?? "暂无法获取", decision.model)
-      setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true)
+      pushCheckResultLog(
+        "方案",
+        schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取",
+        decision.scheme,
+      );
+      pushCheckResultLog(
+        "词库",
+        r.dict?.remoteIdOrSha ?? "暂无法获取",
+        decision.dict,
+      );
+      pushCheckResultLog(
+        "模型",
+        r.model?.remoteIdOrSha ?? "暂无法获取",
+        decision.model,
+      );
+      setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true);
     } catch (e: any) {
-      setStageAndMaybeLog(`检查失败：${String(e?.message ?? e)}`, "CHECK", "ERROR", true)
+      setStageAndMaybeLog(
+        `检查失败：${String(e?.message ?? e)}`,
+        "CHECK",
+        "ERROR",
+        true,
+      );
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   async function onAutoUpdate() {
-    if (!(await guardPathAccess(true))) return
-    setBusy(true)
-    setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStageAndMaybeLog("自动更新中…", "AUTO", "INFO", true)
-    setProgressPct("0.00%")
-    setProgressValue(undefined)
+    if (!(await guardPathAccess(true))) return;
+    setBusy(true);
+    setShowProgress(false); // ✅ 真正有下载进度后再显示
+    setStageAndMaybeLog("自动更新中…", "AUTO", "INFO", true);
+    setProgressPct("0.00%");
+    setProgressValue(undefined);
     try {
-      const current = loadConfig()
-      const { meta: localMeta } = await findLocalMeta(current)
-      await refreshLocal(current)
-      const effective = loadConfig()
+      const current = loadConfig();
+      const { meta: localMeta } = await findLocalMeta(current);
+      await refreshLocal(current);
+      const effective = loadConfig();
 
-      const key = checkKey(effective)
-      let pre = lastCheck
-      let decision = lastCheckDecision
-      let resolvedKey = lastCheckKey
-      const shared = loadSharedCheckCache()
+      const key = checkKey(effective);
+      let pre = lastCheck;
+      let decision = lastCheckDecision;
+      let resolvedKey = lastCheckKey;
+      const shared = loadSharedCheckCache();
       if ((!pre || lastCheckKey !== key) && shared && shared.key === key) {
-        pre = shared.remote
-        decision = shared.decision
-        resolvedKey = key
-        setRemoteSchemeVer(schemeRemoteDisplayMark(effective, shared.remote.scheme) || "暂无法获取")
-        setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取")
-        setRemoteModelMark(shared.remote.model?.remoteIdOrSha ?? "暂无法获取")
-        setNotes(shared.remote.scheme?.body ?? "")
-        setLastCheck(shared.remote)
-        setLastCheckDecision(shared.decision)
-        setLastCheckKey(key)
+        pre = shared.remote;
+        decision = shared.decision;
+        resolvedKey = key;
+        setRemoteSchemeVer(
+          schemeRemoteDisplayMark(effective, shared.remote.scheme) ||
+            "暂无法获取",
+        );
+        setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取");
+        setRemoteModelMark(shared.remote.model?.remoteIdOrSha ?? "暂无法获取");
+        setNotes(shared.remote.scheme?.body ?? "");
+        setLastCheck(shared.remote);
+        setLastCheckDecision(shared.decision);
+        setLastCheckKey(key);
       }
       if (!pre || resolvedKey !== key) {
         // 检查阶段也不显示进度（避免误导）
-        setShowProgress(false)
-        setStageAndMaybeLog("自动更新：检查更新中…", "AUTO", "INFO", true)
-        setRemoteSchemeVer("检查更新中...")
-        setRemoteDictMark("检查更新中...")
-        setRemoteModelMark("检查更新中...")
-        setNotes("检查更新中...")
-        pre = await checkAllUpdates(effective)
-        setRemoteSchemeVer(schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取")
-        setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取")
-        setRemoteModelMark(pre.model?.remoteIdOrSha ?? "暂无法获取")
-        setNotes(pre.scheme?.body ?? "")
-        setLastCheck(pre)
-        decision = buildUpdateDecision(localMeta, pre, effective)
-        setLastCheckDecision(decision)
-        setLastCheckKey(key)
+        setShowProgress(false);
+        setStageAndMaybeLog("自动更新：检查更新中…", "AUTO", "INFO", true);
+        setRemoteSchemeVer("检查更新中...");
+        setRemoteDictMark("检查更新中...");
+        setRemoteModelMark("检查更新中...");
+        setNotes("检查更新中...");
+        pre = await checkAllUpdates(effective);
+        setRemoteSchemeVer(
+          schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取",
+        );
+        setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取");
+        setRemoteModelMark(pre.model?.remoteIdOrSha ?? "暂无法获取");
+        setNotes(pre.scheme?.body ?? "");
+        setLastCheck(pre);
+        decision = buildUpdateDecision(localMeta, pre, effective);
+        setLastCheckDecision(decision);
+        setLastCheckKey(key);
       }
       if (pre && !decision) {
-        decision = buildUpdateDecision(localMeta, pre, effective)
-        setLastCheckDecision(decision)
+        decision = buildUpdateDecision(localMeta, pre, effective);
+        setLastCheckDecision(decision);
       }
 
-      if (decision?.scheme) pushLog("SUCCESS", "AUTO", "方案有可用更新")
-      if (decision?.dict) pushLog("SUCCESS", "AUTO", "词库有可用更新")
-      if (decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新")
+      if (decision?.scheme) pushLog("SUCCESS", "AUTO", "方案有可用更新");
+      if (decision?.dict) pushLog("SUCCESS", "AUTO", "词库有可用更新");
+      if (decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新");
       if (decision && !decision.scheme && !decision.dict && !decision.model) {
-        setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
-        return
+        setStageAndMaybeLog(
+          "自动更新完成（已是最新，无需更新）",
+          "AUTO",
+          "SUCCESS",
+          true,
+        );
+        return;
       }
 
       const autoResult = await autoUpdateAll(
@@ -1306,148 +1666,191 @@ export function HomeView() {
           onLog: wrapDetailLogger("AUTO"),
           onProgress: (p) => applyProgress(p),
           onAfterModule: async () => {
-            await refreshLocal(effective)
-            await refreshLastCheckDecision(effective, pre)
+            await refreshLocal(effective);
+            await refreshLastCheckDecision(effective, pre);
           },
         },
         pre,
-        decision ?? undefined
-      )
+        decision ?? undefined,
+      );
 
-      await refreshLocal(effective)
-      await refreshLastCheckDecision(effective, autoResult.remote)
+      await refreshLocal(effective);
+      await refreshLastCheckDecision(effective, autoResult.remote);
       if (!autoResult.didUpdate) {
-        setStageAndMaybeLog("自动更新完成（已是最新，无需更新）", "AUTO", "SUCCESS", true)
+        setStageAndMaybeLog(
+          "自动更新完成（已是最新，无需更新）",
+          "AUTO",
+          "SUCCESS",
+          true,
+        );
       } else if (autoResult.didDeploy) {
-        setStageAndMaybeLog("自动更新完成（已部署）", "AUTO", "SUCCESS", true)
+        setStageAndMaybeLog("自动更新完成（已部署）", "AUTO", "SUCCESS", true);
       } else {
-        setStageAndMaybeLog("自动更新完成（未自动部署）", "AUTO", "SUCCESS", true)
+        setStageAndMaybeLog(
+          "自动更新完成（未自动部署）",
+          "AUTO",
+          "SUCCESS",
+          true,
+        );
       }
     } catch (e: any) {
-      setStageAndMaybeLog(`自动更新失败：${String(e?.message ?? e)}`, "AUTO", "ERROR", true)
+      setStageAndMaybeLog(
+        `自动更新失败：${String(e?.message ?? e)}`,
+        "AUTO",
+        "ERROR",
+        true,
+      );
     } finally {
-      setBusy(false)
-      setShowProgress(false)
-      setProgressValue(undefined)
+      setBusy(false);
+      setShowProgress(false);
+      setProgressValue(undefined);
     }
   }
 
   async function onUpdateScheme() {
-    if (!(await guardPathAccess(true))) return
-    setBusy(true)
-    setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStageAndMaybeLog("更新方案中…", "SCHEME", "INFO", true)
-    setProgressPct("0.00%")
-    setProgressValue(undefined)
+    if (!(await guardPathAccess(true))) return;
+    setBusy(true);
+    setShowProgress(false); // ✅ 真正有下载进度后再显示
+    setStageAndMaybeLog("更新方案中…", "SCHEME", "INFO", true);
+    setProgressPct("0.00%");
+    setProgressValue(undefined);
     try {
-      const current = loadConfig()
+      const current = loadConfig();
       await updateScheme(current, {
         autoDeploy: false,
         onStage: wrapStageReporter("SCHEME"),
         onLog: wrapDetailLogger("SCHEME"),
         onProgress: (p) => applyProgress(p),
-      })
-      await refreshLocal(current)
-      await refreshLastCheckDecision(current)
-      setStageAndMaybeLog("更新方案完成", "SCHEME", "SUCCESS", true)
+      });
+      await refreshLocal(current);
+      await refreshLastCheckDecision(current);
+      setStageAndMaybeLog("更新方案完成", "SCHEME", "SUCCESS", true);
     } catch (e: any) {
-      setStageAndMaybeLog(`更新方案失败：${String(e?.message ?? e)}`, "SCHEME", "ERROR", true)
+      setStageAndMaybeLog(
+        `更新方案失败：${String(e?.message ?? e)}`,
+        "SCHEME",
+        "ERROR",
+        true,
+      );
     } finally {
-      setBusy(false)
-      setShowProgress(false)
-      setProgressValue(undefined)
+      setBusy(false);
+      setShowProgress(false);
+      setProgressValue(undefined);
     }
   }
 
   async function onUpdateDict() {
-    if (!(await guardPathAccess(true))) return
-    setBusy(true)
-    setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStageAndMaybeLog("更新词库中…", "DICT", "INFO", true)
-    setProgressPct("0.00%")
-    setProgressValue(undefined)
+    if (!(await guardPathAccess(true))) return;
+    setBusy(true);
+    setShowProgress(false); // ✅ 真正有下载进度后再显示
+    setStageAndMaybeLog("更新词库中…", "DICT", "INFO", true);
+    setProgressPct("0.00%");
+    setProgressValue(undefined);
     try {
-      const current = loadConfig()
+      const current = loadConfig();
       await updateDict(current, {
         autoDeploy: false,
         onStage: wrapStageReporter("DICT"),
         onLog: wrapDetailLogger("DICT"),
         onProgress: (p) => applyProgress(p),
-      })
-      await refreshLocal(current)
-      await refreshLastCheckDecision(current)
-      setStageAndMaybeLog("更新词库完成", "DICT", "SUCCESS", true)
+      });
+      await refreshLocal(current);
+      await refreshLastCheckDecision(current);
+      setStageAndMaybeLog("更新词库完成", "DICT", "SUCCESS", true);
     } catch (e: any) {
-      setStageAndMaybeLog(`更新词库失败：${String(e?.message ?? e)}`, "DICT", "ERROR", true)
+      setStageAndMaybeLog(
+        `更新词库失败：${String(e?.message ?? e)}`,
+        "DICT",
+        "ERROR",
+        true,
+      );
     } finally {
-      setBusy(false)
-      setShowProgress(false)
-      setProgressValue(undefined)
+      setBusy(false);
+      setShowProgress(false);
+      setProgressValue(undefined);
     }
   }
 
   async function onUpdateModel() {
-    if (!(await guardPathAccess(true))) return
-    setBusy(true)
-    setShowProgress(false) // ✅ 真正有下载进度后再显示
-    setStageAndMaybeLog("更新模型中…", "MODEL", "INFO", true)
-    setProgressPct("0.00%")
-    setProgressValue(undefined)
+    if (!(await guardPathAccess(true))) return;
+    setBusy(true);
+    setShowProgress(false); // ✅ 真正有下载进度后再显示
+    setStageAndMaybeLog("更新模型中…", "MODEL", "INFO", true);
+    setProgressPct("0.00%");
+    setProgressValue(undefined);
     try {
-      const current = loadConfig()
+      const current = loadConfig();
       await updateModel(current, {
         autoDeploy: false,
-        onStage: (message) => setStageAndMaybeLog(message, "MODEL", "INFO", true),
+        onStage: (message) =>
+          setStageAndMaybeLog(message, "MODEL", "INFO", true),
         onLog: (message) => pushLog("INFO", "MODEL", message),
         onProgress: (p) => applyProgress(p),
-      })
-      await refreshLocal(current)
-      await refreshLastCheckDecision(current)
-      setStageAndMaybeLog("更新模型完成", "MODEL", "SUCCESS", true)
+      });
+      await refreshLocal(current);
+      await refreshLastCheckDecision(current);
+      setStageAndMaybeLog("更新模型完成", "MODEL", "SUCCESS", true);
     } catch (e: any) {
-      setStageAndMaybeLog(`更新模型失败：${String(e?.message ?? e)}`, "MODEL", "ERROR", true)
+      setStageAndMaybeLog(
+        `更新模型失败：${String(e?.message ?? e)}`,
+        "MODEL",
+        "ERROR",
+        true,
+      );
     } finally {
-      setBusy(false)
-      setShowProgress(false)
-      setProgressValue(undefined)
+      setBusy(false);
+      setShowProgress(false);
+      setProgressValue(undefined);
     }
   }
 
   async function onDeploy() {
-    if (!(await guardPathAccess(true))) return
-    setBusy(true)
-    setShowProgress(false) // ✅ 部署不显示下载进度
-    setStageAndMaybeLog("部署中…", "DEPLOY", "INFO", true)
-    setProgressPct("0.00%")
-    setProgressValue(undefined)
+    if (!(await guardPathAccess(true))) return;
+    setBusy(true);
+    setShowProgress(false); // ✅ 部署不显示下载进度
+    setStageAndMaybeLog("部署中…", "DEPLOY", "INFO", true);
+    setProgressPct("0.00%");
+    setProgressValue(undefined);
     try {
-      const current = loadConfig()
-      await deployInputMethod(current, wrapStageReporter("DEPLOY"), wrapDetailLogger("DEPLOY"))
+      const current = loadConfig();
+      await deployInputMethod(
+        current,
+        wrapStageReporter("DEPLOY"),
+        wrapDetailLogger("DEPLOY"),
+      );
     } catch (e: any) {
-      setStageAndMaybeLog(`部署失败：${String(e?.message ?? e)}`, "DEPLOY", "ERROR", true)
+      setStageAndMaybeLog(
+        `部署失败：${String(e?.message ?? e)}`,
+        "DEPLOY",
+        "ERROR",
+        true,
+      );
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
   }
 
   function renderLogEntry(entry: LogEntry) {
-    return <LogEntryRow key={entry.id} entry={entry} />
+    return <LogEntryRow key={entry.id} entry={entry} />;
   }
 
   function renderEditorTab() {
-    const atRoot = !editorRootPath || isSameEditorPath(editorCurrentPath, editorRootPath)
-    const title = editorCurrentPath ? (Path.basename(editorCurrentPath) || "编辑") : "编辑"
+    const atRoot =
+      !editorRootPath || isSameEditorPath(editorCurrentPath, editorRootPath);
+    const title = editorCurrentPath
+      ? Path.basename(editorCurrentPath) || "编辑"
+      : "编辑";
     const goEditorParent = () => {
-      const root = normalizePath(editorRootPath)
-      const current = normalizePath(editorCurrentPath)
-      if (!current || !root) return
-      const parent = normalizePath(Path.dirname(current))
+      const root = normalizePath(editorRootPath);
+      const current = normalizePath(editorCurrentPath);
+      if (!current || !root) return;
+      const parent = normalizePath(Path.dirname(current));
       if (!parent || !isAtOrBelowEditorRoot(parent, root)) {
-        setEditorCurrentPath(root)
-        return
+        setEditorCurrentPath(root);
+        return;
       }
-      setEditorCurrentPath(parent)
-    }
+      setEditorCurrentPath(parent);
+    };
     return (
       <NavigationStack>
         <List
@@ -1464,20 +1867,27 @@ export function HomeView() {
           </Section>
 
           <Section
-            header={(
-              <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            header={
+              <HStack
+                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              >
                 <Text>目录内容</Text>
                 <Spacer />
                 {editorCurrentPath && !atRoot ? (
                   <Button action={goEditorParent}>
-                    <Image systemName="arrow.up.circle" foregroundStyle="systemBlue" />
+                    <Image
+                      systemName="arrow.up.circle"
+                      foregroundStyle="systemBlue"
+                    />
                   </Button>
                 ) : null}
               </HStack>
-            )}
+            }
           >
             {!editorCurrentPath ? (
-              <Text foregroundStyle="secondaryLabel">当前没有可浏览的书签目录。</Text>
+              <Text foregroundStyle="secondaryLabel">
+                当前没有可浏览的书签目录。
+              </Text>
             ) : editorLoading ? (
               <Text foregroundStyle="secondaryLabel">加载中...</Text>
             ) : editorEntries.length ? (
@@ -1485,23 +1895,37 @@ export function HomeView() {
                 <Button
                   key={entry.path}
                   action={() => {
-                    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+                    try {
+                      (globalThis as any).HapticFeedback?.mediumImpact?.();
+                    } catch {}
                     if (entry.isDirectory) {
-                      setEditorCurrentPath(entry.path)
+                      setEditorCurrentPath(entry.path);
                     } else {
-                      void openEditorFile(entry.path)
+                      void openEditorFile(entry.path);
                     }
                   }}
                 >
                   <HStack>
                     <Image
                       systemName={entry.isDirectory ? "folder" : "doc.text"}
-                      foregroundStyle={entry.isDirectory ? "systemBlue" : "secondaryLabel"}
+                      foregroundStyle={
+                        entry.isDirectory ? "systemBlue" : "secondaryLabel"
+                      }
                     />
-                    <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                    <Text
+                      frame={{
+                        maxWidth: "infinity",
+                        alignment: "leading" as any,
+                      }}
+                    >
                       {entry.name}
                     </Text>
-                    {entry.isDirectory ? <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" /> : null}
+                    {entry.isDirectory ? (
+                      <Image
+                        systemName="chevron.right"
+                        foregroundStyle="tertiaryLabel"
+                      />
+                    ) : null}
                   </HStack>
                 </Button>
               ))
@@ -1511,7 +1935,7 @@ export function HomeView() {
           </Section>
         </List>
       </NavigationStack>
-    )
+    );
   }
 
   function renderSection(key: HomeSectionKey) {
@@ -1523,7 +1947,7 @@ export function HomeView() {
           <RowKV k="本地词库" v={localDictMark} />
           <RowKV k="本地模型" v={localModelMark} />
         </Section>
-      )
+      );
     }
     if (key === "remote") {
       return (
@@ -1532,55 +1956,82 @@ export function HomeView() {
           <RowKV k="远程词库" v={remoteDictMark} />
           <RowKV k="远程模型" v={remoteModelMark} />
         </Section>
-      )
+      );
     }
     if (key === "notes") {
       return (
         <Section
           key={key}
-          header={(
-            <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+          header={
+            <HStack
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
+            >
               <Text>更新说明</Text>
               <Spacer />
               <Button
                 buttonStyle="plain"
                 action={() => {
-                  try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                  void openFullscreenNotes()
+                  try {
+                    (globalThis as any).HapticFeedback?.mediumImpact?.();
+                  } catch {}
+                  void openFullscreenNotes();
                 }}
               >
-                <Image systemName={FULLSCREEN_SYMBOL} foregroundStyle="systemBlue" />
+                <Image
+                  systemName={FULLSCREEN_SYMBOL}
+                  foregroundStyle="systemBlue"
+                />
               </Button>
             </HStack>
-          )}
+          }
         >
           <ScrollView frame={{ height: 220 }} padding>
             <Markdown content={notes} />
           </ScrollView>
         </Section>
-      )
+      );
     }
     if (key === "actions") {
       const autoUpdateReady =
         lastCheckKey === checkKey(cfg) &&
         !!lastCheckDecision &&
-        (lastCheckDecision.scheme || lastCheckDecision.dict || lastCheckDecision.model)
+        (lastCheckDecision.scheme ||
+          lastCheckDecision.dict ||
+          lastCheckDecision.model);
       const schemeColor =
-        lastCheckKey === checkKey(cfg) && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue"
+        lastCheckKey === checkKey(cfg) && lastCheckDecision?.scheme
+          ? "systemGreen"
+          : "systemBlue";
       const dictColor =
-        lastCheckKey === checkKey(cfg) && lastCheckDecision?.dict ? "systemGreen" : "systemBlue"
+        lastCheckKey === checkKey(cfg) && lastCheckDecision?.dict
+          ? "systemGreen"
+          : "systemBlue";
       const modelColor =
-        lastCheckKey === checkKey(cfg) && lastCheckDecision?.model ? "systemGreen" : "systemBlue"
-      const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue"
+        lastCheckKey === checkKey(cfg) && lastCheckDecision?.model
+          ? "systemGreen"
+          : "systemBlue";
+      const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue";
       return (
         <Section key={key} header={<Text>操作</Text>}>
           <VStack spacing={6} padding={{ top: 1, bottom: 1 }}>
             <HStack spacing={10} alignment="center">
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="doc.text" title="方案" color={schemeColor} onPress={onUpdateScheme} disabled={busy || !pathUsable} />
+                <GridButton
+                  icon="doc.text"
+                  title="方案"
+                  color={schemeColor}
+                  onPress={onUpdateScheme}
+                  disabled={busy || !pathUsable}
+                />
               </VStack>
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="books.vertical" title="词库" color={dictColor} onPress={onUpdateDict} disabled={busy || !pathUsable} />
+                <GridButton
+                  icon="books.vertical"
+                  title="词库"
+                  color={dictColor}
+                  onPress={onUpdateDict}
+                  disabled={busy || !pathUsable}
+                />
               </VStack>
               <VStack frame={{ maxWidth: "infinity" }}>
                 <GridButton
@@ -1594,23 +2045,39 @@ export function HomeView() {
             </HStack>
             <HStack spacing={10} alignment="center">
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="paperplane" title="部署" onPress={onDeploy} disabled={busy || !pathUsable} />
+                <GridButton
+                  icon="paperplane"
+                  title="部署"
+                  onPress={onDeploy}
+                  disabled={busy || !pathUsable}
+                />
               </VStack>
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="arrow.triangle.2.circlepath" title="检查更新" onPress={onCheckUpdate} disabled={busy || !pathUsable} />
+                <GridButton
+                  icon="arrow.triangle.2.circlepath"
+                  title="检查更新"
+                  onPress={onCheckUpdate}
+                  disabled={busy || !pathUsable}
+                />
               </VStack>
               <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton icon="bolt.fill" title="自动更新" color={autoUpdateColor} onPress={onAutoUpdate} disabled={busy || !pathUsable} />
+                <GridButton
+                  icon="bolt.fill"
+                  title="自动更新"
+                  color={autoUpdateColor}
+                  onPress={onAutoUpdate}
+                  disabled={busy || !pathUsable}
+                />
               </VStack>
             </HStack>
           </VStack>
         </Section>
-      )
+      );
     }
     return (
       <Section
         key={key}
-        header={(
+        header={
           <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
             <Text>状态</Text>
             <Spacer />
@@ -1619,30 +2086,58 @@ export function HomeView() {
                 buttonStyle="plain"
                 disabled={busy}
                 action={() => {
-                  try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
-                  void openFullscreenLogs()
+                  try {
+                    (globalThis as any).HapticFeedback?.mediumImpact?.();
+                  } catch {}
+                  void openFullscreenLogs();
                 }}
               >
-                <Image systemName={FULLSCREEN_SYMBOL} foregroundStyle={busy ? "secondaryLabel" : "systemBlue"} />
+                <Image
+                  systemName={FULLSCREEN_SYMBOL}
+                  foregroundStyle={busy ? "secondaryLabel" : "systemBlue"}
+                />
               </Button>
             ) : null}
           </HStack>
-        )}
+        }
       >
         {cfg.showVerboseLog ? (
-          <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
+          <VStack
+            frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+            spacing={0}
+          >
             <ScrollViewReader>
               {(proxy: any) => {
-                logProxyRef.current = proxy
+                logProxyRef.current = proxy;
                 return (
-                  <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={0}>
-                    <ScrollView frame={{ height: 152, maxWidth: "infinity" as any }} padding={{ top: 2, bottom: 2, leading: 0, trailing: 0 }}>
-                      <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-                        {logs.length ? logs.map(renderLogEntry) : (
+                  <VStack
+                    frame={{
+                      maxWidth: "infinity",
+                      alignment: "topLeading" as any,
+                    }}
+                    spacing={0}
+                  >
+                    <ScrollView
+                      frame={{ height: 152, maxWidth: "infinity" as any }}
+                      padding={{ top: 2, bottom: 2, leading: 0, trailing: 0 }}
+                    >
+                      <VStack
+                        spacing={2}
+                        frame={{
+                          maxWidth: "infinity",
+                          alignment: "topLeading" as any,
+                        }}
+                      >
+                        {logs.length ? (
+                          logs.map(renderLogEntry)
+                        ) : (
                           <Text
                             font="footnote"
                             foregroundStyle="secondaryLabel"
-                            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                            frame={{
+                              maxWidth: "infinity",
+                              alignment: "leading" as any,
+                            }}
                             multilineTextAlignment="leading"
                           >
                             暂无详细日志
@@ -1651,12 +2146,16 @@ export function HomeView() {
                         <Rectangle
                           key="bottomView"
                           foregroundStyle="clear"
-                          frame={{ maxWidth: "infinity", alignment: "leading" as any, height: 1 }}
+                          frame={{
+                            maxWidth: "infinity",
+                            alignment: "leading" as any,
+                            height: 1,
+                          }}
                         />
                       </VStack>
                     </ScrollView>
                   </VStack>
-                )
+                );
               }}
             </ScrollViewReader>
 
@@ -1668,9 +2167,17 @@ export function HomeView() {
                     {progressStageLabel(stage)}
                   </Text>
                   {typeof progressValue === "number" ? (
-                    <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                    <ProgressView
+                      value={progressValue}
+                      total={1}
+                      progressViewStyle="linear"
+                      frame={{ maxWidth: "infinity" }}
+                    />
                   ) : (
-                    <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                    <ProgressView
+                      progressViewStyle="linear"
+                      frame={{ maxWidth: "infinity" }}
+                    />
                   )}
                   <Text>{progressPct}</Text>
                 </HStack>
@@ -1684,9 +2191,17 @@ export function HomeView() {
             {busy && showProgress ? (
               <HStack alignment="center" spacing={8}>
                 {typeof progressValue === "number" ? (
-                  <ProgressView value={progressValue} total={1} progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                  <ProgressView
+                    value={progressValue}
+                    total={1}
+                    progressViewStyle="linear"
+                    frame={{ maxWidth: "infinity" }}
+                  />
                 ) : (
-                  <ProgressView progressViewStyle="linear" frame={{ maxWidth: "infinity" }} />
+                  <ProgressView
+                    progressViewStyle="linear"
+                    frame={{ maxWidth: "infinity" }}
+                  />
                 )}
                 <Text>{progressPct}</Text>
               </HStack>
@@ -1694,7 +2209,7 @@ export function HomeView() {
           </VStack>
         )}
       </Section>
-    )
+    );
   }
 
   return (
@@ -1740,15 +2255,15 @@ export function HomeView() {
               leadingToolbar={renderLeadingToolbar()}
               trailingToolbar={renderSettingsTrailingToolbar()}
               registerSaveAction={(fn) => {
-                settingsSaveRef.current = fn
+                settingsSaveRef.current = fn;
               }}
               onDone={(newCfg) => {
-                void handleSettingsSaved(newCfg)
+                void handleSettingsSaved(newCfg);
               }}
             />
           </NavigationStack>
         </Tab>
       </TabView>
     </VStack>
-  )
+  );
 }
