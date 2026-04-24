@@ -36,7 +36,7 @@ import { downloadModule } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
 import { RemoteControlView } from "./RemoteControlView"
 import { SettingsView } from "./SettingsView"
-import { ActionTileButton } from "./ActionTileButton"
+import { OriginSFSymbolButton } from "./OriginSFSymbolButton"
 import {
   fetchEnabledModuleNames,
   getModuleRemoteName,
@@ -498,26 +498,29 @@ export function HomeView() {
           topBarTrailing: <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />,
         }}
       >
-        <Section header={<Text>操作</Text>}>
-          <HStack spacing={12}>
-            <ActionTileButton
-              title="添加模块"
-              systemImage="plus.square.on.square"
-              tint="systemBlue"
-              onPress={addModule}
-              disabled={busy}
-            />
-            <ActionTileButton
-              title="全部更新"
-              systemImage="arrow.triangle.2.circlepath.circle.fill"
-              tint="systemGreen"
-              onPress={downloadAll}
-              disabled={busy || onlyLocalFiltered}
-            />
-          </HStack>
-        </Section>
-
-        <Section header={<Text>状态</Text>}>
+        <Section
+          header={(
+            <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              <HStack spacing={12}>
+                <OriginSFSymbolButton
+                  title="添加模块"
+                  systemImage="plus.square.on.square"
+                  tint="systemBlue"
+                  onPress={addModule}
+                  disabled={busy}
+                />
+                <OriginSFSymbolButton
+                  title="全部更新"
+                  systemImage="arrow.triangle.2.circlepath.circle.fill"
+                  tint="systemGreen"
+                  onPress={downloadAll}
+                  disabled={busy || onlyLocalFiltered}
+                />
+              </HStack>
+              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>状态</Text>
+            </VStack>
+          )}
+        >
           <Text>{stage}</Text>
           {progress !== null ? (
             <ProgressView
