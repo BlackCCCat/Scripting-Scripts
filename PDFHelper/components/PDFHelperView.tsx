@@ -402,7 +402,7 @@ export function PDFHelperView() {
             <VStack spacing={8} padding={24}>
               <Text>点右上角「+」添加文件或照片</Text>
               <Text foregroundStyle="secondaryLabel">
-                图片将显示整图；PDF 可选择按页展示缩略图(文件页数较大时不显示缩略图)或作为整体导入，支持自定义导入页码范围
+                图片将显示整图；PDF 可按页导入或作为整体导入，支持自定义导入页码范围。当前版本不显示 PDF 页面缩略图
               </Text>
             </VStack>
           ) : (
