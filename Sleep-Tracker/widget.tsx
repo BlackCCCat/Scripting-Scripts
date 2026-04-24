@@ -48,7 +48,7 @@ const BG_LARGE = { style: "systemBackground" as any, shape: { type: "rect" as co
 const CHART_HIDDEN = { chartLegend: "hidden" as const }
 const WIDGET_QUERY_DAYS = 60
 const WIDGET_RELOAD_TIMES = [
-  { hour: 0, minute: 5 },
+  { hour: 5, minute: 30 },
   { hour: 7, minute: 30 },
   { hour: 9, minute: 30 },
   { hour: 12, minute: 30 },
