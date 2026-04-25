@@ -1,6 +1,6 @@
 import type { CaptureResult, ClipItem, ClipPayload, CaisSettings } from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeText } from "../utils/common"
-import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, insertClip, listClips, listImagePaths, purgeOldDeleted, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
+import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClips, listImagePaths, purgeOldDeleted, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 
 function payloadContent(payload: ClipPayload): string {
@@ -31,10 +31,16 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   }
   const contentHash = kind === "image"
     ? hashString(`${kind}:${imageHash}`)
-    : hashString(`${kind}:${content}`)
-  const existing = await findClipByHash(contentHash, kind)
+    : hashString(`text:${content}`)
+  const textMatches = kind === "image" ? [] : await findTextClipsByContent(content)
+  const existing = kind === "image"
+    ? await findClipByHash(contentHash, kind)
+    : textMatches[0] ?? await findClipByHash(contentHash)
   const now = Date.now()
   if (existing) {
+    for (const duplicate of textMatches.filter((match) => match.id !== existing.id)) {
+      await deleteClip(duplicate.id)
+    }
     if (settings.duplicatePolicy === "skip") {
       return { status: "skipped", reason: "重复内容已存在" }
     }
@@ -113,7 +119,7 @@ export async function editClipContent(item: ClipItem, value: string): Promise<Cl
     kind,
     title: clipTitle(kind, content),
     content,
-    contentHash: hashString(`${kind}:${content}`),
+    contentHash: hashString(`text:${content}`),
     updatedAt: Date.now(),
     imagePath: undefined,
   }

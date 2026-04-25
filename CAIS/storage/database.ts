@@ -109,6 +109,15 @@ export async function findClipByHash(contentHash: string, kind?: string): Promis
   return rows[0] ? rowToClip(rows[0]) : null
 }
 
+export async function findTextClipsByContent(content: string): Promise<ClipItem[]> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT * FROM clips WHERE content = ? AND kind IN ('text', 'url') AND manual_favorite = 0 AND deleted_at IS NULL ORDER BY pinned DESC, favorite DESC, updated_at DESC",
+    [content]
+  )
+  return rows.map(rowToClip)
+}
+
 export async function listClips(options: {
   search?: string
   includeDeleted?: boolean

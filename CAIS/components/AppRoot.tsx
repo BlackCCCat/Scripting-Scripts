@@ -459,6 +459,8 @@ export function AppRoot() {
       <HStack
         key={item.id}
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        background="rgba(0,0,0,0.001)"
+        contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
         onTapGesture={withHaptic(() => copyItem(item))}
         contextMenu={{
           menuItems: (
