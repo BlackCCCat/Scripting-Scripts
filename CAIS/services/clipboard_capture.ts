@@ -8,13 +8,12 @@ let monitorTimer: any = null
 let monitorActive = false
 let lastChangeCount = -1
 let lastMessage = "未启动"
+let lastStatus: MonitorStatus = { active: false, lastMessage }
+const listeners = new Set<MonitorListener>()
 
-function previewItem(result: CaptureResult): string | undefined {
-  if (result.status === "skipped") return undefined
-  if (result.item.kind === "image") return result.item.title
-  return result.item.content.length > 80
-    ? `${result.item.content.slice(0, 80)}...`
-    : result.item.content
+function emit(status: MonitorStatus) {
+  lastStatus = status
+  for (const listener of listeners) listener(status)
 }
 
 export async function captureCurrentClipboard(settings: CaisSettings): Promise<CaptureResult> {
@@ -23,25 +22,31 @@ export async function captureCurrentClipboard(settings: CaisSettings): Promise<C
   return addClipFromPayload(payload, settings)
 }
 
-export function isMonitorActive(): boolean {
-  return monitorActive
-}
-
 export function stopClipboardMonitor(listener?: MonitorListener): void {
+  const previousListeners = Array.from(listeners)
   monitorActive = false
+  listeners.clear()
   if (monitorTimer) {
     clearTimeout(monitorTimer)
     monitorTimer = null
   }
   lastMessage = "监听已停止"
-  listener?.({ active: false, lastMessage, lastCheckedAt: Date.now() })
+  lastStatus = { active: false, lastMessage, lastCheckedAt: Date.now() }
+  for (const previousListener of previousListeners) previousListener(lastStatus)
+  if (listener && !previousListeners.includes(listener)) listener(lastStatus)
 }
 
 export function startClipboardMonitor(settings: CaisSettings, listener?: MonitorListener): () => void {
-  if (monitorActive) return () => {}
+  if (listener) listeners.add(listener)
+  if (monitorActive) {
+    if (listener) listener(lastStatus)
+    return () => {
+      if (listener) listeners.delete(listener)
+    }
+  }
   monitorActive = true
   lastMessage = "监听中"
-  listener?.({ active: true, lastMessage, lastCheckedAt: Date.now() })
+  emit({ active: true, lastMessage, lastCheckedAt: Date.now() })
 
   const tick = async () => {
     if (!monitorActive) return
@@ -55,21 +60,19 @@ export function startClipboardMonitor(settings: CaisSettings, listener?: Monitor
           result.status === "created" ? `已采集：${result.item.title}` :
           result.status === "updated" ? `已更新：${result.item.title}` :
           result.reason
-        const lastPreview = previewItem(result)
-        listener?.({
+        emit({
           active: true,
           lastMessage,
-          lastPreview,
           lastCheckedAt: now,
           lastCapturedAt: result.status === "created" || result.status === "updated" ? now : undefined,
         })
       } else {
-        listener?.({ active: true, lastMessage, lastCheckedAt: now })
+        emit({ active: true, lastMessage, lastCheckedAt: now })
       }
       await cleanupDeleted(settings)
     } catch (error: any) {
       lastMessage = String(error?.message ?? error ?? "监听失败")
-      listener?.({ active: true, lastMessage, lastCheckedAt: now })
+      emit({ active: true, lastMessage, lastCheckedAt: now })
     } finally {
       if (monitorActive) {
         monitorTimer = setTimeout(tick, settings.monitorIntervalMs)
@@ -78,5 +81,8 @@ export function startClipboardMonitor(settings: CaisSettings, listener?: Monitor
   }
 
   monitorTimer = setTimeout(tick, 100)
-  return () => stopClipboardMonitor(listener)
+  return () => {
+    if (listener) listeners.delete(listener)
+    if (!listeners.size) stopClipboardMonitor()
+  }
 }

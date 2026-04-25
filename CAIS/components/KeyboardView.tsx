@@ -41,6 +41,7 @@ import { initializeDatabase } from "../storage/database"
 import { loadSettings } from "../storage/settings_store"
 import { summarizeContent } from "../utils/common"
 import { PipStatusView } from "./PipStatusView"
+import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
 
 const TAB_FAVORITE = 0
 const TAB_CLIPS = 1
@@ -52,7 +53,6 @@ const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
   "lowercase",
   "openUrl",
 ]
-const FIXED_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = ["pin", "favorite"]
 let deleteRepeatTimer: any = null
 let lastInsertedText = ""
 let lastPastedText = ""
@@ -238,7 +238,7 @@ function clipListKey(items: ClipItem[]): string {
 
 function getOrderedKeyboardBuiltins(settings: CaisSettings): KeyboardMenuBuiltinAction[] {
   const order = settings.keyboardMenu.builtinOrder?.filter(
-    (key) => CONFIGURABLE_BUILTIN_ACTIONS.includes(key) && !FIXED_BUILTIN_ACTIONS.includes(key)
+    (key) => CONFIGURABLE_BUILTIN_ACTIONS.includes(key)
   )
   if (!order?.length) return CONFIGURABLE_BUILTIN_ACTIONS
   const missing = CONFIGURABLE_BUILTIN_ACTIONS.filter((key) => !order.includes(key))
@@ -550,7 +550,7 @@ export function KeyboardView() {
   const [items, setItems] = useState<ClipItem[]>([])
   const [settings] = useState<CaisSettings>(() => loadSettings())
   const [clipRowCount, setClipRowCount] = useState<1 | 2>(2)
-  const [, setStatus] = useState("点击卡片插入，向下按钮采集当前剪贴板")
+  const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
     lastMessage: "未启动",
@@ -563,12 +563,16 @@ export function KeyboardView() {
     return active.slice(0, settings.keyboardMaxItems)
   }, [activeTab, items, settings.keyboardMaxItems])
   const clipGridRows = useMemo(() => {
-    return Array.from({ length: clipRowCount }, () => ({ size: { type: "flexible" } }))
+    return Array.from({ length: clipRowCount }, () => ({ size: { type: "flexible" as const } }))
   }, [clipRowCount])
 
   useEffect(() => {
     void boot()
+    const timer = (globalThis as any).setInterval?.(() => {
+      setAppPipActive(readPipControlState().active)
+    }, 700)
     return () => {
+      if (timer) (globalThis as any).clearInterval?.(timer)
       stopContinuousDelete()
       stopKeyboardMonitor()
     }
@@ -592,8 +596,7 @@ export function KeyboardView() {
       await initializeDatabase()
       ensureKeyboardMonitor()
       await refresh()
-    } catch (error: any) {
-      setStatus(String(error?.message ?? error ?? "初始化失败"))
+    } catch {
     } finally {
       setLoading(false)
     }
@@ -611,7 +614,6 @@ export function KeyboardView() {
     const fallback = items.find((item) => item.kind !== "image")?.content ?? ""
     const text = lastPastedText || fallback
     if (!text) {
-      setStatus("没有可粘贴的文本内容")
       return
     }
     insertKeyboardText(text)
@@ -623,7 +625,6 @@ export function KeyboardView() {
     const after = String(kb?.textAfterCursor ?? "")
     const total = characterCount(before) + characterCount(after)
     if (!total) {
-      setStatus("当前输入内容为空")
       return
     }
     if (after) kb?.moveCursor?.(characterCount(after))
@@ -631,21 +632,14 @@ export function KeyboardView() {
       deleteBackward()
     }
     lastInsertedText = ""
-    setStatus("已清空当前输入内容")
   }
 
   async function captureNow() {
     setLoading(true)
     try {
-      const result = await captureCurrentClipboard(settings)
-      setStatus(
-        result.status === "created" ? `已采集：${result.item.title}` :
-        result.status === "updated" ? `已更新：${result.item.title}` :
-        result.reason
-      )
+      await captureCurrentClipboard(settings)
       await refresh()
-    } catch (error: any) {
-      setStatus(String(error?.message ?? error ?? "采集失败"))
+    } catch {
     } finally {
       setLoading(false)
     }
@@ -655,9 +649,7 @@ export function KeyboardView() {
     if (item.kind === "image") {
       try {
         await writeClipToPasteboard(item)
-        setStatus("已复制图片")
-      } catch (error: any) {
-        setStatus(String(error?.message ?? error ?? "复制图片失败"))
+      } catch {
       }
       return
     }
@@ -683,7 +675,6 @@ export function KeyboardView() {
 
   function undoInput() {
     if (!lastInsertedText) {
-      setStatus("没有可撤销的 CAIS 插入内容")
       return
     }
     for (let index = 0; index < Array.from(lastInsertedText).length; index += 1) {
@@ -693,23 +684,15 @@ export function KeyboardView() {
   }
 
   function startPipMonitor() {
-    setMonitorStatus({ active: true, lastMessage: "监听运行中", lastCheckedAt: Date.now() })
+    const status = { active: true, lastMessage: "监听运行中", lastCheckedAt: Date.now() }
+    setMonitorStatus(status)
     ensureKeyboardMonitor()
   }
 
   function stopPipMonitor() {
     stopKeyboardMonitor()
-    setMonitorStatus({ active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now() })
-  }
-
-  function togglePip() {
-    const next = !pipPresented.value
-    pipPresented.setValue(next)
-    if (next) {
-      startPipMonitor()
-    } else {
-      stopPipMonitor()
-    }
+    const status = { active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now() }
+    setMonitorStatus(status)
   }
 
   function toggleClipLayout() {
@@ -717,18 +700,28 @@ export function KeyboardView() {
   }
 
   async function openPipInApp() {
+    if (appPipActive) {
+      requestPipStop()
+      setAppPipActive(false)
+      pipPresented.setValue(false)
+      try {
+        await Safari.openURL(Script.createRunURLScheme("CAIS", { pip: "0" }))
+      } catch {
+      }
+      return
+    }
     const url = Script.createRunURLScheme("CAIS", { pip: "1" })
+    requestPipStart()
+    setAppPipActive(true)
     pipPresented.setValue(true)
-    setMonitorStatus({ active: true, lastMessage: "正在打开 CAIS 主应用", lastCheckedAt: Date.now() })
-    setStatus("正在打开 CAIS 主应用启动 PiP")
+    const status = { active: true, lastMessage: "正在打开 CAIS 主应用", lastCheckedAt: Date.now() }
+    setMonitorStatus(status)
     try {
       const ok = await Safari.openURL(url)
       if (!ok) {
-        setStatus("无法跳转 CAIS 主应用，已在键盘内尝试启动监听")
         startPipMonitor()
       }
-    } catch (error: any) {
-      setStatus(String(error?.message ?? error ?? "无法打开 CAIS 主应用"))
+    } catch {
       startPipMonitor()
     }
   }
@@ -791,8 +784,8 @@ export function KeyboardView() {
               onPress={toggleClipLayout}
             />
             <IconButton
-              systemImage="pip.enter"
-              tint={pipPresented.value ? "systemBlue" : "label"}
+              systemImage={appPipActive ? "pip.exit" : "pip.enter"}
+              tint={appPipActive ? "systemBlue" : "label"}
               onPress={openPipInApp}
             />
           </LazyHStack>
@@ -822,7 +815,7 @@ export function KeyboardView() {
                     settings={settings}
                     onInsert={insertClip}
                     onRefresh={refresh}
-                    onStatus={setStatus}
+                    onStatus={() => {}}
                   />
                 ) : (null as any)
               }}

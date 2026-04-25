@@ -44,11 +44,13 @@ import { formatDateTime, withHaptic } from "../utils/common"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { SettingsView } from "./SettingsView"
+import { readPipControlState, writePipControlState } from "../services/pip_control"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
 type ClearScope = "all" | "favorites"
+let intentionalMinimize = false
 
 function EmptyState(props: {
   title: string
@@ -197,7 +199,6 @@ export function AppRoot() {
   const [addCustomActionToken, setAddCustomActionToken] = useState(0)
   const [query, setQuery] = useState("")
   const [searchVisible, setSearchVisible] = useState(false)
-  const [, setStatusText] = useState("手动采集或开启 PiP 监听后，剪贴板内容会保存到这里")
   const [loading, setLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
@@ -231,21 +232,44 @@ export function AppRoot() {
   useEffect(() => {
     void boot()
     const removeResume = Script.onResume?.((details) => {
+      const pipCommand = details.queryParameters?.pip
+      if (pipCommand === "0") {
+        deactivatePipFromExternal({ exitAfter: true })
+        return
+      }
       if (details.queryParameters?.pip === "1") {
         void activatePipFromApp()
         return
       }
-      if (details.resumeFromMinimized) {
-        setStatusText("脚本已从最小化恢复")
-      }
     })
     const removeMinimize = Script.onMinimize?.(() => {
-      setStatusText("脚本已最小化，监听继续运行")
+      if (intentionalMinimize) {
+        intentionalMinimize = false
+        return
+      }
+      Script.exit()
     })
     return () => {
       removeResume?.()
       removeMinimize?.()
       stopClipboardMonitor()
+    }
+  }, [])
+
+  useEffect(() => {
+    let lastSeenCommandAt = 0
+    const timer = (globalThis as any).setInterval?.(() => {
+      const state = readPipControlState()
+      if (!state.command || state.updatedAt <= lastSeenCommandAt) return
+      lastSeenCommandAt = state.updatedAt
+      if (state.command === "stop") {
+        deactivatePipFromExternal()
+      } else if (state.command === "start") {
+        void activatePipFromApp()
+      }
+    }, 500)
+    return () => {
+      if (timer) (globalThis as any).clearInterval?.(timer)
     }
   }, [])
 
@@ -258,8 +282,7 @@ export function AppRoot() {
       if (Script.queryParameters?.pip === "1") {
         await activatePipFromApp()
       }
-    } catch (error: any) {
-      setStatusText(String(error?.message ?? error ?? "初始化失败"))
+    } catch {
     } finally {
       setLoading(false)
     }
@@ -296,14 +319,18 @@ export function AppRoot() {
     setLoading(true)
     try {
       const result = await captureCurrentClipboard(settings)
-      setStatusText(
+      const message =
         result.status === "created" ? `已采集：${result.item.title}` :
         result.status === "updated" ? `已更新：${result.item.title}` :
         result.reason
-      )
+      setMonitorStatus((status) => ({
+        ...status,
+        lastMessage: message,
+        lastCheckedAt: Date.now(),
+        lastCapturedAt: result.status === "skipped" ? status.lastCapturedAt : Date.now(),
+      }))
       await refresh()
-    } catch (error: any) {
-      setStatusText(String(error?.message ?? error ?? "采集失败"))
+    } catch {
     } finally {
       setLoading(false)
     }
@@ -314,7 +341,11 @@ export function AppRoot() {
       const fullContent = await getFullClipContent(item.id)
       await writeClipToPasteboard(item, fullContent)
       await markCopied(item)
-      setStatusText(`已复制：${item.title}`)
+      setMonitorStatus((status) => ({
+        ...status,
+        lastMessage: `已复制：${item.title}`,
+        lastCheckedAt: Date.now(),
+      }))
       showToast("已复制")
       await refresh()
     } catch (error: any) {
@@ -339,7 +370,6 @@ export function AppRoot() {
     dismissDeleteDialog()
     if (!item) return
     await softDeleteClip(item)
-    setStatusText(`已删除：${item.title}`)
     await refresh()
   }
 
@@ -353,10 +383,8 @@ export function AppRoot() {
     clearDialogPresented.setValue(false)
     if (scope === "favorites") {
       await clearFavoriteClips()
-      setStatusText("已清空收藏条目")
     } else {
       await clearAllClips()
-      setStatusText("已清空剪贴板数据库")
     }
     await refresh()
   }
@@ -372,8 +400,7 @@ export function AppRoot() {
       selectAll: true,
     })
     if (title == null) return
-    const next = await updateClipTitle(item, title)
-    setStatusText(`已更新标题：${next.title}`)
+    await updateClipTitle(item, title)
     await refresh()
   }
 
@@ -396,8 +423,7 @@ export function AppRoot() {
       })
       const nextContent = controller.content
       if (nextContent !== fullContent) {
-        const next = await editClipContent(item, nextContent)
-        setStatusText(`已编辑：${next.title}`)
+        await editClipContent(item, nextContent)
         await refresh()
       }
     } catch (error: any) {
@@ -415,7 +441,9 @@ export function AppRoot() {
   }
 
   function startPipMonitor() {
-    setMonitorStatus({ active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now() })
+    const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now() }
+    setMonitorStatus(status)
+    writePipControlState({ active: true, command: undefined })
     startClipboardMonitor(settings, (next) => {
       setMonitorStatus(next)
       if (next.lastCapturedAt) void refresh()
@@ -423,33 +451,60 @@ export function AppRoot() {
   }
 
   function stopPipMonitor() {
-    stopClipboardMonitor((next) => setMonitorStatus(next))
+    stopClipboardMonitor((next) => {
+      setMonitorStatus(next)
+    })
+    writePipControlState({ active: false, command: undefined })
   }
 
   function togglePip() {
-    pipPresented.setValue(!pipPresented.value)
+    const next = !pipPresented.value
+    pipPresented.setValue(next)
+    if (next) {
+      startPipMonitor()
+    } else {
+      stopPipMonitor()
+    }
+  }
+
+  function deactivatePipFromExternal(options: { exitAfter?: boolean } = {}) {
+    pipPresented.setValue(false)
+    stopPipMonitor()
+    if (options.exitAfter) {
+      ;(globalThis as any).setTimeout?.(() => {
+        Script.exit()
+      }, 250)
+    }
   }
 
   async function minimizeScript() {
     if (!Script.supportsMinimization?.()) {
-      setStatusText("当前环境不支持最小化")
       return
     }
     try {
+      intentionalMinimize = true
       const ok = await Script.minimize()
-      setStatusText(ok ? "脚本已最小化" : "最小化未执行")
+      if (!ok) intentionalMinimize = false
     } catch (error: any) {
+      intentionalMinimize = false
       await Dialog.alert({ message: String(error?.message ?? error ?? "最小化失败") })
     }
   }
 
   async function activatePipFromApp() {
-    setStatusText("已从键盘跳转启动 PiP 剪贴板监听")
     pipPresented.setValue(true)
     startPipMonitor()
     if (Script.supportsMinimization?.()) {
       ;(globalThis as any).setTimeout?.(() => {
-        void Script.minimize()
+        void (async () => {
+          intentionalMinimize = true
+          try {
+            const ok = await Script.minimize()
+            if (!ok) intentionalMinimize = false
+          } catch {
+            intentionalMinimize = false
+          }
+        })()
       }, 900)
     }
   }

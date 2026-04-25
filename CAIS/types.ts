@@ -73,7 +73,6 @@ export type KeyboardMenuSettings = {
 export type MonitorStatus = {
   active: boolean
   lastMessage: string
-  lastPreview?: string
   lastCheckedAt?: number
   lastCapturedAt?: number
 }

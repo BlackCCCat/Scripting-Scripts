@@ -1,4 +1,4 @@
-import { Text, VStack, useEffect, useState } from "scripting"
+import { Device, HStack, Image, Text, VStack, useEffect, useObservable } from "scripting"
 import type { MonitorStatus } from "../types"
 
 function timeText(timestamp = Date.now()): string {
@@ -19,34 +19,70 @@ export function PipStatusView(props: {
   onStart: () => void
   onStop: () => void
 }) {
-  const [now, setNow] = useState(Date.now())
-  const title = props.status.active ? "CAIS PiP 监听中" : "CAIS PiP 待启动"
-  const detail = props.status.lastPreview || props.status.lastMessage || "等待剪贴板变化"
+  const started = useObservable(false)
+  const now = useObservable(Date.now())
+  const active = props.status.active || started.value
+  const title = active ? "PiP 监听中" : "PiP 待启动"
+  const detail = active ? "正在监听剪贴板变化" : "等待启动"
 
   useEffect(() => {
-    const timer = (globalThis as any).setInterval?.(() => setNow(Date.now()), 1000)
-    return () => {
-      if (timer) (globalThis as any).clearInterval?.(timer)
+    if (!started.value && !props.status.active) return
+    let timerId: number
+
+    function startTimer() {
+      timerId = (globalThis as any).setTimeout?.(() => {
+        now.setValue(Date.now())
+        startTimer()
+      }, 1000)
     }
-  }, [])
+
+    startTimer()
+
+    return () => {
+      if (timerId) (globalThis as any).clearTimeout?.(timerId)
+    }
+  }, [started.value, props.status.active])
 
   return (
-    <VStack
-      spacing={2}
-      frame={{ width: 260, height: 44, alignment: "leading" as any }}
-      padding={{ leading: 10, trailing: 10 }}
-      onPipStart={props.onStart}
-      onPipStop={props.onStop}
-      onPipPlayPauseToggle={(isPlaying: boolean) => {
-        if (isPlaying) props.onStart()
-        else props.onStop()
+    <HStack
+      spacing={8}
+      frame={{ width: Device.screen.width, height: 50, alignment: "leading" as any }}
+      padding={{ leading: 12, trailing: 12 }}
+      onPipStart={() => {
+        started.setValue(true)
+        props.onStart()
+      }}
+      onPipStop={() => {
+        started.setValue(false)
+        props.onStop()
       }}
       pipHideOnForeground={false}
     >
-      <Text font="headline">{title}</Text>
-      <Text font="caption" lineLimit={1}>
-        {timeText(now)} · {detail}
-      </Text>
-    </VStack>
+      <Image
+        systemName="doc.on.clipboard"
+        font="title3"
+        foregroundStyle="white"
+      />
+      <VStack spacing={1} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+        <Text
+          font="caption"
+          foregroundStyle="white"
+          lineLimit={1}
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          multilineTextAlignment="leading"
+        >
+          {timeText(now.value)} · {title}
+        </Text>
+        <Text
+          font="headline"
+          foregroundStyle="white"
+          lineLimit={1}
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          multilineTextAlignment="leading"
+        >
+          {detail}
+        </Text>
+      </VStack>
+    </HStack>
   )
 }
