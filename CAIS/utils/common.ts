@@ -9,7 +9,8 @@ export function normalizeText(value: unknown): string {
 
 export function isLikelyURL(value: string): boolean {
   const text = value.trim()
-  return /^https?:\/\//i.test(text) || /^mailto:/i.test(text)
+  if (!text || /\s/.test(text)) return false
+  return /^https?:\/\/[^\s]+$/i.test(text) || /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(text)
 }
 
 export function clipTitle(kind: string, content: string): string {

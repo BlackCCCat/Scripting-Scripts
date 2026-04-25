@@ -3,6 +3,9 @@ import { addClipFromPayload, cleanupDeleted } from "../storage/clip_repository"
 import { currentChangeCount, readPasteboardPayload } from "./pasteboard_adapter"
 
 export type MonitorListener = (status: MonitorStatus) => void
+type MonitorOptions = {
+  skipInitialCapture?: boolean
+}
 
 let monitorTimer: any = null
 let monitorActive = false
@@ -36,7 +39,7 @@ export function stopClipboardMonitor(listener?: MonitorListener): void {
   if (listener && !previousListeners.includes(listener)) listener(lastStatus)
 }
 
-export function startClipboardMonitor(settings: CaisSettings, listener?: MonitorListener): () => void {
+export function startClipboardMonitor(settings: CaisSettings, listener?: MonitorListener, options: MonitorOptions = {}): () => void {
   if (listener) listeners.add(listener)
   if (monitorActive) {
     if (listener) listener(lastStatus)
@@ -47,12 +50,21 @@ export function startClipboardMonitor(settings: CaisSettings, listener?: Monitor
   monitorActive = true
   lastMessage = "监听中"
   emit({ active: true, lastMessage, lastCheckedAt: Date.now() })
+  let skipInitialCapture = Boolean(options.skipInitialCapture)
+  let firstTick = true
 
   const tick = async () => {
     if (!monitorActive) return
     const now = Date.now()
     try {
       const current = await currentChangeCount()
+      if (skipInitialCapture && firstTick) {
+        firstTick = false
+        lastChangeCount = current
+        emit({ active: true, lastMessage, lastCheckedAt: now })
+        return
+      }
+      firstTick = false
       if (current !== lastChangeCount) {
         lastChangeCount = current
         const result = await captureCurrentClipboard(settings)

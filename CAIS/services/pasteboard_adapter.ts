@@ -42,14 +42,6 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
   }
 
   try {
-    if (await pasteboardFlag(pb.hasURLs) && typeof pb.getURL === "function") {
-      const url = normalizeText(await pb.getURL())
-      if (url) return { kind: "url", url, text: url, sourceChangeCount }
-    }
-  } catch {
-  }
-
-  try {
     if (await pasteboardFlag(pb.hasStrings) && typeof pb.getString === "function") {
       const text = normalizeText(await pb.getString())
       if (!text) return null
@@ -57,6 +49,18 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
         return null
       }
       return { kind: "text", text, sourceChangeCount }
+    }
+  } catch {
+  }
+
+  try {
+    if (await pasteboardFlag(pb.hasURLs) && typeof pb.getURL === "function") {
+      const url = normalizeText(await pb.getURL())
+      if (!url) return null
+      if (url === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
+        return null
+      }
+      return { kind: "url", url, text: url, sourceChangeCount }
     }
   } catch {
   }

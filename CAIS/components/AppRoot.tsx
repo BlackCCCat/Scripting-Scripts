@@ -26,7 +26,7 @@ import {
 
 import type { CaisSettings, ClipItem, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
-import { writeClipToPasteboard } from "../services/pasteboard_adapter"
+import { currentChangeCount, writeClipToPasteboard } from "../services/pasteboard_adapter"
 import {
   clearAllClips,
   clearFavoriteClips,
@@ -449,12 +449,20 @@ export function AppRoot() {
       ext: "txt",
       readOnly: false,
     })
+    const initialChangeCount = await currentChangeCount()
+    const editorMonitorStopper = startClipboardMonitor(settings, (next) => {
+      if (next.lastCapturedAt) void refresh()
+    }, { skipInitialCapture: true })
     try {
       await controller.present({
         navigationTitle: "编辑内容",
         scriptName: "CAIS",
         fullscreen: false,
       })
+      if (await currentChangeCount() !== initialChangeCount) {
+        await captureCurrentClipboard(settings)
+        await refresh()
+      }
       const nextContent = controller.content
       if (nextContent !== fullContent) {
         await editClipContent(item, nextContent)
@@ -463,6 +471,7 @@ export function AppRoot() {
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "编辑失败") })
     } finally {
+      editorMonitorStopper()
       controller.dispose()
     }
   }
