@@ -38,6 +38,7 @@ import {
   togglePinned,
 } from "../storage/clip_repository"
 import { initializeDatabase } from "../storage/database"
+import { readClipDataVersion } from "../storage/change_signal"
 import { loadSettings } from "../storage/settings_store"
 import { summarizeContent } from "../utils/common"
 import { PipStatusView } from "./PipStatusView"
@@ -57,6 +58,7 @@ let deleteRepeatTimer: any = null
 let lastInsertedText = ""
 let lastPastedText = ""
 let lastKeyboardItemsKey = ""
+let keyboardRefreshGeneration = 0
 let keyboardMonitorStopper: (() => void) | null = null
 
 function keyboard(): any {
@@ -568,8 +570,13 @@ export function KeyboardView() {
 
   useEffect(() => {
     void boot()
+    let lastSeenClipDataVersion = readClipDataVersion()
     const timer = (globalThis as any).setInterval?.(() => {
       setAppPipActive(readPipControlState().active)
+      const version = readClipDataVersion()
+      if (version <= lastSeenClipDataVersion) return
+      lastSeenClipDataVersion = version
+      void refresh(true)
     }, 700)
     return () => {
       if (timer) (globalThis as any).clearInterval?.(timer)
@@ -593,19 +600,22 @@ export function KeyboardView() {
   async function boot() {
     setLoading(true)
     try {
+      lastKeyboardItemsKey = ""
       await initializeDatabase()
       ensureKeyboardMonitor()
-      await refresh()
+      await refresh(true)
     } catch {
     } finally {
       setLoading(false)
     }
   }
 
-  async function refresh() {
+  async function refresh(force = false) {
+    const generation = ++keyboardRefreshGeneration
     const next = await getClips("", Math.min(Math.max(settings.keyboardMaxItems, 50), settings.maxItems))
+    if (generation !== keyboardRefreshGeneration) return
     const key = clipListKey(next)
-    if (key === lastKeyboardItemsKey) return
+    if (!force && key === lastKeyboardItemsKey) return
     lastKeyboardItemsKey = key
     setItems(next)
   }

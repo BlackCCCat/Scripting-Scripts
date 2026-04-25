@@ -1,4 +1,5 @@
 import {
+  AppEvents,
   Button,
   ForEach,
   Group,
@@ -20,6 +21,7 @@ import {
   useState,
   Form,
   Navigation,
+  type ScenePhase,
 } from "scripting"
 
 import type { CaisSettings, ClipItem, MonitorStatus } from "../types"
@@ -40,6 +42,7 @@ import {
 } from "../storage/clip_repository"
 import { initializeDatabase } from "../storage/database"
 import { loadSettings, saveSettings } from "../storage/settings_store"
+import { readClipDataVersion } from "../storage/change_signal"
 import { formatDateTime, withHaptic } from "../utils/common"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
@@ -51,6 +54,8 @@ const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
 type ClearScope = "all" | "favorites"
 let intentionalMinimize = false
+let appRefreshGeneration = 0
+let appMonitorStopper: (() => void) | null = null
 
 function EmptyState(props: {
   title: string
@@ -231,6 +236,10 @@ export function AppRoot() {
 
   useEffect(() => {
     void boot()
+    const handleScenePhase = (phase: ScenePhase) => {
+      if (phase === "active") void refresh(true)
+    }
+    AppEvents.scenePhase.addListener(handleScenePhase)
     const removeResume = Script.onResume?.((details) => {
       const pipCommand = details.queryParameters?.pip
       if (pipCommand === "0") {
@@ -241,6 +250,7 @@ export function AppRoot() {
         void activatePipFromApp()
         return
       }
+      void refresh(true)
     })
     const removeMinimize = Script.onMinimize?.(() => {
       if (intentionalMinimize) {
@@ -250,9 +260,10 @@ export function AppRoot() {
       Script.exit()
     })
     return () => {
+      AppEvents.scenePhase.removeListener(handleScenePhase)
       removeResume?.()
       removeMinimize?.()
-      stopClipboardMonitor()
+      stopPipMonitor()
     }
   }, [])
 
@@ -273,12 +284,25 @@ export function AppRoot() {
     }
   }, [])
 
+  useEffect(() => {
+    let lastSeenClipDataVersion = readClipDataVersion()
+    const timer = (globalThis as any).setInterval?.(() => {
+      const version = readClipDataVersion()
+      if (version <= lastSeenClipDataVersion) return
+      lastSeenClipDataVersion = version
+      void refresh(true)
+    }, 700)
+    return () => {
+      if (timer) (globalThis as any).clearInterval?.(timer)
+    }
+  }, [])
+
   async function boot() {
     setLoading(true)
     try {
       await initializeDatabase()
       await captureCurrentClipboard(settings)
-      await refresh()
+      await refresh(true)
       if (Script.queryParameters?.pip === "1") {
         await activatePipFromApp()
       }
@@ -288,8 +312,10 @@ export function AppRoot() {
     }
   }
 
-  async function refresh() {
+  async function refresh(_force = false) {
+    const generation = ++appRefreshGeneration
     const nextItems = await getClips("", Math.min(settings.maxItems, 300))
+    if (generation !== appRefreshGeneration) return
     setItems(nextItems)
   }
 
@@ -444,16 +470,21 @@ export function AppRoot() {
     const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now() }
     setMonitorStatus(status)
     writePipControlState({ active: true, command: undefined })
-    startClipboardMonitor(settings, (next) => {
+    if (appMonitorStopper) return
+    appMonitorStopper = startClipboardMonitor(settings, (next) => {
       setMonitorStatus(next)
       if (next.lastCapturedAt) void refresh()
     })
   }
 
   function stopPipMonitor() {
-    stopClipboardMonitor((next) => {
-      setMonitorStatus(next)
-    })
+    if (appMonitorStopper) {
+      appMonitorStopper()
+      appMonitorStopper = null
+    } else {
+      stopClipboardMonitor()
+    }
+    setMonitorStatus({ active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now() })
     writePipControlState({ active: false, command: undefined })
   }
 
@@ -537,14 +568,14 @@ export function AppRoot() {
                 title=""
                 systemImage={item.favorite ? "star.slash" : "star"}
                 tint="systemYellow"
-                action={() => void toggleFavorite(item).then(refresh)}
+                action={() => void toggleFavorite(item).then(() => refresh())}
               />,
             ]),
             <Button
               title=""
               systemImage={item.pinned ? "pin.slash" : "pin"}
               tint="systemOrange"
-              action={() => void togglePinned(item).then(refresh)}
+              action={() => void togglePinned(item).then(() => refresh())}
             />,
           ],
         }}

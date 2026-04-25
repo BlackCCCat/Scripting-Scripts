@@ -4,7 +4,6 @@ import { databasePath, ensureAppDirectories } from "./paths"
 type DB = {
   execute: (sql: string, params?: any[]) => Promise<any>
   fetchAll: (sql: string, params?: any[]) => Promise<any[]>
-  close?: () => Promise<void> | void
 }
 
 let cachedDb: DB | null = null
@@ -57,9 +56,7 @@ export async function openCaisDatabase(): Promise<DB> {
   return cachedDb
 }
 
-export async function initializeDatabase(): Promise<DB> {
-  const db = await openCaisDatabase()
-  if (initialized) return db
+async function ensureSchema(db: DB): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS clips (
       id TEXT PRIMARY KEY,
@@ -84,6 +81,12 @@ export async function initializeDatabase(): Promise<DB> {
   }
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active ON clips(deleted_at, pinned, updated_at)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash)")
+}
+
+export async function initializeDatabase(): Promise<DB> {
+  const db = await openCaisDatabase()
+  if (initialized) return db
+  await ensureSchema(db)
   initialized = true
   return db
 }

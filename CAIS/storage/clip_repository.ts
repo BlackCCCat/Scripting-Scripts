@@ -2,6 +2,7 @@ import type { CaptureResult, ClipItem, ClipPayload, CaisSettings } from "../type
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeText } from "../utils/common"
 import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClips, listImagePaths, purgeOldDeleted, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
+import { bumpClipDataVersion } from "./change_signal"
 
 function payloadContent(payload: ClipPayload): string {
   if (payload.kind === "image") return `image:${payload.sourceChangeCount ?? Date.now()}`
@@ -38,14 +39,18 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
     : textMatches[0] ?? await findClipByHash(contentHash)
   const now = Date.now()
   if (existing) {
+    let changed = false
     for (const duplicate of textMatches.filter((match) => match.id !== existing.id)) {
       await deleteClip(duplicate.id)
+      changed = true
     }
     if (settings.duplicatePolicy === "skip") {
+      if (changed) bumpClipDataVersion()
       return { status: "skipped", reason: "重复内容已存在" }
     }
     await updateClipState(existing.id, { updatedAt: now })
     await trimActiveClips(settings.maxItems)
+    bumpClipDataVersion()
     return { status: "updated", item: { ...existing, updatedAt: now } }
   }
 
@@ -73,6 +78,7 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   }
   await insertClip(item)
   await trimActiveClips(settings.maxItems)
+  bumpClipDataVersion()
   return { status: "created", item }
 }
 
@@ -83,31 +89,37 @@ export async function getClips(search = "", limit = 120): Promise<ClipItem[]> {
 export async function markCopied(item: ClipItem): Promise<void> {
   const now = Date.now()
   await updateClipState(item.id, { updatedAt: now, lastCopiedAt: now })
+  bumpClipDataVersion()
 }
 
 export async function togglePinned(item: ClipItem): Promise<void> {
   await updateClipState(item.id, { pinned: !item.pinned, updatedAt: Date.now() })
+  bumpClipDataVersion()
 }
 
 export async function toggleFavorite(item: ClipItem): Promise<void> {
   await updateClipState(item.id, { favorite: !item.favorite })
+  bumpClipDataVersion()
 }
 
 export async function softDeleteClip(item: ClipItem): Promise<void> {
   await removeImage(item.imagePath)
   await deleteClip(item.id)
+  bumpClipDataVersion()
 }
 
 export async function clearAllClips(): Promise<void> {
   const imagePaths = await listImagePaths()
   await deleteAllClips()
   for (const path of imagePaths) await removeImage(path)
+  bumpClipDataVersion()
 }
 
 export async function clearFavoriteClips(): Promise<void> {
   const imagePaths = await listImagePaths({ favoritesOnly: true })
   await deleteFavoriteClips()
   for (const path of imagePaths) await removeImage(path)
+  bumpClipDataVersion()
 }
 
 export async function editClipContent(item: ClipItem, value: string): Promise<ClipItem> {
@@ -124,12 +136,14 @@ export async function editClipContent(item: ClipItem, value: string): Promise<Cl
     imagePath: undefined,
   }
   await updateClipContent(next)
+  bumpClipDataVersion()
   return next
 }
 
 export async function updateClipTitle(item: ClipItem, value: string): Promise<ClipItem> {
   const title = normalizeText(value) || clipTitle(item.kind, item.content)
   await updateClipTitleRow(item.id, title)
+  bumpClipDataVersion()
   return { ...item, title }
 }
 
@@ -158,6 +172,7 @@ export async function addFavoriteFromInput(title: string, content: string): Prom
     deletedAt: null,
   }
   await insertClip(item)
+  bumpClipDataVersion()
   return item
 }
 
