@@ -20,7 +20,13 @@ import {
   useState,
 } from "scripting"
 
-import type { CaisSettings, ClipItem, KeyboardCustomAction, MonitorStatus } from "../types"
+import type {
+  CaisSettings,
+  ClipItem,
+  KeyboardCustomAction,
+  KeyboardMenuBuiltinAction,
+  MonitorStatus,
+} from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { writeClipToPasteboard } from "../services/pasteboard_adapter"
 import {
@@ -38,6 +44,15 @@ import { PipStatusView } from "./PipStatusView"
 
 const TAB_FAVORITE = 0
 const TAB_CLIPS = 1
+const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
+  "base64Encode",
+  "base64Decode",
+  "cleanWhitespace",
+  "uppercase",
+  "lowercase",
+  "openUrl",
+]
+const FIXED_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = ["pin", "favorite"]
 let deleteRepeatTimer: any = null
 let lastInsertedText = ""
 let lastPastedText = ""
@@ -219,6 +234,15 @@ function clipListKey(items: ClipItem[]): string {
     item.contentHash,
     item.imagePath ?? "",
   ].join(":")).join("|")
+}
+
+function getOrderedKeyboardBuiltins(settings: CaisSettings): KeyboardMenuBuiltinAction[] {
+  const order = settings.keyboardMenu.builtinOrder?.filter(
+    (key) => CONFIGURABLE_BUILTIN_ACTIONS.includes(key) && !FIXED_BUILTIN_ACTIONS.includes(key)
+  )
+  if (!order?.length) return CONFIGURABLE_BUILTIN_ACTIONS
+  const missing = CONFIGURABLE_BUILTIN_ACTIONS.filter((key) => !order.includes(key))
+  return [...order, ...missing]
 }
 
 function ClipTile(props: {
@@ -432,6 +456,60 @@ function ClipTileMenu(props: {
     }
   }
 
+  function renderBuiltinAction(action: KeyboardMenuBuiltinAction) {
+    switch (action) {
+      case "base64Encode":
+        return builtins.base64Encode ? (
+          <Button key={action} title="Base64 编码" systemImage="curlybraces.square" action={() => void encodeBase64()} />
+        ) : null
+      case "base64Decode":
+        return !isImage && builtins.base64Decode ? (
+          <Button key={action} title="Base64 解码" systemImage="arrow.down.doc" action={() => void decodeBase64()} />
+        ) : null
+      case "cleanWhitespace":
+        return !isImage && builtins.cleanWhitespace ? (
+          <Button
+            key={action}
+            title="移除空格"
+            systemImage="text.badge.checkmark"
+            action={() => insertTransformed((value) => value.replace(/\s+/g, ""), "没有可处理文本")}
+          />
+        ) : null
+      case "uppercase":
+        return !isImage && builtins.uppercase ? (
+          <Button
+            key={action}
+            title="转为大写"
+            systemImage="textformat.size.larger"
+            action={() => insertTransformed((value) => value.toUpperCase(), "没有可转换文本")}
+          />
+        ) : null
+      case "lowercase":
+        return !isImage && builtins.lowercase ? (
+          <Button
+            key={action}
+            title="转为小写"
+            systemImage="textformat.size.smaller"
+            action={() => insertTransformed((value) => value.toLowerCase(), "没有可转换文本")}
+          />
+        ) : null
+      case "openUrl":
+        return builtins.openUrl && item.kind === "url" ? (
+          <Button
+            key={action}
+            title="打开链接"
+            systemImage="safari"
+            action={async () => {
+              const fullContent = await getFullClipContent(item.id)
+              await Safari.openURL(fullContent)
+            }}
+          />
+        ) : null
+      default:
+        return null
+    }
+  }
+
   return (
     <Group>
       <Button title="复制" systemImage="doc.on.doc" action={() => void copyItem()} />
@@ -447,33 +525,8 @@ function ClipTileMenu(props: {
           action={() => void toggleItemFavorite()}
         />
       ) : null}
-      {builtins.base64Encode ? (
-        <Button title="Base64 编码" systemImage="curlybraces.square" action={() => void encodeBase64()} />
-      ) : null}
-      {!isImage && builtins.base64Decode ? (
-        <Button title="Base64 解码" systemImage="arrow.down.doc" action={() => void decodeBase64()} />
-      ) : null}
-      {!isImage && builtins.cleanWhitespace ? (
-        <Button
-          title="移除空格"
-          systemImage="text.badge.checkmark"
-          action={() => insertTransformed((value) => value.replace(/\s+/g, ""), "没有可处理文本")}
-        />
-      ) : null}
-      {!isImage && builtins.uppercase ? (
-        <Button
-          title="转为大写"
-          systemImage="textformat.size.larger"
-          action={() => insertTransformed((value) => value.toUpperCase(), "没有可转换文本")}
-        />
-      ) : null}
-      {!isImage && builtins.lowercase ? (
-        <Button
-          title="转为小写"
-          systemImage="textformat.size.smaller"
-          action={() => insertTransformed((value) => value.toLowerCase(), "没有可转换文本")}
-        />
-      ) : null}
+      {getOrderedKeyboardBuiltins(props.settings).map((action) => renderBuiltinAction(action))}
+      <Button title="删除" systemImage="trash" role="destructive" action={() => void deleteItem()} />
       {!isImage ? (
         props.settings.keyboardMenu.customActions
           .filter((action) => action.enabled)
@@ -486,17 +539,6 @@ function ClipTileMenu(props: {
             />
           ))
       ) : null}
-      {builtins.openUrl && item.kind === "url" ? (
-        <Button
-          title="打开链接"
-          systemImage="safari"
-          action={async () => {
-            const fullContent = await getFullClipContent(item.id)
-            await Safari.openURL(fullContent)
-          }}
-        />
-      ) : null}
-      <Button title="删除" systemImage="trash" role="destructive" action={() => void deleteItem()} />
     </Group>
   )
 }

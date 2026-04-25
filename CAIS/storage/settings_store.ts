@@ -19,6 +19,11 @@ function sanitizeSettings(raw: any): CaisSettings {
     result[key] = Boolean(rawBuiltins[key] ?? defaultBuiltins[key])
     return result
   }, {} as Record<KeyboardMenuBuiltinAction, boolean>)
+  const builtinOrder = Array.isArray(raw?.keyboardMenu?.builtinOrder)
+    ? raw.keyboardMenu.builtinOrder
+      .filter((key: any) => builtinKeys.includes(key))
+      .map((key: any) => key as KeyboardMenuBuiltinAction)
+    : undefined
   const customActions = Array.isArray(raw?.keyboardMenu?.customActions)
     ? raw.keyboardMenu.customActions
       .map((item: any): KeyboardCustomAction => ({
@@ -42,6 +47,7 @@ function sanitizeSettings(raw: any): CaisSettings {
     keepDeletedDays: Math.max(1, Math.min(90, keepDeletedDays || DEFAULT_CAIS_SETTINGS.keepDeletedDays)),
     keyboardMenu: {
       builtins,
+      builtinOrder,
       customActions,
     },
   }
