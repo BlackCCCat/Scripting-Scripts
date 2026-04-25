@@ -8,6 +8,7 @@ import {
   LazyHGrid,
   LazyHStack,
   Picker,
+  ProgressView,
   RoundedRectangle,
   Script,
   ScrollView,
@@ -37,9 +38,9 @@ import {
   toggleFavorite,
   togglePinned,
 } from "../storage/clip_repository"
-import { initializeDatabase } from "../storage/database"
 import { readClipDataVersion } from "../storage/change_signal"
 import { loadSettings } from "../storage/settings_store"
+import { imagePreviewPath } from "../storage/image_store"
 import { summarizeContent } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { PipStatusView } from "./PipStatusView"
@@ -63,7 +64,18 @@ let lastInsertedText = ""
 let lastPastedText = ""
 let lastKeyboardItemsKey = ""
 let keyboardRefreshGeneration = 0
+let keyboardLifecycleGeneration = 0
+let lastKeyboardItems: ClipItem[] = []
+let lastKeyboardItemsVersion = 0
 let keyboardMonitorStopper: (() => void) | null = null
+let keyboardMonitorStartTimer: any = null
+
+export type KeyboardInitialState = {
+  items: ClipItem[]
+  settings: CaisSettings
+  version: number
+  loaded: boolean
+}
 
 function keyboard(): any {
   return (globalThis as any).CustomKeyboard
@@ -240,6 +252,28 @@ function clipTileWidth(): number {
   return Math.max(132, Math.floor((availableWidth - CLIP_GRID_SPACING) / 2))
 }
 
+function queryLimitForKeyboard(settings: CaisSettings): number {
+  return Math.max(1, Math.min(settings.keyboardMaxItems, settings.maxItems))
+}
+
+function cachedKeyboardItems(): ClipItem[] {
+  return lastKeyboardItemsVersion === readClipDataVersion() ? lastKeyboardItems : []
+}
+
+function rememberKeyboardItems(items: ClipItem[], version = readClipDataVersion()) {
+  lastKeyboardItems = items
+  lastKeyboardItemsKey = clipListKey(items)
+  lastKeyboardItemsVersion = version
+}
+
+export async function preloadKeyboardInitialState(): Promise<KeyboardInitialState> {
+  const settings = loadSettings()
+  const version = readClipDataVersion()
+  const items = await getClips("", queryLimitForKeyboard(settings))
+  rememberKeyboardItems(items, version)
+  return { items, settings, version, loaded: true }
+}
+
 function ClipTile(props: {
   item: ClipItem
   settings: CaisSettings
@@ -249,6 +283,7 @@ function ClipTile(props: {
 }) {
   const item = props.item
   const isImage = item.kind === "image"
+  const previewPath = isImage ? imagePreviewPath(item.imagePath) : undefined
   return (
     <Button
       buttonStyle="plain"
@@ -278,11 +313,18 @@ function ClipTile(props: {
             padding={10}
             spacing={6}
           >
-            {isImage && item.imagePath ? (
+            {isImage && previewPath ? (
               <Image
-                filePath={item.imagePath}
+                filePath={previewPath}
                 resizable
                 scaleToFit
+                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+              />
+            ) : isImage ? (
+              <Image
+                systemName="photo"
+                font="largeTitle"
+                foregroundStyle="secondaryLabel"
                 frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
               />
             ) : (
@@ -538,19 +580,21 @@ function ClipTileMenu(props: {
   )
 }
 
-export function KeyboardView() {
+export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}) {
   const traits = keyboard()?.useTraits?.()
   const pipPresented = useObservable(false)
+  const initialItems = props.initialState?.loaded ? props.initialState.items : cachedKeyboardItems()
+  const initialLoaded = Boolean(props.initialState?.loaded || initialItems.length)
   const [activeTab, setActiveTab] = useState(TAB_CLIPS)
-  const [items, setItems] = useState<ClipItem[]>([])
-  const [settings] = useState<CaisSettings>(() => loadSettings())
+  const [items, setItems] = useState<ClipItem[]>(() => initialItems)
+  const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const [clipRowCount, setClipRowCount] = useState<1 | 2>(2)
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
     lastMessage: "未启动",
   })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(() => !initialLoaded)
   const visibleItems = useMemo(() => {
     const active = activeTab === TAB_FAVORITE
       ? items.filter((item) => item.favorite)
@@ -562,17 +606,24 @@ export function KeyboardView() {
   }, [clipRowCount])
 
   useEffect(() => {
-    void boot()
-    let lastSeenClipDataVersion = readClipDataVersion()
+    const lifecycle = ++keyboardLifecycleGeneration
+    void boot(lifecycle)
+    let lastSeenClipDataVersion = props.initialState?.version ?? readClipDataVersion()
     const timer = (globalThis as any).setInterval?.(() => {
-      setAppPipActive(readPipControlState().active)
+      const pipActive = readPipControlState().active
+      setAppPipActive((current) => current === pipActive ? current : pipActive)
       const version = readClipDataVersion()
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
-      void refresh(true)
-    }, 700)
+      void refresh(true, lifecycle)
+    }, 900)
     return () => {
+      if (keyboardLifecycleGeneration === lifecycle) keyboardLifecycleGeneration += 1
       if (timer) (globalThis as any).clearInterval?.(timer)
+      if (keyboardMonitorStartTimer) {
+        ;(globalThis as any).clearTimeout?.(keyboardMonitorStartTimer)
+        keyboardMonitorStartTimer = null
+      }
       stopContinuousDelete()
       stopKeyboardMonitor()
     }
@@ -590,26 +641,36 @@ export function KeyboardView() {
     keyboardMonitorStopper = null
   }
 
-  async function boot() {
-    setLoading(true)
-    try {
-      lastKeyboardItemsKey = ""
-      await initializeDatabase()
+  function scheduleKeyboardMonitor(lifecycle: number) {
+    if (keyboardMonitorStartTimer) {
+      ;(globalThis as any).clearTimeout?.(keyboardMonitorStartTimer)
+    }
+    keyboardMonitorStartTimer = (globalThis as any).setTimeout?.(() => {
+      keyboardMonitorStartTimer = null
+      if (lifecycle !== keyboardLifecycleGeneration) return
       ensureKeyboardMonitor()
-      await refresh(true)
+    }, 250)
+  }
+
+  async function boot(lifecycle: number) {
+    if (!initialLoaded) setLoading(true)
+    try {
+      if (!initialLoaded) await refresh(true, lifecycle)
+      if (lifecycle === keyboardLifecycleGeneration) scheduleKeyboardMonitor(lifecycle)
     } catch {
     } finally {
-      setLoading(false)
+      if (lifecycle === keyboardLifecycleGeneration) setLoading(false)
     }
   }
 
-  async function refresh(force = false) {
+  async function refresh(force = false, lifecycle = keyboardLifecycleGeneration) {
     const generation = ++keyboardRefreshGeneration
-    const next = await getClips("", Math.min(Math.max(settings.keyboardMaxItems, 50), settings.maxItems))
+    const next = await getClips("", queryLimitForKeyboard(settings))
+    if (lifecycle !== keyboardLifecycleGeneration) return
     if (generation !== keyboardRefreshGeneration) return
     const key = clipListKey(next)
     if (!force && key === lastKeyboardItemsKey) return
-    lastKeyboardItemsKey = key
+    rememberKeyboardItems(next)
     setItems(next)
   }
 
@@ -824,6 +885,13 @@ export function KeyboardView() {
               }}
             />
           </LazyHGrid>
+        ) : loading ? (
+          <VStack
+            frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
+            spacing={8}
+          >
+            <ProgressView />
+          </VStack>
         ) : (
           <VStack
             frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}

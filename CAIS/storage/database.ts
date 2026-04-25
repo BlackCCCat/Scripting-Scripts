@@ -121,13 +121,12 @@ export async function findTextClipsByContent(content: string): Promise<ClipItem[
   return rows.map(rowToClip)
 }
 
-export async function listClips(options: {
+async function fetchClipRows(db: DB, options: {
   search?: string
   includeDeleted?: boolean
   deletedOnly?: boolean
   limit?: number
-} = {}): Promise<ClipItem[]> {
-  const db = await initializeDatabase()
+}): Promise<any[]> {
   const params: any[] = []
   const clauses: string[] = []
   if (options.deletedOnly) clauses.push("deleted_at IS NOT NULL")
@@ -140,10 +139,28 @@ export async function listClips(options: {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""
   const limit = Math.max(1, Math.min(500, Number(options.limit ?? 100) || 100))
   params.push(limit)
-  const rows = await db.fetchAll(
+  return db.fetchAll(
     `SELECT id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at FROM clips ${where} ORDER BY pinned DESC, updated_at DESC LIMIT ?`,
     params
   )
+}
+
+export async function listClips(options: {
+  search?: string
+  includeDeleted?: boolean
+  deletedOnly?: boolean
+  limit?: number
+} = {}): Promise<ClipItem[]> {
+  const db = await openCaisDatabase()
+  let rows: any[]
+  try {
+    rows = await fetchClipRows(db, options)
+  } catch (error) {
+    if (initialized) throw error
+    await ensureSchema(db)
+    initialized = true
+    rows = await fetchClipRows(db, options)
+  }
   return rows.map(rowToClip)
 }
 
