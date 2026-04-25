@@ -49,6 +49,10 @@ function createDefaultOptions(symbolSettings: SymbolSettings): PasswordOptions {
   }
 }
 
+function keyboard() {
+  return (globalThis as any).CustomKeyboard
+}
+
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
     try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
@@ -378,9 +382,20 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
     <Card>
       <HStack frame={{ width: "100%" as any }}>
         <VStack spacing={4} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-          <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-            随机密码生成
-          </Text>
+          {props.mode === "keyboard" ? (
+            <Button
+              buttonStyle="plain"
+              action={withHaptic(() => keyboard()?.dismissToHome?.())}
+            >
+              <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                随机密码生成
+              </Text>
+            </Button>
+          ) : (
+            <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              随机密码生成
+            </Text>
+          )}
           <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
             {optionSummary(options)}
           </Text>
