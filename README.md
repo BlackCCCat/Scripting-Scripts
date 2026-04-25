@@ -13,6 +13,7 @@
 - [快递助手](./Package-Helper/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Package-Helper.zip)
 - [BiliFavor](./BiliFavor/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/BiliFavor.zip)
 - [Sleep Tracker](./Sleep-Tracker/): [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Sleep-Tracker.zip)
+- [CAIS](./CAIS/)：`Clipboard All in Scripting`，[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
 
 
 **Codex完成几乎所有代码**
@@ -24,3 +25,4 @@
 - [万象方案下载更新](./Rime-Wanxiang-Updater/)中的文档查看器复用了`Scripting`群组中分享的`Omni Text Viewer`脚本
 - [快递助手](./Package-Helper/) 修改自 [快递小助手](https://raw.githubusercontent.com/1085481057/Scripting/refs/heads/main/%E5%BF%AB%E9%80%92%E5%B0%8F%E5%8A%A9%E6%89%8B.scripting)
 - [BiliFavor](./BiliFavor/) 参考了哔哩哔哩相关API
+- [CAIS](./CAIS/) 参考了`CAIO`的键盘样式
