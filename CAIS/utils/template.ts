@@ -10,6 +10,7 @@ export function runtimeTemplateVariables() {
     date,
     time,
     datetime: `${date} ${time}`,
+    timestamp: String(now.getTime()),
   }
 }
 
@@ -20,5 +21,5 @@ export function renderRuntimeTemplate(template: string, text = ""): string {
     .replace(/\{\{date\}\}/g, values.date)
     .replace(/\{\{time\}\}/g, values.time)
     .replace(/\{\{datetime\}\}/g, values.datetime)
+    .replace(/\{\{timestamp\}\}/g, values.timestamp)
 }
-

@@ -118,7 +118,7 @@ function CustomActionEditorView(props: {
         {mode === "template" ? (
           <Section
             header={<Text>模板</Text>}
-            footer={<Text>{"可使用 {{text}}、{{date}}、{{time}}、{{datetime}}。"}</Text>}
+            footer={<Text>{"可使用 {{text}}、{{date}}、{{time}}、{{datetime}}、{{timestamp}}。"}</Text>}
           >
             <TextField
               title=""

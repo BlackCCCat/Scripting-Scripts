@@ -47,6 +47,9 @@ import { readPipControlState, requestPipStart, requestPipStop } from "../service
 
 const TAB_FAVORITE = 0
 const TAB_CLIPS = 1
+const KEYBOARD_ROOT_SIDE_PADDING = 6
+const CLIP_SCROLL_SIDE_PADDING = 8
+const CLIP_GRID_SPACING = 10
 const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
   "base64Encode",
   "base64Decode",
@@ -232,6 +235,11 @@ function getOrderedKeyboardBuiltins(settings: CaisSettings): KeyboardMenuBuiltin
   return [...order, ...missing]
 }
 
+function clipTileWidth(): number {
+  const availableWidth = Device.screen.width - KEYBOARD_ROOT_SIDE_PADDING * 2 - CLIP_SCROLL_SIDE_PADDING * 2
+  return Math.max(132, Math.floor((availableWidth - CLIP_GRID_SPACING) / 2))
+}
+
 function ClipTile(props: {
   item: ClipItem
   settings: CaisSettings
@@ -244,7 +252,7 @@ function ClipTile(props: {
   return (
     <Button
       buttonStyle="plain"
-      frame={{ width: 206, maxHeight: "infinity" as any }}
+      frame={{ width: clipTileWidth(), maxHeight: "infinity" as any }}
       action={() => {
         playClick()
         void props.onInsert(item)
@@ -734,7 +742,7 @@ export function KeyboardView() {
     <VStack
       spacing={7}
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
+      padding={{ top: 6, bottom: 6, leading: KEYBOARD_ROOT_SIDE_PADDING, trailing: KEYBOARD_ROOT_SIDE_PADDING }}
       pip={{
         isPresented: pipPresented,
         maximumUpdatesPerSecond: 2,
@@ -791,12 +799,12 @@ export function KeyboardView() {
         axes="horizontal"
         scrollIndicator="hidden"
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        padding={{ leading: 8, trailing: 8 }}
+        padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
       >
         {visibleItems.length ? (
           <LazyHGrid
             rows={clipGridRows}
-            spacing={10}
+            spacing={CLIP_GRID_SPACING}
             frame={{ maxHeight: "infinity" }}
           >
             <ForEach

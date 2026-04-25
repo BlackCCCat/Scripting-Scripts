@@ -152,7 +152,7 @@ function AddFavoriteView() {
         </Section>
         <Section
           header={<Text>内容</Text>}
-          footer={<Text>{"可使用 {{text}}、{{date}}、{{time}}、{{datetime}}。"}</Text>}
+          footer={<Text>{"可使用 {{text}}、{{date}}、{{time}}、{{datetime}}、{{timestamp}}。"}</Text>}
         >
           <TextField
             title=""
