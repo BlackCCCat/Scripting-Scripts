@@ -549,6 +549,7 @@ export function KeyboardView() {
   const [activeTab, setActiveTab] = useState(TAB_CLIPS)
   const [items, setItems] = useState<ClipItem[]>([])
   const [settings] = useState<CaisSettings>(() => loadSettings())
+  const [clipRowCount, setClipRowCount] = useState<1 | 2>(2)
   const [, setStatus] = useState("点击卡片插入，向下按钮采集当前剪贴板")
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
@@ -561,6 +562,9 @@ export function KeyboardView() {
       : items.filter((item) => !item.manualFavorite)
     return active.slice(0, settings.keyboardMaxItems)
   }, [activeTab, items, settings.keyboardMaxItems])
+  const clipGridRows = useMemo(() => {
+    return Array.from({ length: clipRowCount }, () => ({ size: { type: "flexible" } }))
+  }, [clipRowCount])
 
   useEffect(() => {
     void boot()
@@ -708,6 +712,10 @@ export function KeyboardView() {
     }
   }
 
+  function toggleClipLayout() {
+    setClipRowCount((value) => value === 2 ? 1 : 2)
+  }
+
   async function openPipInApp() {
     const url = Script.createRunURLScheme("CAIS", { pip: "1" })
     pipPresented.setValue(true)
@@ -779,6 +787,10 @@ export function KeyboardView() {
             <IconButton systemImage="square.and.arrow.down.on.square" disabled={loading} onPress={captureNow} />
             <IconButton systemImage="keyboard.chevron.compact.down" onPress={() => keyboard()?.dismiss?.()} />
             <IconButton
+              systemImage={clipRowCount === 2 ? "square.grid.2x2" : "rectangle.split.3x1.fill"}
+              onPress={toggleClipLayout}
+            />
+            <IconButton
               systemImage="pip.enter"
               tint={pipPresented.value ? "systemBlue" : "label"}
               onPress={openPipInApp}
@@ -795,7 +807,7 @@ export function KeyboardView() {
       >
         {visibleItems.length ? (
           <LazyHGrid
-            rows={[{ size: { type: "flexible" } }, { size: { type: "flexible" } }]}
+            rows={clipGridRows}
             spacing={10}
             frame={{ maxHeight: "infinity" }}
           >
