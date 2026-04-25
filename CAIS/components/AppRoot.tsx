@@ -44,6 +44,7 @@ import { initializeDatabase } from "../storage/database"
 import { loadSettings, saveSettings } from "../storage/settings_store"
 import { readClipDataVersion } from "../storage/change_signal"
 import { formatDateTime, withHaptic } from "../utils/common"
+import { renderRuntimeTemplate } from "../utils/template"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { SettingsView } from "./SettingsView"
@@ -56,6 +57,10 @@ type ClearScope = "all" | "favorites"
 let intentionalMinimize = false
 let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
+
+function renderClipOutput(item: ClipItem, content: string): string {
+  return item.manualFavorite ? renderRuntimeTemplate(content) : content
+}
 
 function EmptyState(props: {
   title: string
@@ -145,7 +150,10 @@ function AddFavoriteView() {
         <Section>
           <TextField title="标题" value={title} prompt="可选，留空则自动生成" onChanged={setTitle} />
         </Section>
-        <Section header={<Text>内容</Text>}>
+        <Section
+          header={<Text>内容</Text>}
+          footer={<Text>{"可使用 {{text}}、{{date}}、{{time}}、{{datetime}}。"}</Text>}
+        >
           <TextField
             title=""
             value={content}
@@ -364,7 +372,7 @@ export function AppRoot() {
 
   async function copyItem(item: ClipItem) {
     try {
-      const fullContent = await getFullClipContent(item.id)
+      const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
       await markCopied(item)
       setMonitorStatus((status) => ({

@@ -41,6 +41,7 @@ import { initializeDatabase } from "../storage/database"
 import { readClipDataVersion } from "../storage/change_signal"
 import { loadSettings } from "../storage/settings_store"
 import { summarizeContent } from "../utils/common"
+import { renderRuntimeTemplate } from "../utils/template"
 import { PipStatusView } from "./PipStatusView"
 import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
 
@@ -195,35 +196,19 @@ function clipTypeIcon(item: ClipItem): string {
   return "doc.text"
 }
 
-function pad2(value: number): string {
-  return String(value).padStart(2, "0")
-}
-
-function templateVariables() {
-  const now = new Date()
-  const date = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
-  const time = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`
-  return {
-    date,
-    time,
-    datetime: `${date} ${time}`,
-  }
-}
-
-function applyCustomTemplate(template: string, text: string): string {
-  const values = templateVariables()
-  return template
-    .replace(/\{\{text\}\}/g, text)
-    .replace(/\{\{date\}\}/g, values.date)
-    .replace(/\{\{time\}\}/g, values.time)
-    .replace(/\{\{datetime\}\}/g, values.datetime)
-}
-
 function makeRegex(pattern: string): RegExp {
   const trimmed = pattern.trim()
   const wrapped = trimmed.match(/^\/(.+)\/([dgimsuvy]*)$/)
   if (wrapped) return new RegExp(wrapped[1], wrapped[2])
   return new RegExp(trimmed)
+}
+
+function selectedKeyboardText(): string {
+  return String(keyboard()?.selectedText ?? "")
+}
+
+function renderClipOutput(item: ClipItem, content: string): string {
+  return item.manualFavorite ? renderRuntimeTemplate(content, selectedKeyboardText()) : content
 }
 
 function clipListKey(items: ClipItem[]): string {
@@ -343,7 +328,7 @@ function ClipTileMenu(props: {
 
   async function copyItem() {
     try {
-      const fullContent = isImage ? undefined : await getFullClipContent(item.id)
+      const fullContent = isImage ? undefined : renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
       if (fullContent) lastPastedText = fullContent
       props.onStatus("已复制")
@@ -353,9 +338,9 @@ function ClipTileMenu(props: {
   }
 
   async function insertTransformed(transform: (value: string) => string, emptyMessage: string) {
-    let source = String(keyboard()?.selectedText ?? "")
+    let source = selectedKeyboardText()
     if (!source && !isImage) {
-      source = await getFullClipContent(item.id)
+      source = renderClipOutput(item, await getFullClipContent(item.id))
     }
     if (!source || isImage) {
       props.onStatus(emptyMessage)
@@ -365,9 +350,9 @@ function ClipTileMenu(props: {
   }
 
   async function runCustomAction(action: KeyboardCustomAction) {
-    let source = String(keyboard()?.selectedText ?? "")
+    let source = selectedKeyboardText()
     if (!source && !isImage) {
-      source = await getFullClipContent(item.id)
+      source = renderClipOutput(item, await getFullClipContent(item.id))
     }
     if (!source || isImage) {
       props.onStatus("当前条目不支持该自定义功能")
@@ -388,7 +373,7 @@ function ClipTileMenu(props: {
         insertKeyboardText(match[1] ?? match[0])
         return
       }
-      insertKeyboardText(applyCustomTemplate(action.template, source))
+      insertKeyboardText(renderRuntimeTemplate(action.template, source))
     } catch (error: any) {
       props.onStatus(String(error?.message ?? error ?? "自定义功能执行失败"))
     }
@@ -423,7 +408,7 @@ function ClipTileMenu(props: {
         insertKeyboardText(data.toBase64String())
         return
       }
-      const fullContent = await getFullClipContent(item.id)
+      const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       const data = Data.fromRawString(fullContent, "utf-8")
       if (!data) {
         props.onStatus("文本无法编码")
@@ -437,7 +422,7 @@ function ClipTileMenu(props: {
 
   async function decodeBase64() {
     try {
-      const fullContent = await getFullClipContent(item.id)
+      const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       const data = Data.fromBase64String(stripDataUri(fullContent))
       const text = dataToRawText(data)
       if (text) {
@@ -502,7 +487,7 @@ function ClipTileMenu(props: {
             title="打开链接"
             systemImage="safari"
             action={async () => {
-              const fullContent = await getFullClipContent(item.id)
+              const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
               await Safari.openURL(fullContent)
             }}
           />
@@ -663,7 +648,7 @@ export function KeyboardView() {
       }
       return
     }
-    const fullContent = await getFullClipContent(item.id)
+    const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
     insertKeyboardText(fullContent)
   }
 
