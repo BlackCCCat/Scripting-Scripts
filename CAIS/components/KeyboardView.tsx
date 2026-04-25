@@ -526,7 +526,6 @@ function ClipTileMenu(props: {
         />
       ) : null}
       {getOrderedKeyboardBuiltins(props.settings).map((action) => renderBuiltinAction(action))}
-      <Button title="删除" systemImage="trash" role="destructive" action={() => void deleteItem()} />
       {!isImage ? (
         props.settings.keyboardMenu.customActions
           .filter((action) => action.enabled)
@@ -539,6 +538,7 @@ function ClipTileMenu(props: {
             />
           ))
       ) : null}
+      <Button title="删除" systemImage="trash" role="destructive" action={() => void deleteItem()} />
     </Group>
   )
 }
