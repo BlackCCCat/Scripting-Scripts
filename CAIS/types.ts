@@ -88,7 +88,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   captureImages: false,
   monitorIntervalMs: 200,
   duplicatePolicy: "bump",
-  maxItems: 1000,
+  maxItems: 800,
   keyboardMaxItems: 30,
   keyboardMenu: {
     builtins: {

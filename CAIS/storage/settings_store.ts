@@ -41,7 +41,7 @@ function sanitizeSettings(raw: any): CaisSettings {
     captureImages: Boolean(raw?.captureImages ?? DEFAULT_CAIS_SETTINGS.captureImages),
     monitorIntervalMs: Math.max(100, Math.min(10000, monitorIntervalMs || DEFAULT_CAIS_SETTINGS.monitorIntervalMs)),
     duplicatePolicy: raw?.duplicatePolicy === "skip" ? "skip" : "bump",
-    maxItems: Math.max(50, Math.min(10000, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
+    maxItems: Math.max(50, Math.min(800, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
       builtins,
