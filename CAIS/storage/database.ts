@@ -1,4 +1,4 @@
-import type { ClipItem } from "../types"
+import type { ClipGroup, ClipItem, ClipListScope } from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
 
 type DB = {
@@ -8,6 +8,8 @@ type DB = {
 
 let cachedDb: DB | null = null
 let initialized = false
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at"
 
 function rowToClip(row: any): ClipItem {
   return {
@@ -80,6 +82,10 @@ async function ensureSchema(db: DB): Promise<void> {
   } catch {
   }
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active ON clips(deleted_at, pinned, updated_at)")
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active_order ON clips(deleted_at, pinned DESC, updated_at DESC)")
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_favorite_order ON clips(deleted_at, favorite, pinned DESC, updated_at DESC)")
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_clipboard_order ON clips(deleted_at, manual_favorite, pinned DESC, updated_at DESC)")
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_trim_order ON clips(deleted_at, pinned, favorite, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash)")
 }
 
@@ -122,15 +128,13 @@ export async function findTextClipsByContent(content: string): Promise<ClipItem[
 }
 
 async function fetchClipRows(db: DB, options: {
+  scope?: ClipListScope
   search?: string
-  includeDeleted?: boolean
-  deletedOnly?: boolean
   limit?: number
 }): Promise<any[]> {
   const params: any[] = []
-  const clauses: string[] = []
-  if (options.deletedOnly) clauses.push("deleted_at IS NOT NULL")
-  else if (!options.includeDeleted) clauses.push("deleted_at IS NULL")
+  const clauses: string[] = ["deleted_at IS NULL"]
+  if (options.scope) clauses.push(scopeClause(options.scope))
   const search = String(options.search ?? "").trim()
   if (search) {
     clauses.push("(title LIKE ? OR content LIKE ?)")
@@ -140,15 +144,14 @@ async function fetchClipRows(db: DB, options: {
   const limit = Math.max(1, Math.min(500, Number(options.limit ?? 100) || 100))
   params.push(limit)
   return db.fetchAll(
-    `SELECT id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at FROM clips ${where} ORDER BY pinned DESC, updated_at DESC LIMIT ?`,
+    `SELECT ${CLIP_ROW_SELECT} FROM clips ${where} ORDER BY pinned DESC, updated_at DESC LIMIT ?`,
     params
   )
 }
 
 export async function listClips(options: {
+  scope?: ClipListScope
   search?: string
-  includeDeleted?: boolean
-  deletedOnly?: boolean
   limit?: number
 } = {}): Promise<ClipItem[]> {
   const db = await openCaisDatabase()
@@ -164,7 +167,84 @@ export async function listClips(options: {
   return rows.map(rowToClip)
 }
 
-export async function updateClipState(id: string, updates: Partial<Pick<ClipItem, "updatedAt" | "lastCopiedAt" | "pinned" | "favorite" | "deletedAt">>): Promise<void> {
+type TimeGroup = {
+  title: string
+  clause: string
+  params: number[]
+}
+
+function clipTimeGroups(now: number): TimeGroup[] {
+  const oneDayAgo = now - ONE_DAY_MS
+  const threeDaysAgo = now - ONE_DAY_MS * 3
+  const sevenDaysAgo = now - ONE_DAY_MS * 7
+  return [
+    { title: "最近内容", clause: "updated_at >= ?", params: [oneDayAgo] },
+    { title: "近三天", clause: "updated_at < ? AND updated_at >= ?", params: [oneDayAgo, threeDaysAgo] },
+    { title: "近七天", clause: "updated_at < ? AND updated_at >= ?", params: [threeDaysAgo, sevenDaysAgo] },
+    { title: "更久", clause: "updated_at < ?", params: [sevenDaysAgo] },
+  ]
+}
+
+function scopeClause(scope: ClipListScope): string {
+  return scope === "favorites" ? "favorite = 1" : "manual_favorite = 0"
+}
+
+async function fetchClipGroupRows(db: DB, options: {
+  scope: ClipListScope
+  search?: string
+  limit?: number
+  offset?: number
+  group: TimeGroup
+}): Promise<any[]> {
+  const params: any[] = []
+  const clauses = ["deleted_at IS NULL", scopeClause(options.scope), options.group.clause]
+  params.push(...options.group.params)
+  const search = String(options.search ?? "").trim()
+  if (search) {
+    clauses.push("(title LIKE ? OR content LIKE ?)")
+    params.push(`%${search}%`, `%${search}%`)
+  }
+  const limit = Math.max(1, Math.min(300, Number(options.limit ?? 120) || 120))
+  const offset = Math.max(0, Number(options.offset ?? 0) || 0)
+  params.push(limit, offset)
+  return db.fetchAll(
+    `SELECT ${CLIP_ROW_SELECT} FROM clips WHERE ${clauses.join(" AND ")} ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?`,
+    params
+  )
+}
+
+async function fetchClipGroups(db: DB, options: {
+  scope: ClipListScope
+  search?: string
+  limit?: number
+  offset?: number
+}): Promise<ClipGroup[]> {
+  const groups: ClipGroup[] = []
+  for (const group of clipTimeGroups(Date.now())) {
+    const rows = await fetchClipGroupRows(db, { ...options, group })
+    groups.push({ title: group.title, items: rows.map(rowToClip) })
+  }
+  return groups
+}
+
+export async function listClipGroups(options: {
+  scope: ClipListScope
+  search?: string
+  limit?: number
+  offset?: number
+}): Promise<ClipGroup[]> {
+  const db = await openCaisDatabase()
+  try {
+    return await fetchClipGroups(db, options)
+  } catch (error) {
+    if (initialized) throw error
+    await ensureSchema(db)
+    initialized = true
+    return fetchClipGroups(db, options)
+  }
+}
+
+export async function updateClipState(id: string, updates: Partial<Pick<ClipItem, "updatedAt" | "lastCopiedAt" | "pinned" | "favorite">>): Promise<void> {
   const db = await initializeDatabase()
   const sets: string[] = []
   const params: any[] = []
@@ -183,10 +263,6 @@ export async function updateClipState(id: string, updates: Partial<Pick<ClipItem
   if (updates.favorite != null) {
     sets.push("favorite = ?")
     params.push(updates.favorite ? 1 : 0)
-  }
-  if ("deletedAt" in updates) {
-    sets.push("deleted_at = ?")
-    params.push(updates.deletedAt ?? null)
   }
   if (!sets.length) return
   params.push(id)
@@ -229,11 +305,6 @@ export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "tit
 export async function updateClipTitle(id: string, title: string): Promise<void> {
   const db = await initializeDatabase()
   await db.execute("UPDATE clips SET title = ? WHERE id = ?", [title, id])
-}
-
-export async function purgeOldDeleted(beforeTimestamp: number): Promise<void> {
-  const db = await initializeDatabase()
-  await db.execute("DELETE FROM clips WHERE deleted_at IS NOT NULL AND deleted_at < ?", [beforeTimestamp])
 }
 
 export async function trimActiveClips(maxItems: number): Promise<void> {

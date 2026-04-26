@@ -1,6 +1,6 @@
-import type { CaptureResult, ClipItem, ClipPayload, CaisSettings } from "../types"
+import type { CaptureResult, ClipGroup, ClipItem, ClipListScope, ClipPayload, CaisSettings } from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeText } from "../utils/common"
-import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClips, listImagePaths, purgeOldDeleted, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
+import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 import { bumpClipDataVersion } from "./change_signal"
 
@@ -82,8 +82,12 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   return { status: "created", item }
 }
 
-export async function getClips(search = "", limit = 120): Promise<ClipItem[]> {
-  return listClips({ search, limit })
+export async function getClips(search = "", limit = 120, scope?: ClipListScope): Promise<ClipItem[]> {
+  return listClips({ search, limit, scope })
+}
+
+export async function getClipGroups(scope: ClipListScope, search = "", limit = 120, offset = 0): Promise<ClipGroup[]> {
+  return listClipGroups({ scope, search, limit, offset })
 }
 
 export async function markCopied(item: ClipItem): Promise<void> {
@@ -145,11 +149,6 @@ export async function updateClipTitle(item: ClipItem, value: string): Promise<Cl
   await updateClipTitleRow(item.id, title)
   bumpClipDataVersion()
   return { ...item, title }
-}
-
-export async function cleanupDeleted(settings: CaisSettings): Promise<void> {
-  const before = Date.now() - settings.keepDeletedDays * 24 * 60 * 60 * 1000
-  await purgeOldDeleted(before)
 }
 
 export async function addFavoriteFromInput(title: string, content: string): Promise<ClipItem> {

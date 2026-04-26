@@ -16,7 +16,6 @@ import {
   Toggle,
   VStack,
   useEffect,
-  useMemo,
   useObservable,
   useState,
   Form,
@@ -24,14 +23,14 @@ import {
   type ScenePhase,
 } from "scripting"
 
-import type { CaisSettings, ClipItem, MonitorStatus } from "../types"
+import type { CaisSettings, ClipGroup, ClipItem, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard } from "../services/pasteboard_adapter"
 import {
   clearAllClips,
   clearFavoriteClips,
   editClipContent,
-  getClips,
+  getClipGroups,
   getFullClipContent,
   markCopied,
   softDeleteClip,
@@ -53,6 +52,7 @@ import { readPipControlState, writePipControlState } from "../services/pip_contr
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
+const APP_GROUP_PAGE_SIZE = 300
 type ClearScope = "all" | "favorites"
 let intentionalMinimize = false
 let appRefreshGeneration = 0
@@ -105,29 +105,6 @@ function StatusCard(props: {
   )
 }
 
-type ClipGroup = {
-  title: string
-  items: ClipItem[]
-}
-
-function groupClips(listItems: ClipItem[]): ClipGroup[] {
-  const now = Date.now()
-  const oneDay = 24 * 60 * 60 * 1000
-  const groups: ClipGroup[] = [
-    { title: "最近内容", items: [] },
-    { title: "近三天", items: [] },
-    { title: "近七天", items: [] },
-    { title: "更久", items: [] },
-  ]
-  for (const item of listItems) {
-    const age = now - item.updatedAt
-    if (age <= oneDay) groups[0].items.push(item)
-    else if (age <= oneDay * 3) groups[1].items.push(item)
-    else if (age <= oneDay * 7) groups[2].items.push(item)
-    else groups[3].items.push(item)
-  }
-  return groups
-}
 function AddFavoriteView() {
   const dismiss = Navigation.useDismiss()
   const [title, setTitle] = useState("")
@@ -205,7 +182,8 @@ export function AppRoot() {
   const clearDialogPresented = useObservable(false)
   const toastPresented = useObservable(false)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
-  const [items, setItems] = useState<ClipItem[]>([])
+  const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
+  const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
   const [pendingClearScope, setPendingClearScope] = useState<ClearScope>("all")
@@ -218,23 +196,6 @@ export function AppRoot() {
     active: false,
     lastMessage: "未启动",
   })
-
-  const filteredItems = useMemo(() => {
-    const fixed = query.trim().toLowerCase()
-    if (!fixed) return items
-    return items.filter((item) =>
-      item.title.toLowerCase().includes(fixed) ||
-      item.content.toLowerCase().includes(fixed)
-    )
-  }, [items, query])
-
-  const favoriteItems = useMemo(() => {
-    return filteredItems.filter((item) => item.favorite)
-  }, [filteredItems])
-
-  const clipboardItems = useMemo(() => {
-    return filteredItems.filter((item) => !item.manualFavorite)
-  }, [filteredItems])
 
   useEffect(() => {
     deleteDialogPresented.setValue(false)
@@ -305,6 +266,15 @@ export function AppRoot() {
     }
   }, [])
 
+  useEffect(() => {
+    const timer = (globalThis as any).setTimeout?.(() => {
+      void refresh(true)
+    }, 180)
+    return () => {
+      if (timer) (globalThis as any).clearTimeout?.(timer)
+    }
+  }, [query])
+
   async function boot() {
     setLoading(true)
     try {
@@ -320,16 +290,23 @@ export function AppRoot() {
     }
   }
 
-  async function refresh(_force = false) {
+  async function refresh(_force = false, currentSettings = settings) {
     const generation = ++appRefreshGeneration
-    const nextItems = await getClips("", Math.min(settings.maxItems, 300))
+    const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
+    const search = query.trim()
+    const [nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
+      getClipGroups("favorites", search, groupLimit),
+      getClipGroups("clipboard", search, groupLimit),
+    ])
     if (generation !== appRefreshGeneration) return
-    setItems(nextItems)
+    setFavoriteGroups(nextFavoriteGroups)
+    setClipboardGroups(nextClipboardGroups)
   }
 
   function updateSettings(nextSettings: CaisSettings) {
     const next = saveSettings(nextSettings)
     setSettings(next)
+    void refresh(true, next)
   }
 
   function showToast(message: string) {
@@ -623,14 +600,13 @@ export function AppRoot() {
     )
   }
 
-  function renderGroupedClipList(listItems: ClipItem[], emptyMessage: string, options: { allowDelete?: (item: ClipItem) => boolean } = {}) {
-    if (!listItems.length) {
+  function renderGroupedClipList(groups: ClipGroup[], emptyMessage: string, options: { allowDelete?: (item: ClipItem) => boolean } = {}) {
+    if (!groups.some((group) => group.items.length)) {
       return <EmptyState title="暂无内容" message={emptyMessage} systemImage="doc.on.clipboard" />
     }
     return (
       <Group>
-        {groupClips(listItems)
-          .filter((group) => group.items.length)
+        {groups.filter((group) => group.items.length)
           .map((group) => (
             <Section key={group.title} header={<Text>{group.title}</Text>}>
               <ForEach
@@ -770,7 +746,7 @@ export function AppRoot() {
             toast={toastOptions()}
           >
             {searchSection()}
-            {renderGroupedClipList(favoriteItems, searchVisible && query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+            {renderGroupedClipList(favoriteGroups, searchVisible && query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
           </List>
         </NavigationStack>
       </Tab>
@@ -796,7 +772,7 @@ export function AppRoot() {
             </Section>
             {searchSection()}
             {renderGroupedClipList(
-              clipboardItems,
+              clipboardGroups,
               searchVisible && query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
               { allowDelete: (item) => !item.manualFavorite }
             )}

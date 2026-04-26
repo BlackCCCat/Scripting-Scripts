@@ -24,6 +24,7 @@ import {
 import type {
   CaisSettings,
   ClipItem,
+  ClipListScope,
   KeyboardCustomAction,
   KeyboardMenuBuiltinAction,
   MonitorStatus,
@@ -62,11 +63,12 @@ const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
 let deleteRepeatTimer: any = null
 let lastInsertedText = ""
 let lastPastedText = ""
-let lastKeyboardItemsKey = ""
 let keyboardRefreshGeneration = 0
 let keyboardLifecycleGeneration = 0
-let lastKeyboardItems: ClipItem[] = []
-let lastKeyboardItemsVersion = 0
+let activeKeyboardScope: ClipListScope = "clipboard"
+let lastKeyboardItemsByScope: Record<ClipListScope, ClipItem[]> = { favorites: [], clipboard: [] }
+let lastKeyboardItemsKeyByScope: Record<ClipListScope, string> = { favorites: "", clipboard: "" }
+let lastKeyboardItemsVersionByScope: Record<ClipListScope, number> = { favorites: 0, clipboard: 0 }
 let keyboardMonitorStopper: (() => void) | null = null
 let keyboardMonitorStartTimer: any = null
 
@@ -75,6 +77,7 @@ export type KeyboardInitialState = {
   settings: CaisSettings
   version: number
   loaded: boolean
+  scope: ClipListScope
 }
 
 function keyboard(): any {
@@ -256,22 +259,27 @@ function queryLimitForKeyboard(settings: CaisSettings): number {
   return Math.max(1, Math.min(settings.keyboardMaxItems, settings.maxItems))
 }
 
-function cachedKeyboardItems(): ClipItem[] {
-  return lastKeyboardItemsVersion === readClipDataVersion() ? lastKeyboardItems : []
+function keyboardScopeForTab(tab: number): ClipListScope {
+  return tab === TAB_FAVORITE ? "favorites" : "clipboard"
 }
 
-function rememberKeyboardItems(items: ClipItem[], version = readClipDataVersion()) {
-  lastKeyboardItems = items
-  lastKeyboardItemsKey = clipListKey(items)
-  lastKeyboardItemsVersion = version
+function cachedKeyboardItems(scope: ClipListScope): ClipItem[] {
+  return lastKeyboardItemsVersionByScope[scope] === readClipDataVersion() ? lastKeyboardItemsByScope[scope] : []
+}
+
+function rememberKeyboardItems(scope: ClipListScope, items: ClipItem[], version = readClipDataVersion()) {
+  lastKeyboardItemsByScope[scope] = items
+  lastKeyboardItemsKeyByScope[scope] = clipListKey(items)
+  lastKeyboardItemsVersionByScope[scope] = version
 }
 
 export async function preloadKeyboardInitialState(): Promise<KeyboardInitialState> {
   const settings = loadSettings()
   const version = readClipDataVersion()
-  const items = await getClips("", queryLimitForKeyboard(settings))
-  rememberKeyboardItems(items, version)
-  return { items, settings, version, loaded: true }
+  const scope: ClipListScope = "clipboard"
+  const items = await getClips("", queryLimitForKeyboard(settings), scope)
+  rememberKeyboardItems(scope, items, version)
+  return { items, settings, version, loaded: true, scope }
 }
 
 function ClipTile(props: {
@@ -583,9 +591,12 @@ function ClipTileMenu(props: {
 export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}) {
   const traits = keyboard()?.useTraits?.()
   const pipPresented = useObservable(false)
-  const initialItems = props.initialState?.loaded ? props.initialState.items : cachedKeyboardItems()
+  const initialItems = props.initialState?.loaded && props.initialState.scope === "clipboard"
+    ? props.initialState.items
+    : cachedKeyboardItems("clipboard")
   const initialLoaded = Boolean(props.initialState?.loaded || initialItems.length)
   const [activeTab, setActiveTab] = useState(TAB_CLIPS)
+  activeKeyboardScope = keyboardScopeForTab(activeTab)
   const [items, setItems] = useState<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const [clipRowCount, setClipRowCount] = useState<1 | 2>(2)
@@ -596,11 +607,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   })
   const [loading, setLoading] = useState(() => !initialLoaded)
   const visibleItems = useMemo(() => {
-    const active = activeTab === TAB_FAVORITE
-      ? items.filter((item) => item.favorite)
-      : items.filter((item) => !item.manualFavorite)
-    return active.slice(0, settings.keyboardMaxItems)
-  }, [activeTab, items, settings.keyboardMaxItems])
+    return items.slice(0, settings.keyboardMaxItems)
+  }, [items, settings.keyboardMaxItems])
   const clipGridRows = useMemo(() => {
     return Array.from({ length: clipRowCount }, () => ({ size: { type: "flexible" as const } }))
   }, [clipRowCount])
@@ -615,7 +623,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       const version = readClipDataVersion()
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
-      void refresh(true, lifecycle)
+      void refresh(true, lifecycle, activeKeyboardScope)
     }, 900)
     return () => {
       if (keyboardLifecycleGeneration === lifecycle) keyboardLifecycleGeneration += 1
@@ -628,6 +636,23 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       stopKeyboardMonitor()
     }
   }, [])
+
+  useEffect(() => {
+    const lifecycle = keyboardLifecycleGeneration
+    const scope = keyboardScopeForTab(activeTab)
+    activeKeyboardScope = scope
+    const cached = cachedKeyboardItems(scope)
+    if (cached.length) {
+      setItems(cached)
+      setLoading(false)
+    } else {
+      setItems([])
+      setLoading(true)
+    }
+    void refresh(true, lifecycle, scope).finally(() => {
+      if (lifecycle === keyboardLifecycleGeneration && scope === activeKeyboardScope) setLoading(false)
+    })
+  }, [activeTab])
 
   function ensureKeyboardMonitor() {
     if (keyboardMonitorStopper) return
@@ -663,14 +688,15 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     }
   }
 
-  async function refresh(force = false, lifecycle = keyboardLifecycleGeneration) {
+  async function refresh(force = false, lifecycle = keyboardLifecycleGeneration, scope = activeKeyboardScope) {
     const generation = ++keyboardRefreshGeneration
-    const next = await getClips("", queryLimitForKeyboard(settings))
+    const next = await getClips("", queryLimitForKeyboard(settings), scope)
     if (lifecycle !== keyboardLifecycleGeneration) return
     if (generation !== keyboardRefreshGeneration) return
     const key = clipListKey(next)
-    if (!force && key === lastKeyboardItemsKey) return
-    rememberKeyboardItems(next)
+    if (!force && key === lastKeyboardItemsKeyByScope[scope]) return
+    rememberKeyboardItems(scope, next)
+    if (scope !== activeKeyboardScope) return
     setItems(next)
   }
 

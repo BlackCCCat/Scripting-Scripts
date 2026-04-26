@@ -25,6 +25,13 @@ export type ClipItem = {
   deletedAt?: number | null
 }
 
+export type ClipListScope = "favorites" | "clipboard"
+
+export type ClipGroup = {
+  title: string
+  items: ClipItem[]
+}
+
 export type CaptureResult =
   | { status: "created"; item: ClipItem }
   | { status: "updated"; item: ClipItem }
@@ -39,7 +46,6 @@ export type CaisSettings = {
   duplicatePolicy: DuplicatePolicy
   maxItems: number
   keyboardMaxItems: number
-  keepDeletedDays: number
   keyboardMenu: KeyboardMenuSettings
 }
 
@@ -84,7 +90,6 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   duplicatePolicy: "bump",
   maxItems: 1000,
   keyboardMaxItems: 30,
-  keepDeletedDays: 7,
   keyboardMenu: {
     builtins: {
       pin: true,
