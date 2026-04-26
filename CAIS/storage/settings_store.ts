@@ -11,7 +11,6 @@ function sanitizeSettings(raw: any): CaisSettings {
   const monitorIntervalMs = Number(raw?.monitorIntervalMs ?? DEFAULT_CAIS_SETTINGS.monitorIntervalMs)
   const maxItems = Number(raw?.maxItems ?? DEFAULT_CAIS_SETTINGS.maxItems)
   const keyboardMaxItems = Number(raw?.keyboardMaxItems ?? DEFAULT_CAIS_SETTINGS.keyboardMaxItems)
-  const keepDeletedDays = Number(raw?.keepDeletedDays ?? DEFAULT_CAIS_SETTINGS.keepDeletedDays)
   const defaultBuiltins = DEFAULT_CAIS_SETTINGS.keyboardMenu.builtins
   const rawBuiltins = raw?.keyboardMenu?.builtins ?? {}
   const builtinKeys = Object.keys(defaultBuiltins) as KeyboardMenuBuiltinAction[]
@@ -44,7 +43,6 @@ function sanitizeSettings(raw: any): CaisSettings {
     duplicatePolicy: raw?.duplicatePolicy === "skip" ? "skip" : "bump",
     maxItems: Math.max(50, Math.min(10000, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
-    keepDeletedDays: Math.max(1, Math.min(90, keepDeletedDays || DEFAULT_CAIS_SETTINGS.keepDeletedDays)),
     keyboardMenu: {
       builtins,
       builtinOrder,

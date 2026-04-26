@@ -1,5 +1,5 @@
 import type { CaptureResult, CaisSettings, MonitorStatus } from "../types"
-import { addClipFromPayload, cleanupDeleted } from "../storage/clip_repository"
+import { addClipFromPayload } from "../storage/clip_repository"
 import { currentChangeCount, readPasteboardPayload } from "./pasteboard_adapter"
 
 export type MonitorListener = (status: MonitorStatus) => void
@@ -81,7 +81,6 @@ export function startClipboardMonitor(settings: CaisSettings, listener?: Monitor
       } else {
         emit({ active: true, lastMessage, lastCheckedAt: now })
       }
-      await cleanupDeleted(settings)
     } catch (error: any) {
       lastMessage = String(error?.message ?? error ?? "监听失败")
       emit({ active: true, lastMessage, lastCheckedAt: now })

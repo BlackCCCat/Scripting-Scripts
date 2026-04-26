@@ -3,6 +3,7 @@ import { hashString } from "../utils/common"
 
 const THUMBNAIL_SIZE = 220
 const THUMBNAIL_QUALITY = 0.68
+const previewPathCache = new Map<string, string>()
 
 function imageData(image: UIImage): Data | null {
   const dataClass = (globalThis as any).Data
@@ -81,6 +82,7 @@ export async function saveImageForClip(id: string, image: UIImage): Promise<stri
 
 export async function removeImage(path?: string | null): Promise<void> {
   if (!path) return
+  previewPathCache.delete(path)
   const fm = (globalThis as any).FileManager
   const paths = [path, thumbnailPathForImagePath(path)].filter(Boolean) as string[]
   try {
@@ -97,11 +99,17 @@ export async function removeImage(path?: string | null): Promise<void> {
 
 export function imagePreviewPath(path?: string | null): string | undefined {
   if (!path) return undefined
+  const cached = previewPathCache.get(path)
+  if (cached) return cached
   const thumb = thumbnailPathForImagePath(path)
   const fm = (globalThis as any).FileManager
   try {
-    if (thumb && typeof fm?.existsSync === "function" && fm.existsSync(thumb)) return thumb
+    if (thumb && typeof fm?.existsSync === "function" && fm.existsSync(thumb)) {
+      previewPathCache.set(path, thumb)
+      return thumb
+    }
   } catch {
   }
+  previewPathCache.set(path, path)
   return path
 }
