@@ -24,7 +24,7 @@ import type {
 import { makeId } from "../utils/common"
 
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500]
-const MAX_ITEM_OPTIONS = [200, 500, 1000, 3000]
+const MAX_ITEM_OPTIONS = [200, 500, 800]
 const KEYBOARD_MAX_ITEM_OPTIONS = [10, 20, 30, 40, 50]
 
 const BUILTIN_ACTIONS: Array<{
@@ -309,7 +309,7 @@ export function SettingsView(props: {
           title="最多保留"
           pickerStyle="menu"
           value={optionIndex(MAX_ITEM_OPTIONS, settings.maxItems)}
-          onChanged={(index: number) => update({ maxItems: MAX_ITEM_OPTIONS[index] ?? 1000 })}
+          onChanged={(index: number) => update({ maxItems: MAX_ITEM_OPTIONS[index] ?? 800 })}
         >
           {MAX_ITEM_OPTIONS.map((value, index) => (
             <Text key={value} tag={index}>{value} 条</Text>
