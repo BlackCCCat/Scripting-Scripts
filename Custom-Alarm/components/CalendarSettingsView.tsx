@@ -23,19 +23,29 @@ export function CalendarSettingsView(props: {
 }) {
   const colorScheme = useColorScheme()
   const source = props.sources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? props.sources[0] ?? null
-  const currentYear = new Date().getFullYear()
-  const offCount = source
-    ? new Set(
-        source.holidayDates.filter((dateKey) => String(dateKey).startsWith(`${currentYear}-`))
-      ).size
-    : 0
-  const workCount = source
-    ? new Set(
-        source.holidayItems
-          .filter((item) => item.kind === "work" && String(item.dateKey).startsWith(`${currentYear}-`))
-          .map((item) => item.dateKey)
-      ).size
-    : 0
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const todayKey = `${currentYear}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+  const offDateKeys = source
+    ? Array.from(
+        new Set(
+          source.holidayDates.filter((dateKey) => String(dateKey).startsWith(`${currentYear}-`))
+        )
+      ).sort((a, b) => a.localeCompare(b))
+    : []
+  const workDateKeys = source
+    ? Array.from(
+        new Set(
+          source.holidayItems
+            .filter((item) => item.kind === "work" && String(item.dateKey).startsWith(`${currentYear}-`))
+            .map((item) => item.dateKey)
+        )
+      ).sort((a, b) => a.localeCompare(b))
+    : []
+  const offCount = offDateKeys.length
+  const remainingOffCount = offDateKeys.filter((dateKey) => dateKey >= todayKey).length
+  const workCount = workDateKeys.length
+  const remainingWorkCount = workDateKeys.filter((dateKey) => dateKey >= todayKey).length
 
   const content = (
     <ZStack>
@@ -58,12 +68,12 @@ export function CalendarSettingsView(props: {
             <HStack spacing={12}>
               <Image systemName="sun.max.fill" foregroundStyle="#EA580C" />
               <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>休息日</Text>
-              <Text foregroundStyle="secondaryLabel">{String(offCount)}</Text>
+              <Text foregroundStyle="secondaryLabel">{`${remainingOffCount}/${offCount}`}</Text>
             </HStack>
             <HStack spacing={12}>
               <Image systemName="briefcase.fill" foregroundStyle="#2563EB" />
               <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>调班日</Text>
-              <Text foregroundStyle="secondaryLabel">{String(workCount)}</Text>
+              <Text foregroundStyle="secondaryLabel">{`${remainingWorkCount}/${workCount}`}</Text>
             </HStack>
           </Section>
 
