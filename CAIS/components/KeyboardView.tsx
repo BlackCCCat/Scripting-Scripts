@@ -2,6 +2,7 @@ import {
   Button,
   Device,
   ForEach,
+  GeometryReader,
   Group,
   HStack,
   Image,
@@ -18,6 +19,7 @@ import {
   useEffect,
   useMemo,
   useObservable,
+  useRef,
   useState,
 } from "scripting"
 
@@ -255,6 +257,20 @@ function clipTileWidth(): number {
   return Math.max(132, Math.floor((availableWidth - CLIP_GRID_SPACING) / 2))
 }
 
+function clipTileMetrics(height: number) {
+  const compact = height > 0 && height < 96
+  const tiny = height > 0 && height < 76
+  const minimal = height > 0 && height < 58
+  return {
+    padding: minimal ? 6 : compact ? 8 : 10,
+    spacing: minimal ? 2 : compact ? 4 : 6,
+    showTitle: !compact,
+    showFooter: !minimal,
+    contentLineLimit: minimal ? 1 : tiny ? 1 : compact ? 2 : 5,
+    iconFont: tiny ? "caption2" : "caption",
+  }
+}
+
 function queryLimitForKeyboard(settings: CaisSettings): number {
   return Math.max(1, Math.min(settings.keyboardMaxItems, settings.maxItems))
 }
@@ -315,59 +331,73 @@ function ClipTile(props: {
         cornerRadius={10}
         fill="systemBackground"
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        clipShape={{ type: "rect", cornerRadius: 10 } as any}
+        clipped
         overlay={
-          <VStack
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
-            padding={10}
-            spacing={6}
-          >
-            {isImage && previewPath ? (
-              <Image
-                filePath={previewPath}
-                resizable
-                scaleToFit
-                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-              />
-            ) : isImage ? (
-              <Image
-                systemName="photo"
-                font="largeTitle"
-                foregroundStyle="secondaryLabel"
-                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-              />
-            ) : (
-              <>
-                <Text
-                  font="headline"
-                  lineLimit={1}
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  multilineTextAlignment="leading"
+          <GeometryReader>
+            {(proxy) => {
+              const metrics = clipTileMetrics(proxy.size.height)
+              return (
+                <VStack
+                  frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+                  padding={metrics.padding}
+                  spacing={metrics.spacing}
+                  clipped
                 >
-                  {item.title}
-                </Text>
-                <Text
-                  font="caption"
-                  foregroundStyle="secondaryLabel"
-                  lineLimit={5}
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  multilineTextAlignment="leading"
-                >
-                  {summarizeContent(item.content, 220)}
-                </Text>
-                <Spacer />
-              </>
-            )}
-            <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-              <Image
-                systemName={clipTypeIcon(item)}
-                font="caption"
-                foregroundStyle="secondaryLabel"
-              />
-              <Spacer />
-              {item.pinned ? <Image systemName="pin.fill" font="caption" foregroundStyle="systemOrange" /> : null}
-              {item.favorite ? <Image systemName="star.fill" font="caption" foregroundStyle="systemYellow" /> : null}
-            </HStack>
-          </VStack>
+                  {isImage && previewPath ? (
+                    <Image
+                      filePath={previewPath}
+                      resizable
+                      scaleToFit
+                      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+                    />
+                  ) : isImage ? (
+                    <Image
+                      systemName="photo"
+                      font={proxy.size.height < 76 ? "title2" : "largeTitle"}
+                      foregroundStyle="secondaryLabel"
+                      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+                    />
+                  ) : (
+                    <>
+                      {metrics.showTitle ? (
+                        <Text
+                          font="headline"
+                          lineLimit={1}
+                          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                          multilineTextAlignment="leading"
+                        >
+                          {item.title}
+                        </Text>
+                      ) : null}
+                      <Text
+                        font="caption"
+                        foregroundStyle={metrics.showTitle ? "secondaryLabel" : "label"}
+                        lineLimit={metrics.contentLineLimit}
+                        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                        multilineTextAlignment="leading"
+                      >
+                        {summarizeContent(item.content, metrics.showTitle ? 220 : 120)}
+                      </Text>
+                      <Spacer />
+                    </>
+                  )}
+                  {metrics.showFooter ? (
+                    <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                      <Image
+                        systemName={clipTypeIcon(item)}
+                        font={metrics.iconFont}
+                        foregroundStyle="secondaryLabel"
+                      />
+                      <Spacer />
+                      {item.pinned ? <Image systemName="pin.fill" font={metrics.iconFont} foregroundStyle="systemOrange" /> : null}
+                      {item.favorite ? <Image systemName="star.fill" font={metrics.iconFont} foregroundStyle="systemYellow" /> : null}
+                    </HStack>
+                  ) : null}
+                </VStack>
+              )
+            }}
+          </GeometryReader>
         }
       />
     </Button>
@@ -605,6 +635,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     active: false,
     lastMessage: "未启动",
   })
+  const didHandleInitialTabEffect = useRef(false)
   const [loading, setLoading] = useState(() => !initialLoaded)
   const visibleItems = useMemo(() => {
     return items.slice(0, settings.keyboardMaxItems)
@@ -638,6 +669,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }, [])
 
   useEffect(() => {
+    if (!didHandleInitialTabEffect.current) {
+      didHandleInitialTabEffect.current = true
+      return
+    }
     const lifecycle = keyboardLifecycleGeneration
     const scope = keyboardScopeForTab(activeTab)
     activeKeyboardScope = scope
