@@ -16,6 +16,7 @@ import {
   Spacer,
   Text,
   VStack,
+  type Font,
   useEffect,
   useMemo,
   useObservable,
@@ -292,7 +293,16 @@ function clipTileWidth(): number {
   return Math.max(132, Math.floor((availableWidth - CLIP_GRID_SPACING) / 2))
 }
 
-function clipTileMetrics(height: number) {
+type ClipTileMetrics = {
+  padding: number
+  spacing: number
+  showTitle: boolean
+  showFooter: boolean
+  contentLineLimit: number
+  iconFont: Font
+}
+
+function clipTileMetrics(height: number): ClipTileMetrics {
   const compact = height > 0 && height < 96
   const tiny = height > 0 && height < 76
   const minimal = height > 0 && height < 58
