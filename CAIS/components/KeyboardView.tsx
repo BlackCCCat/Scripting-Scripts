@@ -54,6 +54,8 @@ const TAB_CLIPS = 1
 const KEYBOARD_ROOT_SIDE_PADDING = 6
 const CLIP_SCROLL_SIDE_PADDING = 8
 const CLIP_GRID_SPACING = 10
+const KEYBOARD_ROW_COUNT_KEY = "cais_keyboard_row_count_v1"
+const SHARED_STORAGE_OPTIONS = { shared: true }
 const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
   "base64Encode",
   "base64Decode",
@@ -84,6 +86,39 @@ export type KeyboardInitialState = {
 
 function keyboard(): any {
   return (globalThis as any).CustomKeyboard
+}
+
+function storage(): any {
+  return (globalThis as any).Storage
+}
+
+function readKeyboardRowCount(): 1 | 2 {
+  const st = storage()
+  try {
+    const raw = st?.get?.(KEYBOARD_ROW_COUNT_KEY, SHARED_STORAGE_OPTIONS) ?? st?.getString?.(KEYBOARD_ROW_COUNT_KEY, SHARED_STORAGE_OPTIONS)
+    return Number(raw) === 1 ? 1 : 2
+  } catch {
+  }
+  try {
+    const raw = st?.get?.(KEYBOARD_ROW_COUNT_KEY) ?? st?.getString?.(KEYBOARD_ROW_COUNT_KEY)
+    return Number(raw) === 1 ? 1 : 2
+  } catch {
+    return 2
+  }
+}
+
+function writeKeyboardRowCount(value: 1 | 2) {
+  const st = storage()
+  try {
+    if (typeof st?.set === "function") {
+      st.set(KEYBOARD_ROW_COUNT_KEY, value)
+      st.set(KEYBOARD_ROW_COUNT_KEY, value, SHARED_STORAGE_OPTIONS)
+    } else if (typeof st?.setString === "function") {
+      st.setString(KEYBOARD_ROW_COUNT_KEY, String(value))
+      st.setString(KEYBOARD_ROW_COUNT_KEY, String(value), SHARED_STORAGE_OPTIONS)
+    }
+  } catch {
+  }
 }
 
 function playClick() {
@@ -629,7 +664,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   activeKeyboardScope = keyboardScopeForTab(activeTab)
   const [items, setItems] = useState<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
-  const [clipRowCount, setClipRowCount] = useState<1 | 2>(2)
+  const [clipRowCount, setClipRowCount] = useState<1 | 2>(() => readKeyboardRowCount())
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
@@ -821,7 +856,11 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   function toggleClipLayout() {
-    setClipRowCount((value) => value === 2 ? 1 : 2)
+    setClipRowCount((value) => {
+      const next = value === 2 ? 1 : 2
+      writeKeyboardRowCount(next)
+      return next
+    })
   }
 
   async function openPipInApp() {
