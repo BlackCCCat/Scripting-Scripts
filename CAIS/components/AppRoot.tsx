@@ -427,28 +427,26 @@ export function AppRoot() {
       readOnly: false,
     })
     const initialChangeCount = await currentChangeCount()
-    const editorMonitorStopper = startClipboardMonitor(settings, (next) => {
-      if (next.lastCapturedAt) void refresh()
-    }, { skipInitialCapture: true })
     try {
       await controller.present({
         navigationTitle: "编辑内容",
         scriptName: "CAIS",
         fullscreen: false,
       })
+      let needsRefresh = false
       if (await currentChangeCount() !== initialChangeCount) {
         await captureCurrentClipboard(settings)
-        await refresh()
+        needsRefresh = true
       }
       const nextContent = controller.content
       if (nextContent !== fullContent) {
         await editClipContent(item, nextContent)
-        await refresh()
+        needsRefresh = true
       }
+      if (needsRefresh) await refresh()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "编辑失败") })
     } finally {
-      editorMonitorStopper()
       controller.dispose()
     }
   }
