@@ -22,10 +22,27 @@ import type {
   KeyboardMenuBuiltinAction,
 } from "../types";
 import { makeId } from "../utils/common";
+import {
+  JAVASCRIPT_ACTION_EXAMPLE,
+  runJavaScriptTransform,
+  validateRegexPattern,
+  validateRuntimeTemplate,
+} from "../utils/custom_action";
 
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
 const MAX_ITEM_OPTIONS = [200, 500, 800];
 const KEYBOARD_MAX_ITEM_OPTIONS = [10, 20, 30, 40, 50];
+const JAVASCRIPT_HELP = [
+  "函数名必须是 transform，只接收一个文本参数 text，需返回 { text }。",
+  "trim(): 移除首尾空白",
+  "replace(a, b): 替换内容，可配合正则使用",
+  "match(regexp): 获取匹配结果",
+  "split(text): 拆分字符串",
+  "join(text): 合并数组为字符串",
+  "toUpperCase(): 转为大写",
+  "toLowerCase(): 转为小写",
+  "slice(start, end): 截取字符串",
+].join("\n");
 
 const BUILTIN_ACTIONS: Array<{
   key: KeyboardMenuBuiltinAction;
@@ -38,6 +55,7 @@ const BUILTIN_ACTIONS: Array<{
   { key: "cleanWhitespace", title: "移除空格" },
   { key: "uppercase", title: "转为大写" },
   { key: "lowercase", title: "转为​小写" },
+  { key: "chineseAmount", title: "中文大写金额" },
   { key: "openUrl", title: "打开链接" },
 ];
 const FIXED_BUILTIN_ACTION_KEYS: KeyboardMenuBuiltinAction[] = [
@@ -53,6 +71,20 @@ function optionIndex(options: number[], value: number): number {
   return index >= 0 ? index : 0;
 }
 
+function customActionModeIndex(mode: KeyboardCustomActionMode): number {
+  if (mode === "regexExtract") return 1;
+  if (mode === "regexRemove") return 2;
+  if (mode === "javascript") return 3;
+  return 0;
+}
+
+function customActionModeFromIndex(index: number): KeyboardCustomActionMode {
+  if (index === 1) return "regexExtract";
+  if (index === 2) return "regexRemove";
+  if (index === 3) return "javascript";
+  return "template";
+}
+
 function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
   const dismiss = Navigation.useDismiss();
   const [title, setTitle] = useState(props.action?.title ?? "");
@@ -63,11 +95,18 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
     props.action?.template ?? "{{text}}",
   );
   const [regex, setRegex] = useState(props.action?.regex ?? "");
+  const [regexRemoveAll, setRegexRemoveAll] = useState(
+    Boolean(props.action?.regexRemoveAll ?? true),
+  );
+  const [script, setScript] = useState(
+    props.action?.script ?? JAVASCRIPT_ACTION_EXAMPLE,
+  );
 
   async function save() {
     const fixedTitle = title.trim();
     const fixedTemplate = template.trim();
     const fixedRegex = regex.trim();
+    const fixedScript = script.trim();
     if (!fixedTitle) {
       await Dialog.alert({ message: "请输入功能名称" });
       return;
@@ -76,16 +115,53 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
       await Dialog.alert({ message: "请输入模板内容" });
       return;
     }
-    if (mode === "regex" && !fixedRegex) {
+    if ((mode === "regexExtract" || mode === "regexRemove") && !fixedRegex) {
       await Dialog.alert({ message: "请输入正则表达式" });
       return;
+    }
+    if (mode === "javascript" && !fixedScript) {
+      await Dialog.alert({ message: "请输入 JavaScript 函数" });
+      return;
+    }
+    if (mode === "template") {
+      const templateError = validateRuntimeTemplate(fixedTemplate);
+      if (templateError) {
+        await Dialog.alert({ title: "模板错误", message: templateError });
+        return;
+      }
+    }
+    if (mode === "regexExtract" || mode === "regexRemove") {
+      const regexError = validateRegexPattern(
+        fixedRegex,
+        mode === "regexRemove" && regexRemoveAll,
+      );
+      if (regexError) {
+        await Dialog.alert({
+          title: "正则表达式错误",
+          message: regexError,
+        });
+        return;
+      }
+    }
+    if (mode === "javascript") {
+      try {
+        runJavaScriptTransform(fixedScript, "示例文本");
+      } catch (error: any) {
+        await Dialog.alert({
+          title: "JavaScript 错误",
+          message: String(error?.message ?? error ?? "JavaScript 函数无效"),
+        });
+        return;
+      }
     }
     dismiss({
       id: props.action?.id ?? makeId("menu"),
       title: fixedTitle,
       mode,
       template: mode === "template" ? fixedTemplate : "",
-      regex: mode === "regex" ? fixedRegex : "",
+      regex: mode === "regexExtract" || mode === "regexRemove" ? fixedRegex : "",
+      regexRemoveAll: mode === "regexRemove" ? regexRemoveAll : false,
+      script: mode === "javascript" ? fixedScript : "",
       enabled: props.action?.enabled ?? true,
     });
   }
@@ -115,13 +191,15 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
           <Picker
             title="类型"
             pickerStyle="menu"
-            value={mode === "template" ? 0 : 1}
+            value={customActionModeIndex(mode)}
             onChanged={(index: number) =>
-              setMode(index === 1 ? "regex" : "template")
+              setMode(customActionModeFromIndex(index))
             }
           >
             <Text tag={0}>模板替换</Text>
             <Text tag={1}>正则提取</Text>
+            <Text tag={2}>正则删除</Text>
+            <Text tag={3}>JavaScript 转换</Text>
           </Picker>
         </Section>
 
@@ -149,19 +227,45 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
               onChanged={setTemplate}
             />
           </Section>
+        ) : mode === "javascript" ? (
+          <Section
+            header={<Text>JavaScript 函数</Text>}
+            footer={
+              <Text>{JAVASCRIPT_HELP}</Text>
+            }
+          >
+            <TextField
+              title=""
+              value={script}
+              prompt={JAVASCRIPT_ACTION_EXAMPLE}
+              axis="vertical"
+              frame={{
+                minHeight: 170,
+                maxWidth: "infinity",
+                alignment: "topLeading" as any,
+              }}
+              onChanged={setScript}
+            />
+          </Section>
         ) : (
           <Section
             header={<Text>正则表达式</Text>}
             footer={
               <Text>
-                应用时会插入第一个捕获组；没有捕获组时插入完整匹配结果。
+                {mode === "regexRemove"
+                  ? "应用时会移除命中的内容。"
+                  : "应用时会插入第一个捕获组；没有捕获组时插入完整匹配结果。"}
               </Text>
             }
           >
             <TextField
               title=""
               value={regex}
-              prompt={"例如：[\\w.-]+@[\\w.-]+\\.[A-Za-z]{2,}"}
+              prompt={
+                mode === "regexRemove"
+                  ? "例如：\\s+"
+                  : "例如：[\\w.-]+@[\\w.-]+\\.[A-Za-z]{2,}"
+              }
               axis="vertical"
               frame={{
                 minHeight: 92,
@@ -170,6 +274,14 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
               }}
               onChanged={setRegex}
             />
+            {mode === "regexRemove" ? (
+              <Toggle
+                title="删除全部匹配"
+                value={regexRemoveAll}
+                onChanged={setRegexRemoveAll}
+                toggleStyle="switch"
+              />
+            ) : null}
           </Section>
         )}
       </Form>

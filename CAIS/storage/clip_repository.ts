@@ -1,13 +1,13 @@
 import type { CaptureResult, ClipGroup, ClipItem, ClipListScope, ClipPayload, CaisSettings } from "../types"
-import { clipTitle, hashString, isLikelyURL, makeId, normalizeText } from "../utils/common"
+import { clipTitle, hashString, isLikelyURL, makeId, normalizeClipContent, normalizeText } from "../utils/common"
 import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 import { bumpClipDataVersion } from "./change_signal"
 
 function payloadContent(payload: ClipPayload): string {
   if (payload.kind === "image") return `image:${payload.sourceChangeCount ?? Date.now()}`
-  if (payload.kind === "url") return normalizeText(payload.url ?? payload.text ?? "")
-  return normalizeText(payload.text ?? "")
+  if (payload.kind === "url") return normalizeClipContent(payload.url ?? payload.text ?? "")
+  return normalizeClipContent(payload.text ?? "")
 }
 
 function shouldCapture(payload: ClipPayload, settings: CaisSettings): boolean {
@@ -17,7 +17,7 @@ function shouldCapture(payload: ClipPayload, settings: CaisSettings): boolean {
 
 export async function addClipFromPayload(payload: ClipPayload, settings: CaisSettings): Promise<CaptureResult> {
   const content = payloadContent(payload)
-  if (!content) return { status: "skipped", reason: "剪贴板为空" }
+  if (!content.trim()) return { status: "skipped", reason: "剪贴板为空" }
   const kind = payload.kind === "text" && isLikelyURL(content) ? "url" : payload.kind
   if (!shouldCapture({ ...payload, kind }, settings)) {
     return { status: "skipped", reason: "当前类型未开启采集" }
@@ -127,8 +127,8 @@ export async function clearFavoriteClips(): Promise<void> {
 }
 
 export async function editClipContent(item: ClipItem, value: string): Promise<ClipItem> {
-  const content = normalizeText(value)
-  if (!content) throw new Error("内容不能为空")
+  const content = normalizeClipContent(value)
+  if (!content.trim()) throw new Error("内容不能为空")
   const kind = item.kind === "image" ? "text" : isLikelyURL(content) ? "url" : "text"
   const next: ClipItem = {
     ...item,
@@ -152,8 +152,8 @@ export async function updateClipTitle(item: ClipItem, value: string): Promise<Cl
 }
 
 export async function addFavoriteFromInput(title: string, content: string): Promise<ClipItem> {
-  const fixedContent = normalizeText(content)
-  if (!fixedContent) throw new Error("内容不能为空")
+  const fixedContent = normalizeClipContent(content)
+  if (!fixedContent.trim()) throw new Error("内容不能为空")
   const kind = isLikelyURL(fixedContent) ? "url" : "text"
   const now = Date.now()
   const item: ClipItem = {

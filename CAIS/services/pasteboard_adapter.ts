@@ -1,5 +1,5 @@
 import type { ClipItem, ClipPayload } from "../types"
-import { normalizeText } from "../utils/common"
+import { normalizeClipContent } from "../utils/common"
 
 let lastSelfWriteText = ""
 let lastSelfWriteAt = 0
@@ -43,8 +43,8 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
 
   try {
     if (await pasteboardFlag(pb.hasStrings) && typeof pb.getString === "function") {
-      const text = normalizeText(await pb.getString())
-      if (!text) return null
+      const text = normalizeClipContent(await pb.getString())
+      if (!text.trim()) return null
       if (text === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
         return null
       }
@@ -55,8 +55,8 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
 
   try {
     if (await pasteboardFlag(pb.hasURLs) && typeof pb.getURL === "function") {
-      const url = normalizeText(await pb.getURL())
-      if (!url) return null
+      const url = normalizeClipContent(await pb.getURL())
+      if (!url.trim()) return null
       if (url === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
         return null
       }

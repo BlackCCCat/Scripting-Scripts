@@ -57,9 +57,10 @@ export type KeyboardMenuBuiltinAction =
   | "cleanWhitespace"
   | "uppercase"
   | "lowercase"
+  | "chineseAmount"
   | "openUrl"
 
-export type KeyboardCustomActionMode = "template" | "regex"
+export type KeyboardCustomActionMode = "template" | "regexExtract" | "regexRemove" | "javascript"
 
 export type KeyboardCustomAction = {
   id: string
@@ -67,6 +68,8 @@ export type KeyboardCustomAction = {
   mode: KeyboardCustomActionMode
   template: string
   regex?: string
+  regexRemoveAll?: boolean
+  script?: string
   enabled: boolean
 }
 
@@ -99,6 +102,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
       cleanWhitespace: true,
       uppercase: true,
       lowercase: true,
+      chineseAmount: false,
       openUrl: true,
     },
     customActions: [],

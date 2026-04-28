@@ -7,6 +7,13 @@ function getStorage(): any {
   return (globalThis as any).Storage
 }
 
+function sanitizeCustomActionMode(value: any): KeyboardCustomAction["mode"] {
+  if (value === "regex" || value === "regexExtract") return "regexExtract"
+  if (value === "regexRemove") return "regexRemove"
+  if (value === "javascript") return "javascript"
+  return "template"
+}
+
 function sanitizeSettings(raw: any): CaisSettings {
   const monitorIntervalMs = Number(raw?.monitorIntervalMs ?? DEFAULT_CAIS_SETTINGS.monitorIntervalMs)
   const maxItems = Number(raw?.maxItems ?? DEFAULT_CAIS_SETTINGS.maxItems)
@@ -28,12 +35,18 @@ function sanitizeSettings(raw: any): CaisSettings {
       .map((item: any): KeyboardCustomAction => ({
         id: String(item?.id ?? `custom_${Date.now()}`),
         title: String(item?.title ?? "").trim(),
-        mode: item?.mode === "regex" ? "regex" : "template",
+        mode: sanitizeCustomActionMode(item?.mode),
         template: String(item?.template ?? ""),
         regex: String(item?.regex ?? ""),
+        regexRemoveAll: Boolean(item?.regexRemoveAll ?? false),
+        script: String(item?.script ?? ""),
         enabled: Boolean(item?.enabled ?? true),
       }))
-      .filter((item: KeyboardCustomAction) => item.title && (item.mode === "regex" ? item.regex : item.template))
+      .filter((item: KeyboardCustomAction) => item.title && (
+        item.mode === "template" ? item.template :
+        item.mode === "javascript" ? item.script :
+        item.regex
+      ))
       .slice(0, 12)
     : []
   return {

@@ -47,6 +47,7 @@ import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
 import { summarizeContent } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
+import { arabicNumberToChineseAmount, makeRegex, runJavaScriptTransform } from "../utils/custom_action"
 import { PipStatusView } from "./PipStatusView"
 import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
 
@@ -63,6 +64,7 @@ const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
   "cleanWhitespace",
   "uppercase",
   "lowercase",
+  "chineseAmount",
   "openUrl",
 ]
 let deleteRepeatTimer: any = null
@@ -250,13 +252,6 @@ function clipTypeIcon(item: ClipItem): string {
     /^www\./i.test(content)
   ) return "link"
   return "doc.text"
-}
-
-function makeRegex(pattern: string): RegExp {
-  const trimmed = pattern.trim()
-  const wrapped = trimmed.match(/^\/(.+)\/([dgimsuvy]*)$/)
-  if (wrapped) return new RegExp(wrapped[1], wrapped[2])
-  return new RegExp(trimmed)
 }
 
 function selectedKeyboardText(): string {
@@ -483,7 +478,8 @@ function ClipTileMenu(props: {
   }
 
   async function runCustomAction(action: KeyboardCustomAction) {
-    let source = selectedKeyboardText()
+    const selectedText = selectedKeyboardText()
+    let source = selectedText
     if (!source && !isImage) {
       source = renderClipOutput(item, await getFullClipContent(item.id))
     }
@@ -492,10 +488,14 @@ function ClipTileMenu(props: {
       return
     }
     try {
-      if (action.mode === "regex") {
+      if (action.mode === "regexExtract" || action.mode === "regexRemove") {
         const pattern = String(action.regex ?? "").trim()
         if (!pattern) {
           props.onStatus("正则表达式为空")
+          return
+        }
+        if (action.mode === "regexRemove") {
+          insertKeyboardText(source.replace(makeRegex(pattern, Boolean(action.regexRemoveAll)), ""))
           return
         }
         const match = source.match(makeRegex(pattern))
@@ -504,6 +504,14 @@ function ClipTileMenu(props: {
           return
         }
         insertKeyboardText(match[1] ?? match[0])
+        return
+      }
+      if (action.mode === "javascript") {
+        const result = runJavaScriptTransform(
+          String(action.script ?? ""),
+          source,
+        )
+        insertKeyboardText(result.text)
         return
       }
       insertKeyboardText(renderRuntimeTemplate(action.template, source))
@@ -613,6 +621,15 @@ function ClipTileMenu(props: {
             action={() => insertTransformed((value) => value.toLowerCase(), "没有可转换文本")}
           />
         ) : null
+      case "chineseAmount":
+        return !isImage && builtins.chineseAmount ? (
+          <Button
+            key={action}
+            title="中文大写金额"
+            systemImage="chineseyuanrenminbisign"
+            action={() => insertTransformed(arabicNumberToChineseAmount, "没有可转换文本")}
+          />
+        ) : null
       case "openUrl":
         return builtins.openUrl && item.kind === "url" ? (
           <Button
@@ -653,7 +670,15 @@ function ClipTileMenu(props: {
             <Button
               key={action.id}
               title={action.title}
-              systemImage={action.mode === "regex" ? "text.magnifyingglass" : "wand.and.stars"}
+              systemImage={
+                action.mode === "regexExtract"
+                  ? "text.magnifyingglass"
+                  : action.mode === "regexRemove"
+                    ? "text.badge.minus"
+                    : action.mode === "javascript"
+                      ? "curlybraces"
+                      : "wand.and.stars"
+              }
               action={() => runCustomAction(action)}
             />
           ))

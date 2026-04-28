@@ -7,8 +7,12 @@ export function normalizeText(value: unknown): string {
   return String(value ?? "").replace(/\r\n/g, "\n").trim()
 }
 
+export function normalizeClipContent(value: unknown): string {
+  return String(value ?? "").replace(/\r\n/g, "\n")
+}
+
 export function isLikelyURL(value: string): boolean {
-  const text = value.trim()
+  const text = value
   if (!text || /\s/.test(text)) return false
   return /^https?:\/\/[^\s]+$/i.test(text) || /^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(text)
 }
@@ -47,7 +51,14 @@ export function formatDateTime(timestamp?: number | null): string {
 }
 
 export function summarizeContent(content: string, limit = 140): string {
-  const fixed = content.replace(/\s+/g, " ").trim()
+  const normalized = content.replace(/\r\n/g, "\n")
+  const leadingSpaces = normalized.match(/^ */)?.[0].length ?? 0
+  const trailingSpaces = normalized.match(/ *$/)?.[0].length ?? 0
+  const bodyEnd = trailingSpaces ? normalized.length - trailingSpaces : normalized.length
+  const fixed = `${"␠".repeat(leadingSpaces)}${normalized
+    .slice(leadingSpaces, bodyEnd)
+    .replace(/\t/g, "⇥")
+    .replace(/\n/g, "↵")}${"␠".repeat(trailingSpaces)}`
   if (fixed.length <= limit) return fixed
   return `${fixed.slice(0, limit)}...`
 }
