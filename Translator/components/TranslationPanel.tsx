@@ -50,6 +50,22 @@ type TranslationPanelProps = {
   allowsReplacement: boolean
 }
 
+function summarizeText(text: string, maxLength = 48) {
+  const normalized = String(text ?? "").replace(/\s+/g, " ").trim()
+  if (!normalized) return ""
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength)}...`
+    : normalized
+}
+
+function logTranslationEvent(message: string, payload?: Record<string, unknown>) {
+  if (payload) {
+    console.log(`[Translator] ${message}`, payload)
+    return
+  }
+  console.log(`[Translator] ${message}`)
+}
+
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
     try {
@@ -281,6 +297,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
     if (!hasInput) return
 
     if (!visibleEngines.length) {
+      logTranslationEvent("没有可执行的翻译引擎", {
+        sourceLanguageCode,
+        targetLanguageCode,
+      })
       setEngineResults([])
       setErrorText("没有启用且可用的翻译引擎。")
       return
@@ -290,6 +310,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
       sourceLanguageCode !== AUTO_LANGUAGE.code &&
       sourceLanguageCode === targetLanguageCode
     ) {
+      logTranslationEvent("源语言和目标语言相同，已拦截翻译", {
+        sourceLanguageCode,
+        targetLanguageCode,
+      })
       setEngineResults(visibleEngines.map((engine) => ({
         engineId: engine.id,
         engineName: engine.label,
@@ -304,16 +328,39 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
+    const startedAt = Date.now()
     setErrorText("")
     setEngineResults(createLoadingStates())
+    logTranslationEvent("开始翻译", {
+      requestId,
+      sourceLength: sourceText.length,
+      sourcePreview: summarizeText(sourceText),
+      sourceLanguageCode,
+      targetLanguageCode,
+      engineNames: visibleEngines.map((engine) => engine.label),
+    })
 
     try {
       // 这里逐条回填每个引擎的状态，不再在最后整体覆盖，避免未完成项丢掉自己的加载态。
       await Promise.allSettled(
         visibleEngines.map(async (engine) => {
+          const engineStartedAt = Date.now()
+          logTranslationEvent("引擎开始翻译", {
+            requestId,
+            engineId: engine.id,
+            engineName: engine.label,
+          })
           try {
             const result = await translateEngine(engine)
             if (requestId !== requestIdRef.current) return null
+            logTranslationEvent("引擎翻译成功", {
+              requestId,
+              engineId: engine.id,
+              engineName: engine.label,
+              elapsedMs: Date.now() - engineStartedAt,
+              translatedLength: result.translatedText.length,
+              translatedPreview: summarizeText(result.translatedText),
+            })
 
             setEngineResults((current) => current.map((item) => (
               item.engineId === engine.id ? result : item
@@ -321,13 +368,21 @@ export function TranslationPanel(props: TranslationPanelProps) {
             return result
           } catch (error) {
             if (requestId !== requestIdRef.current) return null
+            const message = error instanceof Error ? error.message : String(error)
+            console.error(`[Translator] 引擎翻译失败`, {
+              requestId,
+              engineId: engine.id,
+              engineName: engine.label,
+              elapsedMs: Date.now() - engineStartedAt,
+              error: message,
+            })
 
             const failed = {
               engineId: engine.id,
               engineName: engine.label,
               systemImage: engine.systemImage,
               translatedText: "",
-              errorText: error instanceof Error ? error.message : String(error),
+              errorText: message,
               isTranslating: false,
             } satisfies EngineTranslationState
             setEngineResults((current) => current.map((item) => (
@@ -339,12 +394,22 @@ export function TranslationPanel(props: TranslationPanelProps) {
       )
 
       if (requestId !== requestIdRef.current) return
+      logTranslationEvent("翻译完成", {
+        requestId,
+        elapsedMs: Date.now() - startedAt,
+      })
       try {
         HapticFeedback.notificationSuccess()
       } catch {}
     } catch (error) {
       if (requestId !== requestIdRef.current) return
-      setErrorText(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[Translator] 翻译流程失败`, {
+        requestId,
+        elapsedMs: Date.now() - startedAt,
+        error: message,
+      })
+      setErrorText(message)
       try {
         HapticFeedback.notificationError()
       } catch {}
@@ -374,11 +439,19 @@ export function TranslationPanel(props: TranslationPanelProps) {
       if (cancelled || !detected) return
 
       if ((detected === "zh-Hans" || detected === "zh-Hant") && targetLanguageCode !== "en") {
+        logTranslationEvent("自动切换默认目标语言", {
+          detectedSourceLanguageCode: detected,
+          nextTargetLanguageCode: "en",
+        })
         setTargetLanguageCode("en")
         return
       }
 
       if (detected === "en" && targetLanguageCode !== "zh-Hans") {
+        logTranslationEvent("自动切换默认目标语言", {
+          detectedSourceLanguageCode: detected,
+          nextTargetLanguageCode: "zh-Hans",
+        })
         setTargetLanguageCode("zh-Hans")
       }
     })()
@@ -418,6 +491,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
+    const startedAt = Date.now()
     setErrorText("")
     setEngineResults((current) => current.map((item) => (
       item.engineId === engineId
@@ -428,10 +502,25 @@ export function TranslationPanel(props: TranslationPanelProps) {
           }
         : item
     )))
+    logTranslationEvent("单引擎重试开始", {
+      requestId,
+      engineId: engine.id,
+      engineName: engine.label,
+      sourceLanguageCode,
+      targetLanguageCode,
+    })
 
     try {
       const result = await translateEngine(engine)
       if (requestId !== requestIdRef.current) return
+      logTranslationEvent("单引擎重试成功", {
+        requestId,
+        engineId: engine.id,
+        engineName: engine.label,
+        elapsedMs: Date.now() - startedAt,
+        translatedLength: result.translatedText.length,
+        translatedPreview: summarizeText(result.translatedText),
+      })
 
       setEngineResults((current) => current.map((item) => (
         item.engineId === engineId ? result : item
@@ -441,13 +530,21 @@ export function TranslationPanel(props: TranslationPanelProps) {
       } catch {}
     } catch (error) {
       if (requestId !== requestIdRef.current) return
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[Translator] 单引擎重试失败`, {
+        requestId,
+        engineId: engine.id,
+        engineName: engine.label,
+        elapsedMs: Date.now() - startedAt,
+        error: message,
+      })
 
       setEngineResults((current) => current.map((item) => (
         item.engineId === engineId
           ? {
               ...item,
               translatedText: "",
-              errorText: error instanceof Error ? error.message : String(error),
+              errorText: message,
               isTranslating: false,
             }
           : item
