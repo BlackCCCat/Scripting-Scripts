@@ -47,9 +47,17 @@ import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
 import { summarizeContent } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
-import { arabicNumberToChineseAmount, makeRegex, runJavaScriptTransform } from "../utils/custom_action"
 import { PipStatusView } from "./PipStatusView"
 import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
+import {
+  applyBuiltinMenuAction,
+  applyCustomMenuAction,
+  customActionSystemImage,
+  getOrderedMenuBuiltins,
+  menuBuiltinSystemImage,
+  menuBuiltinTitle,
+  type MenuActionResult,
+} from "../utils/menu_actions"
 
 const TAB_FAVORITE = 0
 const TAB_CLIPS = 1
@@ -59,15 +67,6 @@ const CLIP_GRID_SPACING = 10
 const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_ROW_COUNT_KEY = "cais_keyboard_row_count_v1"
 const SHARED_STORAGE_OPTIONS = { shared: true }
-const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
-  "base64Encode",
-  "base64Decode",
-  "cleanWhitespace",
-  "uppercase",
-  "lowercase",
-  "chineseAmount",
-  "openUrl",
-]
 let deleteRepeatTimer: any = null
 let lastInsertedText = ""
 let lastPastedText = ""
@@ -232,15 +231,6 @@ function BottomKey(props: {
   )
 }
 
-function stripDataUri(value: string): string {
-  return value.trim().replace(/^data:[^,]+,/, "")
-}
-
-function dataToRawText(data: Data | null): string | null {
-  if (!data) return null
-  return data.toRawString("utf-8")
-}
-
 function characterCount(value: string | null | undefined): number {
   return Array.from(String(value ?? "")).length
 }
@@ -276,15 +266,6 @@ function clipListKey(items: ClipItem[]): string {
     item.contentHash,
     item.imagePath ?? "",
   ].join(":")).join("|")
-}
-
-function getOrderedKeyboardBuiltins(settings: CaisSettings): KeyboardMenuBuiltinAction[] {
-  const order = settings.keyboardMenu.builtinOrder?.filter(
-    (key) => CONFIGURABLE_BUILTIN_ACTIONS.includes(key)
-  )
-  if (!order?.length) return CONFIGURABLE_BUILTIN_ACTIONS
-  const missing = CONFIGURABLE_BUILTIN_ACTIONS.filter((key) => !order.includes(key))
-  return [...order, ...missing]
 }
 
 function clipTileWidth(): number {
@@ -486,56 +467,81 @@ function ClipTileMenu(props: {
     }
   }
 
-  async function insertTransformed(transform: (value: string) => string, emptyMessage: string) {
+  async function sourceText(): Promise<string> {
     let source = selectedKeyboardText()
     if (!source && !isImage) {
       source = renderClipOutput(item, await getFullClipContent(item.id))
     }
-    if (!source || isImage) {
-      props.onStatus(emptyMessage)
+    return source
+  }
+
+  async function saveMenuResult(result: MenuActionResult, source: string) {
+    const saveSettings = { ...props.settings, captureText: true, captureImages: true }
+    if (result.kind === "text") {
+      if (!result.text.trim() || result.text === source) return false
+      const saved = await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
+      await props.onRefresh()
+      return saved.status !== "skipped"
+    }
+    if (result.kind === "image") {
+      const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
+      await props.onRefresh()
+      return saved.status !== "skipped"
+    }
+    return false
+  }
+
+  async function handleMenuResult(result: MenuActionResult | null, source: string) {
+    if (!result) {
+      props.onStatus("当前条目不支持该功能")
       return
     }
-    insertKeyboardText(transform(source))
+    if (result.kind === "openUrl") {
+      await Safari.openURL(result.url)
+      return
+    }
+    if (result.kind === "text") {
+      insertKeyboardText(result.text)
+      const saved = await saveMenuResult(result, source)
+      props.onStatus(saved ? "已上屏并保存" : "已上屏")
+      return
+    }
+    await Pasteboard.setImage(result.image)
+    const saved = await saveMenuResult(result, source)
+    props.onStatus(saved ? "已写入剪贴板并保存" : "已写入剪贴板")
+  }
+
+  async function runBuiltinAction(action: KeyboardMenuBuiltinAction) {
+    const source = await sourceText()
+    if (!source && !(isImage && action === "base64Encode")) {
+      props.onStatus("当前条目不支持该功能")
+      return
+    }
+    if (isImage && action !== "base64Encode") {
+      props.onStatus("当前条目不支持该功能")
+      return
+    }
+    try {
+      const result = applyBuiltinMenuAction({
+        action,
+        source,
+        imagePath: item.imagePath,
+        isImage,
+      })
+      await handleMenuResult(result, source)
+    } catch (error: any) {
+      props.onStatus(String(error?.message ?? error ?? `${menuBuiltinTitle(action)}失败`))
+    }
   }
 
   async function runCustomAction(action: KeyboardCustomAction) {
-    const selectedText = selectedKeyboardText()
-    let source = selectedText
-    if (!source && !isImage) {
-      source = renderClipOutput(item, await getFullClipContent(item.id))
-    }
+    const source = await sourceText()
     if (!source || isImage) {
       props.onStatus("当前条目不支持该自定义功能")
       return
     }
     try {
-      if (action.mode === "regexExtract" || action.mode === "regexRemove") {
-        const pattern = String(action.regex ?? "").trim()
-        if (!pattern) {
-          props.onStatus("正则表达式为空")
-          return
-        }
-        if (action.mode === "regexRemove") {
-          insertKeyboardText(source.replace(makeRegex(pattern, Boolean(action.regexRemoveAll)), ""))
-          return
-        }
-        const match = source.match(makeRegex(pattern))
-        if (!match) {
-          props.onStatus("没有匹配结果")
-          return
-        }
-        insertKeyboardText(match[1] ?? match[0])
-        return
-      }
-      if (action.mode === "javascript") {
-        const result = runJavaScriptTransform(
-          String(action.script ?? ""),
-          source,
-        )
-        insertKeyboardText(result.text)
-        return
-      }
-      insertKeyboardText(renderRuntimeTemplate(action.template, source))
+      await handleMenuResult(applyCustomMenuAction(action, source), source)
     } catch (error: any) {
       props.onStatus(String(error?.message ?? error ?? "自定义功能执行失败"))
     }
@@ -559,109 +565,35 @@ function ClipTileMenu(props: {
     props.onStatus(`已删除：${item.title}`)
   }
 
-  async function encodeBase64() {
-    try {
-      if (isImage && item.imagePath) {
-        const data = Data.fromFile(item.imagePath)
-        if (!data) {
-          props.onStatus("图片文件不可读取")
-          return
-        }
-        insertKeyboardText(data.toBase64String())
-        return
-      }
-      const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
-      const data = Data.fromRawString(fullContent, "utf-8")
-      if (!data) {
-        props.onStatus("文本无法编码")
-        return
-      }
-      insertKeyboardText(data.toBase64String())
-    } catch (error: any) {
-      props.onStatus(String(error?.message ?? error ?? "Base64 编码失败"))
-    }
-  }
-
-  async function decodeBase64() {
-    try {
-      const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
-      const data = Data.fromBase64String(stripDataUri(fullContent))
-      const text = dataToRawText(data)
-      if (text) {
-        insertKeyboardText(text)
-        return
-      }
-      const image = UIImage.fromBase64String(stripDataUri(fullContent))
-      if (!image) {
-        props.onStatus("Base64 内容无法识别为文本或图片")
-        return
-      }
-      await Pasteboard.setImage(image)
-      await addClipFromPayload({ kind: "image", image }, loadSettings())
-      await props.onRefresh()
-      props.onStatus("已解码图片并写入剪贴板")
-    } catch (error: any) {
-      props.onStatus(String(error?.message ?? error ?? "Base64 解码失败"))
-    }
-  }
-
   function renderBuiltinAction(action: KeyboardMenuBuiltinAction) {
     switch (action) {
       case "base64Encode":
         return builtins.base64Encode ? (
-          <Button key={action} title="Base64 编码" systemImage="curlybraces.square" action={() => void encodeBase64()} />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "base64Decode":
         return !isImage && builtins.base64Decode ? (
-          <Button key={action} title="Base64 解码" systemImage="arrow.down.doc" action={() => void decodeBase64()} />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "cleanWhitespace":
         return !isImage && builtins.cleanWhitespace ? (
-          <Button
-            key={action}
-            title="移除空格"
-            systemImage="text.badge.checkmark"
-            action={() => insertTransformed((value) => value.replace(/\s+/g, ""), "没有可处理文本")}
-          />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "uppercase":
         return !isImage && builtins.uppercase ? (
-          <Button
-            key={action}
-            title="转为大写"
-            systemImage="textformat.size.larger"
-            action={() => insertTransformed((value) => value.toUpperCase(), "没有可转换文本")}
-          />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "lowercase":
         return !isImage && builtins.lowercase ? (
-          <Button
-            key={action}
-            title="转为小写"
-            systemImage="textformat.size.smaller"
-            action={() => insertTransformed((value) => value.toLowerCase(), "没有可转换文本")}
-          />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "chineseAmount":
         return !isImage && builtins.chineseAmount ? (
-          <Button
-            key={action}
-            title="中文大写金额"
-            systemImage="chineseyuanrenminbisign"
-            action={() => insertTransformed(arabicNumberToChineseAmount, "没有可转换文本")}
-          />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "openUrl":
         return builtins.openUrl && item.kind === "url" ? (
-          <Button
-            key={action}
-            title="打开链接"
-            systemImage="safari"
-            action={async () => {
-              const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
-              await Safari.openURL(fullContent)
-            }}
-          />
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       default:
         return null
@@ -683,7 +615,7 @@ function ClipTileMenu(props: {
           action={() => void toggleItemFavorite()}
         />
       ) : null}
-      {getOrderedKeyboardBuiltins(props.settings).map((action) => renderBuiltinAction(action))}
+      {getOrderedMenuBuiltins(props.settings).map((action) => renderBuiltinAction(action))}
       {!isImage ? (
         props.settings.keyboardMenu.customActions
           .filter((action) => action.enabled)
@@ -691,15 +623,7 @@ function ClipTileMenu(props: {
             <Button
               key={action.id}
               title={action.title}
-              systemImage={
-                action.mode === "regexExtract"
-                  ? "text.magnifyingglass"
-                  : action.mode === "regexRemove"
-                    ? "text.badge.minus"
-                    : action.mode === "javascript"
-                      ? "curlybraces"
-                      : "wand.and.stars"
-              }
+              systemImage={customActionSystemImage(action)}
               action={() => runCustomAction(action)}
             />
           ))

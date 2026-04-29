@@ -2,7 +2,6 @@ import {
   AppEvents,
   Button,
   EmptyView,
-  ForEach,
   Group,
   HStack,
   Image,
@@ -24,10 +23,11 @@ import {
   type ScenePhase,
 } from "scripting"
 
-import type { CaisSettings, ClipGroup, ClipItem, MonitorStatus } from "../types"
+import type { CaisSettings, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
-import { currentChangeCount, writeClipToPasteboard } from "../services/pasteboard_adapter"
+import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
+  addClipFromPayload,
   clearAllClips,
   clearFavoriteClips,
   editClipContent,
@@ -49,6 +49,15 @@ import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { SettingsView } from "./SettingsView"
 import { readPipControlState, writePipControlState } from "../services/pip_control"
+import {
+  applyBuiltinMenuAction,
+  applyCustomMenuAction,
+  customActionSystemImage,
+  getOrderedMenuBuiltins,
+  menuBuiltinSystemImage,
+  menuBuiltinTitle,
+  type MenuActionResult,
+} from "../utils/menu_actions"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
@@ -424,6 +433,77 @@ export function AppRoot() {
     })
   }
 
+  async function itemSource(item: ClipItem): Promise<string> {
+    if (item.kind === "image") return ""
+    return renderClipOutput(item, await getFullClipContent(item.id))
+  }
+
+  async function saveTransformedResult(result: MenuActionResult, source: string): Promise<boolean> {
+    const saveSettings = { ...settings, captureText: true, captureImages: true }
+    if (result.kind === "text") {
+      if (!result.text.trim() || result.text === source) return false
+      const saved = await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
+      return saved.status !== "skipped"
+    }
+    if (result.kind === "image") {
+      const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
+      return saved.status !== "skipped"
+    }
+    return false
+  }
+
+  async function copyMenuResult(result: MenuActionResult, source: string) {
+    if (result.kind === "openUrl") {
+      await Safari.openURL(result.url)
+      return
+    }
+    if (result.kind === "text") {
+      await writeTextToPasteboard(result.text)
+    } else {
+      await writeImageToPasteboard(result.image)
+    }
+    const saved = await saveTransformedResult(result, source)
+    showToast(saved ? "已复制并保存" : "已复制")
+    await refresh()
+  }
+
+  async function runBuiltinActionForItem(item: ClipItem, action: KeyboardMenuBuiltinAction) {
+    try {
+      const source = await itemSource(item)
+      const result = applyBuiltinMenuAction({
+        action,
+        source,
+        imagePath: item.imagePath,
+        isImage: item.kind === "image",
+      })
+      if (!result) {
+        showToast("当前条目不支持该功能")
+        return
+      }
+      await copyMenuResult(result, source)
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? `${menuBuiltinTitle(action)}失败`) })
+    }
+  }
+
+  async function runCustomActionForItem(item: ClipItem, action: KeyboardCustomAction) {
+    if (item.kind === "image") {
+      showToast("当前条目不支持该自定义功能")
+      return
+    }
+    try {
+      const source = await itemSource(item)
+      const result = applyCustomMenuAction(action, source)
+      if (!result) {
+        showToast("当前条目不支持该自定义功能")
+        return
+      }
+      await copyMenuResult(result, source)
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "自定义功能执行失败") })
+    }
+  }
+
   function startPipMonitor() {
     const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now() }
     setMonitorStatus(status)
@@ -521,6 +601,32 @@ export function AppRoot() {
               ) : (
                 <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
               )}
+              {getOrderedMenuBuiltins(settings).map((action) => {
+                const enabled = settings.keyboardMenu.builtins[action]
+                const supported =
+                  action === "base64Encode" ||
+                  (action === "openUrl" ? item.kind === "url" : item.kind !== "image")
+                return enabled && supported ? (
+                  <Button
+                    key={action}
+                    title={menuBuiltinTitle(action)}
+                    systemImage={menuBuiltinSystemImage(action)}
+                    action={() => void runBuiltinActionForItem(item, action)}
+                  />
+                ) : null
+              })}
+              {item.kind !== "image" ? (
+                settings.keyboardMenu.customActions
+                  .filter((action) => action.enabled)
+                  .map((action) => (
+                    <Button
+                      key={action.id}
+                      title={action.title}
+                      systemImage={customActionSystemImage(action)}
+                      action={() => void runCustomActionForItem(item, action)}
+                    />
+                  ))
+              ) : null}
             </Group>
           ),
         }}
@@ -583,13 +689,7 @@ export function AppRoot() {
               header={<Text>{group.title}</Text>}
               listSectionSeparator="hidden"
             >
-              <ForEach
-                count={group.items.length}
-                itemBuilder={(index) => {
-                  const item = group.items[index]
-                  return item ? renderClipRow(item, { allowDelete: options.allowDelete?.(item) ?? true }) : (null as any)
-                }}
-              />
+              {group.items.map((item) => renderClipRow(item, { allowDelete: options.allowDelete?.(item) ?? true }))}
             </Section>
           ))}
       </Group>
@@ -673,12 +773,21 @@ export function AppRoot() {
     )
   }
 
-  function searchSection() {
+  function searchPanel() {
     if (!searchVisible) return null
     return (
-      <Section>
-        <TextField title="搜索" value={query} prompt="输入关键词" onChanged={setQuery} />
-      </Section>
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+        padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+      >
+        <VStack
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
+          background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+        >
+          <TextField title="搜索" value={query} prompt="输入关键词" onChanged={setQuery} />
+        </VStack>
+      </VStack>
     )
   }
 
@@ -744,19 +853,25 @@ export function AppRoot() {
     >
       <Tab title="收藏" systemImage="star" value={TAB_FAVORITES}>
         <NavigationStack>
-          <List
+          <VStack
             navigationTitle="收藏"
             navigationBarTitleDisplayMode="inline"
-            listStyle="plain"
-            scrollContentBackground="hidden"
-            listRowSpacing={10}
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
             background="systemGroupedBackground"
             toolbar={{ topBarLeading: toolbarLeading("favorites"), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
-            {searchSection()}
-            {renderGroupedClipList(favoriteGroups, searchVisible && query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
-          </List>
+            {searchPanel()}
+            <List
+              listStyle="plain"
+              scrollContentBackground="hidden"
+              listRowSpacing={10}
+              background="systemGroupedBackground"
+              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+            >
+              {renderGroupedClipList(favoriteGroups, searchVisible && query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+            </List>
+          </VStack>
         </NavigationStack>
       </Tab>
 
@@ -771,6 +886,7 @@ export function AppRoot() {
             toast={toastOptions()}
           >
             {pipControlPanel()}
+            {searchPanel()}
             <List
               listStyle="plain"
               scrollContentBackground="hidden"
@@ -778,7 +894,6 @@ export function AppRoot() {
               background="systemGroupedBackground"
               frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             >
-              {searchSection()}
               {renderGroupedClipList(
                 clipboardGroups,
                 searchVisible && query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",

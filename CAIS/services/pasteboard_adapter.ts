@@ -86,3 +86,17 @@ export async function writeClipToPasteboard(item: ClipItem, fullContent?: string
   lastSelfWriteAt = Date.now()
   await pb.setString(textToWrite)
 }
+
+export async function writeTextToPasteboard(text: string): Promise<void> {
+  const pb = pasteboard()
+  if (!pb) throw new Error("Pasteboard 不可用")
+  lastSelfWriteText = text
+  lastSelfWriteAt = Date.now()
+  await pb.setString(text)
+}
+
+export async function writeImageToPasteboard(image: UIImage): Promise<void> {
+  const pb = pasteboard()
+  if (!pb || typeof pb.setImage !== "function") throw new Error("Pasteboard 不可用")
+  await pb.setImage(image)
+}

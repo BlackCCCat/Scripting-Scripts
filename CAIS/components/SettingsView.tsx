@@ -533,7 +533,7 @@ export function SettingsView(props: {
         </Toggle>
       </Section>
 
-      <Section header={<Text>键盘长按菜单</Text>}>
+      <Section header={<Text>长按菜单</Text>}>
         <ForEach
           count={getOrderedBuiltinActions().length}
           itemBuilder={(index) => {
