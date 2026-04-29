@@ -1,4 +1,4 @@
-import type { TranslationRequest, TranslationResult } from "../types"
+import type { TranslationEngineConfig, TranslationRequest, TranslationResult } from "../types"
 
 const ASSISTANT_TRANSLATION_SYSTEM_PROMPT = [
   "You are a translation engine for an iOS translation panel.",
@@ -47,11 +47,20 @@ function normalizeAssistantTranslation(content: string) {
   return lines.join("\n").trim()
 }
 
-export function createAssistantTranslationEngine() {
+export function createAssistantTranslationEngine(config?: TranslationEngineConfig) {
+  const providerId = config?.assistantProviderId ?? "openai"
+  const customProvider = String(config?.assistantCustomProvider ?? "").trim()
+  const modelId = String(config?.assistantModelId ?? "").trim()
+  const provider = providerId === "custom"
+    ? (customProvider ? { custom: customProvider } : undefined)
+    : providerId
+
   return {
     async translate(request: TranslationRequest): Promise<TranslationResult> {
       const stream = await Assistant.requestStreaming({
         systemPrompt: ASSISTANT_TRANSLATION_SYSTEM_PROMPT,
+        provider,
+        modelId: modelId || undefined,
         messages: {
           role: "user",
           content: [

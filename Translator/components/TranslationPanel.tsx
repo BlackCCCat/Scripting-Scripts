@@ -66,6 +66,19 @@ function logTranslationEvent(message: string, payload?: Record<string, unknown>)
   console.log(`[Translator] ${message}`)
 }
 
+function assistantLogOptions(engine: { kind?: string; config?: any }) {
+  if (engine.kind !== "assistant") return {}
+
+  const providerId = String(engine.config?.assistantProviderId ?? "openai").trim() || "openai"
+  const customProvider = String(engine.config?.assistantCustomProvider ?? "").trim()
+  const modelId = String(engine.config?.assistantModelId ?? "").trim()
+
+  return {
+    provider: providerId === "custom" ? `{ custom: "${customProvider}" }` : providerId,
+    modelId: modelId || "(default)",
+  }
+}
+
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
     try {
@@ -233,11 +246,12 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const [isSourceExpanded, setIsSourceExpanded] = useState(false)
   const requestIdRef = useRef(0)
   const targetTouchedRef = useRef(false)
+  const executableEngines = getExecutableEngines(settings)
+  const assistantConfig = settings.engines.find((engine) => engine.kind === "assistant")?.config
   const [appleEngine] = useState(() => createTranslationEngine())
-  const [assistantEngine] = useState(() => createAssistantTranslationEngine())
+  const [assistantEngine] = useState(() => createAssistantTranslationEngine(assistantConfig))
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
 
-  const executableEngines = getExecutableEngines(settings)
   const visibleEngines = executableEngines.filter((engine) => {
     const available = engine.kind === "apple_intelligence"
       ? isLocalTranslationAvailable()
@@ -337,7 +351,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
       sourcePreview: summarizeText(sourceText),
       sourceLanguageCode,
       targetLanguageCode,
-      engineNames: visibleEngines.map((engine) => engine.label),
+      engines: visibleEngines.map((engine) => ({
+        engineName: engine.label,
+        ...assistantLogOptions(engine),
+      })),
     })
 
     try {
@@ -349,6 +366,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
             requestId,
             engineId: engine.id,
             engineName: engine.label,
+            ...assistantLogOptions(engine),
           })
           try {
             const result = await translateEngine(engine)
@@ -357,6 +375,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
               requestId,
               engineId: engine.id,
               engineName: engine.label,
+              ...assistantLogOptions(engine),
               elapsedMs: Date.now() - engineStartedAt,
               translatedLength: result.translatedText.length,
               translatedPreview: summarizeText(result.translatedText),
@@ -373,6 +392,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
               requestId,
               engineId: engine.id,
               engineName: engine.label,
+              ...assistantLogOptions(engine),
               elapsedMs: Date.now() - engineStartedAt,
               error: message,
             })
@@ -506,6 +526,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
       requestId,
       engineId: engine.id,
       engineName: engine.label,
+      ...assistantLogOptions(engine),
       sourceLanguageCode,
       targetLanguageCode,
     })
@@ -517,6 +538,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
         requestId,
         engineId: engine.id,
         engineName: engine.label,
+        ...assistantLogOptions(engine),
         elapsedMs: Date.now() - startedAt,
         translatedLength: result.translatedText.length,
         translatedPreview: summarizeText(result.translatedText),
@@ -535,6 +557,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
         requestId,
         engineId: engine.id,
         engineName: engine.label,
+        ...assistantLogOptions(engine),
         elapsedMs: Date.now() - startedAt,
         error: message,
       })

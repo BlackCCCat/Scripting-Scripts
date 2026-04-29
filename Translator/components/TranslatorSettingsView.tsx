@@ -35,10 +35,11 @@ import {
   updateDefaultTargetLanguage,
   updateEngineEnabled,
 } from "../utils/translator_settings"
+import { AssistantEngineEditorView } from "./AssistantEngineEditorView"
 import { EngineEditorView } from "./EngineEditorView"
 
 function isEngineEditable(engine: TranslatorEngineEntry) {
-  return engine.kind === "ai_api"
+  return engine.kind === "ai_api" || engine.kind === "assistant"
 }
 
 function canDeleteEngine(engine: TranslatorEngineEntry) {
@@ -136,7 +137,12 @@ export function TranslatorSettingsView() {
     if (!isEngineEditable(engine)) return
 
     const result = await Navigation.present({
-      element: (
+      element: engine.kind === "assistant" ? (
+        <AssistantEngineEditorView
+          title={`配置 ${engine.label}`}
+          initial={engine.config}
+        />
+      ) : (
         <EngineEditorView
           title={`配置 ${engine.label}`}
           initial={{
@@ -150,9 +156,18 @@ export function TranslatorSettingsView() {
 
     if (!result) return
 
-    const nextWithConfig = engine.kind === "ai_api"
-      ? updateEngineConfig(baseSettings, engine.id, result.config as TranslationEngineConfig)
+    const nextWithConfig = (engine.kind === "ai_api" || engine.kind === "assistant")
+      ? updateEngineConfig(
+          baseSettings,
+          engine.id,
+          (engine.kind === "assistant" ? result : result.config) as TranslationEngineConfig
+        )
       : baseSettings
+
+    if (engine.kind === "assistant") {
+      persist(nextWithConfig)
+      return
+    }
 
     persist({
       defaultTargetLanguageCode: nextWithConfig.defaultTargetLanguageCode,

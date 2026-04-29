@@ -37,6 +37,9 @@ export type TranslationEngineConfig = {
   compatibilityMode?: AiApiCompatibilityMode
   baseUrl?: string
   model?: string
+  assistantProviderId?: "openai" | "gemini" | "anthropic" | "deepseek" | "openrouter" | "custom"
+  assistantCustomProvider?: string
+  assistantModelId?: string
 }
 
 export type TranslatorEngineEntry = {

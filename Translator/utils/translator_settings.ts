@@ -24,6 +24,13 @@ function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
       ? defaultEnabled && isLocalTranslationAvailable()
       : defaultEnabled,
     isBuiltIn: true,
+    config: kind === "assistant"
+      ? {
+          assistantProviderId: "openai",
+          assistantCustomProvider: "",
+          assistantModelId: "",
+        }
+      : undefined,
   }
 }
 
@@ -92,7 +99,12 @@ function normalizeEngineEntry(raw: Partial<TranslatorEngineEntry> | null | undef
     return {
       ...base,
       enabled: raw.enabled ?? base.enabled,
-      config: raw.config,
+      config: raw.kind === "assistant"
+        ? {
+            ...base.config,
+            ...raw.config,
+          }
+        : raw.config,
     }
   }
 
