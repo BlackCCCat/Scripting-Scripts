@@ -2,6 +2,7 @@ import {
   Button,
   Group,
   HStack,
+  Image,
   List,
   Navigation,
   NavigationStack,
@@ -36,7 +37,6 @@ import { downloadModule } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
 import { RemoteControlView } from "./RemoteControlView"
 import { SettingsView } from "./SettingsView"
-import { OriginSFSymbolButton } from "./OriginSFSymbolButton"
 import {
   fetchEnabledModuleNames,
   getModuleRemoteName,
@@ -497,30 +497,44 @@ export function HomeView() {
           topBarLeading: <Button title="" systemImage="switch.2" action={withButtonHaptic(openRemoteSettings)} />,
           topBarTrailing: <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />,
         }}
-      >
-        <Section
-          header={(
-            <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-              <HStack spacing={12}>
-                <OriginSFSymbolButton
-                  title="添加模块"
-                  systemImage="plus.square.on.square"
+        safeAreaInset={{
+          bottom: {
+            alignment: "trailing",
+            spacing: 0,
+            content: (
+              <VStack spacing={18} padding={{ bottom: 18, trailing: 16 }}>
+                <Button
+                  action={withButtonHaptic(addModule)}
+                  buttonStyle="glass"
+                  buttonBorderShape="circle"
+                  controlSize="extraLarge"
                   tint="systemBlue"
-                  onPress={addModule}
                   disabled={busy}
-                />
-                <OriginSFSymbolButton
-                  title="全部更新"
-                  systemImage="arrow.triangle.2.circlepath.circle.fill"
+                  frame={{ width: 76, height: 76 }}
+                >
+                  <VStack frame={{ width: 56, height: 56, alignment: "center" }}>
+                    <Image systemName="plus" font={30} foregroundStyle="systemBlue" />
+                  </VStack>
+                </Button>
+                <Button
+                  action={withButtonHaptic(downloadAll)}
+                  buttonStyle="glass"
+                  buttonBorderShape="circle"
+                  controlSize="extraLarge"
                   tint="systemGreen"
-                  onPress={downloadAll}
                   disabled={busy || onlyLocalFiltered}
-                />
-              </HStack>
-              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>状态</Text>
-            </VStack>
-          )}
-        >
+                  frame={{ width: 76, height: 76 }}
+                >
+                  <VStack frame={{ width: 56, height: 56, alignment: "center" }}>
+                    <Image systemName="arrow.triangle.2.circlepath" font={28} foregroundStyle="systemGreen" />
+                  </VStack>
+                </Button>
+              </VStack>
+            ),
+          },
+        }}
+      >
+        <Section header={<Text>状态</Text>}>
           <Text>{stage}</Text>
           {progress !== null ? (
             <ProgressView
