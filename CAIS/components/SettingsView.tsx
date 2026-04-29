@@ -8,6 +8,7 @@ import {
   Picker,
   Section,
   Spacer,
+  Stepper,
   Text,
   TextField,
   Toggle,
@@ -32,6 +33,8 @@ import {
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
 const MAX_ITEM_OPTIONS = [200, 500, 800];
 const KEYBOARD_MAX_ITEM_OPTIONS = [10, 20, 30, 40, 50];
+const APP_CONTENT_LINE_MIN = 1;
+const APP_CONTENT_LINE_MAX = 12;
 const JAVASCRIPT_HELP = [
   "函数名必须是 transform，只接收一个文本参数 text，需返回 { text }。",
   "trim(): 移除首尾空白",
@@ -492,6 +495,42 @@ export function SettingsView(props: {
             </Text>
           ))}
         </Picker>
+      </Section>
+
+      <Section header={<Text>界面显示</Text>}>
+        <Stepper
+          onIncrement={() =>
+            update({
+              appContentLineLimit: Math.min(
+                APP_CONTENT_LINE_MAX,
+                settings.appContentLineLimit + 1,
+              ),
+            })
+          }
+          onDecrement={() =>
+            update({
+              appContentLineLimit: Math.max(
+                APP_CONTENT_LINE_MIN,
+                settings.appContentLineLimit - 1,
+              ),
+            })
+          }
+        >
+          <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            <Text>内容显示行数</Text>
+            <Spacer />
+            <Text foregroundStyle="secondaryLabel">
+              {settings.appContentLineLimit} 行
+            </Text>
+          </HStack>
+        </Stepper>
+        <Toggle
+          value={settings.keyboardShowTitle}
+          onChanged={(keyboardShowTitle: boolean) => update({ keyboardShowTitle })}
+          toggleStyle="switch"
+        >
+          <Text>键盘显示标题</Text>
+        </Toggle>
       </Section>
 
       <Section header={<Text>键盘长按菜单</Text>}>

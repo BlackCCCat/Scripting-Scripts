@@ -45,6 +45,8 @@ export type CaisSettings = {
   monitorIntervalMs: number
   duplicatePolicy: DuplicatePolicy
   maxItems: number
+  appContentLineLimit: number
+  keyboardShowTitle: boolean
   keyboardMaxItems: number
   keyboardMenu: KeyboardMenuSettings
 }
@@ -92,6 +94,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   monitorIntervalMs: 200,
   duplicatePolicy: "bump",
   maxItems: 800,
+  appContentLineLimit: 3,
+  keyboardShowTitle: true,
   keyboardMaxItems: 30,
   keyboardMenu: {
     builtins: {

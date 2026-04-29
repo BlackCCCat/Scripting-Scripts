@@ -158,32 +158,35 @@ function IconButton(props: {
   tint?: string
   frame?: any
   onPress: () => void | Promise<void>
+  onLongPress?: () => void | Promise<void>
 }) {
   const tint: any = props.disabled ? "secondaryLabel" : props.tint ?? "label"
   return (
-    <Button
-      disabled={props.disabled}
-      buttonStyle="plain"
+    <RoundedRectangle
+      cornerRadius={8}
+      fill={props.disabled ? "tertiarySystemFill" : "secondarySystemFill"}
       frame={props.frame ?? { width: 34, height: 36 }}
-      action={() => {
+      onTapGesture={() => {
+        if (props.disabled) return
         playClick()
         void props.onPress()
       }}
-    >
-      <RoundedRectangle
-        cornerRadius={8}
-        fill={props.disabled ? "tertiarySystemFill" : "secondarySystemFill"}
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        overlay={
-          <Image
-            systemName={props.systemImage}
-            font="title3"
-            foregroundStyle={tint}
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-          />
-        }
-      />
-    </Button>
+      onLongPressGesture={props.onLongPress && !props.disabled ? {
+        minDuration: 450,
+        perform: () => {
+          playClick()
+          void props.onLongPress?.()
+        },
+      } : undefined}
+      overlay={
+        <Image
+          systemName={props.systemImage}
+          font="title3"
+          foregroundStyle={tint}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+        />
+      }
+    />
   )
 }
 
@@ -294,6 +297,7 @@ type ClipTileMetrics = {
   showTitle: boolean
   showFooter: boolean
   contentLineLimit: number
+  contentPreviewLimit: number
   iconFont: Font
 }
 
@@ -301,12 +305,27 @@ function clipTileMetrics(height: number): ClipTileMetrics {
   const compact = height > 0 && height < 96
   const tiny = height > 0 && height < 76
   const minimal = height > 0 && height < 58
+  const padding = minimal ? 6 : compact ? 8 : 10
+  const spacing = minimal ? 2 : compact ? 4 : 6
+  const showTitle = !compact
+  const showFooter = !minimal
+  const reservedHeight =
+    padding * 2 +
+    (showTitle ? 21 + spacing : 0) +
+    (showFooter ? 16 + spacing : 0)
+  const dynamicLineLimit = Math.max(1, Math.floor(Math.max(0, height - reservedHeight) / 14))
+  const contentLineLimit = minimal
+    ? 1
+    : tiny
+      ? 1
+      : Math.max(1, Math.min(dynamicLineLimit, 12))
   return {
-    padding: minimal ? 6 : compact ? 8 : 10,
-    spacing: minimal ? 2 : compact ? 4 : 6,
-    showTitle: !compact,
-    showFooter: !minimal,
-    contentLineLimit: minimal ? 1 : tiny ? 1 : compact ? 2 : 5,
+    padding,
+    spacing,
+    showTitle,
+    showFooter,
+    contentLineLimit,
+    contentPreviewLimit: Math.max(120, contentLineLimit * 64),
     iconFont: tiny ? "caption2" : "caption",
   }
 }
@@ -377,6 +396,7 @@ function ClipTile(props: {
           <GeometryReader>
             {(proxy) => {
               const metrics = clipTileMetrics(proxy.size.height)
+              const showTitle = metrics.showTitle && props.settings.keyboardShowTitle
               return (
                 <VStack
                   frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
@@ -400,7 +420,7 @@ function ClipTile(props: {
                     />
                   ) : (
                     <>
-                      {metrics.showTitle ? (
+                      {showTitle ? (
                         <Text
                           font="headline"
                           lineLimit={1}
@@ -412,12 +432,12 @@ function ClipTile(props: {
                       ) : null}
                       <Text
                         font="caption"
-                        foregroundStyle={metrics.showTitle ? "secondaryLabel" : "label"}
+                        foregroundStyle={showTitle ? "secondaryLabel" : "label"}
                         lineLimit={metrics.contentLineLimit}
                         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                         multilineTextAlignment="leading"
                       >
-                        {summarizeContent(item.content, metrics.showTitle ? 220 : 120)}
+                        {summarizeContent(item.content, metrics.contentPreviewLimit)}
                       </Text>
                       <Spacer />
                     </>
@@ -925,6 +945,18 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     }
   }
 
+  async function openCaisApp() {
+    try {
+      await Safari.openURL(Script.createRunURLScheme("CAIS"))
+    } catch (error: any) {
+      setMonitorStatus({
+        active: Boolean(appPipActive),
+        lastMessage: String(error?.message ?? error ?? "打开 CAIS 失败"),
+        lastCheckedAt: Date.now(),
+      })
+    }
+  }
+
   function sendReturn() {
     const kb = keyboard()
     if (typeof kb?.send === "function") {
@@ -956,6 +988,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           systemImage="house.fill"
           frame={{ width: 32, height: 36 }}
           onPress={() => keyboard()?.dismissToHome?.()}
+          onLongPress={openCaisApp}
         />
         <Picker
           title=""

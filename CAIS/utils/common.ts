@@ -52,15 +52,8 @@ export function formatDateTime(timestamp?: number | null): string {
 
 export function summarizeContent(content: string, limit = 140): string {
   const normalized = content.replace(/\r\n/g, "\n")
-  const leadingSpaces = normalized.match(/^ */)?.[0].length ?? 0
-  const trailingSpaces = normalized.match(/ *$/)?.[0].length ?? 0
-  const bodyEnd = trailingSpaces ? normalized.length - trailingSpaces : normalized.length
-  const fixed = `${"␠".repeat(leadingSpaces)}${normalized
-    .slice(leadingSpaces, bodyEnd)
-    .replace(/\t/g, "⇥")
-    .replace(/\n/g, "↵")}${"␠".repeat(trailingSpaces)}`
-  if (fixed.length <= limit) return fixed
-  return `${fixed.slice(0, limit)}...`
+  if (normalized.length <= limit) return normalized
+  return `${normalized.slice(0, limit)}...`
 }
 
 export function withHaptic(action: () => void | Promise<void>) {

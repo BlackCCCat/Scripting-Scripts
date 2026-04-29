@@ -1,6 +1,7 @@
 import {
   AppEvents,
   Button,
+  EmptyView,
   ForEach,
   Group,
   HStack,
@@ -76,31 +77,6 @@ function EmptyState(props: {
       <Image systemName={props.systemImage} font="largeTitle" foregroundStyle="secondaryLabel" />
       <Text font="headline">{props.title}</Text>
       <Text foregroundStyle="secondaryLabel" multilineTextAlignment="center">{props.message}</Text>
-    </VStack>
-  )
-}
-
-function StatusCard(props: {
-  status: MonitorStatus
-}) {
-  return (
-    <VStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} spacing={7}>
-      <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-        <VStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} spacing={3}>
-          <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>PiP 状态</Text>
-          <Text font="subheadline" foregroundStyle="secondaryLabel">
-            {props.status.active ? "PiP 监听运行中" : "PiP 监听未启动"}
-          </Text>
-        </VStack>
-      </HStack>
-      <Text
-        font="caption"
-        foregroundStyle="secondaryLabel"
-        multilineTextAlignment="leading"
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      >
-        [{formatDateTime(props.status.lastCheckedAt)}] {props.status.lastMessage}
-      </Text>
     </VStack>
   )
 }
@@ -334,12 +310,7 @@ export function AppRoot() {
         result.status === "created" ? `已采集：${result.item.title}` :
         result.status === "updated" ? `已更新：${result.item.title}` :
         result.reason
-      setMonitorStatus((status) => ({
-        ...status,
-        lastMessage: message,
-        lastCheckedAt: Date.now(),
-        lastCapturedAt: result.status === "skipped" ? status.lastCapturedAt : Date.now(),
-      }))
+      showToast(message)
       await refresh()
     } catch {
     } finally {
@@ -352,11 +323,6 @@ export function AppRoot() {
       const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
       await markCopied(item)
-      setMonitorStatus((status) => ({
-        ...status,
-        lastMessage: `已复制：${item.title}`,
-        lastCheckedAt: Date.now(),
-      }))
       showToast("已复制")
       await refresh()
     } catch (error: any) {
@@ -465,7 +431,10 @@ export function AppRoot() {
     if (appMonitorStopper) return
     appMonitorStopper = startClipboardMonitor(settings, (next) => {
       setMonitorStatus(next)
-      if (next.lastCapturedAt) void refresh()
+      if (next.lastCapturedAt) {
+        showToast(next.lastMessage)
+        void refresh()
+      }
     })
   }
 
@@ -539,6 +508,9 @@ export function AppRoot() {
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         background="rgba(0,0,0,0.001)"
         contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+        listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
+        listRowSeparator="hidden"
+        listRowBackground={<EmptyView />}
         onTapGesture={withHaptic(() => copyItem(item))}
         contextMenu={{
           menuItems: (
@@ -593,7 +565,7 @@ export function AppRoot() {
           ),
         } : undefined}
       >
-        <ClipRow item={item} />
+        <ClipRow item={item} contentLineLimit={settings.appContentLineLimit} />
       </HStack>
     )
   }
@@ -606,7 +578,11 @@ export function AppRoot() {
       <Group>
         {groups.filter((group) => group.items.length)
           .map((group) => (
-            <Section key={group.title} header={<Text>{group.title}</Text>}>
+            <Section
+              key={group.title}
+              header={<Text>{group.title}</Text>}
+              listSectionSeparator="hidden"
+            >
               <ForEach
                 count={group.items.length}
                 itemBuilder={(index) => {
@@ -739,7 +715,9 @@ export function AppRoot() {
           <List
             navigationTitle="收藏"
             navigationBarTitleDisplayMode="inline"
-            listStyle="insetGroup"
+            listStyle="plain"
+            scrollContentBackground="hidden"
+            listRowSpacing={10}
             toolbar={{ topBarLeading: toolbarLeading("favorites"), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
@@ -759,14 +737,21 @@ export function AppRoot() {
             toast={toastOptions()}
           >
             <Section>
-              <StatusCard
-                status={monitorStatus}
-              />
               <Toggle
                 title="开启 PiP 监听"
                 value={pipPresented.value}
                 onChanged={() => withHaptic(togglePip)()}
               />
+              {pipPresented.value ? (
+                <Text
+                  font="caption"
+                  foregroundStyle="secondaryLabel"
+                  multilineTextAlignment="leading"
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                >
+                  [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage}
+                </Text>
+              ) : null}
             </Section>
             {searchSection()}
             {renderGroupedClipList(

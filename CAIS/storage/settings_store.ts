@@ -17,6 +17,7 @@ function sanitizeCustomActionMode(value: any): KeyboardCustomAction["mode"] {
 function sanitizeSettings(raw: any): CaisSettings {
   const monitorIntervalMs = Number(raw?.monitorIntervalMs ?? DEFAULT_CAIS_SETTINGS.monitorIntervalMs)
   const maxItems = Number(raw?.maxItems ?? DEFAULT_CAIS_SETTINGS.maxItems)
+  const appContentLineLimit = Number(raw?.appContentLineLimit ?? DEFAULT_CAIS_SETTINGS.appContentLineLimit)
   const keyboardMaxItems = Number(raw?.keyboardMaxItems ?? DEFAULT_CAIS_SETTINGS.keyboardMaxItems)
   const defaultBuiltins = DEFAULT_CAIS_SETTINGS.keyboardMenu.builtins
   const rawBuiltins = raw?.keyboardMenu?.builtins ?? {}
@@ -55,6 +56,8 @@ function sanitizeSettings(raw: any): CaisSettings {
     monitorIntervalMs: Math.max(100, Math.min(10000, monitorIntervalMs || DEFAULT_CAIS_SETTINGS.monitorIntervalMs)),
     duplicatePolicy: raw?.duplicatePolicy === "skip" ? "skip" : "bump",
     maxItems: Math.max(50, Math.min(800, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
+    appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
+    keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
       builtins,
