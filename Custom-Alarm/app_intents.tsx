@@ -12,7 +12,6 @@ type SnoozeIntentParams = {
   logicalAlarmId: string
   title: string
   snoozeMinutes: number
-  soundName: string | null
 }
 
 function buildSnoozeAttributes(
@@ -53,7 +52,6 @@ function buildSnoozeConfiguration(params: SnoozeIntentParams): AlarmManager.Conf
   // “推迟”会重新注册成一个新的固定时间闹钟，这样它会像正常闹钟一样再次响起。
   const fireDate = new Date(Date.now() + params.snoozeMinutes * 60 * 1000)
   fireDate.setSeconds(0, 0)
-  const normalizedSoundName = String(params.soundName ?? "").trim()
 
   const configuration = AlarmManager.Configuration.alarm({
     schedule: AlarmManager.Schedule.fixed(fireDate),
@@ -62,9 +60,7 @@ function buildSnoozeConfiguration(params: SnoozeIntentParams): AlarmManager.Conf
       params.logicalAlarmId,
       params.snoozeMinutes
     ),
-    sound: normalizedSoundName
-      ? AlarmManager.Sound.named(normalizedSoundName)
-      : AlarmManager.Sound.default(),
+    sound: AlarmManager.Sound.default(),
     secondaryIntent: SnoozeCustomAlarmIntent({
       ...params,
       alarmId: params.alarmId,

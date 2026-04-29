@@ -131,14 +131,12 @@ function draftKey(draft: AlarmDraft): string {
   return JSON.stringify({
     title: draft.title.trim(),
     snoozeMinutes: draft.snoozeMinutes,
-    soundName: draft.soundName ?? null,
     repeatRule: normalizeRepeatRule(draft.repeatRule),
   })
 }
 
 export function AddAlarmView(props: {
   holidaySources: HolidayCalendarSource[]
-  availableSounds: string[]
   existingDrafts?: AlarmDraft[]
   initial?: AlarmDraft | null
   mode?: "create" | "edit"
@@ -162,18 +160,8 @@ export function AddAlarmView(props: {
     initialRepeatMode = initialDraft.repeatRule.kind
   }
 
-  const soundOptions = (() => {
-    const base = props.availableSounds.length ? props.availableSounds : ["Default"]
-    const initialSound = initialDraft?.soundName?.trim() || "Default"
-    return base.includes(initialSound) ? base : [...base, initialSound]
-  })()
   const [title, setTitle] = useState(initialDraft?.title ?? "闹钟")
   const [snoozeMinutes, setSnoozeMinutes] = useState(initialDraft?.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES)
-  const [soundIndex, setSoundIndex] = useState<number>(() => {
-    const initialSoundName = initialDraft?.soundName?.trim() || "Default"
-    const index = soundOptions.findIndex((item) => item === initialSoundName)
-    return index >= 0 ? index : 0
-  })
   const [repeatEnabled, setRepeatEnabled] = useState(initialRepeatEnabled)
   const [repeatMode, setRepeatMode] = useState<DraftRepeatMode>(initialRepeatMode)
   const [oneTimeTimestamp, setOneTimeTimestamp] = useState<number>(initialTimestamp)
@@ -245,15 +233,12 @@ export function AddAlarmView(props: {
     const occurrenceLimit = repeatEnabled && supportsOccurrenceLimit(repeatMode) && occurrenceLimitValue > 0
       ? Math.max(1, Math.min(99, occurrenceLimitValue))
       : null
-    const selectedSound = soundOptions[soundIndex] ?? "Default"
-    const soundName = selectedSound === "Default" ? null : selectedSound
     let result: AlarmDraft
 
     if (!repeatEnabled) {
       result = {
         title: fixedTitle,
         snoozeMinutes,
-        soundName,
         repeatRule: {
           kind: "once",
           timestamp: oneTimeTimestamp,
@@ -263,7 +248,6 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
-        soundName,
         repeatRule: {
           kind: "daily",
           hour,
@@ -275,7 +259,6 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
-        soundName,
         repeatRule: {
           kind: "weekly",
           hour,
@@ -288,7 +271,6 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
-        soundName,
         repeatRule: {
           kind: "monthly",
           hour,
@@ -301,7 +283,6 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
-        soundName,
         repeatRule: {
           kind: "holiday",
           hour,
@@ -314,7 +295,6 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
-        soundName,
         repeatRule: {
           kind: "custom",
           hour,
@@ -363,18 +343,6 @@ export function AddAlarmView(props: {
             {SNOOZE_OPTIONS.map((minutes, index) => (
               <Text key={`snooze-${minutes}`} tag={index}>
                 {minutes} 分钟
-              </Text>
-            ))}
-          </Picker>
-          <Picker
-            title="闹钟声音"
-            pickerStyle="menu"
-            value={soundIndex}
-            onChanged={setSoundIndex}
-          >
-            {soundOptions.map((option, index) => (
-              <Text key={`sound-${option || "default"}`} tag={index}>
-                {option}
               </Text>
             ))}
           </Picker>

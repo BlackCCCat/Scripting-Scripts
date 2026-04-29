@@ -1,5 +1,4 @@
 import {
-  Button,
   Form,
   HStack,
   Image,
@@ -36,45 +35,11 @@ function MetricRow(props: {
   )
 }
 
-function ActionMetricRow(props: {
-  icon: string
-  title: string
-  value: string
-  tint?: string
-  onPress: () => void
-}) {
-  return (
-    <Button
-      buttonStyle="plain"
-      frame={{ maxWidth: "infinity" }}
-      action={props.onPress}
-    >
-      <HStack
-        spacing={12}
-        frame={{ width: "100%" as any, alignment: "leading" as any }}
-        padding={{ top: 2, bottom: 2 }}
-        background={"rgba(0,0,0,0.001)"}
-      >
-        <Image
-          systemName={props.icon}
-          foregroundStyle={(props.tint ?? "#FF9500") as any}
-          frame={{ width: 20, alignment: "center" as any }}
-        />
-        <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          {props.title}
-        </Text>
-        <Text foregroundStyle="secondaryLabel">{props.value}</Text>
-      </HStack>
-    </Button>
-  )
-}
-
 export function StatusView(props: {
   logicalAlarmCount: number
   enabledCount: number
   managedInstanceCount: number
   cleanupCandidateCount: number
-  soundCount: number
   currentHolidayTitle: string
   syncedHolidayCount: number
   currentMonthTotalOffCount: number
@@ -83,7 +48,6 @@ export function StatusView(props: {
   currentMonthRemainingWorkCount: number
   lastSyncedAt: number | null
   embedded?: boolean
-  onOpenSoundSettings?: () => void
 }) {
   const dismiss = Navigation.useDismiss()
   const content = (
@@ -106,17 +70,6 @@ export function StatusView(props: {
         <MetricRow icon="checkmark.circle.fill" title="已启用" value={String(props.enabledCount)} tint="#16A34A" />
         <MetricRow icon="bell.and.waves.left.and.right.fill" title="注册到系统闹钟" value={String(props.managedInstanceCount)} />
         <MetricRow icon="exclamationmark.triangle.fill" title="残留闹钟" value={String(props.cleanupCandidateCount)} tint="#DC2626" />
-        {props.onOpenSoundSettings ? (
-          <ActionMetricRow
-            icon="speaker.wave.2.fill"
-            title="声音"
-            value={String(props.soundCount)}
-            tint="#2563EB"
-            onPress={props.onOpenSoundSettings}
-          />
-        ) : (
-          <MetricRow icon="speaker.wave.2.fill" title="声音" value={String(props.soundCount)} tint="#2563EB" />
-        )}
       </Section>
 
       <Section header={<Text>节假日日历</Text>}>

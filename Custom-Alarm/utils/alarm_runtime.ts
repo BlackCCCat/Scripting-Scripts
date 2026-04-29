@@ -143,31 +143,22 @@ function buildAttributes(
   return attributes
 }
 
-function buildSound(soundName: string | null): AlarmManager.Sound {
-  const normalizedSoundName = String(soundName ?? "").trim()
-  return normalizedSoundName
-    ? AlarmManager.Sound.named(normalizedSoundName)
-    : AlarmManager.Sound.default()
-}
-
 function buildConfiguration(
   systemAlarmId: string,
   logicalAlarmId: string,
   title: string,
   schedule: AlarmManager.Schedule,
-  snoozeMinutes: number,
-  soundName: string | null
+  snoozeMinutes: number
 ): AlarmManager.Configuration {
   const configuration = AlarmManager.Configuration.alarm({
     schedule,
     attributes: buildAttributes(title, logicalAlarmId, snoozeMinutes),
-    sound: buildSound(soundName),
+    sound: AlarmManager.Sound.default(),
     secondaryIntent: snoozeMinutes > 0 ? SnoozeCustomAlarmIntent({
       alarmId: systemAlarmId,
       logicalAlarmId,
       title,
       snoozeMinutes,
-      soundName,
     }) as any : null,
   })
   if (!configuration) throw new Error("闹钟配置创建失败")
@@ -452,8 +443,7 @@ async function scheduleFixedTimestamps(
       record.id,
       record.title,
       AlarmManager.Schedule.fixed(new Date(timestamp)),
-      record.snoozeMinutes,
-      record.soundName
+      record.snoozeMinutes
     )
     await AlarmManager.schedule(systemId, configuration)
     createdIds.push(systemId)
@@ -595,8 +585,7 @@ export async function scheduleAlarm(
           record.id,
           record.title,
           AlarmManager.Schedule.fixed(new Date(record.repeatRule.timestamp)),
-          record.snoozeMinutes,
-          record.soundName
+          record.snoozeMinutes
         )
         await AlarmManager.schedule(systemId, configuration)
         createdIds.push(systemId)
@@ -613,8 +602,7 @@ export async function scheduleAlarm(
             record.id,
             record.title,
             AlarmManager.Schedule.relative(record.repeatRule.hour, record.repeatRule.minute),
-            record.snoozeMinutes,
-            record.soundName
+            record.snoozeMinutes
           )
           await AlarmManager.schedule(systemId, configuration)
           createdIds.push(systemId)
@@ -636,8 +624,7 @@ export async function scheduleAlarm(
               record.repeatRule.minute,
               record.repeatRule.weekdays
             ),
-            record.snoozeMinutes,
-            record.soundName
+            record.snoozeMinutes
           )
           await AlarmManager.schedule(systemId, configuration)
           createdIds.push(systemId)
