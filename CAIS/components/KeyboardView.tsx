@@ -56,6 +56,7 @@ const TAB_CLIPS = 1
 const KEYBOARD_ROOT_SIDE_PADDING = 6
 const CLIP_SCROLL_SIDE_PADDING = 8
 const CLIP_GRID_SPACING = 10
+const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_ROW_COUNT_KEY = "cais_keyboard_row_count_v1"
 const SHARED_STORAGE_OPTIONS = { shared: true }
 const CONFIGURABLE_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
@@ -301,13 +302,13 @@ type ClipTileMetrics = {
   iconFont: Font
 }
 
-function clipTileMetrics(height: number): ClipTileMetrics {
+function clipTileMetrics(height: number, titleEnabled = true): ClipTileMetrics {
   const compact = height > 0 && height < 96
   const tiny = height > 0 && height < 76
   const minimal = height > 0 && height < 58
   const padding = minimal ? 6 : compact ? 8 : 10
   const spacing = minimal ? 2 : compact ? 4 : 6
-  const showTitle = !compact
+  const showTitle = titleEnabled && !compact
   const showFooter = !minimal
   const reservedHeight =
     padding * 2 +
@@ -325,7 +326,7 @@ function clipTileMetrics(height: number): ClipTileMetrics {
     showTitle,
     showFooter,
     contentLineLimit,
-    contentPreviewLimit: Math.max(120, contentLineLimit * 64),
+    contentPreviewLimit: KEYBOARD_TILE_PREVIEW_LIMIT,
     iconFont: tiny ? "caption2" : "caption",
   }
 }
@@ -395,8 +396,8 @@ function ClipTile(props: {
         overlay={
           <GeometryReader>
             {(proxy) => {
-              const metrics = clipTileMetrics(proxy.size.height)
-              const showTitle = metrics.showTitle && props.settings.keyboardShowTitle
+              const metrics = clipTileMetrics(proxy.size.height, props.settings.keyboardShowTitle)
+              const showTitle = metrics.showTitle
               return (
                 <VStack
                   frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
