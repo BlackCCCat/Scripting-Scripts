@@ -682,6 +682,38 @@ export function AppRoot() {
     )
   }
 
+  function pipControlPanel() {
+    return (
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+        padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+      >
+        <VStack
+          spacing={8}
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
+          background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+        >
+          <Toggle
+            title="开启 PiP 监听"
+            value={pipPresented.value}
+            onChanged={() => withHaptic(togglePip)()}
+          />
+          {pipPresented.value ? (
+            <Text
+              font="caption"
+              foregroundStyle="secondaryLabel"
+              multilineTextAlignment="leading"
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            >
+              [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage}
+            </Text>
+          ) : null}
+        </VStack>
+      </VStack>
+    )
+  }
+
   return (
     <TabView
       selection={activeTab as any}
@@ -718,6 +750,7 @@ export function AppRoot() {
             listStyle="plain"
             scrollContentBackground="hidden"
             listRowSpacing={10}
+            background="systemGroupedBackground"
             toolbar={{ topBarLeading: toolbarLeading("favorites"), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
@@ -729,37 +762,30 @@ export function AppRoot() {
 
       <Tab title="剪贴板" systemImage="doc.on.clipboard" value={TAB_CLIPS}>
         <NavigationStack>
-          <List
+          <VStack
             navigationTitle="CAIS"
             navigationBarTitleDisplayMode="inline"
-            listStyle="insetGroup"
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
+            background="systemGroupedBackground"
             toolbar={{ topBarLeading: toolbarLeading("all"), topBarTrailing: clipToolbarButtons() }}
             toast={toastOptions()}
           >
-            <Section>
-              <Toggle
-                title="开启 PiP 监听"
-                value={pipPresented.value}
-                onChanged={() => withHaptic(togglePip)()}
-              />
-              {pipPresented.value ? (
-                <Text
-                  font="caption"
-                  foregroundStyle="secondaryLabel"
-                  multilineTextAlignment="leading"
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                >
-                  [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage}
-                </Text>
-              ) : null}
-            </Section>
-            {searchSection()}
-            {renderGroupedClipList(
-              clipboardGroups,
-              searchVisible && query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-              { allowDelete: (item) => !item.manualFavorite }
-            )}
-          </List>
+            {pipControlPanel()}
+            <List
+              listStyle="plain"
+              scrollContentBackground="hidden"
+              listRowSpacing={10}
+              background="systemGroupedBackground"
+              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+            >
+              {searchSection()}
+              {renderGroupedClipList(
+                clipboardGroups,
+                searchVisible && query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+                { allowDelete: (item) => !item.manualFavorite }
+              )}
+            </List>
+          </VStack>
         </NavigationStack>
       </Tab>
 
