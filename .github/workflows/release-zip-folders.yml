@@ -128,37 +128,64 @@ jobs:
 
           if [[ -n "$PREVIOUS_TAG" ]]; then
             gh api "repos/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG_NAME}" > compare.json
+          fi
 
-            python3 - <<'PY'
+          export PREVIOUS_TAG
+          python3 - <<'PY'
           import json
           import os
+          import subprocess
 
           repo = os.environ["GITHUB_REPOSITORY"]
+          tag_name = os.environ["TAG_NAME"]
+          previous_tag = os.environ.get("PREVIOUS_TAG", "")
           notes_file = "release-notes.md"
 
-          with open("compare.json", "r", encoding="utf-8") as f:
-              data = json.load(f)
+          def format_commit(f, sha: str, message: str) -> None:
+              lines = message.rstrip("\n").splitlines()
+              subject = lines[0].strip() if lines and lines[0].strip() else "(no subject)"
+              f.write(f"- {subject} ([{sha[:7]}](https://github.com/{repo}/commit/{sha}))\n")
 
-          commits = data.get("commits", [])
+              body_lines = lines[1:]
+              if any(line.strip() for line in body_lines):
+                  f.write("\n")
+                  for line in body_lines:
+                      if line.strip():
+                          f.write(f"  {line.rstrip()}\n")
+                      else:
+                          f.write("\n")
+
+              f.write("\n")
+
+          commits: list[tuple[str, str]] = []
+
+          if previous_tag:
+              with open("compare.json", "r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              commits = [
+                  (commit["sha"], commit["commit"]["message"])
+                  for commit in data.get("commits", [])
+              ]
+          else:
+              raw = subprocess.check_output(
+                  ["git", "log", "--reverse", "--format=%H%x1f%B%x1e", tag_name],
+                  text=True,
+              )
+              for entry in raw.split("\x1e"):
+                  entry = entry.strip()
+                  if not entry or "\x1f" not in entry:
+                      continue
+                  sha, message = entry.split("\x1f", 1)
+                  commits.append((sha.strip(), message))
 
           with open(notes_file, "a", encoding="utf-8") as f:
               if commits:
-                  for commit in commits:
-                      sha = commit["sha"]
-                      short_sha = sha[:7]
-                      message = commit["commit"]["message"].splitlines()[0]
-                      f.write(f"- {message} ([{short_sha}](https://github.com/{repo}/commit/{sha}))\n")
+                  for sha, message in commits:
+                      format_commit(f, sha, message)
               else:
                   f.write("- No commits found.\n")
           PY
-          else
-            COMMITS="$(git log --reverse --pretty=format:"- %s ([%h](https://github.com/${GITHUB_REPOSITORY}/commit/%H))" "$TAG_NAME" || true)"
-            if [[ -n "$COMMITS" ]]; then
-              printf '%s\n' "$COMMITS" >> "$NOTES_FILE"
-            else
-              echo "- No commits found." >> "$NOTES_FILE"
-            fi
-          fi
 
           if [[ -n "$PREVIOUS_TAG" ]]; then
             {
