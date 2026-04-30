@@ -20,7 +20,7 @@ import {
 } from "scripting"
 
 import { FollowingsFilterView } from "./FollowingsFilterView"
-import { InlineVideoPlayerPage } from "./InlineVideoPlayerPage"
+import { InlineVideoPlayerPage, stopActiveInlinePlayback } from "./InlineVideoPlayerPage"
 import type {
   BiliAuthSession,
   BiliAuthorFilterRule,
@@ -379,6 +379,7 @@ export function DynamicTabView(props: {
                 isPresented: filterPresented || playingItem != null,
                 onChanged: (value) => {
                   if (!value) {
+                    void stopActiveInlinePlayback()
                     setFilterPresented(false)
                     setPlayingItem(null)
                   }
