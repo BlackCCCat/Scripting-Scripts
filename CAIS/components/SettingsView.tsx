@@ -436,17 +436,26 @@ export function SettingsView(props: {
           role="destructive"
           action={() => props.onClearFavorites?.()}
         />
-        <Menu title="清空剪贴板数据" systemImage="trash">
-          {CLIPBOARD_CLEAR_OPTIONS.map((option) => (
-            <Button
-              key={option.range}
-              title={option.title}
-              systemImage="trash"
-              role="destructive"
-              action={() => props.onClearClipboard?.(option.range)}
-            />
-          ))}
-        </Menu>
+        <Button
+          title="清空剪贴板数据"
+          systemImage="trash"
+          action={async () => {
+            const actions = CLIPBOARD_CLEAR_OPTIONS.map((opt) => ({
+              label: opt.title,
+              destructive: true,
+            }))
+            const idx = await Dialog.actionSheet({
+              title: "选择清理范围",
+              actions,
+            })
+            if (idx != null) {
+              const option = CLIPBOARD_CLEAR_OPTIONS[idx]
+              if (option) {
+                props.onClearClipboard?.(option.range)
+              }
+            }
+          }}
+        />
       </Section>
 
       <Section header={<Text>采集类型</Text>}>

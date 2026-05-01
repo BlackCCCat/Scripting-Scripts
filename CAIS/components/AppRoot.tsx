@@ -19,6 +19,7 @@ import {
   useState,
   Form,
   Navigation,
+  useColorScheme,
   type ScenePhase,
 } from "scripting"
 
@@ -77,16 +78,32 @@ function EmptyState(props: {
   message: string
   systemImage: string
 }) {
+  const colorScheme = useColorScheme()
+  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+
   return (
-    <VStack
+    <HStack
       frame={{ maxWidth: "infinity", alignment: "center" as any }}
-      padding={{ top: 32, bottom: 32 }}
-      spacing={10}
+      listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
+      listRowSeparator="hidden"
+      listRowBackground={<EmptyView />}
     >
-      <Image systemName={props.systemImage} font="largeTitle" foregroundStyle="secondaryLabel" />
-      <Text font="headline">{props.title}</Text>
-      <Text foregroundStyle="secondaryLabel" multilineTextAlignment="center">{props.message}</Text>
-    </VStack>
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "center" as any }}
+        padding={{ top: 40, bottom: 40, leading: 16, trailing: 16 }}
+        spacing={12}
+        background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
+        shadow={{
+          color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
+          radius: 10,
+          y: 4,
+        }}
+      >
+        <Image systemName={props.systemImage} font="largeTitle" foregroundStyle="secondaryLabel" />
+        <Text font="headline">{props.title}</Text>
+        <Text foregroundStyle="secondaryLabel" multilineTextAlignment="center">{props.message}</Text>
+      </VStack>
+    </HStack>
   )
 }
 
@@ -383,6 +400,9 @@ export function AppRoot() {
   }
 
   async function clearData(scope: ClearScope) {
+    showToast("正在删除...")
+    // Yield to let toast render before blocking on async work
+    await new Promise((r) => (globalThis as any).setTimeout?.(r, 50))
     if (scope === "favorites") {
       await clearFavoriteClips()
       showToast("已清空收藏数据")
@@ -941,15 +961,20 @@ export function AppRoot() {
 
       <Tab title="设置" systemImage="gearshape" value={TAB_SETTINGS}>
         <NavigationStack>
-          <SettingsView
-            value={settings}
-            onChanged={updateSettings}
-            onClearFavorites={() => void requestClear("favorites")}
-            onClearClipboard={(range) => void requestClear(range)}
-            addActionToken={addCustomActionToken}
-            leadingToolbar={toolbarLeading()}
-            trailingToolbar={settingsTrailingToolbar()}
-          />
+          <VStack
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
+            toast={toastOptions()}
+          >
+            <SettingsView
+              value={settings}
+              onChanged={updateSettings}
+              onClearFavorites={() => void requestClear("favorites")}
+              onClearClipboard={(range) => void requestClear(range)}
+              addActionToken={addCustomActionToken}
+              leadingToolbar={toolbarLeading()}
+              trailingToolbar={settingsTrailingToolbar()}
+            />
+          </VStack>
         </NavigationStack>
       </Tab>
     </TabView>
