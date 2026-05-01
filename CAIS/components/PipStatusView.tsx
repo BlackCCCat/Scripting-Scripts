@@ -22,8 +22,9 @@ export function PipStatusView(props: {
   const started = useObservable(false)
   const now = useObservable(Date.now())
   const active = props.status.active || started.value
+  const capturedCount = props.status.capturedCount ?? 0
   const title = active ? "PiP 监听中" : "PiP 待启动"
-  const detail = active ? "正在监听剪贴板变化" : "等待启动"
+  const detail = active ? `已复制 ${capturedCount} 条` : "等待启动"
 
   useEffect(() => {
     if (!started.value && !props.status.active) return

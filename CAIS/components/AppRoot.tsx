@@ -13,7 +13,6 @@ import {
   TabView,
   Text,
   TextField,
-  Toggle,
   VStack,
   useEffect,
   useObservable,
@@ -23,12 +22,12 @@ import {
   type ScenePhase,
 } from "scripting"
 
-import type { CaisSettings, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
+import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
   addClipFromPayload,
-  clearAllClips,
+  clearClipboardClipsByRange,
   clearFavoriteClips,
   editClipContent,
   getClipGroups,
@@ -45,6 +44,7 @@ import { loadSettings, saveSettings } from "../storage/settings_store"
 import { readClipDataVersion } from "../storage/change_signal"
 import { formatDateTime, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
+import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { SettingsView } from "./SettingsView"
@@ -63,7 +63,7 @@ const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
 const APP_GROUP_PAGE_SIZE = 300
-type ClearScope = "all" | "favorites"
+type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
@@ -164,22 +164,21 @@ export function AppRoot() {
   const activeTab = useObservable(TAB_CLIPS)
   const pipPresented = useObservable(false)
   const deleteDialogPresented = useObservable(false)
-  const clearDialogPresented = useObservable(false)
   const toastPresented = useObservable(false)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
-  const [pendingClearScope, setPendingClearScope] = useState<ClearScope>("all")
   const [addCustomActionToken, setAddCustomActionToken] = useState(0)
   const [query, setQuery] = useState("")
-  const [searchVisible, setSearchVisible] = useState(false)
+  const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
   const [loading, setLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
     lastMessage: "未启动",
+    capturedCount: 0,
   })
 
   useEffect(() => {
@@ -195,6 +194,9 @@ export function AppRoot() {
     }
     AppEvents.scenePhase.addListener(handleScenePhase)
     const removeResume = Script.onResume?.((details) => {
+      if (details.resumeFromMinimized) {
+        intentionalMinimize = false
+      }
       const pipCommand = details.queryParameters?.pip
       if (pipCommand === "0") {
         deactivatePipFromExternal({ exitAfter: true })
@@ -359,18 +361,34 @@ export function AppRoot() {
     await refresh()
   }
 
-  function requestClear(scope: ClearScope) {
-    setPendingClearScope(scope)
-    clearDialogPresented.setValue(true)
+  async function requestClear(scope: ClearScope) {
+    const ok = await Dialog.confirm({
+      title: `清空${clearScopeLabel(scope)}？`,
+      message: "此操作无法撤销。",
+      cancelLabel: "取消",
+      confirmLabel: "清空",
+    })
+    if (!ok) return
+    await clearData(scope)
   }
 
-  async function confirmClear() {
-    const scope = pendingClearScope
-    clearDialogPresented.setValue(false)
+  function clearScopeLabel(scope: ClearScope): string {
+    switch (scope) {
+      case "favorites": return "收藏数据"
+      case "recent": return "最近内容"
+      case "threeDays": return "近三天剪贴板数据"
+      case "sevenDays": return "近七天剪贴板数据"
+      case "older": return "更早剪贴板数据"
+    }
+  }
+
+  async function clearData(scope: ClearScope) {
     if (scope === "favorites") {
       await clearFavoriteClips()
+      showToast("已清空收藏数据")
     } else {
-      await clearAllClips()
+      await clearClipboardClipsByRange(scope)
+      showToast("已清空剪贴板数据")
     }
     await refresh()
   }
@@ -505,7 +523,7 @@ export function AppRoot() {
   }
 
   function startPipMonitor() {
-    const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now() }
+    const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now(), capturedCount: 0 }
     setMonitorStatus(status)
     writePipControlState({ active: true, command: undefined })
     if (appMonitorStopper) return
@@ -525,7 +543,7 @@ export function AppRoot() {
     } else {
       stopClipboardMonitor()
     }
-    setMonitorStatus({ active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now() })
+    setMonitorStatus({ active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now(), capturedCount: 0 })
     writePipControlState({ active: false, command: undefined })
   }
 
@@ -560,6 +578,27 @@ export function AppRoot() {
     } catch (error: any) {
       intentionalMinimize = false
       await Dialog.alert({ message: String(error?.message ?? error ?? "最小化失败") })
+    }
+  }
+
+  function toggleFullscreenMode() {
+    const next = !appFullscreen
+    setAppFullscreen(next)
+    writeAppFullscreen(next)
+    void restartScript()
+  }
+
+  async function restartScript() {
+    try {
+      const url = Script.createRunURLScheme("CAIS", { restart: String(Date.now()) })
+      const ok = await Safari.openURL(url)
+      if (ok === false) {
+        showToast("已保存显示模式，下次运行生效")
+        return
+      }
+      Script.exit()
+    } catch {
+      showToast("已保存显示模式，下次运行生效")
     }
   }
 
@@ -696,24 +735,29 @@ export function AppRoot() {
     )
   }
 
-  function toolbarLeading(scope: ClearScope | null) {
+  function toolbarLeading() {
     return (
       <HStack spacing={10}>
-        {scope ? (
-          <Button
-            title=""
-            systemImage="trash"
-            role="destructive"
-            action={withHaptic(() => requestClear(scope))}
-          />
-        ) : null}
+        <Button
+          title=""
+          systemImage="xmark.circle.fill"
+          foregroundStyle="systemRed"
+          action={withHaptic(() => Script.exit())}
+        />
         {Script.supportsMinimization?.() ? (
           <Button
             title=""
-            systemImage="minus.circle"
+            systemImage="minus.circle.fill"
+            foregroundStyle="systemYellow"
             action={withHaptic(minimizeScript)}
           />
         ) : null}
+        <Button
+          title=""
+          systemImage={appFullscreen ? "arrow.down.right.and.arrow.up.left.circle.fill" : "arrow.up.left.and.arrow.down.right.circle.fill"}
+          foregroundStyle="systemBlue"
+          action={withHaptic(toggleFullscreenMode)}
+        />
       </HStack>
     )
   }
@@ -721,11 +765,7 @@ export function AppRoot() {
   function clipToolbarButtons() {
     return (
       <HStack spacing={10}>
-        <Button
-          title=""
-          systemImage="magnifyingglass"
-          action={withHaptic(() => setSearchVisible((v) => !v))}
-        />
+        {pipToolbarButton()}
         <Button
           title=""
           systemImage="doc.badge.plus"
@@ -739,11 +779,7 @@ export function AppRoot() {
   function favoriteToolbarButtons() {
     return (
       <HStack spacing={10}>
-        <Button
-          title=""
-          systemImage="magnifyingglass"
-          action={withHaptic(() => setSearchVisible((v) => !v))}
-        />
+        {pipToolbarButton()}
         <Button
           title=""
           systemImage="plus"
@@ -763,6 +799,17 @@ export function AppRoot() {
     )
   }
 
+  function pipToolbarButton() {
+    return (
+      <Button
+        title=""
+        systemImage={pipPresented.value ? "pip.exit" : "pip.enter"}
+        foregroundStyle={pipPresented.value ? "systemBlue" : undefined}
+        action={withHaptic(togglePip)}
+      />
+    )
+  }
+
   function settingsTrailingToolbar() {
     return (
       <Button
@@ -774,7 +821,6 @@ export function AppRoot() {
   }
 
   function searchPanel() {
-    if (!searchVisible) return null
     return (
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
@@ -792,6 +838,7 @@ export function AppRoot() {
   }
 
   function pipControlPanel() {
+    if (!pipPresented.value) return null
     return (
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
@@ -803,21 +850,21 @@ export function AppRoot() {
           padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
           background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
         >
-          <Toggle
-            title="开启 PiP 监听"
-            value={pipPresented.value}
-            onChanged={() => withHaptic(togglePip)()}
-          />
-          {pipPresented.value ? (
-            <Text
-              font="caption"
-              foregroundStyle="secondaryLabel"
-              multilineTextAlignment="leading"
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            >
-              [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage}
-            </Text>
-          ) : null}
+          <Text
+            font="headline"
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            multilineTextAlignment="leading"
+          >
+            PiP 监听状态
+          </Text>
+          <Text
+            font="caption"
+            foregroundStyle="secondaryLabel"
+            multilineTextAlignment="leading"
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          >
+            [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage} · 已复制 {monitorStatus.capturedCount ?? 0} 条
+          </Text>
         </VStack>
       </VStack>
     )
@@ -840,25 +887,14 @@ export function AppRoot() {
           />
         ),
       }}
-      confirmationDialog={{
-        title: pendingClearScope === "favorites" ? "清空收藏？" : "清空剪贴板？",
-        isPresented: clearDialogPresented,
-        actions: (
-          <Group>
-            <Button title="清空" systemImage="trash" role="destructive" action={() => void confirmClear()} />
-            <Button title="取消" role="cancel" action={() => clearDialogPresented.setValue(false)} />
-          </Group>
-        ),
-      }}
     >
       <Tab title="收藏" systemImage="star" value={TAB_FAVORITES}>
         <NavigationStack>
           <VStack
-            navigationTitle="收藏"
-            navigationBarTitleDisplayMode="inline"
             frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
             background="systemGroupedBackground"
-            toolbar={{ topBarLeading: toolbarLeading("favorites"), topBarTrailing: favoriteToolbarButtons() }}
+            ignoresSafeArea={{ regions: "keyboard", edges: "bottom" }}
+            toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
             {searchPanel()}
@@ -869,7 +905,7 @@ export function AppRoot() {
               background="systemGroupedBackground"
               frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             >
-              {renderGroupedClipList(favoriteGroups, searchVisible && query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+              {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
             </List>
           </VStack>
         </NavigationStack>
@@ -878,11 +914,10 @@ export function AppRoot() {
       <Tab title="剪贴板" systemImage="doc.on.clipboard" value={TAB_CLIPS}>
         <NavigationStack>
           <VStack
-            navigationTitle="CAIS"
-            navigationBarTitleDisplayMode="inline"
             frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
             background="systemGroupedBackground"
-            toolbar={{ topBarLeading: toolbarLeading("all"), topBarTrailing: clipToolbarButtons() }}
+            ignoresSafeArea={{ regions: "keyboard", edges: "bottom" }}
+            toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: clipToolbarButtons() }}
             toast={toastOptions()}
           >
             {pipControlPanel()}
@@ -896,7 +931,7 @@ export function AppRoot() {
             >
               {renderGroupedClipList(
                 clipboardGroups,
-                searchVisible && query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+                query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
                 { allowDelete: (item) => !item.manualFavorite }
               )}
             </List>
@@ -909,8 +944,10 @@ export function AppRoot() {
           <SettingsView
             value={settings}
             onChanged={updateSettings}
+            onClearFavorites={() => void requestClear("favorites")}
+            onClearClipboard={(range) => void requestClear(range)}
             addActionToken={addCustomActionToken}
-            leadingToolbar={toolbarLeading(null)}
+            leadingToolbar={toolbarLeading()}
             trailingToolbar={settingsTrailingToolbar()}
           />
         </NavigationStack>

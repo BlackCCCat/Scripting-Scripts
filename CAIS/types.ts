@@ -27,6 +27,8 @@ export type ClipItem = {
 
 export type ClipListScope = "favorites" | "clipboard"
 
+export type ClipboardClearRange = "recent" | "threeDays" | "sevenDays" | "older"
+
 export type ClipGroup = {
   title: string
   items: ClipItem[]
@@ -86,6 +88,7 @@ export type MonitorStatus = {
   lastMessage: string
   lastCheckedAt?: number
   lastCapturedAt?: number
+  capturedCount?: number
 }
 
 export const DEFAULT_CAIS_SETTINGS: CaisSettings = {

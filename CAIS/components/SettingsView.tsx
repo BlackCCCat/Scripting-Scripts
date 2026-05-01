@@ -3,6 +3,7 @@ import {
   ForEach,
   Form,
   HStack,
+  Menu,
   Navigation,
   NavigationStack,
   Picker,
@@ -18,6 +19,7 @@ import {
 
 import type {
   CaisSettings,
+  ClipboardClearRange,
   KeyboardCustomAction,
   KeyboardCustomActionMode,
   KeyboardMenuBuiltinAction,
@@ -33,6 +35,12 @@ import {
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
 const MAX_ITEM_OPTIONS = [200, 500, 800];
 const KEYBOARD_MAX_ITEM_OPTIONS = [10, 20, 30, 40, 50];
+const CLIPBOARD_CLEAR_OPTIONS: Array<{ range: ClipboardClearRange; title: string }> = [
+  { range: "recent", title: "最近内容" },
+  { range: "threeDays", title: "近三天" },
+  { range: "sevenDays", title: "近七天" },
+  { range: "older", title: "更早" },
+];
 const APP_CONTENT_LINE_MIN = 1;
 const APP_CONTENT_LINE_MAX = 12;
 const JAVASCRIPT_HELP = [
@@ -295,6 +303,8 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
 export function SettingsView(props: {
   value: CaisSettings;
   onChanged: (settings: CaisSettings) => void;
+  onClearFavorites?: () => void;
+  onClearClipboard?: (range: ClipboardClearRange) => void;
   addActionToken?: number;
   leadingToolbar?: any;
   trailingToolbar?: any;
@@ -413,14 +423,32 @@ export function SettingsView(props: {
 
   return (
     <Form
-      navigationTitle="设置"
-      navigationBarTitleDisplayMode="inline"
       formStyle="grouped"
       toolbar={{
         topBarLeading: props.leadingToolbar,
         topBarTrailing: props.trailingToolbar,
       }}
     >
+      <Section header={<Text>数据管理</Text>}>
+        <Button
+          title="清空收藏数据"
+          systemImage="star.slash"
+          role="destructive"
+          action={() => props.onClearFavorites?.()}
+        />
+        <Menu title="清空剪贴板数据" systemImage="trash">
+          {CLIPBOARD_CLEAR_OPTIONS.map((option) => (
+            <Button
+              key={option.range}
+              title={option.title}
+              systemImage="trash"
+              role="destructive"
+              action={() => props.onClearClipboard?.(option.range)}
+            />
+          ))}
+        </Menu>
+      </Section>
+
       <Section header={<Text>采集类型</Text>}>
         <Toggle
           value={settings.captureText}
