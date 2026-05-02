@@ -478,17 +478,27 @@ function ClipTileMenu(props: {
   async function saveMenuResult(result: MenuActionResult, source: string) {
     const saveSettings = { ...props.settings, captureText: true, captureImages: true }
     if (result.kind === "text") {
-      if (!result.text.trim() || result.text === source) return false
+      if (!result.text.trim() || result.text === source) return 0
       const saved = await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
       await props.onRefresh()
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
+    }
+    if (result.kind === "texts") {
+      let savedCount = 0
+      for (const text of result.texts) {
+        if (!text.trim() || text === source) continue
+        const saved = await addClipFromPayload({ kind: "text", text }, saveSettings)
+        if (saved.status !== "skipped") savedCount += 1
+      }
+      await props.onRefresh()
+      return savedCount
     }
     if (result.kind === "image") {
       const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
       await props.onRefresh()
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
     }
-    return false
+    return 0
   }
 
   async function handleMenuResult(result: MenuActionResult | null, source: string) {
@@ -504,6 +514,11 @@ function ClipTileMenu(props: {
       insertKeyboardText(result.text)
       const saved = await saveMenuResult(result, source)
       props.onStatus(saved ? "已上屏并保存" : "已上屏")
+      return
+    }
+    if (result.kind === "texts") {
+      const saved = await saveMenuResult(result, source)
+      props.onStatus(saved ? `已拆分保存 ${saved} 条` : "没有新的拆分结果")
       return
     }
     await Pasteboard.setImage(result.image)
@@ -577,6 +592,14 @@ function ClipTileMenu(props: {
         ) : null
       case "cleanWhitespace":
         return !isImage && builtins.cleanWhitespace ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
+        ) : null
+      case "removeBlankLines":
+        return !isImage && builtins.removeBlankLines ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
+        ) : null
+      case "splitLines":
+        return !isImage && builtins.splitLines ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
       case "uppercase":

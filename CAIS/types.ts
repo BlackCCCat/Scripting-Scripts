@@ -59,6 +59,8 @@ export type KeyboardMenuBuiltinAction =
   | "base64Encode"
   | "base64Decode"
   | "cleanWhitespace"
+  | "removeBlankLines"
+  | "splitLines"
   | "uppercase"
   | "lowercase"
   | "chineseAmount"
@@ -107,6 +109,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
       base64Encode: true,
       base64Decode: true,
       cleanWhitespace: true,
+      removeBlankLines: true,
+      splitLines: true,
       uppercase: true,
       lowercase: true,
       chineseAmount: false,

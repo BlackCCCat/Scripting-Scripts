@@ -10,6 +10,8 @@ export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
   "base64Encode",
   "base64Decode",
   "cleanWhitespace",
+  "removeBlankLines",
+  "splitLines",
   "uppercase",
   "lowercase",
   "chineseAmount",
@@ -18,6 +20,7 @@ export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
 
 export type MenuActionResult =
   | { kind: "text"; text: string }
+  | { kind: "texts"; texts: string[] }
   | { kind: "image"; image: UIImage }
   | { kind: "openUrl"; url: string }
 
@@ -26,8 +29,22 @@ export function getOrderedMenuBuiltins(settings: CaisSettings): KeyboardMenuBuil
     (key) => CONFIGURABLE_MENU_BUILTIN_ACTIONS.includes(key),
   )
   if (!order?.length) return CONFIGURABLE_MENU_BUILTIN_ACTIONS
-  const missing = CONFIGURABLE_MENU_BUILTIN_ACTIONS.filter((key) => !order.includes(key))
-  return [...order, ...missing]
+  const result = [...order]
+  const insertAfter = (anchor: KeyboardMenuBuiltinAction, action: KeyboardMenuBuiltinAction) => {
+    if (result.includes(action)) return
+    const index = result.indexOf(anchor)
+    if (index >= 0) {
+      result.splice(index + 1, 0, action)
+    } else {
+      result.push(action)
+    }
+  }
+  insertAfter("cleanWhitespace", "removeBlankLines")
+  insertAfter("removeBlankLines", "splitLines")
+  for (const action of CONFIGURABLE_MENU_BUILTIN_ACTIONS) {
+    if (!result.includes(action)) result.push(action)
+  }
+  return result
 }
 
 export function menuBuiltinTitle(action: KeyboardMenuBuiltinAction): string {
@@ -35,6 +52,8 @@ export function menuBuiltinTitle(action: KeyboardMenuBuiltinAction): string {
     case "base64Encode": return "Base64 编码"
     case "base64Decode": return "Base64 解码"
     case "cleanWhitespace": return "移除空格"
+    case "removeBlankLines": return "移除空行"
+    case "splitLines": return "按行拆分"
     case "uppercase": return "转为大写"
     case "lowercase": return "转为小写"
     case "chineseAmount": return "中文大写金额"
@@ -49,6 +68,8 @@ export function menuBuiltinSystemImage(action: KeyboardMenuBuiltinAction): strin
     case "base64Encode": return "curlybraces.square"
     case "base64Decode": return "arrow.down.doc"
     case "cleanWhitespace": return "text.badge.checkmark"
+    case "removeBlankLines": return "text.badge.minus"
+    case "splitLines": return "list.bullet.rectangle"
     case "uppercase": return "textformat.size.larger"
     case "lowercase": return "textformat.size.smaller"
     case "chineseAmount": return "chineseyuanrenminbisign"
@@ -105,6 +126,12 @@ export function applyBuiltinMenuAction(options: {
     case "cleanWhitespace":
       if (isImage) return null
       return { kind: "text", text: source.replace(/\s+/g, "") }
+    case "removeBlankLines":
+      if (isImage) return null
+      return { kind: "text", text: source.split("\n").filter((line) => line.trim()).join("\n") }
+    case "splitLines":
+      if (isImage) return null
+      return { kind: "texts", texts: source.split("\n").filter((line) => line.trim()) }
     case "uppercase":
       if (isImage) return null
       return { kind: "text", text: source.toUpperCase() }

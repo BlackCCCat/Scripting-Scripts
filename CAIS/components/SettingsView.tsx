@@ -64,6 +64,8 @@ const BUILTIN_ACTIONS: Array<{
   { key: "base64Encode", title: "Base64 编码" },
   { key: "base64Decode", title: "Base64 解码" },
   { key: "cleanWhitespace", title: "移除空格" },
+  { key: "removeBlankLines", title: "移除空行" },
+  { key: "splitLines", title: "按行拆分" },
   { key: "uppercase", title: "转为大写" },
   { key: "lowercase", title: "转为​小写" },
   { key: "chineseAmount", title: "中文大写金额" },
@@ -328,10 +330,26 @@ export function SettingsView(props: {
     const sorted = order
       .map((key) => CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === key))
       .filter(Boolean) as typeof BUILTIN_ACTIONS;
-    const missing = CONFIGURABLE_BUILTIN_ACTIONS.filter(
-      (a) => !order.includes(a.key),
-    );
-    return [...sorted, ...missing];
+    const insertAfter = (
+      anchor: KeyboardMenuBuiltinAction,
+      action: typeof CONFIGURABLE_BUILTIN_ACTIONS[number],
+    ) => {
+      if (sorted.some((item) => item.key === action.key)) return;
+      const index = sorted.findIndex((item) => item.key === anchor);
+      if (index >= 0) {
+        sorted.splice(index + 1, 0, action);
+      } else {
+        sorted.push(action);
+      }
+    };
+    const removeBlankLines = CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === "removeBlankLines");
+    const splitLines = CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === "splitLines");
+    if (removeBlankLines) insertAfter("cleanWhitespace", removeBlankLines);
+    if (splitLines) insertAfter("removeBlankLines", splitLines);
+    for (const action of CONFIGURABLE_BUILTIN_ACTIONS) {
+      if (!sorted.some((item) => item.key === action.key)) sorted.push(action);
+    }
+    return sorted;
   }
 
   function reorderBuiltins(indices: number[], newOffset: number) {

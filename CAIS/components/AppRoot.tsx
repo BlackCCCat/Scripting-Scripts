@@ -1,5 +1,4 @@
 import {
-  AppEvents,
   Button,
   EmptyView,
   Group,
@@ -16,11 +15,11 @@ import {
   VStack,
   useEffect,
   useObservable,
+  useRef,
   useState,
   Form,
   Navigation,
   useColorScheme,
-  type ScenePhase,
 } from "scripting"
 
 import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
@@ -41,8 +40,8 @@ import {
   addFavoriteFromInput,
 } from "../storage/clip_repository"
 import { initializeDatabase } from "../storage/database"
-import { loadSettings, saveSettings } from "../storage/settings_store"
 import { readClipDataVersion } from "../storage/change_signal"
+import { loadSettings, saveSettings } from "../storage/settings_store"
 import { formatDateTime, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
@@ -64,6 +63,7 @@ const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
 const APP_GROUP_PAGE_SIZE = 300
+const CAIS_APP_RESUME_HANDLER = "__CAIS_APP_RESUME_HANDLER__"
 type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appRefreshGeneration = 0
@@ -189,6 +189,9 @@ export function AppRoot() {
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
   const [addCustomActionToken, setAddCustomActionToken] = useState(0)
   const [query, setQuery] = useState("")
+  const settingsRef = useRef(settings)
+  const queryRef = useRef(query)
+  const lastObservedPasteboardChangeCount = useRef<number | null>(null)
   const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
   const [loading, setLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
@@ -199,32 +202,23 @@ export function AppRoot() {
   })
 
   useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+
+  useEffect(() => {
+    queryRef.current = query
+  }, [query])
+
+  useEffect(() => {
     deleteDialogPresented.setValue(false)
     setPendingDeleteItem(null)
     setPendingDeleteTab(null)
   }, [activeTab.value])
 
   useEffect(() => {
+    const previousResumeHandler = (globalThis as any)[CAIS_APP_RESUME_HANDLER]
+    ;(globalThis as any)[CAIS_APP_RESUME_HANDLER] = handleScriptResume
     void boot()
-    const handleScenePhase = (phase: ScenePhase) => {
-      if (phase === "active") void refresh(true)
-    }
-    AppEvents.scenePhase.addListener(handleScenePhase)
-    const removeResume = Script.onResume?.((details) => {
-      if (details.resumeFromMinimized) {
-        intentionalMinimize = false
-      }
-      const pipCommand = details.queryParameters?.pip
-      if (pipCommand === "0") {
-        deactivatePipFromExternal({ exitAfter: true })
-        return
-      }
-      if (details.queryParameters?.pip === "1") {
-        void activatePipFromApp()
-        return
-      }
-      void refresh(true)
-    })
     const removeMinimize = Script.onMinimize?.(() => {
       if (intentionalMinimize) {
         intentionalMinimize = false
@@ -233,8 +227,11 @@ export function AppRoot() {
       Script.exit()
     })
     return () => {
-      AppEvents.scenePhase.removeListener(handleScenePhase)
-      removeResume?.()
+      if (previousResumeHandler) {
+        ;(globalThis as any)[CAIS_APP_RESUME_HANDLER] = previousResumeHandler
+      } else {
+        delete (globalThis as any)[CAIS_APP_RESUME_HANDLER]
+      }
       removeMinimize?.()
       stopPipMonitor()
     }
@@ -263,10 +260,45 @@ export function AppRoot() {
       const version = readClipDataVersion()
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
-      void refresh(true)
+      void refresh(true, settingsRef.current)
     }, 700)
     return () => {
       if (timer) (globalThis as any).clearInterval?.(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let stopped = false
+    let checking = false
+    let timer: any = null
+
+    function schedule() {
+      if (stopped) return
+      const interval = Math.max(300, settingsRef.current.monitorIntervalMs || 500)
+      timer = (globalThis as any).setTimeout?.(tick, interval)
+    }
+
+    function tick() {
+      if (stopped) return
+      if (checking) {
+        schedule()
+        return
+      }
+      checking = true
+      void (async () => {
+        try {
+          await captureClipboardChangeAndRefresh()
+        } finally {
+          checking = false
+          schedule()
+        }
+      })()
+    }
+
+    timer = (globalThis as any).setTimeout?.(tick, 500)
+    return () => {
+      stopped = true
+      if (timer) (globalThis as any).clearTimeout?.(timer)
     }
   }, [])
 
@@ -283,8 +315,7 @@ export function AppRoot() {
     setLoading(true)
     try {
       await initializeDatabase()
-      await captureCurrentClipboard(settings)
-      await refresh(true)
+      await captureClipboardAndRefresh(settingsRef.current, true)
       if (Script.queryParameters?.pip === "1") {
         await activatePipFromApp()
       }
@@ -294,10 +325,51 @@ export function AppRoot() {
     }
   }
 
+  async function captureClipboardAndRefresh(currentSettings = settingsRef.current, force = false) {
+    await captureClipboardIfChanged(currentSettings, force)
+    await refresh(true, currentSettings)
+  }
+
+  async function captureClipboardChangeAndRefresh() {
+    if (pipPresented.value || appMonitorStopper) return
+    const changed = await captureClipboardIfChanged(settingsRef.current)
+    if (changed) {
+      await refresh(true, settingsRef.current)
+    }
+  }
+
+  async function captureClipboardIfChanged(currentSettings = settingsRef.current, force = false): Promise<boolean> {
+    try {
+      const changeCount = await currentChangeCount()
+      if (!force && lastObservedPasteboardChangeCount.current === changeCount) return false
+      lastObservedPasteboardChangeCount.current = changeCount
+      const result = await captureCurrentClipboard(currentSettings)
+      return result.status === "created" || result.status === "updated"
+    } catch {
+      return false
+    }
+  }
+
+  function handleScriptResume(details: any = {}) {
+    if (details.resumeFromMinimized) {
+      intentionalMinimize = false
+    }
+    const pipCommand = details.queryParameters?.pip
+    if (pipCommand === "0") {
+      deactivatePipFromExternal({ exitAfter: true })
+      return
+    }
+    if (pipCommand === "1") {
+      void activatePipFromApp()
+      return
+    }
+    void captureClipboardChangeAndRefresh()
+  }
+
   async function refresh(_force = false, currentSettings = settings) {
     const generation = ++appRefreshGeneration
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
-    const search = query.trim()
+    const search = queryRef.current.trim()
     const [nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
       getClipGroups("favorites", search, groupLimit),
       getClipGroups("clipboard", search, groupLimit),
@@ -309,6 +381,7 @@ export function AppRoot() {
 
   function updateSettings(nextSettings: CaisSettings) {
     const next = saveSettings(nextSettings)
+    settingsRef.current = next
     setSettings(next)
     void refresh(true, next)
   }
@@ -476,23 +549,38 @@ export function AppRoot() {
     return renderClipOutput(item, await getFullClipContent(item.id))
   }
 
-  async function saveTransformedResult(result: MenuActionResult, source: string): Promise<boolean> {
-    const saveSettings = { ...settings, captureText: true, captureImages: true }
+  async function saveTransformedResult(result: MenuActionResult, source: string): Promise<number> {
+    const saveSettings = { ...settingsRef.current, captureText: true, captureImages: true }
     if (result.kind === "text") {
-      if (!result.text.trim() || result.text === source) return false
+      if (!result.text.trim() || result.text === source) return 0
       const saved = await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
+    }
+    if (result.kind === "texts") {
+      let savedCount = 0
+      for (const text of result.texts) {
+        if (!text.trim() || text === source) continue
+        const saved = await addClipFromPayload({ kind: "text", text }, saveSettings)
+        if (saved.status !== "skipped") savedCount += 1
+      }
+      return savedCount
     }
     if (result.kind === "image") {
       const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
     }
-    return false
+    return 0
   }
 
   async function copyMenuResult(result: MenuActionResult, source: string) {
     if (result.kind === "openUrl") {
       await Safari.openURL(result.url)
+      return
+    }
+    if (result.kind === "texts") {
+      const saved = await saveTransformedResult(result, source)
+      showToast(saved ? `已拆分保存 ${saved} 条` : "没有新的拆分结果")
+      await refresh()
       return
     }
     if (result.kind === "text") {
