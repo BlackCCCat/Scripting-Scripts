@@ -182,6 +182,7 @@ function ImageViewerView(props: {
 }
 
 export function AppRoot() {
+  const colorScheme = useColorScheme()
   const activeTab = useObservable(TAB_CLIPS)
   const pipPresented = useObservable(false)
   const deleteDialogPresented = useObservable(false)
@@ -205,6 +206,7 @@ export function AppRoot() {
     lastMessage: "未启动",
     capturedCount: 0,
   })
+  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
 
   useEffect(() => {
     settingsRef.current = settings
@@ -958,9 +960,12 @@ export function AppRoot() {
         <VStack
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
           padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
-          background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+          background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
         >
-          <TextField title="搜索" value={query} prompt="输入关键词" onChanged={setQuery} />
+          <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+            <Image systemName="magnifyingglass" foregroundStyle="secondaryLabel" frame={{ width: 18 }} />
+            <TextField title="" value={query} prompt="输入关键词" onChanged={setQuery} />
+          </HStack>
         </VStack>
       </VStack>
     )
