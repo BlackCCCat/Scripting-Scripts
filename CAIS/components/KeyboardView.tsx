@@ -68,7 +68,6 @@ const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_ROW_COUNT_KEY = "cais_keyboard_row_count_v1"
 const SHARED_STORAGE_OPTIONS = { shared: true }
 let deleteRepeatTimer: any = null
-let lastInsertedText = ""
 let lastPastedText = ""
 let keyboardRefreshGeneration = 0
 let keyboardLifecycleGeneration = 0
@@ -136,7 +135,6 @@ function playClick() {
 function insertKeyboardText(text: string) {
   if (!text) return
   keyboard()?.insertText?.(text)
-  lastInsertedText = text
   lastPastedText = text
 }
 
@@ -193,6 +191,7 @@ function IconButton(props: {
 function BottomKey(props: {
   title?: string
   systemImage?: string
+  tint?: string
   width?: number
   onPress: () => void | Promise<void>
   onLongPress?: () => void
@@ -221,9 +220,9 @@ function BottomKey(props: {
       overlay={
         <HStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}>
           {props.systemImage ? (
-            <Image systemName={props.systemImage} font="title3" />
+            <Image systemName={props.systemImage} font="title3" foregroundStyle={props.tint as any} />
           ) : (
-            <Text font="title3" lineLimit={1}>{props.title ?? ""}</Text>
+            <Text font="title3" lineLimit={1} foregroundStyle={props.tint as any}>{props.title ?? ""}</Text>
           )}
         </HStack>
       }
@@ -668,6 +667,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const [items, setItems] = useState<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const [clipRowCount, setClipRowCount] = useState<1 | 2>(() => readKeyboardRowCount())
+  const [cursorMode, setCursorMode] = useState(false)
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
@@ -794,7 +794,6 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     for (let index = 0; index < total; index += 1) {
       deleteBackward()
     }
-    lastInsertedText = ""
   }
 
   async function captureNow() {
@@ -824,6 +823,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     keyboard()?.deleteBackward?.()
   }
 
+  function moveCursorHorizontal(offset: number) {
+    keyboard()?.moveCursor?.(offset)
+  }
+
   function startContinuousDelete() {
     stopContinuousDelete()
     deleteBackward()
@@ -834,16 +837,6 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     if (!deleteRepeatTimer) return
     ;(globalThis as any).clearInterval?.(deleteRepeatTimer)
     deleteRepeatTimer = null
-  }
-
-  function undoInput() {
-    if (!lastInsertedText) {
-      return
-    }
-    for (let index = 0; index < Array.from(lastInsertedText).length; index += 1) {
-      deleteBackward()
-    }
-    lastInsertedText = ""
   }
 
   function startPipMonitor() {
@@ -912,6 +905,18 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       return
     }
     kb?.insertText?.("\n")
+  }
+
+  function spaceOrCursorKeys() {
+    if (!cursorMode) {
+      return <BottomKey systemImage="space" onPress={() => keyboard()?.insertText?.(" ")} />
+    }
+    return (
+      <HStack spacing={4} frame={{ maxWidth: "infinity", height: 42 }}>
+        <BottomKey systemImage="arrow.left" onPress={() => moveCursorHorizontal(-1)} />
+        <BottomKey systemImage="arrow.right" onPress={() => moveCursorHorizontal(1)} />
+      </HStack>
+    )
   }
 
   return (
@@ -1023,8 +1028,13 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
 
       <HStack spacing={6} frame={{ maxWidth: "infinity", height: 42 }}>
         <BottomKey systemImage="globe" width={46} onPress={() => keyboard()?.nextKeyboard?.()} />
-        <BottomKey systemImage="arrow.uturn.backward" width={46} onPress={undoInput} />
-        <BottomKey systemImage="space" onPress={() => keyboard()?.insertText?.(" ")} />
+        <BottomKey
+          systemImage="arrow.left.and.right"
+          tint={cursorMode ? "systemBlue" : undefined}
+          width={46}
+          onPress={() => setCursorMode((value) => !value)}
+        />
+        {spaceOrCursorKeys()}
         <BottomKey
           systemImage="delete.left"
           width={46}
@@ -1035,7 +1045,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
         <BottomKey
           title={undefined}
           systemImage={returnKeySymbol(traits?.returnKeyType)}
-          width={76}
+          width={68}
           onPress={sendReturn}
         />
       </HStack>
