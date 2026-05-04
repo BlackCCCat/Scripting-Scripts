@@ -4,7 +4,6 @@ import {
   Group,
   HStack,
   Image,
-  List,
   NavigationStack,
   Section,
   Script,
@@ -63,7 +62,12 @@ const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
 const APP_GROUP_PAGE_SIZE = 300
+const TOAST_DURATION_MS = 1200
 const CAIS_APP_RESUME_HANDLER = "__CAIS_APP_RESUME_HANDLER__"
+const APP_SCROLL_CONTENT_MARGINS = {
+  insets: { top: 0, bottom: 0, leading: 0, trailing: 0 },
+  placement: "scrollContent" as const,
+}
 type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appRefreshGeneration = 0
@@ -192,6 +196,7 @@ export function AppRoot() {
   const settingsRef = useRef(settings)
   const queryRef = useRef(query)
   const lastObservedPasteboardChangeCount = useRef<number | null>(null)
+  const toastHideTimer = useRef<any>(null)
   const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
   const [loading, setLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
@@ -233,6 +238,7 @@ export function AppRoot() {
         delete (globalThis as any)[CAIS_APP_RESUME_HANDLER]
       }
       removeMinimize?.()
+      clearToastHideTimer()
       stopPipMonitor()
     }
   }, [])
@@ -386,19 +392,31 @@ export function AppRoot() {
     void refresh(true, next)
   }
 
+  function clearToastHideTimer() {
+    if (toastHideTimer.current) {
+      ;(globalThis as any).clearTimeout?.(toastHideTimer.current)
+      toastHideTimer.current = null
+    }
+  }
+
   function showToast(message: string) {
+    clearToastHideTimer()
     setToastMessage(message)
     toastPresented.setValue(false)
     ;(globalThis as any).setTimeout?.(() => {
       toastPresented.setValue(true)
     }, 0)
+    toastHideTimer.current = (globalThis as any).setTimeout?.(() => {
+      toastPresented.setValue(false)
+      toastHideTimer.current = null
+    }, TOAST_DURATION_MS)
   }
 
   function toastOptions() {
     return {
       isPresented: toastPresented,
       message: toastMessage,
-      duration: 1.2,
+      duration: TOAST_DURATION_MS / 1000,
       position: "bottom" as any,
     }
   }
@@ -933,6 +951,9 @@ export function AppRoot() {
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+        listRowInsets={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
+        listRowSeparator="hidden"
+        listRowBackground={<EmptyView />}
       >
         <VStack
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
@@ -951,6 +972,9 @@ export function AppRoot() {
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+        listRowInsets={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
+        listRowSeparator="hidden"
+        listRowBackground={<EmptyView />}
       >
         <VStack
           spacing={8}
@@ -998,52 +1022,38 @@ export function AppRoot() {
     >
       <Tab title="收藏" systemImage="star" value={TAB_FAVORITES}>
         <NavigationStack>
-          <VStack
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
-            background="systemGroupedBackground"
-            ignoresSafeArea={{ regions: "keyboard", edges: "bottom" }}
+          <Form
+            formStyle="grouped"
+            listRowSpacing={10}
+            contentMargins={APP_SCROLL_CONTENT_MARGINS}
+            frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
             {searchPanel()}
-            <List
-              listStyle="plain"
-              scrollContentBackground="hidden"
-              listRowSpacing={10}
-              background="systemGroupedBackground"
-              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-            >
-              {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
-            </List>
-          </VStack>
+            {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+          </Form>
         </NavigationStack>
       </Tab>
 
       <Tab title="剪贴板" systemImage="doc.on.clipboard" value={TAB_CLIPS}>
         <NavigationStack>
-          <VStack
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
-            background="systemGroupedBackground"
-            ignoresSafeArea={{ regions: "keyboard", edges: "bottom" }}
+          <Form
+            formStyle="grouped"
+            listRowSpacing={10}
+            contentMargins={APP_SCROLL_CONTENT_MARGINS}
+            frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: clipToolbarButtons() }}
             toast={toastOptions()}
           >
             {pipControlPanel()}
             {searchPanel()}
-            <List
-              listStyle="plain"
-              scrollContentBackground="hidden"
-              listRowSpacing={10}
-              background="systemGroupedBackground"
-              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-            >
-              {renderGroupedClipList(
-                clipboardGroups,
-                query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-                { allowDelete: (item) => !item.manualFavorite }
-              )}
-            </List>
-          </VStack>
+            {renderGroupedClipList(
+              clipboardGroups,
+              query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+              { allowDelete: (item) => !item.manualFavorite }
+            )}
+          </Form>
         </NavigationStack>
       </Tab>
 
