@@ -244,8 +244,6 @@ export function FavoritesTabView(props: {
       <List
         navigationTitle="收藏"
         navigationBarTitleDisplayMode="large"
-        listStyle="plain"
-        background="systemGroupedBackground"
         listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
         listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
         refreshable={props.favoriteAuthors.length > 0 ? props.onRefresh : undefined}

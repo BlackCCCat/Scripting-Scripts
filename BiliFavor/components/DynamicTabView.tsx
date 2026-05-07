@@ -370,8 +370,6 @@ export function DynamicTabView(props: {
             <List
               navigationTitle="动态"
               navigationBarTitleDisplayMode="large"
-              listStyle="plain"
-              background="systemGroupedBackground"
               listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
               refreshable={props.isLoggedIn ? props.onRefresh : undefined}
