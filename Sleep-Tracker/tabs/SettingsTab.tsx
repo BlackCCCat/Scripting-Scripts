@@ -13,7 +13,7 @@ export function SettingsTab(props: {
       <ScrollView
         navigationTitle="设置"
         navigationBarTitleDisplayMode="large"
-        background={palette.page}
+        background="systemBackground"
       >
         <VStack spacing={16} padding={16}>
           <SoftCard title="睡眠目标" subtitle="这个目标会同时影响每日对比、趋势解读和睡眠评分。">
