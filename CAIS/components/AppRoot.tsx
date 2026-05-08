@@ -177,8 +177,8 @@ function ClipContentEditorView(props: {
         presentationDetents={["large"]}
         presentationDragIndicator="visible"
         toolbar={{
-          topBarLeading: <Button title="保存" action={() => dismiss(controller.content)} />,
-          topBarTrailing: <Button title="取消" role="cancel" action={() => dismiss(null)} />,
+          topBarLeading: <Button title="取消" role="cancel" action={() => dismiss(null)} />,
+          topBarTrailing: <Button title="保存" action={() => dismiss(controller.content)} />,
         }}
       >
         <Editor
