@@ -4,6 +4,7 @@
 // - 系统能力（LiveActivity/Notification/Script）
 import {
   Button,
+  Editor,
   HStack,
   Image,
   List,
@@ -66,6 +67,45 @@ import { OverallReportView } from "./OverallReportView";
 const createTimerActivity = PomodoroLiveActivity;
 // 兼容历史名称，清理残留活动
 const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"];
+
+function NoteEditorPage(props: { title: string; content: string }) {
+  const dismiss = Navigation.useDismiss();
+  const [controller] = useState(() => {
+    return new EditorController({
+      content: props.content,
+      ext: "md",
+      readOnly: false,
+    });
+  });
+
+  useEffect(() => {
+    return () => {
+      controller.dispose();
+    };
+  }, [controller]);
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarLeading: (
+            <Button title="取消" action={() => dismiss(null)} />
+          ),
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => dismiss(String(controller.content ?? ""))}
+            />
+          ),
+        }}
+      >
+        <Editor controller={controller} />
+      </VStack>
+    </NavigationStack>
+  );
+}
 
 export function CalendarTimerView() {
   // 任务列表与当前选中任务
@@ -1129,21 +1169,11 @@ export function CalendarTimerView() {
   }
 
   async function editNote(content: string, title = "笔记"): Promise<string> {
-    // 打开全屏编辑器（支持 Markdown），返回编辑后的文本
-    const controller = new EditorController({
-      content,
-      ext: "md",
-      readOnly: false,
+    const next = await Navigation.present<string | null>({
+      element: <NoteEditorPage title={title} content={content} />,
+      modalPresentationStyle: "pageSheet",
     });
-    try {
-      await controller.present({
-        navigationTitle: title,
-        fullscreen: false,
-      });
-      return String(controller.content ?? "");
-    } finally {
-      controller.dispose();
-    }
+    return next == null ? content : String(next);
   }
 
   async function openNoteEditor() {
