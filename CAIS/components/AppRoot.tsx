@@ -1,6 +1,7 @@
 import {
   Button,
   EmptyView,
+  Editor,
   Group,
   HStack,
   Image,
@@ -147,6 +148,45 @@ function AddFavoriteView() {
           />
         </Section>
       </Form>
+    </NavigationStack>
+  )
+}
+
+function ClipContentEditorView(props: {
+  content: string
+}) {
+  const dismiss = Navigation.useDismiss()
+  const [controller] = useState(() => new EditorController({
+    content: props.content,
+    ext: "txt",
+    readOnly: false,
+  }))
+
+  useEffect(() => {
+    return () => {
+      controller.dispose()
+    }
+  }, [controller])
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle="编辑内容"
+        navigationBarTitleDisplayMode="inline"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        presentationDetents={["large"]}
+        presentationDragIndicator="visible"
+        toolbar={{
+          topBarLeading: <Button title="保存" action={() => dismiss(controller.content)} />,
+          topBarTrailing: <Button title="取消" role="cancel" action={() => dismiss(null)} />,
+        }}
+      >
+        <Editor
+          controller={controller}
+          scriptName="CAIS"
+          showAccessoryView
+        />
+      </VStack>
     </NavigationStack>
   )
 }
@@ -527,33 +567,24 @@ export function AppRoot() {
       return
     }
     const fullContent = await getFullClipContent(item.id)
-    const controller = new EditorController({
-      content: fullContent,
-      ext: "txt",
-      readOnly: false,
-    })
     const initialChangeCount = await currentChangeCount()
     try {
-      await controller.present({
-        navigationTitle: "编辑内容",
-        scriptName: "CAIS",
-        fullscreen: false,
+      const nextContent = await Navigation.present<string | null>({
+        element: <ClipContentEditorView content={fullContent} />,
+        modalPresentationStyle: "pageSheet",
       })
       let needsRefresh = false
       if (await currentChangeCount() !== initialChangeCount) {
         await captureCurrentClipboard(settings)
         needsRefresh = true
       }
-      const nextContent = controller.content
-      if (nextContent !== fullContent) {
+      if (nextContent != null && nextContent !== fullContent) {
         await editClipContent(item, nextContent)
         needsRefresh = true
       }
       if (needsRefresh) await refresh()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "编辑失败") })
-    } finally {
-      controller.dispose()
     }
   }
 
