@@ -278,7 +278,7 @@ export function KeyboardView() {
 
   async function onOpenAppUpdate() {
     try {
-      const url = Script.createRunSingleURLScheme("万象下载更新", {
+      const url = Script.createRunSingleURLScheme("万象方案助手", {
         action: "autoUpdate",
         requestId: String(Date.now()),
       })
