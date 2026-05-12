@@ -62,6 +62,7 @@ type AdvancedCleanupItem = {
 }
 type AdvancedCleanupSnapshot = {
   items: AdvancedCleanupItem[]
+  diagnosticItems: AdvancedCleanupItem[]
 }
 
 function isContentTab(value: RootTab): value is ContentTab {
@@ -214,6 +215,15 @@ function describeSystemAlarm(alarm: AlarmManager.Alarm): string {
   }
 
   return alarm.state
+}
+
+function alarmScheduleKindLabel(alarm: AlarmManager.Alarm): string {
+  const schedule = alarm.schedule
+  if (!schedule) return "未知规则"
+  if (schedule.type === "fixed" && schedule.date) return "固定时间"
+  if (schedule.weekdays?.length) return "每周重复"
+  if (typeof schedule.hour === "number" && typeof schedule.minute === "number") return "每日重复"
+  return "未知规则"
 }
 
 function rowSwipeActions(props: {
@@ -380,6 +390,14 @@ export function HomeView() {
     })
   }
 
+  function markCleanupCandidates(ids: string[]): string[] {
+    if (!ids.length) return cleanupCandidateAlarmIds
+    const next = mergeManagedSystemAlarmIds(cleanupCandidateAlarmIds, ids)
+    setCleanupCandidateAlarmIds(next)
+    saveStateSnapshot(records, holidaySources, managedSystemAlarmIds, next)
+    return next
+  }
+
   function buildAdvancedCleanupItems(
     nextSystemAlarms = systemAlarms,
     nextRecords = records,
@@ -403,6 +421,37 @@ export function HomeView() {
         }
       })
       .filter((item: AdvancedCleanupItem | null): item is AdvancedCleanupItem => Boolean(item))
+  }
+
+  function buildDiagnosticItems(
+    nextSystemAlarms = systemAlarms,
+    nextRecords = records,
+    nextManagedIds = managedSystemAlarmIds,
+    nextCleanupCandidateIds = cleanupCandidateAlarmIds
+  ): AdvancedCleanupItem[] {
+    const managedIdSet = new Set(nextManagedIds)
+    const cleanupIdSet = new Set(nextCleanupCandidateIds)
+
+    return [...nextSystemAlarms]
+      .sort((a, b) => systemAlarmTimeLabel(a).localeCompare(systemAlarmTimeLabel(b)))
+      .map((alarm): AdvancedCleanupItem => {
+        const owner = nextRecords.find((record) => record.systemAlarmIds.includes(alarm.id))
+        const linkedLabel = owner ? displaySubtitle(owner, holidaySourceMap) : "未关联到当前首页闹钟"
+        const sourceParts = [
+          owner ? "当前首页闹钟已关联" : "当前首页闹钟未关联",
+          managedIdSet.has(alarm.id) ? "脚本已登记" : "脚本未登记",
+          cleanupIdSet.has(alarm.id) ? "已标记为残留候选" : null,
+        ].filter(Boolean)
+
+        return {
+          alarmId: alarm.id,
+          timeLabel: systemAlarmTimeLabel(alarm),
+          title: owner?.title || "未关联到当前首页闹钟",
+          summary: `${alarmScheduleKindLabel(alarm)} · ${linkedLabel}`,
+          detail: describeSystemAlarm(alarm),
+          sourceLabel: sourceParts.join(" · "),
+        }
+      })
   }
 
   useEffect(() => {
@@ -480,6 +529,7 @@ export function HomeView() {
       setSystemAlarms([])
       return {
         items: [],
+        diagnosticItems: [],
       }
     }
     try {
@@ -495,10 +545,13 @@ export function HomeView() {
       const referencedIds = collectRecordSystemAlarmIds(nextRecordsSnapshot)
       const nextManagedIds = mergeManagedSystemAlarmIds(storedState.managedSystemAlarmIds, referencedIds)
       const orphanIds = nextManagedIds.filter((id) => !referencedIds.includes(id))
+      const cleanupCandidateSet = new Set([
+        ...storedState.cleanupCandidateAlarmIds,
+        ...orphanIds,
+      ])
       if (orphanIds.length) {
         await cancelManagedSystemAlarmIds(orphanIds)
       }
-      const cleanupCandidateSet = new Set(storedState.cleanupCandidateAlarmIds)
       const referencedIdSet = new Set(referencedIds)
       const nextCleanupCandidateIds = alarms
         .map((item) => item.id)
@@ -508,10 +561,12 @@ export function HomeView() {
       saveStateSnapshot(nextRecordsSnapshot, holidaySources, referencedIds, nextCleanupCandidateIds)
       return {
         items: buildAdvancedCleanupItems(alarms, nextRecordsSnapshot, nextCleanupCandidateIds),
+        diagnosticItems: buildDiagnosticItems(alarms, nextRecordsSnapshot, referencedIds, nextCleanupCandidateIds),
       }
     } catch {
       return {
         items: buildAdvancedCleanupItems(systemAlarms, records, cleanupCandidateAlarmIds),
+        diagnosticItems: buildDiagnosticItems(systemAlarms, records, managedSystemAlarmIds, cleanupCandidateAlarmIds),
       }
     }
   }
@@ -521,6 +576,7 @@ export function HomeView() {
       element: (
         <SystemAlarmSettingsView
           items={buildAdvancedCleanupItems()}
+          diagnosticItems={buildDiagnosticItems()}
           onRefresh={refreshSystemState}
           onDeleteIds={deleteSystemAlarmIds}
         />
@@ -612,6 +668,11 @@ export function HomeView() {
 
     if (!affectedRecords.length || !AlarmManager.isAvailable) return
 
+    const replacingIds = collectRecordSystemAlarmIds(affectedRecords)
+    const nextCleanupCandidateIds = replacingIds.length
+      ? markCleanupCandidates(replacingIds)
+      : cleanupCandidateAlarmIds
+
     if (!options?.muteBusy) setGlobalBusy(true)
     try {
       const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
@@ -630,7 +691,7 @@ export function HomeView() {
       setRecords(updatedRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(updatedRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(updatedRecords, updatedSources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(updatedRecords, updatedSources, nextManagedIds, nextCleanupCandidateIds)
       await refreshSystemState()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
@@ -671,6 +732,9 @@ export function HomeView() {
 
     setGlobalBusy(true)
     try {
+      const nextCleanupCandidateIds = record.systemAlarmIds.length
+        ? markCleanupCandidates(record.systemAlarmIds)
+        : cleanupCandidateAlarmIds
       const optimisticRecord: AlarmRecord = {
         ...record,
         title: draft.title,
@@ -681,14 +745,14 @@ export function HomeView() {
       }
       const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
       setRecords(optimisticRecords)
-      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       const nextRecord = await scheduleAlarm(optimisticRecord, holidaySourceMap)
       const nextRecords = optimisticRecords.map((item) => (item.id === record.id ? nextRecord : item))
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, nextCleanupCandidateIds)
       await refreshSystemState()
     } catch (error: any) {
       const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
@@ -709,6 +773,9 @@ export function HomeView() {
 
     setBusyRecordId(record.id)
     try {
+      const nextCleanupCandidateIds = !enabled && record.systemAlarmIds.length
+        ? markCleanupCandidates(record.systemAlarmIds)
+        : cleanupCandidateAlarmIds
       const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
       const optimisticRecord: AlarmRecord = {
         ...record,
@@ -717,7 +784,7 @@ export function HomeView() {
       }
       const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
       setRecords(optimisticRecords)
-      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       const nextRecord = enabled
         ? await scheduleAlarm(optimisticRecord, holidaySourceMap)
@@ -726,7 +793,7 @@ export function HomeView() {
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, nextCleanupCandidateIds)
       void refreshSystemState()
     } catch (error: any) {
       const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
@@ -859,6 +926,7 @@ export function HomeView() {
     if (!ids.length) {
       return {
         items: buildAdvancedCleanupItems(systemAlarms, records, cleanupCandidateAlarmIds),
+        diagnosticItems: buildDiagnosticItems(systemAlarms, records, managedSystemAlarmIds, cleanupCandidateAlarmIds),
       }
     }
 
@@ -891,6 +959,7 @@ export function HomeView() {
       await Dialog.alert({ message: String(error?.message ?? error) })
       return {
         items: buildAdvancedCleanupItems(systemAlarms, records, cleanupCandidateAlarmIds),
+        diagnosticItems: buildDiagnosticItems(systemAlarms, records, managedSystemAlarmIds, cleanupCandidateAlarmIds),
       }
     } finally {
       setGlobalBusy(false)
