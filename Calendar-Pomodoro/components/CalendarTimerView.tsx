@@ -4,7 +4,6 @@
 // - 系统能力（LiveActivity/Notification/Script）
 import {
   Button,
-  Editor,
   HStack,
   Image,
   List,
@@ -15,6 +14,7 @@ import {
   Tab,
   TabView,
   Text,
+  TextField,
   VStack,
   useEffect,
   useMemo,
@@ -70,19 +70,7 @@ const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"];
 
 function NoteEditorPage(props: { title: string; content: string }) {
   const dismiss = Navigation.useDismiss();
-  const [controller] = useState(() => {
-    return new EditorController({
-      content: props.content,
-      ext: "md",
-      readOnly: false,
-    });
-  });
-
-  useEffect(() => {
-    return () => {
-      controller.dispose();
-    };
-  }, [controller]);
+  const [content, setContent] = useState(props.content);
 
   return (
     <NavigationStack>
@@ -94,14 +82,28 @@ function NoteEditorPage(props: { title: string; content: string }) {
             <Button title="取消" action={() => dismiss(null)} />
           ),
           topBarTrailing: (
-            <Button
-              title="保存"
-              action={() => dismiss(String(controller.content ?? ""))}
-            />
+            <Button title="保存" action={() => dismiss(content)} />
           ),
         }}
+        padding={16}
+        spacing={12}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
       >
-        <Editor controller={controller} />
+        <TextField
+          title=""
+          prompt="输入本次计时的笔记"
+          value={content}
+          onChanged={setContent}
+          axis="vertical"
+          autofocus
+          textFieldStyle="plain"
+          frame={{
+            minHeight: 360,
+            maxWidth: "infinity",
+            maxHeight: "infinity",
+            alignment: "topLeading" as any,
+          }}
+        />
       </VStack>
     </NavigationStack>
   );
