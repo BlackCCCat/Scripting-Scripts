@@ -1,0 +1,44 @@
+{
+  "version": "",
+  "name": "Scripting Rime Keyboard",
+  "icon": "keyboard.fill",
+  "author": {
+    "name": "BlackCCCat",
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts"
+  },
+  "runInApp": false,
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Scripting-Rime-Keyboard.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "entry": "index.tsx",
+  "description": null,
+  "color": "rgba(0, 0, 0,1)",
+  "intentInputTypes": [],
+  "localizedNames": {
+    "es": "",
+    "en": "",
+    "ja": "",
+    "zh": "",
+    "fr": "",
+    "de": "",
+    "pt": "",
+    "it": "",
+    "ru": ""
+  },
+  "localizedDescriptions": {
+    "es": "",
+    "en": "",
+    "ja": "",
+    "zh": "",
+    "fr": "",
+    "de": "",
+    "pt": "",
+    "it": "",
+    "ru": ""
+  },
+  "contributors": [],
+  "iconImage": "https://raw.githubusercontent.com/BlackCCCat/Scripting-Scripts/refs/heads/main/src/scripting-rime-keyboard.png"
+}
