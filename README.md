@@ -14,6 +14,7 @@
 - [BiliFavor](./BiliFavor/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/BiliFavor.zip)
 - [Sleep Tracker](./Sleep-Tracker/): [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Sleep-Tracker.zip)
 - [CAIS](./CAIS/)：`Clipboard All in Scripting`，[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
+- [Scripting Rime Keyboard](./Scripting-Rime-Keyboard)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Scripting-Rime-Keyboard.zip)
 
 
 **Codex完成几乎所有代码**
