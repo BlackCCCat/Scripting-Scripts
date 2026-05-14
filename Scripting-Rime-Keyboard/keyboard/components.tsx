@@ -1,4 +1,14 @@
-import { Group, HStack, Image, Spacer, Text, VStack, ZStack } from "scripting";
+import {
+  DragGesture,
+  Group,
+  HStack,
+  Image,
+  Spacer,
+  Text,
+  useRef,
+  VStack,
+  ZStack,
+} from "scripting";
 import { BASE_KEY_HEIGHT } from "./constants";
 import type { Palette } from "./types";
 import { dragDirection, estimatedTextWidth } from "./utils";
@@ -59,12 +69,20 @@ export function KeyFace(props: {
   onPress: () => void;
   onLongPress?: () => void;
   onLongPressEnd?: () => void;
+  onTouchStart?: () => void;
+  onTouchEnd?: () => void;
+  onLongPressMove?: (details: any) => void;
+  longPressDuration?: number;
   onSwipeUp?: () => void;
   onSwipeDown?: () => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
   contextMenu?: any;
 }) {
+  const gestureStartedRef = useRef(false);
+  const longPressHandledRef = useRef(false);
+  const longPressCancelledRef = useRef(false);
+  const longPressTimerRef = useRef<any>(null);
   const usesEnterColor = props.id === "enter" || props.id === "numeric-enter";
   const baseBg = props.palette.keyOverrides[props.id] ??
     (props.accent || usesEnterColor
@@ -76,6 +94,89 @@ export function KeyFace(props: {
       ? props.palette.accentText
       : (props.selected ? props.palette.accent : props.palette.primary));
   const width = props.width ?? 32;
+  const hasSwipe = !!(
+    props.onSwipeUp || props.onSwipeDown || props.onSwipeLeft ||
+    props.onSwipeRight
+  );
+  const needsManualGesture = !props.passive &&
+    (hasSwipe || props.onLongPress || props.onTouchStart || props.onTouchEnd);
+
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current != null) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = null;
+  }
+
+  function dragIntent(details: any) {
+    const dx = Math.abs(Number(details?.translation?.width ?? 0));
+    const dy = Math.abs(Number(details?.translation?.height ?? 0));
+    const vx = Math.abs(Number(details?.velocity?.width ?? 0));
+    const vy = Math.abs(Number(details?.velocity?.height ?? 0));
+    return dx >= 4 || dy >= 4 || vx >= 8 || vy >= 8;
+  }
+
+  function resetGesture() {
+    clearLongPressTimer();
+    gestureStartedRef.current = false;
+    longPressHandledRef.current = false;
+    longPressCancelledRef.current = false;
+  }
+
+  function startGesture() {
+    if (gestureStartedRef.current) return;
+    gestureStartedRef.current = true;
+    longPressHandledRef.current = false;
+    longPressCancelledRef.current = false;
+    props.onTouchStart?.();
+    if (!props.onLongPress) return;
+    longPressTimerRef.current = setTimeout(() => {
+      if (!gestureStartedRef.current || longPressCancelledRef.current) return;
+      longPressHandledRef.current = true;
+      props.onLongPress?.();
+    }, props.longPressDuration ?? 360);
+  }
+
+  const manualGesture = needsManualGesture
+    ? {
+      gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
+        .onChanged((details: any) => {
+          startGesture();
+          if (longPressHandledRef.current) {
+            props.onLongPressMove?.(details);
+            return;
+          }
+          if (props.onLongPress && dragIntent(details)) {
+            longPressCancelledRef.current = true;
+            clearLongPressTimer();
+          }
+        })
+        .onEnded((details: any) => {
+          const wasLongPress = longPressHandledRef.current;
+          clearLongPressTimer();
+          props.onTouchEnd?.();
+          if (wasLongPress) {
+            props.onLongPressEnd?.();
+            resetGesture();
+            return;
+          }
+          const direction = dragDirection(details);
+          if (direction === "up" && props.onSwipeUp) props.onSwipeUp();
+          else if (direction === "down" && props.onSwipeDown) {
+            props.onSwipeDown();
+          } else if (direction === "left" && props.onSwipeLeft) {
+            props.onSwipeLeft();
+          } else if (direction === "right" && props.onSwipeRight) {
+            props.onSwipeRight();
+          } else props.onPress();
+          resetGesture();
+        }),
+      mask: "gesture" as any,
+    }
+    : undefined;
+  const tapGesture = !props.passive && !needsManualGesture
+    ? { onTapGesture: () => props.onPress() }
+    : {};
 
   return (
     <ZStack
@@ -89,30 +190,8 @@ export function KeyFace(props: {
       shadow={props.plain
         ? undefined
         : { color: props.palette.shadow as any, radius: 1, y: 1 }}
-      {...(props.passive ? {} : {
-        onTapGesture: () => props.onPress(),
-        onDragGesture: {
-          minDistance: 18,
-          onEnded: (details: any) => {
-            const direction = dragDirection(details);
-            if (direction === "up") props.onSwipeUp?.();
-            else if (direction === "down") props.onSwipeDown?.();
-            else if (direction === "left") props.onSwipeLeft?.();
-            else if (direction === "right") props.onSwipeRight?.();
-          },
-        },
-      })}
-      {...(props.onLongPress
-        ? {
-          onLongPressGesture: {
-            minDuration: 320,
-            perform: () => props.onLongPress?.(),
-            onPressingChanged: (pressing: boolean) => {
-              if (!pressing) props.onLongPressEnd?.();
-            },
-          },
-        }
-        : {})}
+      {...tapGesture}
+      {...(manualGesture ? { highPriorityGesture: manualGesture } : {})}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
     >
       {props.topCenter
