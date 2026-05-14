@@ -60,11 +60,10 @@ function currentKeyboardAppearance(): KeyboardAppearance {
 
 export function KeyboardView() {
   const [settings] = useState<RimeKeyboardSettings>(() =>
-    loadRimeKeyboardSettings()
+    loadRimeKeyboardSettings(),
   );
-  const [keyboardAppearance, setKeyboardAppearance] = useState<
-    KeyboardAppearance
-  >(() => currentKeyboardAppearance());
+  const [keyboardAppearance, setKeyboardAppearance] =
+    useState<KeyboardAppearance>(() => currentKeyboardAppearance());
   const palette = paletteFor(settings, keyboardAppearance);
   const sessionRef = useRef<Rime.Session | null>(null);
 
@@ -104,6 +103,8 @@ export function KeyboardView() {
   const rowLongPressTimerRef = useRef(new Map<string, number | null>());
   const rowLongPressCancelledRef = useRef(new Map<string, boolean>());
   const rowLongPressLatestGestureRef = useRef(new Map<string, any>());
+  const rowGestureTokenRef = useRef(new Map<string, number>());
+  const nextGestureTokenRef = useRef(0);
   const spaceCursorDragXRef = useRef<number | null>(null);
   const lastPressFeedbackAtRef = useRef(0);
   const lastPressRequestAtRef = useRef(0);
@@ -120,8 +121,8 @@ export function KeyboardView() {
     const syncKeyboardAppearance = (
       traits?: CustomKeyboard.TextInputTraits,
     ) => {
-      const value = traits?.keyboardAppearance ??
-        CustomKeyboard.traits?.keyboardAppearance;
+      const value =
+        traits?.keyboardAppearance ?? CustomKeyboard.traits?.keyboardAppearance;
       setKeyboardAppearance(
         value === "dark" || value === "light" ? value : "default",
       );
@@ -184,8 +185,7 @@ export function KeyboardView() {
         ctx.cursorPos ?? ctx.preedit.length,
         0,
       );
-    } catch {
-    }
+    } catch {}
   }
 
   function refresh(session = sessionRef.current) {
@@ -226,9 +226,8 @@ export function KeyboardView() {
     if (!settings.haptics) return;
     const now = Date.now();
     const elapsed = now - lastPressRequestAtRef.current;
-    pressBurstCountRef.current = elapsed > 110
-      ? 0
-      : Math.min(10, pressBurstCountRef.current + 1);
+    pressBurstCountRef.current =
+      elapsed > 110 ? 0 : Math.min(10, pressBurstCountRef.current + 1);
     lastPressRequestAtRef.current = now;
     pendingPressHapticRef.current = true;
     if (hapticQueueTimerRef.current) return;
@@ -243,11 +242,14 @@ export function KeyboardView() {
     if (!pendingPressHapticRef.current || !settings.haptics) return;
     const now = Date.now();
     const burst = pressBurstCountRef.current;
-    const minInterval = burst >= 7
-      ? 220
-      : (burst >= 4
-        ? 160
-        : (burst >= 2 ? 115 : Math.max(75, hapticInterval(settings))));
+    const minInterval =
+      burst >= 7
+        ? 220
+        : burst >= 4
+          ? 160
+          : burst >= 2
+            ? 115
+            : Math.max(75, hapticInterval(settings));
     const remaining = minInterval - (now - lastPressFeedbackAtRef.current);
     if (remaining > 0) {
       hapticQueueTimerRef.current = setTimeout(
@@ -305,6 +307,18 @@ export function KeyboardView() {
     rowLongPressTimerRef.current.delete(rowId);
   }
 
+  function cancelRowGesture(rowId: string) {
+    clearRowLongPressTimer(rowId);
+    rowLongPressCancelledRef.current.set(rowId, true);
+    rowLongPressHandledRef.current.delete(rowId);
+    rowLongPressLatestGestureRef.current.delete(rowId);
+    activeHitTargetRef.current.delete(rowId);
+    rowGestureTokenRef.current.delete(rowId);
+    stopRepeatingBackspace();
+    spaceCursorDragXRef.current = null;
+    setPressedVisual(null);
+  }
+
   function scheduleRowLongPress(rowId: string, target: KeyHitTarget | null) {
     clearRowLongPressTimer(rowId);
     rowLongPressHandledRef.current.set(rowId, false);
@@ -312,8 +326,11 @@ export function KeyboardView() {
     rowLongPressLatestGestureRef.current.delete(rowId);
     spaceCursorDragXRef.current = null;
     if (!target?.onLongPress) return;
+    const gestureToken = rowGestureTokenRef.current.get(rowId);
     const isSpaceKey = target.id === "space";
     const timer = setTimeout(() => {
+      if (gestureToken == null) return;
+      if (rowGestureTokenRef.current.get(rowId) !== gestureToken) return;
       if (activeHitTargetRef.current.get(rowId)?.id !== target.id) return;
       if (rowLongPressCancelledRef.current.get(rowId)) return;
       const latest = rowLongPressLatestGestureRef.current.get(rowId);
@@ -322,7 +339,8 @@ export function KeyboardView() {
         (isSpaceKey
           ? isVerticalDragIntent(latest)
           : isLongPressDragIntent(latest))
-      ) return;
+      )
+        return;
       rowLongPressHandledRef.current.set(rowId, true);
       target.onLongPress?.();
     }, target.longPressDuration ?? 360);
@@ -340,8 +358,14 @@ export function KeyboardView() {
     const predictedDy = Math.abs(
       Number(details?.predictedEndTranslation?.height ?? 0),
     );
-    return dx >= 4 || dy >= 4 || vx >= 8 || vy >= 8 || predictedDx >= 8 ||
-      predictedDy >= 8;
+    return (
+      dx >= 4 ||
+      dy >= 4 ||
+      vx >= 8 ||
+      vy >= 8 ||
+      predictedDx >= 8 ||
+      predictedDy >= 8
+    );
   }
 
   function isVerticalDragIntent(details: any) {
@@ -363,9 +387,10 @@ export function KeyboardView() {
     const isSpace = activeHitTargetRef.current.get(rowId)?.id === "space";
     if (
       isSpace ? !isVerticalDragIntent(details) : !isLongPressDragIntent(details)
-    ) return;
+    )
+      return;
     rowLongPressCancelledRef.current.set(rowId, true);
-    clearRowLongPressTimer(rowId);
+    cancelRowGesture(rowId);
   }
 
   function updateSpaceCursorDrag(details: any) {
@@ -401,6 +426,7 @@ export function KeyboardView() {
     const target = hitTargetFromGesture(details, targets);
     if (target) activeHitTargetRef.current.set(rowId, target);
     else activeHitTargetRef.current.delete(rowId);
+    rowGestureTokenRef.current.set(rowId, ++nextGestureTokenRef.current);
     setPressedVisual(target?.id ?? null);
     if (target) playPressFeedback();
     scheduleRowLongPress(rowId, target);
@@ -411,26 +437,23 @@ export function KeyboardView() {
     details: any,
     targets: KeyHitTarget[],
   ) {
-    const target = activeHitTargetRef.current.get(rowId) ??
-      hitTargetFromGesture(
-        details,
-        targets,
-      );
+    const target =
+      activeHitTargetRef.current.get(rowId) ??
+      hitTargetFromGesture(details, targets);
     clearRowLongPressTimer(rowId);
-    rowLongPressCancelledRef.current.delete(rowId);
+    rowLongPressCancelledRef.current.set(rowId, true);
     rowLongPressLatestGestureRef.current.delete(rowId);
+    rowGestureTokenRef.current.delete(rowId);
 
     if (!target) {
-      activeHitTargetRef.current.delete(rowId);
-      setPressedVisual(null);
+      rowGestureTokenRef.current.delete(rowId);
       return;
     }
     if (rowLongPressHandledRef.current.get(rowId)) {
       rowLongPressHandledRef.current.delete(rowId);
       spaceCursorDragXRef.current = null;
       target.onLongPressEnd?.();
-      activeHitTargetRef.current.delete(rowId);
-      setPressedVisual(null);
+      cancelRowGesture(rowId);
       return;
     }
     const direction = dragDirection(details);
@@ -442,8 +465,7 @@ export function KeyboardView() {
       target.onSwipeRight();
     } else target.onPress();
 
-    activeHitTargetRef.current.delete(rowId);
-    setPressedVisual(null);
+    cancelRowGesture(rowId);
   }
 
   function hitRowGesture(rowId: string, targets: KeyHitTarget[]) {
@@ -453,10 +475,10 @@ export function KeyboardView() {
         coordinateSpace: "local",
       })
         .onChanged((details: any) =>
-          handleHitRowGestureChanged(rowId, details, targets)
+          handleHitRowGestureChanged(rowId, details, targets),
         )
         .onEnded((details: any) =>
-          handleHitRowGestureEnded(rowId, details, targets)
+          handleHitRowGestureEnded(rowId, details, targets),
         ),
       mask: "gesture" as any,
     };
@@ -724,8 +746,7 @@ export function KeyboardView() {
     try {
       const text = await Pasteboard.getString();
       if (text) CustomKeyboard.insertText(text);
-    } catch {
-    }
+    } catch {}
   }
 
   async function copySelectedText() {
@@ -733,8 +754,7 @@ export function KeyboardView() {
       if (CustomKeyboard.selectedText) {
         await Pasteboard.setString(CustomKeyboard.selectedText);
       }
-    } catch {
-    }
+    } catch {}
   }
 
   async function cutSelectedText() {
@@ -742,8 +762,7 @@ export function KeyboardView() {
       if (!CustomKeyboard.selectedText) return;
       await Pasteboard.setString(CustomKeyboard.selectedText);
       CustomKeyboard.deleteBackward();
-    } catch {
-    }
+    } catch {}
   }
 
   async function selectAllBestEffort() {
@@ -763,8 +782,7 @@ export function KeyboardView() {
       }
       const text = CustomKeyboard.allText;
       if (text) await Pasteboard.setString(text);
-    } catch {
-    }
+    } catch {}
   }
 
   function deleteAllText() {
@@ -775,8 +793,7 @@ export function KeyboardView() {
       const after = CustomKeyboard.textAfterCursor?.length ?? 0;
       if (after > 0) CustomKeyboard.moveCursor(after);
       for (let i = 0; i < text.length; i += 1) CustomKeyboard.deleteBackward();
-    } catch {
-    }
+    } catch {}
   }
 
   function restoreDeletedText() {
@@ -793,7 +810,9 @@ export function KeyboardView() {
     if (mode === "rime") {
       processText(action);
       if (
-        action === "{backslash}" || action === "backslash" || action === "\\"
+        action === "{backslash}" ||
+        action === "backslash" ||
+        action === "\\"
       ) {
         setBackslashWrapMode(true);
       }
@@ -866,12 +885,12 @@ export function KeyboardView() {
   }
 
   function runLetterSwipe(direction: "up" | "down", key: string) {
-    const actions = direction === "up"
-      ? settings.letterSwipeUp
-      : settings.letterSwipeDown;
-    const modes = direction === "up"
-      ? settings.letterSwipeUpModes
-      : settings.letterSwipeDownModes;
+    const actions =
+      direction === "up" ? settings.letterSwipeUp : settings.letterSwipeDown;
+    const modes =
+      direction === "up"
+        ? settings.letterSwipeUpModes
+        : settings.letterSwipeDownModes;
     const action = actions[key];
     if (preedit && modes[key] !== "direct" && /^[0-9]$/.test(action)) {
       if (selectCandidateByKey(action)) return;
@@ -880,22 +899,26 @@ export function KeyboardView() {
   }
 
   function runIdleFunctionSwipe(direction: "up" | "down", key: string) {
-    const actions = direction === "up"
-      ? settings.idleFunctionSwipeUp
-      : settings.idleFunctionSwipeDown;
-    const modes = direction === "up"
-      ? settings.idleFunctionSwipeUpModes
-      : settings.idleFunctionSwipeDownModes;
+    const actions =
+      direction === "up"
+        ? settings.idleFunctionSwipeUp
+        : settings.idleFunctionSwipeDown;
+    const modes =
+      direction === "up"
+        ? settings.idleFunctionSwipeUpModes
+        : settings.idleFunctionSwipeDownModes;
     runConfiguredAction(actions[key], modes[key]);
   }
 
   function runComposingFunctionSwipe(direction: "up" | "down", key: string) {
-    const actions = direction === "up"
-      ? settings.composingFunctionSwipeUp
-      : settings.composingFunctionSwipeDown;
-    const modes = direction === "up"
-      ? settings.composingFunctionSwipeUpModes
-      : settings.composingFunctionSwipeDownModes;
+    const actions =
+      direction === "up"
+        ? settings.composingFunctionSwipeUp
+        : settings.composingFunctionSwipeDown;
+    const modes =
+      direction === "up"
+        ? settings.composingFunctionSwipeUpModes
+        : settings.composingFunctionSwipeDownModes;
     runConfiguredAction(actions[key], modes[key]);
   }
 
@@ -909,12 +932,14 @@ export function KeyboardView() {
   }
 
   function candidateComment(candidate: Rime.Candidate): string {
-    return settings.showCandidateComment ? candidate.comment?.trim() ?? "" : "";
+    return settings.showCandidateComment
+      ? (candidate.comment?.trim() ?? "")
+      : "";
   }
 
   const composing = preedit.length > 0;
-  const schemaMenu = schemas.length > 1
-    ? (
+  const schemaMenu =
+    schemas.length > 1 ? (
       <Group>
         {schemas.map((schema) => (
           <Button
@@ -926,17 +951,23 @@ export function KeyboardView() {
           />
         ))}
       </Group>
-    )
-    : null;
-  const showsPreeditCaret = !error && !settings.inlinePreedit &&
-    settings.showPreeditCaret && preedit.length > 0;
+    ) : null;
+  const showsPreeditCaret =
+    !error &&
+    !settings.inlinePreedit &&
+    settings.showPreeditCaret &&
+    preedit.length > 0;
   const safePreeditCursor = Math.min(
     preedit.length,
     Math.max(0, preeditCursor),
   );
   const preeditBeforeCaret = showsPreeditCaret
     ? preedit.slice(0, safePreeditCursor)
-    : (error ? `Rime 错误：${error}` : (settings.inlinePreedit ? "" : preedit));
+    : error
+      ? `Rime 错误：${error}`
+      : settings.inlinePreedit
+        ? ""
+        : preedit;
   const preeditAfterCaret = showsPreeditCaret
     ? preedit.slice(safePreeditCursor)
     : "";
@@ -958,19 +989,23 @@ export function KeyboardView() {
     (candidateHomeButtonVisible ? candidateHomeButtonWidth : 0) +
     candidateSettingsButtonWidth +
     candidateRightButtonWidth;
-  const candidateFixedButtonCount = (candidateHomeButtonVisible ? 1 : 0) +
+  const candidateFixedButtonCount =
+    (candidateHomeButtonVisible ? 1 : 0) +
     (candidateSettingsButtonWidth > 0 ? 1 : 0) +
     (candidateRightButtonVisible ? 1 : 0);
   const candidateFixedButtonGaps = KEY_SPACING * candidateFixedButtonCount;
-  const candidateBarWidth = metrics.width - candidateFixedButtonWidth -
-    candidateFixedButtonGaps;
+  const candidateBarWidth =
+    metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps;
   const candidateRightButtonImage =
     effectiveCandidateRightButtonMode === "expand"
-      ? (candidateExpanded ? "chevron.up.circle" : "chevron.down.circle")
+      ? candidateExpanded
+        ? "chevron.up.circle"
+        : "chevron.down.circle"
       : "keyboard.chevron.compact.down";
   const normalKeyboardBodyHeight =
     (settings.showFunctionRow ? metrics.functionKeyHeight + 6 : 0) +
-    metrics.keyHeight * 4 + 6 * 3;
+    metrics.keyHeight * 4 +
+    6 * 3;
   const expandedPanelHeight = normalKeyboardBodyHeight;
 
   function shiftSwipeUp() {
@@ -1256,9 +1291,12 @@ export function KeyboardView() {
 
   function numericRowHitTargets(row: string[]): KeyHitTarget[] {
     return row.map((value, index) => ({
-      id: value === "ABC"
-        ? "numeric-abc"
-        : (value === "space" ? "numeric-space" : `numeric-${value}`),
+      id:
+        value === "ABC"
+          ? "numeric-abc"
+          : value === "space"
+            ? "numeric-space"
+            : `numeric-${value}`,
       x: index * (numericKeyWidth + KEY_SPACING),
       width: numericKeyWidth,
       onPress: () => {
@@ -1332,8 +1370,7 @@ export function KeyboardView() {
     });
     try {
       CustomKeyboard.dismiss();
-    } catch {
-    }
+    } catch {}
     setTimeout(() => {
       void Safari.openURL(url);
     }, 80);
@@ -1343,9 +1380,8 @@ export function KeyboardView() {
   const numericPanelHeight = metrics.keyHeight * 4 + numericRowSpacing * 3;
   const numericLeftWidth = Math.max(48, Math.min(56, metrics.width * 0.14));
   const numericRightWidth = Math.max(58, Math.min(72, metrics.width * 0.18));
-  const numericCenterWidth = metrics.width - numericLeftWidth -
-    numericRightWidth -
-    KEY_SPACING * 2;
+  const numericCenterWidth =
+    metrics.width - numericLeftWidth - numericRightWidth - KEY_SPACING * 2;
   const numericKeyWidth = (numericCenterWidth - KEY_SPACING * 2) / 3;
 
   return (
@@ -1365,84 +1401,74 @@ export function KeyboardView() {
           alignment: "leading" as any,
         }}
       >
-        {showsPreeditRow
-          ? (
-            <HStack
-              spacing={1}
-              padding={{ leading: 8 }}
-              frame={{
-                width: metrics.width,
-                height: 18,
-                alignment: "bottomLeading" as any,
-              }}
+        {showsPreeditRow ? (
+          <HStack
+            spacing={1}
+            padding={{ leading: 8 }}
+            frame={{
+              width: metrics.width,
+              height: 18,
+              alignment: "bottomLeading" as any,
+            }}
+          >
+            <Text
+              font="caption"
+              lineLimit={1}
+              foregroundStyle={palette.primary as any}
             >
+              {preeditBeforeCaret}
+            </Text>
+            {showsPreeditCaret ? (
+              <Text
+                font="caption2"
+                baselineOffset={-7}
+                foregroundStyle={palette.primary as any}
+                padding={{ bottom: -2 }}
+              >
+                ^
+              </Text>
+            ) : null}
+            {preeditAfterCaret ? (
               <Text
                 font="caption"
                 lineLimit={1}
                 foregroundStyle={palette.primary as any}
               >
-                {preeditBeforeCaret}
+                {preeditAfterCaret}
               </Text>
-              {showsPreeditCaret
-                ? (
-                  <Text
-                    font="caption2"
-                    baselineOffset={-7}
-                    foregroundStyle={palette.primary as any}
-                    padding={{ bottom: -2 }}
-                  >
-                    ^
-                  </Text>
-                )
-                : null}
-              {preeditAfterCaret
-                ? (
-                  <Text
-                    font="caption"
-                    lineLimit={1}
-                    foregroundStyle={palette.primary as any}
-                  >
-                    {preeditAfterCaret}
-                  </Text>
-                )
-                : null}
-            </HStack>
-          )
-          : null}
+            ) : null}
+          </HStack>
+        ) : null}
         <HStack
           spacing={KEY_SPACING}
           frame={{ width: metrics.width, height: metrics.candidateBarHeight }}
         >
-          {candidateHomeButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-home"
-                image="house"
-                palette={palette}
-                width={candidateHomeButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primary}
-                onPress={() => runWithFeedback(pressCandidateHomeButton)}
-              />
-            )
-            : null}
-          {candidateHomeButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-settings"
-                image="gearshape"
-                palette={palette}
-                width={candidateSettingsButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primary}
-                onPress={() => runWithFeedback(pressCandidateSettingsButton)}
-              />
-            )
-            : null}
+          {candidateHomeButtonVisible ? (
+            <KeyFace
+              id="candidate-home"
+              image="house"
+              palette={palette}
+              width={candidateHomeButtonWidth}
+              height={metrics.candidateButtonHeight}
+              system
+              plain
+              foregroundStyle={palette.primary}
+              onPress={() => runWithFeedback(pressCandidateHomeButton)}
+            />
+          ) : null}
+          {candidateHomeButtonVisible ? (
+            <KeyFace
+              id="candidate-settings"
+              image="gearshape"
+              palette={palette}
+              width={candidateSettingsButtonWidth}
+              height={metrics.candidateButtonHeight}
+              system
+              plain
+              foregroundStyle={palette.primary}
+              onPress={() => runWithFeedback(pressCandidateSettingsButton)}
+            />
+          ) : null}
           <ScrollView
             axes="horizontal"
             scrollIndicator="hidden"
@@ -1465,563 +1491,527 @@ export function KeyboardView() {
                   commentFontSize={metrics.candidateCommentFontSize}
                   onPress={() =>
                     runWithFeedback(() =>
-                      selectCandidateAbsolute(pageNo * rimePageSize + idx)
-                    )}
+                      selectCandidateAbsolute(pageNo * rimePageSize + idx),
+                    )
+                  }
                 />
               ))}
             </HStack>
           </ScrollView>
-          {candidateRightButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-right"
-                image={candidateRightButtonImage}
-                palette={palette}
-                width={candidateRightButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primary}
-                onPress={() => runWithFeedback(pressCandidateRightButton)}
-              />
-            )
-            : null}
+          {candidateRightButtonVisible ? (
+            <KeyFace
+              id="candidate-right"
+              image={candidateRightButtonImage}
+              palette={palette}
+              width={candidateRightButtonWidth}
+              height={metrics.candidateButtonHeight}
+              system
+              plain
+              foregroundStyle={palette.primary}
+              onPress={() => runWithFeedback(pressCandidateRightButton)}
+            />
+          ) : null}
         </HStack>
       </VStack>
 
-      {candidateExpanded
-        ? (
-          <ScrollView
-            axes="vertical"
-            scrollIndicator="hidden"
-            frame={{ width: metrics.width, height: expandedPanelHeight }}
+      {candidateExpanded ? (
+        <ScrollView
+          axes="vertical"
+          scrollIndicator="hidden"
+          frame={{ width: metrics.width, height: expandedPanelHeight }}
+          background={"rgba(0,0,0,0.001)" as any}
+          contentShape="rect"
+        >
+          <VStack
+            spacing={KEY_SPACING}
+            frame={{
+              width: metrics.width,
+              minHeight: expandedPanelHeight,
+              alignment: "top" as any,
+            }}
             background={"rgba(0,0,0,0.001)" as any}
             contentShape="rect"
           >
-            <VStack
+            <FlowLayout
               spacing={KEY_SPACING}
-              frame={{
-                width: metrics.width,
-                minHeight: expandedPanelHeight,
-                alignment: "top" as any,
-              }}
-              background={"rgba(0,0,0,0.001)" as any}
-              contentShape="rect"
+              frame={{ width: metrics.width, alignment: "leading" as any }}
             >
-              <FlowLayout
+              {candidates.map((candidate, absoluteIndex) => {
+                const comment = candidateComment(candidate);
+                const naturalWidth = candidateButtonNaturalWidth({
+                  text: candidate.text,
+                  comment,
+                  index: absoluteIndex,
+                  candidateFontSize: metrics.candidateFontSize,
+                  commentFontSize: metrics.candidateCommentFontSize,
+                  expanded: true,
+                });
+                const width =
+                  naturalWidth > metrics.width ? metrics.width : undefined;
+                return (
+                  <CandidateButton
+                    key={`expanded-${absoluteIndex}-${candidate.text}`}
+                    index={absoluteIndex}
+                    candidate={candidate}
+                    comment={comment}
+                    selected={absoluteIndex === highlightedIdx}
+                    palette={palette}
+                    width={width}
+                    naturalWidth={naturalWidth}
+                    height={Math.max(52, metrics.candidateButtonHeight + 12)}
+                    candidateFontSize={metrics.candidateFontSize}
+                    commentFontSize={metrics.candidateCommentFontSize}
+                    expanded
+                    onPress={() =>
+                      runWithFeedback(() => {
+                        selectCandidateAbsolute(
+                          pageNo * rimePageSize + absoluteIndex,
+                        );
+                        setCandidateExpanded(false);
+                      })
+                    }
+                  />
+                );
+              })}
+            </FlowLayout>
+          </VStack>
+        </ScrollView>
+      ) : (
+        <Group>
+          {settings.showFunctionRow ? (
+            composing ? (
+              <HStack
                 spacing={KEY_SPACING}
-                frame={{ width: metrics.width, alignment: "leading" as any }}
+                frame={{
+                  width: metrics.width,
+                  height: metrics.functionKeyHeight,
+                }}
+                contentShape="rect"
+                highPriorityGesture={hitRowGesture(
+                  "func-comp",
+                  composingFunctionHitTargets(),
+                )}
               >
-                {candidates.map((candidate, absoluteIndex) => {
-                  const comment = candidateComment(candidate);
-                  const naturalWidth = candidateButtonNaturalWidth({
-                    text: candidate.text,
-                    comment,
-                    index: absoluteIndex,
-                    candidateFontSize: metrics.candidateFontSize,
-                    commentFontSize: metrics.candidateCommentFontSize,
-                    expanded: true,
-                  });
-                  const width = naturalWidth > metrics.width
-                    ? metrics.width
-                    : undefined;
-                  return (
-                    <CandidateButton
-                      key={`expanded-${absoluteIndex}-${candidate.text}`}
-                      index={absoluteIndex}
-                      candidate={candidate}
-                      comment={comment}
-                      selected={absoluteIndex === highlightedIdx}
-                      palette={palette}
-                      width={width}
-                      naturalWidth={naturalWidth}
-                      height={Math.max(
-                        52,
-                        metrics.candidateButtonHeight + 12,
-                      )}
-                      candidateFontSize={metrics.candidateFontSize}
-                      commentFontSize={metrics.candidateCommentFontSize}
-                      expanded
-                      onPress={() =>
-                        runWithFeedback(() => {
-                          selectCandidateAbsolute(
-                            pageNo * rimePageSize + absoluteIndex,
-                          );
-                          setCandidateExpanded(false);
-                        })}
-                    />
-                  );
-                })}
-              </FlowLayout>
-            </VStack>
-          </ScrollView>
-        )
-        : (
-          <Group>
-            {settings.showFunctionRow
-              ? (
-                composing
-                  ? (
-                    <HStack
-                      spacing={KEY_SPACING}
-                      frame={{
-                        width: metrics.width,
-                        height: metrics.functionKeyHeight,
-                      }}
-                      contentShape="rect"
-                      highPriorityGesture={hitRowGesture(
-                        "func-comp",
-                        composingFunctionHitTargets(),
-                      )}
-                    >
-                      <KeyFace
-                        id="func-left"
-                        image="arrow.left"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "func-left"}
-                        onPress={() =>
-                          runWithFeedback(() => processKey(KEY_UP))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "left")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "left")
-                          )}
-                      />
-                      <KeyFace
-                        id="func-page-down"
-                        image="arrow.up.arrow.down"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "func-page-down"}
-                        onPress={() =>
-                          runWithFeedback(() => processKey(KEY_PAGE_DOWN))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "page")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "page")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-1"
-                        image="1.circle"
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "tone-1"}
-                        onPress={() => runWithFeedback(() => processText("7"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone1")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone1")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-2"
-                        image="2.circle"
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "tone-2"}
-                        onPress={() => runWithFeedback(() => processText("8"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone2")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone2")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-3"
-                        image="3.circle"
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "tone-3"}
-                        onPress={() => runWithFeedback(() => processText("9"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone3")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone3")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-4"
-                        image="4.circle"
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "tone-4"}
-                        onPress={() => runWithFeedback(() => processText("0"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone4")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone4")
-                          )}
-                      />
-                      <KeyFace
-                        id="func-backslash"
-                        image="viewfinder"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "func-backslash"}
-                        onPress={() => runWithFeedback(pressBackslashFilter)}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "filter")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "filter")
-                          )}
-                      />
-                      <KeyFace
-                        id="func-right"
-                        image="arrow.right"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "func-right"}
-                        onPress={() =>
-                          runWithFeedback(() => processKey(KEY_DOWN))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "right")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "right")
-                          )}
-                      />
-                    </HStack>
-                  )
-                  : (
-                    <HStack
-                      spacing={KEY_SPACING}
-                      frame={{
-                        width: metrics.width,
-                        height: metrics.functionKeyHeight,
-                      }}
-                      contentShape="rect"
-                      highPriorityGesture={hitRowGesture(
-                        "func-idle",
-                        idleFunctionHitTargets(),
-                      )}
-                    >
-                      <KeyFace
-                        id="idle-left"
-                        image="arrow.left"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-left"}
-                        onPress={() =>
-                          runWithFeedback(() => CustomKeyboard.moveCursor(-1))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "left")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "left")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-head"
-                        image="text.line.first.and.arrowtriangle.forward"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-head"}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            CustomKeyboard.moveCursor(
-                              -(CustomKeyboard.textBeforeCursor?.length ?? 0),
-                            )
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "head")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "head")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-schema"
-                        image="list.bullet.rectangle"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-schema"}
-                        onPress={() => runWithFeedback(openRimeSchemaMenu)}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "select")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "select")
-                          )}
-                        contextMenu={schemaMenu != null
-                          ? { menuItems: schemaMenu }
-                          : undefined}
-                      />
-                      <KeyFace
-                        id="idle-cut"
-                        image="scissors"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-cut"}
-                        onPress={() =>
-                          runWithFeedback(() => void cutSelectedText())}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "cut")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "cut")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-copy"
-                        image="doc.on.doc"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-copy"}
-                        onPress={() =>
-                          runWithFeedback(() => void copySelectedText())}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "copy")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "copy")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-paste"
-                        image="doc.on.clipboard"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-paste"}
-                        onPress={() => runWithFeedback(() => void pasteText())}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "paste")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "paste")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-tail"
-                        image="text.line.last.and.arrowtriangle.forward"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-tail"}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            CustomKeyboard.moveCursor(
-                              CustomKeyboard.textAfterCursor?.length ?? 0,
-                            )
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "tail")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "tail")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-right"
-                        image="arrow.right"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "idle-right"}
-                        onPress={() =>
-                          runWithFeedback(() => CustomKeyboard.moveCursor(1))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "right")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "right")
-                          )}
-                      />
-                    </HStack>
-                  )
-              )
-              : null}
+                <KeyFace
+                  id="func-left"
+                  image="arrow.left"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "func-left"}
+                  onPress={() => runWithFeedback(() => processKey(KEY_UP))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "left"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "left"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="func-page-down"
+                  image="arrow.up.arrow.down"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "func-page-down"}
+                  onPress={() =>
+                    runWithFeedback(() => processKey(KEY_PAGE_DOWN))
+                  }
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "page"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "page"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="tone-1"
+                  image="1.circle"
+                  imageScale="medium"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "tone-1"}
+                  onPress={() => runWithFeedback(() => processText("7"))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "tone1"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "tone1"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="tone-2"
+                  image="2.circle"
+                  imageScale="medium"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "tone-2"}
+                  onPress={() => runWithFeedback(() => processText("8"))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "tone2"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "tone2"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="tone-3"
+                  image="3.circle"
+                  imageScale="medium"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "tone-3"}
+                  onPress={() => runWithFeedback(() => processText("9"))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "tone3"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "tone3"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="tone-4"
+                  image="4.circle"
+                  imageScale="medium"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "tone-4"}
+                  onPress={() => runWithFeedback(() => processText("0"))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "tone4"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "tone4"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="func-backslash"
+                  image="viewfinder"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "func-backslash"}
+                  onPress={() => runWithFeedback(pressBackslashFilter)}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "filter"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "filter"),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="func-right"
+                  image="arrow.right"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "func-right"}
+                  onPress={() => runWithFeedback(() => processKey(KEY_DOWN))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("up", "right"),
+                    )
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runComposingFunctionSwipe("down", "right"),
+                    )
+                  }
+                />
+              </HStack>
+            ) : (
+              <HStack
+                spacing={KEY_SPACING}
+                frame={{
+                  width: metrics.width,
+                  height: metrics.functionKeyHeight,
+                }}
+                contentShape="rect"
+                highPriorityGesture={hitRowGesture(
+                  "func-idle",
+                  idleFunctionHitTargets(),
+                )}
+              >
+                <KeyFace
+                  id="idle-left"
+                  image="arrow.left"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-left"}
+                  onPress={() =>
+                    runWithFeedback(() => CustomKeyboard.moveCursor(-1))
+                  }
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "left"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "left"))
+                  }
+                />
+                <KeyFace
+                  id="idle-head"
+                  image="text.line.first.and.arrowtriangle.forward"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-head"}
+                  onPress={() =>
+                    runWithFeedback(() =>
+                      CustomKeyboard.moveCursor(
+                        -(CustomKeyboard.textBeforeCursor?.length ?? 0),
+                      ),
+                    )
+                  }
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "head"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "head"))
+                  }
+                />
+                <KeyFace
+                  id="idle-schema"
+                  image="list.bullet.rectangle"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-schema"}
+                  onPress={() => runWithFeedback(openRimeSchemaMenu)}
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "select"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() =>
+                      runIdleFunctionSwipe("down", "select"),
+                    )
+                  }
+                  contextMenu={
+                    schemaMenu != null ? { menuItems: schemaMenu } : undefined
+                  }
+                />
+                <KeyFace
+                  id="idle-cut"
+                  image="scissors"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-cut"}
+                  onPress={() => runWithFeedback(() => void cutSelectedText())}
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "cut"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "cut"))
+                  }
+                />
+                <KeyFace
+                  id="idle-copy"
+                  image="doc.on.doc"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-copy"}
+                  onPress={() => runWithFeedback(() => void copySelectedText())}
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "copy"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "copy"))
+                  }
+                />
+                <KeyFace
+                  id="idle-paste"
+                  image="doc.on.clipboard"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-paste"}
+                  onPress={() => runWithFeedback(() => void pasteText())}
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "paste"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "paste"))
+                  }
+                />
+                <KeyFace
+                  id="idle-tail"
+                  image="text.line.last.and.arrowtriangle.forward"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-tail"}
+                  onPress={() =>
+                    runWithFeedback(() =>
+                      CustomKeyboard.moveCursor(
+                        CustomKeyboard.textAfterCursor?.length ?? 0,
+                      ),
+                    )
+                  }
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "tail"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "tail"))
+                  }
+                />
+                <KeyFace
+                  id="idle-right"
+                  image="arrow.right"
+                  palette={palette}
+                  width={metrics.functionWidth8}
+                  height={metrics.functionKeyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "idle-right"}
+                  onPress={() =>
+                    runWithFeedback(() => CustomKeyboard.moveCursor(1))
+                  }
+                  onSwipeUp={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("up", "right"))
+                  }
+                  onSwipeDown={() =>
+                    runWithFeedback(() => runIdleFunctionSwipe("down", "right"))
+                  }
+                />
+              </HStack>
+            )
+          ) : null}
 
-            {symbolLayer
-              ? (
-                <HStack
-                  spacing={KEY_SPACING}
-                  frame={{ width: metrics.width, height: numericPanelHeight }}
+          {symbolLayer ? (
+            <HStack
+              spacing={KEY_SPACING}
+              frame={{ width: metrics.width, height: numericPanelHeight }}
+            >
+              <VStack
+                frame={{
+                  width: numericLeftWidth,
+                  height: numericPanelHeight,
+                }}
+                background={palette.keyBg as any}
+                foregroundStyle={palette.primary as any}
+                clipShape={{ type: "rect", cornerRadius: 8 }}
+                shadow={{
+                  color: palette.shadow as any,
+                  radius: 1,
+                  y: 1,
+                }}
+              >
+                <ScrollView
+                  axes="vertical"
+                  scrollIndicator="hidden"
+                  frame={{
+                    width: numericLeftWidth,
+                    height: numericPanelHeight,
+                  }}
                 >
                   <VStack
+                    spacing={0}
                     frame={{
                       width: numericLeftWidth,
-                      height: numericPanelHeight,
-                    }}
-                    background={palette.keyBg as any}
-                    foregroundStyle={palette.primary as any}
-                    clipShape={{ type: "rect", cornerRadius: 8 }}
-                    shadow={{
-                      color: palette.shadow as any,
-                      radius: 1,
-                      y: 1,
+                      alignment: "top" as any,
                     }}
                   >
-                    <ScrollView
-                      axes="vertical"
-                      scrollIndicator="hidden"
-                      frame={{
-                        width: numericLeftWidth,
-                        height: numericPanelHeight,
-                      }}
-                    >
-                      <VStack
-                        spacing={0}
+                    {NUMERIC_SYMBOLS.map((item) => (
+                      <Text
+                        key={`numeric-symbol-${item.label}`}
+                        font={18}
                         frame={{
                           width: numericLeftWidth,
-                          alignment: "top" as any,
+                          height: numericPanelHeight / 5,
+                          alignment: "center" as any,
                         }}
+                        contentShape="rect"
+                        onTapGesture={() =>
+                          runWithFeedback(() => pressSymbol(item.value))
+                        }
                       >
-                        {NUMERIC_SYMBOLS.map((item) => (
-                          <Text
-                            key={`numeric-symbol-${item.label}`}
-                            font={18}
-                            frame={{
-                              width: numericLeftWidth,
-                              height: numericPanelHeight / 5,
-                              alignment: "center" as any,
-                            }}
-                            contentShape="rect"
-                            onTapGesture={() =>
-                              runWithFeedback(() => pressSymbol(item.value))}
-                          >
-                            {item.label}
-                          </Text>
-                        ))}
-                      </VStack>
-                    </ScrollView>
+                        {item.label}
+                      </Text>
+                    ))}
                   </VStack>
+                </ScrollView>
+              </VStack>
 
-                  <VStack
-                    spacing={numericRowSpacing}
-                    frame={{
-                      width: numericCenterWidth,
-                      height: numericPanelHeight,
-                    }}
-                  >
-                    {[["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]].map((
-                      row,
-                      rowIndex,
-                    ) => {
-                      const hitTargets = numericRowHitTargets(row);
-                      return (
-                        <HStack
-                          key={`numeric-row-${rowIndex}`}
-                          spacing={KEY_SPACING}
-                          frame={{
-                            width: numericCenterWidth,
-                            height: metrics.keyHeight,
-                          }}
-                          contentShape="rect"
-                          highPriorityGesture={hitRowGesture(
-                            `num-row-${rowIndex}`,
-                            hitTargets,
-                          )}
-                        >
-                          {row.map((value) => (
-                            <KeyFace
-                              key={`numeric-${value}`}
-                              id={`numeric-${value}`}
-                              label={value}
-                              palette={palette}
-                              width={numericKeyWidth}
-                              height={metrics.keyHeight}
-                              labelFontSize={24}
-                              passive
-                              active={pressedKeyId === `numeric-${value}`}
-                              onPress={() =>
-                                runWithFeedback(() => pressNumericDigit(value))}
-                            />
-                          ))}
-                        </HStack>
-                      );
-                    })}
+              <VStack
+                spacing={numericRowSpacing}
+                frame={{
+                  width: numericCenterWidth,
+                  height: numericPanelHeight,
+                }}
+              >
+                {[
+                  ["1", "2", "3"],
+                  ["4", "5", "6"],
+                  ["7", "8", "9"],
+                ].map((row, rowIndex) => {
+                  const hitTargets = numericRowHitTargets(row);
+                  return (
                     <HStack
+                      key={`numeric-row-${rowIndex}`}
                       spacing={KEY_SPACING}
                       frame={{
                         width: numericCenterWidth,
@@ -2029,221 +2019,271 @@ export function KeyboardView() {
                       }}
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
-                        "num-row-zero",
-                        numericRowHitTargets(["ABC", "0", "space"]),
+                        `num-row-${rowIndex}`,
+                        hitTargets,
                       )}
                     >
-                      <KeyFace
-                        id="numeric-abc"
-                        label="ABC"
-                        palette={palette}
-                        width={numericKeyWidth}
-                        height={metrics.keyHeight}
-                        system
-                        labelFontSize={16}
-                        passive
-                        active={pressedKeyId === "numeric-abc"}
-                        onPress={() =>
-                          runWithFeedback(() => setSymbolLayer(false))}
-                      />
-                      <KeyFace
-                        id="numeric-0"
-                        label="0"
-                        palette={palette}
-                        width={numericKeyWidth}
-                        height={metrics.keyHeight}
-                        labelFontSize={24}
-                        passive
-                        active={pressedKeyId === "numeric-0"}
-                        onPress={() =>
-                          runWithFeedback(() => pressNumericDigit("0"))}
-                      />
-                      <KeyFace
-                        id="numeric-space"
-                        image="space"
-                        palette={palette}
-                        width={numericKeyWidth}
-                        height={metrics.keyHeight}
-                        system
-                        passive
-                        active={pressedKeyId === "numeric-space"}
-                        onPress={() => runWithFeedback(pressSpace)}
-                      />
+                      {row.map((value) => (
+                        <KeyFace
+                          key={`numeric-${value}`}
+                          id={`numeric-${value}`}
+                          label={value}
+                          palette={palette}
+                          width={numericKeyWidth}
+                          height={metrics.keyHeight}
+                          labelFontSize={24}
+                          passive
+                          active={pressedKeyId === `numeric-${value}`}
+                          onPress={() =>
+                            runWithFeedback(() => pressNumericDigit(value))
+                          }
+                        />
+                      ))}
                     </HStack>
-                  </VStack>
+                  );
+                })}
+                <HStack
+                  spacing={KEY_SPACING}
+                  frame={{
+                    width: numericCenterWidth,
+                    height: metrics.keyHeight,
+                  }}
+                  contentShape="rect"
+                  highPriorityGesture={hitRowGesture(
+                    "num-row-zero",
+                    numericRowHitTargets(["ABC", "0", "space"]),
+                  )}
+                >
+                  <KeyFace
+                    id="numeric-abc"
+                    label="ABC"
+                    palette={palette}
+                    width={numericKeyWidth}
+                    height={metrics.keyHeight}
+                    system
+                    labelFontSize={16}
+                    passive
+                    active={pressedKeyId === "numeric-abc"}
+                    onPress={() => runWithFeedback(() => setSymbolLayer(false))}
+                  />
+                  <KeyFace
+                    id="numeric-0"
+                    label="0"
+                    palette={palette}
+                    width={numericKeyWidth}
+                    height={metrics.keyHeight}
+                    labelFontSize={24}
+                    passive
+                    active={pressedKeyId === "numeric-0"}
+                    onPress={() =>
+                      runWithFeedback(() => pressNumericDigit("0"))
+                    }
+                  />
+                  <KeyFace
+                    id="numeric-space"
+                    image="space"
+                    palette={palette}
+                    width={numericKeyWidth}
+                    height={metrics.keyHeight}
+                    system
+                    passive
+                    active={pressedKeyId === "numeric-space"}
+                    onPress={() => runWithFeedback(pressSpace)}
+                  />
+                </HStack>
+              </VStack>
 
-                  <VStack
-                    spacing={numericRowSpacing}
-                    frame={{
-                      width: numericRightWidth,
-                      height: numericPanelHeight,
-                    }}
-                    contentShape="rect"
-                    highPriorityGesture={hitRowGesture(
-                      "num-row-right",
-                      numericRightHitTargets(),
-                    )}
-                  >
+              <VStack
+                spacing={numericRowSpacing}
+                frame={{
+                  width: numericRightWidth,
+                  height: numericPanelHeight,
+                }}
+                contentShape="rect"
+                highPriorityGesture={hitRowGesture(
+                  "num-row-right",
+                  numericRightHitTargets(),
+                )}
+              >
+                <KeyFace
+                  id="numeric-backspace"
+                  image="delete.left"
+                  palette={palette}
+                  width={numericRightWidth}
+                  height={metrics.keyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "numeric-backspace"}
+                  onPress={() => runWithFeedback(pressBackspace)}
+                  onSwipeLeft={() => runWithFeedback(clearComposition)}
+                  onSwipeUp={() => runWithFeedback(deleteAllText)}
+                  onSwipeDown={() => runWithFeedback(restoreDeletedText)}
+                />
+                <KeyFace
+                  id="numeric-dot"
+                  label="."
+                  palette={palette}
+                  width={numericRightWidth}
+                  height={metrics.keyHeight}
+                  passive
+                  active={pressedKeyId === "numeric-dot"}
+                  onPress={() => runWithFeedback(pressNumericDot)}
+                />
+                <KeyFace
+                  id="numeric-equal"
+                  label="="
+                  palette={palette}
+                  width={numericRightWidth}
+                  height={metrics.keyHeight}
+                  passive
+                  active={pressedKeyId === "numeric-equal"}
+                  onPress={() => runWithFeedback(() => pressSymbol("="))}
+                  onSwipeUp={() =>
+                    runWithFeedback(() =>
+                      runConfiguredAction(
+                        settings.numericEqualsSwipeUp,
+                        "rime",
+                      ),
+                    )
+                  }
+                />
+                <KeyFace
+                  id="numeric-enter"
+                  image="paperplane.fill"
+                  palette={palette}
+                  width={numericRightWidth}
+                  height={metrics.keyHeight}
+                  system
+                  passive
+                  active={pressedKeyId === "numeric-enter"}
+                  onPress={() => runWithFeedback(pressReturn)}
+                  onSwipeUp={() => runWithFeedback(insertNewline)}
+                />
+              </VStack>
+            </HStack>
+          ) : (
+            LETTER_ROWS.map((row, rowIndex) => {
+              const hitTargets = letterRowHitTargets(row, rowIndex);
+              return (
+                <HStack
+                  key={`row-${rowIndex}`}
+                  spacing={KEY_SPACING}
+                  frame={{ width: metrics.width, height: metrics.keyHeight }}
+                  contentShape="rect"
+                  highPriorityGesture={hitRowGesture(
+                    `main-row-${rowIndex}`,
+                    hitTargets,
+                  )}
+                >
+                  {rowIndex === 1 ? (
+                    <VStack frame={{ width: metrics.secondRowInset }} />
+                  ) : null}
+                  {rowIndex === 2 ? (
                     <KeyFace
-                      id="numeric-backspace"
-                      image="delete.left"
+                      id="shift"
+                      image={
+                        composing && settings.shiftComposingEnabled
+                          ? settings.shiftComposingIcon
+                          : capsLocked
+                            ? "capslock.fill"
+                            : shifted
+                              ? "shift.fill"
+                              : "shift"
+                      }
                       palette={palette}
-                      width={numericRightWidth}
+                      width={metrics.shiftWidth}
                       height={metrics.keyHeight}
                       system
                       passive
-                      active={pressedKeyId === "numeric-backspace"}
+                      selected={shifted || capsLocked}
+                      active={pressedKeyId === "shift"}
+                      onPress={() => runWithFeedback(pressShift)}
+                      onSwipeUp={() => runWithFeedback(shiftSwipeUp)}
+                    />
+                  ) : null}
+                  {row.map((ch) => (
+                    <KeyFace
+                      key={ch}
+                      id={ch}
+                      label={
+                        backslashWrapMode
+                          ? BACKSLASH_SYMBOLS[ch]
+                          : shifted || capsLocked
+                            ? ch.toUpperCase()
+                            : ch
+                      }
+                      labelFontSize={
+                        backslashWrapMode
+                          ? BACKSLASH_SYMBOLS[ch].length > 2
+                            ? 16
+                            : 22
+                          : shifted || capsLocked
+                            ? 24
+                            : 27
+                      }
+                      topLeft={
+                        !backslashWrapMode &&
+                        settings.showHintSymbols &&
+                        !settings.letterSwipeUpSymbols[ch]
+                          ? settings.letterSwipeUp[ch]
+                          : undefined
+                      }
+                      topLeftImage={
+                        !backslashWrapMode && settings.showHintSymbols
+                          ? settings.letterSwipeUpSymbols[ch] || undefined
+                          : undefined
+                      }
+                      topRight={
+                        !backslashWrapMode &&
+                        settings.showHintSymbols &&
+                        !settings.letterSwipeDownSymbols[ch]
+                          ? settings.letterSwipeDown[ch]
+                          : undefined
+                      }
+                      topRightImage={
+                        !backslashWrapMode && settings.showHintSymbols
+                          ? settings.letterSwipeDownSymbols[ch] || undefined
+                          : undefined
+                      }
+                      palette={palette}
+                      width={metrics.letterWidth}
+                      height={metrics.keyHeight}
+                      passive
+                      active={pressedKeyId === ch}
+                      onPress={() => runWithFeedback(() => pressLetter(ch))}
+                      onSwipeUp={() =>
+                        runWithFeedback(() => runLetterSwipe("up", ch))
+                      }
+                      onSwipeDown={() =>
+                        runWithFeedback(() => runLetterSwipe("down", ch))
+                      }
+                    />
+                  ))}
+                  {rowIndex === 2 ? (
+                    <KeyFace
+                      id="backspace"
+                      image="delete.left"
+                      palette={palette}
+                      width={metrics.shiftWidth}
+                      height={metrics.keyHeight}
+                      system
+                      passive
+                      active={pressedKeyId === "backspace"}
                       onPress={() => runWithFeedback(pressBackspace)}
                       onSwipeLeft={() => runWithFeedback(clearComposition)}
                       onSwipeUp={() => runWithFeedback(deleteAllText)}
                       onSwipeDown={() => runWithFeedback(restoreDeletedText)}
                     />
-                    <KeyFace
-                      id="numeric-dot"
-                      label="."
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      passive
-                      active={pressedKeyId === "numeric-dot"}
-                      onPress={() => runWithFeedback(pressNumericDot)}
-                    />
-                    <KeyFace
-                      id="numeric-equal"
-                      label="="
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      passive
-                      active={pressedKeyId === "numeric-equal"}
-                      onPress={() => runWithFeedback(() => pressSymbol("="))}
-                      onSwipeUp={() =>
-                        runWithFeedback(() =>
-                          runConfiguredAction(
-                            settings.numericEqualsSwipeUp,
-                            "rime",
-                          )
-                        )}
-                    />
-                    <KeyFace
-                      id="numeric-enter"
-                      image="paperplane.fill"
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      system
-                      passive
-                      active={pressedKeyId === "numeric-enter"}
-                      onPress={() => runWithFeedback(pressReturn)}
-                      onSwipeUp={() => runWithFeedback(insertNewline)}
-                    />
-                  </VStack>
+                  ) : null}
+                  {rowIndex === 1 ? (
+                    <VStack frame={{ width: metrics.secondRowInset }} />
+                  ) : null}
                 </HStack>
-              )
-              : LETTER_ROWS.map((row, rowIndex) => {
-                const hitTargets = letterRowHitTargets(row, rowIndex);
-                return (
-                  <HStack
-                    key={`row-${rowIndex}`}
-                    spacing={KEY_SPACING}
-                    frame={{ width: metrics.width, height: metrics.keyHeight }}
-                    contentShape="rect"
-                    highPriorityGesture={hitRowGesture(
-                      `main-row-${rowIndex}`,
-                      hitTargets,
-                    )}
-                  >
-                    {rowIndex === 1
-                      ? <VStack frame={{ width: metrics.secondRowInset }} />
-                      : null}
-                    {rowIndex === 2
-                      ? (
-                        <KeyFace
-                          id="shift"
-                          image={composing && settings.shiftComposingEnabled
-                            ? settings.shiftComposingIcon
-                            : (capsLocked
-                              ? "capslock.fill"
-                              : (shifted ? "shift.fill" : "shift"))}
-                          palette={palette}
-                          width={metrics.shiftWidth}
-                          height={metrics.keyHeight}
-                          system
-                          passive
-                          selected={shifted || capsLocked}
-                          active={pressedKeyId === "shift"}
-                          onPress={() => runWithFeedback(pressShift)}
-                          onSwipeUp={() => runWithFeedback(shiftSwipeUp)}
-                        />
-                      )
-                      : null}
-                    {row.map((ch) => (
-                      <KeyFace
-                        key={ch}
-                        id={ch}
-                        label={backslashWrapMode
-                          ? BACKSLASH_SYMBOLS[ch]
-                          : (shifted || capsLocked ? ch.toUpperCase() : ch)}
-                        labelFontSize={backslashWrapMode
-                          ? (BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22)
-                          : (shifted || capsLocked ? 24 : 27)}
-                        topLeft={!backslashWrapMode &&
-                            settings.showHintSymbols &&
-                            !settings.letterSwipeUpSymbols[ch]
-                          ? settings.letterSwipeUp[ch]
-                          : undefined}
-                        topLeftImage={!backslashWrapMode &&
-                            settings.showHintSymbols
-                          ? settings.letterSwipeUpSymbols[ch] || undefined
-                          : undefined}
-                        topRight={!backslashWrapMode &&
-                            settings.showHintSymbols &&
-                            !settings.letterSwipeDownSymbols[ch]
-                          ? settings.letterSwipeDown[ch]
-                          : undefined}
-                        topRightImage={!backslashWrapMode &&
-                            settings.showHintSymbols
-                          ? settings.letterSwipeDownSymbols[ch] || undefined
-                          : undefined}
-                        palette={palette}
-                        width={metrics.letterWidth}
-                        height={metrics.keyHeight}
-                        passive
-                        active={pressedKeyId === ch}
-                        onPress={() => runWithFeedback(() => pressLetter(ch))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() => runLetterSwipe("up", ch))}
-                        onSwipeDown={() =>
-                          runWithFeedback(() => runLetterSwipe("down", ch))}
-                      />
-                    ))}
-                    {rowIndex === 2
-                      ? (
-                        <KeyFace
-                          id="backspace"
-                          image="delete.left"
-                          palette={palette}
-                          width={metrics.shiftWidth}
-                          height={metrics.keyHeight}
-                          system
-                          passive
-                          active={pressedKeyId === "backspace"}
-                          onPress={() => runWithFeedback(pressBackspace)}
-                          onSwipeLeft={() => runWithFeedback(clearComposition)}
-                          onSwipeUp={() => runWithFeedback(deleteAllText)}
-                          onSwipeDown={() =>
-                            runWithFeedback(restoreDeletedText)}
-                        />
-                      )
-                      : null}
-                    {rowIndex === 1
-                      ? <VStack frame={{ width: metrics.secondRowInset }} />
-                      : null}
-                  </HStack>
-                );
-              })}
-          </Group>
-        )}
+              );
+            })
+          )}
+        </Group>
+      )}
 
       {candidateExpanded || symbolLayer ? null : (
         <HStack
@@ -2266,7 +2306,8 @@ export function KeyboardView() {
             passive
             active={pressedKeyId === "numbers"}
             onPress={() =>
-              runWithFeedback(() => setSymbolLayer((value) => !value))}
+              runWithFeedback(() => setSymbolLayer((value) => !value))
+            }
             onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
           />
           <KeyFace
@@ -2285,12 +2326,16 @@ export function KeyboardView() {
           <KeyFace
             id="space"
             image="space"
-            bottomRight={settings.showWanxiangLabel
-              ? settings.spaceLabel
-              : undefined}
-            bottomRightFontSize={settings.spaceLabel.length > 4
-              ? 8
-              : (settings.spaceLabel.length > 2 ? 10 : 12)}
+            bottomRight={
+              settings.showWanxiangLabel ? settings.spaceLabel : undefined
+            }
+            bottomRightFontSize={
+              settings.spaceLabel.length > 4
+                ? 8
+                : settings.spaceLabel.length > 2
+                  ? 10
+                  : 12
+            }
             palette={palette}
             width={metrics.bottom.space}
             height={metrics.keyHeight}
@@ -2299,25 +2344,31 @@ export function KeyboardView() {
             active={pressedKeyId === "space"}
             onPress={() => runWithFeedback(pressSpace)}
             onSwipeUp={() =>
-              runWithFeedback(() => processSpaceSwipeCandidate("2"))}
+              runWithFeedback(() => processSpaceSwipeCandidate("2"))
+            }
             onSwipeDown={() =>
-              runWithFeedback(() => processSpaceSwipeCandidate("3"))}
+              runWithFeedback(() => processSpaceSwipeCandidate("3"))
+            }
             onSwipeLeft={() =>
-              runWithFeedback(() => CustomKeyboard.moveCursor(-1))}
+              runWithFeedback(() => CustomKeyboard.moveCursor(-1))
+            }
             onSwipeRight={() =>
-              runWithFeedback(() => CustomKeyboard.moveCursor(1))}
+              runWithFeedback(() => CustomKeyboard.moveCursor(1))
+            }
           />
           <KeyFace
             id="mode"
-            image={composing && settings.modeComposingEnabled
-              ? settings.modeComposingIcon
-              : undefined}
-            modeTopLeft={composing && settings.modeComposingEnabled
-              ? undefined
-              : "中"}
-            modeBottomRight={composing && settings.modeComposingEnabled
-              ? undefined
-              : "英"}
+            image={
+              composing && settings.modeComposingEnabled
+                ? settings.modeComposingIcon
+                : undefined
+            }
+            modeTopLeft={
+              composing && settings.modeComposingEnabled ? undefined : "中"
+            }
+            modeBottomRight={
+              composing && settings.modeComposingEnabled ? undefined : "英"
+            }
             modeTopLeftActive={!ascii}
             palette={palette}
             width={metrics.bottom.mode}
@@ -2336,7 +2387,8 @@ export function KeyboardView() {
                 } else {
                   toggleAscii();
                 }
-              })}
+              })
+            }
             onSwipeUp={() =>
               runWithFeedback(() => {
                 if (composing && settings.modeComposingEnabled) {
@@ -2345,7 +2397,8 @@ export function KeyboardView() {
                     settings.modeComposingSwipeUpMode,
                   );
                 }
-              })}
+              })
+            }
             onSwipeDown={() =>
               runWithFeedback(() => {
                 if (composing && settings.modeComposingEnabled) {
@@ -2354,11 +2407,12 @@ export function KeyboardView() {
                     settings.modeComposingSwipeDownMode,
                   );
                 }
-              })}
+              })
+            }
             onLongPress={() => runWithFeedback(commitComposition)}
-            contextMenu={schemaMenu != null
-              ? { menuItems: schemaMenu }
-              : undefined}
+            contextMenu={
+              schemaMenu != null ? { menuItems: schemaMenu } : undefined
+            }
           />
           <KeyFace
             id="enter"
