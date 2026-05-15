@@ -63,6 +63,7 @@ let globalRepeatingDeleteTimer: any = null;
 let globalRepeatingDeleteToken = 0;
 const SPACE_CURSOR_DRAG_STEP = 12;
 const SPACE_CANDIDATE_DRAG_STEP = 24;
+const DELETE_LONG_PRESS_DURATION = 760;
 
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
@@ -133,6 +134,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
   const rowLongPressTimerRef = useRef(new Map<string, number | null>());
   const rowLongPressCancelledRef = useRef(new Map<string, boolean>());
   const rowLongPressLatestGestureRef = useRef(new Map<string, any>());
+  const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
   const rowGestureTokenRef = useRef(new Map<string, number>());
   const nextGestureTokenRef = useRef(0);
   const spaceCursorDragXRef = useRef<number | null>(null);
@@ -192,6 +194,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
         if (timer != null) clearTimeout(timer);
       }
       rowLongPressTimerRef.current.clear();
+      rowSpaceDragConsumedRef.current.clear();
       for (const timer of pressedReleaseTimersRef.current.values()) {
         clearTimeout(timer);
       }
@@ -341,15 +344,19 @@ function KeyboardContent(props: { availableHeight?: number }) {
     pressedReleaseTimersRef.current.delete(id);
   }
 
-  function schedulePressedRelease(id: string) {
+  function schedulePressedFallbackRelease(id: string, delay: number) {
     clearPressedReleaseTimer(id);
     pressedReleaseTimersRef.current.set(
       id,
       setTimeout(() => {
         pressedReleaseTimersRef.current.delete(id);
         setKeyPressed(id, false);
-      }, 420),
+      }, delay),
     );
+  }
+
+  function schedulePressedRelease(id: string) {
+    schedulePressedFallbackRelease(id, 420);
   }
 
   function setKeyPressed(id: string, pressed: boolean) {
@@ -415,6 +422,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     rowLongPressCancelledRef.current.set(rowId, true);
     rowLongPressHandledRef.current.delete(rowId);
     rowLongPressLatestGestureRef.current.delete(rowId);
+    rowSpaceDragConsumedRef.current.delete(rowId);
     activeHitTargetRef.current.delete(rowId);
     rowGestureTokenRef.current.delete(rowId);
     if (target?.id === "backspace" || target?.id === "numeric-backspace") {
@@ -428,6 +436,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     rowLongPressHandledRef.current.set(rowId, false);
     rowLongPressCancelledRef.current.set(rowId, false);
     rowLongPressLatestGestureRef.current.delete(rowId);
+    rowSpaceDragConsumedRef.current.set(rowId, false);
     spaceCursorDragXRef.current = null;
     if (!target?.onLongPress) return;
     const gestureToken = rowGestureTokenRef.current.get(rowId);
@@ -489,7 +498,8 @@ function KeyboardContent(props: { availableHeight?: number }) {
     ) {
       return;
     }
-    const isSpace = isSpaceCursorKey(activeHitTargetRef.current.get(rowId)?.id);
+    const target = activeHitTargetRef.current.get(rowId);
+    const isSpace = isSpaceCursorKey(target?.id);
     if (
       isSpace ? !isVerticalDragIntent(details) : !isLongPressDragIntent(details)
     ) {
@@ -515,8 +525,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
   function updateSpaceLongPressDrag(details: any) {
     const x = Number(details?.location?.x ?? details?.startLocation?.x ?? 0);
     if (spaceCursorDragXRef.current == null) {
-      spaceCursorDragXRef.current = x;
-      return;
+      spaceCursorDragXRef.current = Number(details?.startLocation?.x ?? x);
     }
     const hasCandidateNavigation = preedit.length > 0 && candidates.length > 0;
     const stepSize = hasCandidateNavigation
@@ -524,7 +533,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
       : SPACE_CURSOR_DRAG_STEP;
     const dx = x - spaceCursorDragXRef.current;
     const steps = Math.trunc(dx / stepSize);
-    if (steps === 0) return;
+    if (steps === 0) return false;
     if (hasCandidateNavigation) {
       moveHighlightedCandidateBySpaceDrag(steps);
     } else {
@@ -532,6 +541,19 @@ function KeyboardContent(props: { availableHeight?: number }) {
       playCursorMoveFeedback();
     }
     spaceCursorDragXRef.current += steps * stepSize;
+    return true;
+  }
+
+  function trackImmediateSpaceDrag(rowId: string, details: any) {
+    const dx = Math.abs(Number(details?.translation?.width ?? 0));
+    const dy = Math.abs(Number(details?.translation?.height ?? 0));
+    if (dx < SPACE_CURSOR_DRAG_STEP || dx < dy) return;
+    if (updateSpaceLongPressDrag(details)) {
+      cancelPendingPressFeedback();
+      clearRowLongPressTimer(rowId);
+      rowLongPressCancelledRef.current.set(rowId, true);
+      rowSpaceDragConsumedRef.current.set(rowId, true);
+    }
   }
 
   function handleHitRowGestureChanged(
@@ -543,13 +565,18 @@ function KeyboardContent(props: { availableHeight?: number }) {
     if (rowLongPressHandledRef.current.get(rowId)) {
       const activeId = activeHitTargetRef.current.get(rowId)?.id;
       if (isSpaceCursorKey(activeId)) {
-        updateSpaceLongPressDrag(details);
+        void updateSpaceLongPressDrag(details);
       } else if (activeId === "backspace" || activeId === "numeric-backspace") {
         backspaceLongPressMove(details);
       }
       return;
     }
-    if (activeHitTargetRef.current.get(rowId)) {
+    const activeTarget = activeHitTargetRef.current.get(rowId);
+    if (activeTarget) {
+      if (isSpaceCursorKey(activeTarget.id)) {
+        trackImmediateSpaceDrag(rowId, details);
+        if (rowSpaceDragConsumedRef.current.get(rowId)) return;
+      }
       cancelRowLongPressIfDragging(rowId, details);
       return;
     }
@@ -582,6 +609,13 @@ function KeyboardContent(props: { availableHeight?: number }) {
       rowLongPressHandledRef.current.delete(rowId);
       spaceCursorDragXRef.current = null;
       target.onLongPressEnd?.();
+      cancelRowGesture(rowId);
+      return;
+    }
+    if (
+      isSpaceCursorKey(target.id) && rowSpaceDragConsumedRef.current.get(rowId)
+    ) {
+      cancelPendingPressFeedback();
       cancelRowGesture(rowId);
       return;
     }
@@ -890,6 +924,11 @@ function KeyboardContent(props: { availableHeight?: number }) {
       return;
     }
     selectCandidateOnPage(numberKey === "2" ? 1 : 2);
+  }
+
+  function canSpaceSwipeCandidate(numberKey: "2" | "3") {
+    const index = numberKey === "2" ? 1 : 2;
+    return preedit.length > 0 && candidates.length > index;
   }
 
   function pressNumericDigit(value: string) {
@@ -1355,8 +1394,12 @@ function KeyboardContent(props: { availableHeight?: number }) {
       onLongPressEnd: () => {
         spaceCursorDragXRef.current = null;
       },
-      onSwipeUp: () => processSpaceSwipeCandidate("2"),
-      onSwipeDown: () => processSpaceSwipeCandidate("3"),
+      onSwipeUp: canSpaceSwipeCandidate("2")
+        ? () => processSpaceSwipeCandidate("2")
+        : undefined,
+      onSwipeDown: canSpaceSwipeCandidate("3")
+        ? () => processSpaceSwipeCandidate("3")
+        : undefined,
       onSwipeLeft: () => CustomKeyboard.moveCursor(-1),
       onSwipeRight: () => CustomKeyboard.moveCursor(1),
     });
@@ -1428,10 +1471,10 @@ function KeyboardContent(props: { availableHeight?: number }) {
           spaceCursorDragXRef.current = null;
         }
         : undefined,
-      onSwipeUp: value === "space"
+      onSwipeUp: value === "space" && canSpaceSwipeCandidate("2")
         ? () => processSpaceSwipeCandidate("2")
         : undefined,
-      onSwipeDown: value === "space"
+      onSwipeDown: value === "space" && canSpaceSwipeCandidate("3")
         ? () => processSpaceSwipeCandidate("3")
         : undefined,
       onSwipeLeft: value === "space"
@@ -1454,6 +1497,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
         onPress: pressBackspace,
         onLongPress: startRepeatingBackspace,
         onLongPressEnd: stopRepeatingBackspace,
+        longPressDuration: DELETE_LONG_PRESS_DURATION,
         onSwipeLeft: backspaceSwipeLeft,
         onSwipeUp: backspaceSwipeUp,
         onSwipeDown: backspaceSwipeDown,
@@ -2413,6 +2457,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             onLongPress={startRepeatingBackspace}
                             onLongPressEnd={stopRepeatingBackspace}
                             onLongPressMove={backspaceLongPressMove}
+                            longPressDuration={DELETE_LONG_PRESS_DURATION}
                             onSwipeLeft={backspaceSwipeLeft}
                             onSwipeUp={backspaceSwipeUp}
                             onSwipeDown={backspaceSwipeDown}

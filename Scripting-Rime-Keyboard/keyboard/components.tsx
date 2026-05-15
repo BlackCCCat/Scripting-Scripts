@@ -85,6 +85,7 @@ export function KeyFace(props: {
   const longPressHandledRef = useRef(false);
   const longPressCancelledRef = useRef(false);
   const longPressTimerRef = useRef<any>(null);
+  const latestGestureRef = useRef<any>(null);
   const usesEnterColor = props.id === "enter" || props.id === "numeric-enter";
   const baseBg = props.palette.keyOverrides[props.id] ??
     (props.accent || usesEnterColor
@@ -131,6 +132,7 @@ export function KeyFace(props: {
 
   function resetGesture() {
     clearLongPressTimer();
+    latestGestureRef.current = null;
     gestureStartedRef.current = false;
     longPressHandledRef.current = false;
     longPressCancelledRef.current = false;
@@ -145,6 +147,10 @@ export function KeyFace(props: {
     if (!props.onLongPress) return;
     longPressTimerRef.current = setTimeout(() => {
       if (!gestureStartedRef.current || longPressCancelledRef.current) return;
+      if (latestGestureRef.current && dragIntent(latestGestureRef.current)) {
+        longPressCancelledRef.current = true;
+        return;
+      }
       longPressHandledRef.current = true;
       props.onLongPress?.();
     }, props.longPressDuration ?? 360);
@@ -154,6 +160,7 @@ export function KeyFace(props: {
     ? {
       gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
         .onChanged((details: any) => {
+          latestGestureRef.current = details;
           startGesture();
           if (longPressHandledRef.current) {
             props.onLongPressMove?.(details);
@@ -165,6 +172,7 @@ export function KeyFace(props: {
           }
         })
         .onEnded((details: any) => {
+          latestGestureRef.current = details;
           const wasLongPress = longPressHandledRef.current;
           clearLongPressTimer();
           if (wasLongPress) {
