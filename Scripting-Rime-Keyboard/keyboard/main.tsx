@@ -1006,7 +1006,11 @@ function KeyboardContent(props: { availableHeight?: number }) {
     CustomKeyboard.insertText(deletedTextRef.current);
   }
 
-  function runConfiguredAction(action: string, mode: ActionSendMode = "auto") {
+  function runConfiguredAction(
+    action: string,
+    mode: ActionSendMode = "auto",
+    options: { allowBackslashWrap?: boolean } = {},
+  ) {
     if (!action) return;
     if (mode === "direct") {
       insertConfiguredText(action);
@@ -1015,9 +1019,10 @@ function KeyboardContent(props: { availableHeight?: number }) {
     if (mode === "rime") {
       processText(action);
       if (
-        action === "{backslash}" ||
-        action === "backslash" ||
-        action === "\\"
+        options.allowBackslashWrap &&
+        (action === "{backslash}" ||
+          action === "backslash" ||
+          action === "\\")
       ) {
         setBackslashWrapMode(true);
       }
@@ -1077,11 +1082,14 @@ function KeyboardContent(props: { availableHeight?: number }) {
         commitComposition();
         return;
       case "{backslashWrap}":
+        processText("\\");
+        setBackslashWrapMode(true);
+        return;
       case "{backslash}":
       case "backslash":
       case "\\":
         processText("\\");
-        setBackslashWrapMode(true);
+        if (options.allowBackslashWrap) setBackslashWrapMode(true);
         return;
       default:
         if (processRimeKeySpec(action)) return;
@@ -1120,7 +1128,9 @@ function KeyboardContent(props: { availableHeight?: number }) {
     const modes = direction === "up"
       ? settings.composingFunctionSwipeUpModes
       : settings.composingFunctionSwipeDownModes;
-    runConfiguredAction(actions[key], modes[key]);
+    runConfiguredAction(actions[key], modes[key], {
+      allowBackslashWrap: key === "filter",
+    });
   }
 
   function pressBackslashFilter() {
@@ -2385,9 +2395,9 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             system
                             selected={shifted || capsLocked}
                             active={isPressed("shift")}
+                            onPress={pressShift}
                             onTouchStart={() => beginKeyTouch("shift")}
                             onTouchEnd={() => endKeyTouch("shift")}
-                            onPress={pressShift}
                             onSwipeUp={shiftSwipeUp}
                             onSwipeStart={cancelPendingPressFeedback}
                             swipeTriggerDistance={currentSwipeTriggerDistance}
@@ -2430,9 +2440,9 @@ function KeyboardContent(props: { availableHeight?: number }) {
                           width={metrics.letterWidth}
                           height={metrics.keyHeight}
                           active={isPressed(ch)}
+                          onPress={() => pressLetter(ch)}
                           onTouchStart={() => beginKeyTouch(ch)}
                           onTouchEnd={() => endKeyTouch(ch)}
-                          onPress={() => pressLetter(ch)}
                           onLongPress={() => pressUppercaseLetter(ch)}
                           longPressDuration={settings.letterLongPressDuration}
                           onSwipeUp={() => runLetterSwipe("up", ch)}
@@ -2451,9 +2461,9 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             height={metrics.keyHeight}
                             system
                             active={isPressed("backspace")}
+                            onPress={pressBackspace}
                             onTouchStart={() => beginKeyTouch("backspace")}
                             onTouchEnd={() => endKeyTouch("backspace")}
-                            onPress={pressBackspace}
                             onLongPress={startRepeatingBackspace}
                             onLongPressEnd={stopRepeatingBackspace}
                             onLongPressMove={backspaceLongPressMove}

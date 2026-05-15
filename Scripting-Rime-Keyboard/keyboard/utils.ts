@@ -100,7 +100,7 @@ export function nearestHitTarget(
       : (y < target.y
         ? target.y - y
         : (y > target.y + target.height ? y - target.y - target.height : 0));
-    const distance = Math.hypot(dx, dy);
+    const distance = dx * dx + dy * dy;
     if (
       distance < bestDistance ||
       (distance === bestDistance && target.width > (best?.width ?? 0))
