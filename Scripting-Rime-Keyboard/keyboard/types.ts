@@ -6,6 +6,7 @@ export type KeyboardMetrics = {
   functionWidth8: number;
   keyHeight: number;
   functionKeyHeight: number;
+  preeditRowHeight: number;
   candidateBarHeight: number;
   candidateButtonHeight: number;
   candidateFontSize: number;

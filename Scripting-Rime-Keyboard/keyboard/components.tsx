@@ -94,6 +94,17 @@ export function KeyFace(props: {
       ? props.palette.accentText
       : (props.selected ? props.palette.accent : props.palette.primary));
   const width = props.width ?? 32;
+  const hintPadding = width < 34 ? 5 : 7;
+  const hintSlotWidth = Math.max(8, (width - hintPadding * 2) / 2);
+  const hintFontSize = Math.max(7, Math.min(10, width * 0.3));
+  const modeFontSize = Math.max(
+    11,
+    Math.min(16, (props.height ?? BASE_KEY_HEIGHT) * 0.32),
+  );
+  const modeInset = Math.max(
+    4,
+    Math.min(9, (props.height ?? BASE_KEY_HEIGHT) * 0.13),
+  );
   const hasSwipe = !!(
     props.onSwipeUp || props.onSwipeDown || props.onSwipeLeft ||
     props.onSwipeRight
@@ -215,7 +226,7 @@ export function KeyFace(props: {
         ? (
           <Group>
             <Text
-              font={16}
+              font={modeFontSize}
               fontWeight="regular"
               foregroundStyle={(props.modeTopLeftActive
                 ? fg
@@ -225,12 +236,12 @@ export function KeyFace(props: {
                 maxHeight: "infinity" as any,
                 alignment: "topLeading" as any,
               }}
-              padding={{ leading: 9, top: 7 }}
+              padding={{ leading: modeInset, top: modeInset }}
             >
               {props.modeTopLeft ?? ""}
             </Text>
             <Text
-              font={16}
+              font={modeFontSize}
               fontWeight="regular"
               foregroundStyle={(props.modeTopLeftActive
                 ? props.palette.hint
@@ -240,7 +251,7 @@ export function KeyFace(props: {
                 maxHeight: "infinity" as any,
                 alignment: "bottomTrailing" as any,
               }}
-              padding={{ trailing: 9, bottom: 7 }}
+              padding={{ trailing: modeInset, bottom: modeInset }}
             >
               {props.modeBottomRight ?? ""}
             </Text>
@@ -256,22 +267,33 @@ export function KeyFace(props: {
               maxHeight: "infinity" as any,
               alignment: "top" as any,
             }}
-            padding={{ horizontal: 7, top: 4 }}
+            padding={{ horizontal: hintPadding, top: 4 }}
           >
             {props.topLeftImage
               ? (
                 <Image
                   systemName={props.topLeftImage}
                   imageScale="small"
-                  font={8}
-                  frame={{ width: 9, height: 9 }}
+                  font={hintFontSize}
+                  frame={{
+                    width: hintSlotWidth,
+                    height: 10,
+                    alignment: "leading" as any,
+                  }}
                   foregroundStyle={props.palette.hint as any}
                 />
               )
               : (
                 <Text
-                  font="caption2"
+                  font={hintFontSize}
                   foregroundStyle={props.palette.hint as any}
+                  lineLimit={1}
+                  minScaleFactor={0.45}
+                  allowsTightening
+                  frame={{
+                    width: hintSlotWidth,
+                    alignment: "leading" as any,
+                  }}
                 >
                   {props.topLeft ?? ""}
                 </Text>
@@ -282,15 +304,26 @@ export function KeyFace(props: {
                 <Image
                   systemName={props.topRightImage}
                   imageScale="small"
-                  font={8}
-                  frame={{ width: 9, height: 9 }}
+                  font={hintFontSize}
+                  frame={{
+                    width: hintSlotWidth,
+                    height: 10,
+                    alignment: "trailing" as any,
+                  }}
                   foregroundStyle={props.palette.hint as any}
                 />
               )
               : (
                 <Text
-                  font="caption2"
+                  font={hintFontSize}
                   foregroundStyle={props.palette.hint as any}
+                  lineLimit={1}
+                  minScaleFactor={0.45}
+                  allowsTightening
+                  frame={{
+                    width: hintSlotWidth,
+                    alignment: "trailing" as any,
+                  }}
                 >
                   {props.topRight ?? ""}
                 </Text>

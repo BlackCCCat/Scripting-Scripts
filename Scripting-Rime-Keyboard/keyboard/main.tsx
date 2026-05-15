@@ -2,6 +2,7 @@ import {
   Button,
   DragGesture,
   FlowLayout,
+  GeometryReader,
   Group,
   HStack,
   Script,
@@ -40,7 +41,7 @@ import {
   candidateButtonNaturalWidth,
   KeyFace,
 } from "./components";
-import { KEY_SPACING, PREEDIT_ROW_HEIGHT, SIDE_PADDING } from "./constants";
+import { KEY_SPACING, SIDE_PADDING } from "./constants";
 import { keyboardMetrics } from "./metrics";
 import { type KeyboardAppearance, paletteFor } from "./palette";
 import type { KeyHitTarget } from "./types";
@@ -59,6 +60,18 @@ function currentKeyboardAppearance(): KeyboardAppearance {
 }
 
 export function KeyboardView() {
+  return (
+    <GeometryReader>
+      {(proxy) => (
+        <KeyboardContent
+          availableHeight={Number(proxy.size.height || 0) || undefined}
+        />
+      )}
+    </GeometryReader>
+  );
+}
+
+function KeyboardContent(props: { availableHeight?: number }) {
   const [settings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
   );
@@ -118,7 +131,7 @@ export function KeyboardView() {
   const repeatingDeleteTimerRef = useRef<number | null>(null);
   const hapticQueueTimerRef = useRef<any>(null);
   const pendingPressHapticRef = useRef(false);
-  const [metrics] = useState(() => keyboardMetrics(settings));
+  const metrics = keyboardMetrics(settings, props.availableHeight);
 
   useEffect(() => {
     const syncKeyboardAppearance = (
@@ -995,7 +1008,7 @@ export function KeyboardView() {
   const showsPreeditRow = !settings.inlinePreedit;
   const candidateHeaderHeight = settings.inlinePreedit
     ? metrics.candidateBarHeight
-    : metrics.candidateBarHeight + PREEDIT_ROW_HEIGHT + 2;
+    : metrics.candidateBarHeight + metrics.preeditRowHeight + 2;
   const effectiveCandidateRightButtonMode =
     settings.candidateRightButtonMode === "expand" && candidates.length === 0
       ? "dismiss"
@@ -1381,7 +1394,7 @@ export function KeyboardView() {
               padding={{ leading: 8 }}
               frame={{
                 width: metrics.width,
-                height: 18,
+                height: metrics.preeditRowHeight,
                 alignment: "bottomLeading" as any,
               }}
             >

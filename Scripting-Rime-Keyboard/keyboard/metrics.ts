@@ -5,6 +5,7 @@ import {
   BASE_KEY_HEIGHT,
   DEFAULT_KEYBOARD_HEIGHT,
   KEY_SPACING,
+  PREEDIT_ROW_HEIGHT,
   SIDE_PADDING,
 } from "./constants";
 import type { KeyboardMetrics } from "./types";
@@ -12,6 +13,7 @@ import { clamp } from "./utils";
 
 export function keyboardMetrics(
   settings: RimeKeyboardSettings,
+  availableHeight?: number,
 ): KeyboardMetrics {
   const width = Math.max(
     320,
@@ -19,16 +21,34 @@ export function keyboardMetrics(
   );
   const targetHeight = settings.useCustomKeyboardHeight
     ? settings.keyboardHeight
-    : DEFAULT_KEYBOARD_HEIGHT;
-  const heightDelta = targetHeight - DEFAULT_KEYBOARD_HEIGHT;
+    : (availableHeight && availableHeight > 0
+      ? availableHeight
+      : DEFAULT_KEYBOARD_HEIGHT);
+  const fixedHeight = 12 +
+    KEY_SPACING * (settings.showFunctionRow ? 5 : 4) +
+    (settings.inlinePreedit ? 0 : 2);
+  const scalableHeight = settings.candidateBarHeight +
+    (settings.inlinePreedit ? 0 : PREEDIT_ROW_HEIGHT) +
+    (settings.showFunctionRow ? BASE_FUNCTION_KEY_HEIGHT : 0) +
+    BASE_KEY_HEIGHT * 4;
+  const heightScale = clamp(
+    (targetHeight - fixedHeight) / scalableHeight,
+    0.48,
+    1.34,
+  );
   const keyHeight = Math.round(
-    clamp(BASE_KEY_HEIGHT + heightDelta * 0.12, 44, 58),
+    clamp(BASE_KEY_HEIGHT * heightScale, 26, 66),
   );
   const functionKeyHeight = Math.round(
-    clamp(BASE_FUNCTION_KEY_HEIGHT + heightDelta * 0.08, 34, 48),
+    clamp(BASE_FUNCTION_KEY_HEIGHT * heightScale, 22, 54),
   );
-  const candidateBarHeight = settings.candidateBarHeight;
-  const candidateButtonHeight = Math.max(36, candidateBarHeight);
+  const preeditRowHeight = Math.round(
+    clamp(PREEDIT_ROW_HEIGHT * heightScale, 12, PREEDIT_ROW_HEIGHT),
+  );
+  const candidateBarHeight = Math.round(
+    clamp(settings.candidateBarHeight * heightScale, 28, 64),
+  );
+  const candidateButtonHeight = Math.max(28, candidateBarHeight);
   const candidateFontSize = Math.round(
     clamp(candidateBarHeight * 0.46, 16, 24),
   );
@@ -58,6 +78,7 @@ export function keyboardMetrics(
     functionWidth8: (width - KEY_SPACING * 7) / 8,
     keyHeight,
     functionKeyHeight,
+    preeditRowHeight,
     candidateBarHeight,
     candidateButtonHeight,
     candidateFontSize,
