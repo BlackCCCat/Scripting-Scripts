@@ -79,13 +79,17 @@ export function KeyboardView() {
       {(proxy) => (
         <KeyboardContent
           availableHeight={Number(proxy.size.height || 0) || undefined}
+          availableWidth={Number(proxy.size.width || 0) || undefined}
         />
       )}
     </GeometryReader>
   );
 }
 
-function KeyboardContent(props: { availableHeight?: number }) {
+function KeyboardContent(props: {
+  availableHeight?: number;
+  availableWidth?: number;
+}) {
   const [settings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
   );
@@ -148,7 +152,11 @@ function KeyboardContent(props: { availableHeight?: number }) {
   const pendingPressHapticRef = useRef(false);
   const swipeTriggerDistanceRef = useRef(settings.swipeTriggerDistance);
   const lastSwipeSettingsReloadAtRef = useRef(0);
-  const metrics = keyboardMetrics(settings, props.availableHeight);
+  const metrics = keyboardMetrics(
+    settings,
+    props.availableHeight,
+    props.availableWidth,
+  );
 
   useEffect(() => {
     stopRepeatingBackspace();
@@ -1568,8 +1576,8 @@ function KeyboardContent(props: { availableHeight?: number }) {
 
   const numericRowSpacing = 6;
   const numericPanelHeight = metrics.keyHeight * 4 + numericRowSpacing * 3;
-  const numericLeftWidth = Math.max(48, Math.min(56, metrics.width * 0.14));
-  const numericRightWidth = Math.max(58, Math.min(72, metrics.width * 0.18));
+  const numericLeftWidth = Math.max(40, Math.min(56, metrics.width * 0.14));
+  const numericRightWidth = Math.max(48, Math.min(72, metrics.width * 0.18));
   const numericCenterWidth = metrics.width - numericLeftWidth -
     numericRightWidth - KEY_SPACING * 2;
   const numericKeyWidth = (numericCenterWidth - KEY_SPACING * 2) / 3;

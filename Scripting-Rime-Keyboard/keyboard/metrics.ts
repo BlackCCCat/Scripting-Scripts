@@ -1,4 +1,3 @@
-import { Device } from "scripting";
 import type { RimeKeyboardSettings } from "../settings";
 import {
   BASE_FUNCTION_KEY_HEIGHT,
@@ -14,11 +13,12 @@ import { clamp } from "./utils";
 export function keyboardMetrics(
   settings: RimeKeyboardSettings,
   availableHeight?: number,
+  availableWidth?: number,
 ): KeyboardMetrics {
-  const width = Math.max(
-    320,
-    Number(Device.screen.width ?? 390) - SIDE_PADDING * 2,
+  const measuredWidth = Number(
+    availableWidth && availableWidth > 0 ? availableWidth : 390,
   );
+  const width = Math.max(240, measuredWidth - SIDE_PADDING * 2);
   const targetHeight = settings.useCustomKeyboardHeight
     ? settings.keyboardHeight
     : (availableHeight && availableHeight > 0
@@ -64,9 +64,9 @@ export function keyboardMetrics(
     letterWidth * 1.45,
     (width - letterWidth * 7 - KEY_SPACING * 8) / 2,
   );
-  const actionWidth = Math.min(82, Math.max(76, width * 0.2));
+  const actionWidth = clamp(width * 0.19, 52, 82);
   const numbers = actionWidth;
-  const comma = 40;
+  const comma = clamp(width * 0.105, 32, 40);
   const mode = comma;
   const enter = actionWidth;
   const space = width - numbers - comma - mode - enter - KEY_SPACING * 4;
