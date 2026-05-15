@@ -35,6 +35,8 @@ import {
   type RimeKeyboardSettings,
   type RimeKeyboardTheme,
   saveRimeKeyboardSettings,
+  SWIPE_TRIGGER_DISTANCE_MAX,
+  SWIPE_TRIGGER_DISTANCE_MIN,
 } from "./settings";
 
 const THEME_OPTIONS: Array<{ value: RimeKeyboardTheme; label: string }> = [
@@ -793,6 +795,32 @@ function SettingsView() {
               label={<Text>字母长按时长</Text>}
               minValueLabel={<Text>短</Text>}
               maxValueLabel={<Text>长</Text>}
+            />
+          </VStack>
+          <VStack alignment="leading" spacing={8}>
+            <HStack>
+              <Text>上下划触发距离</Text>
+              <Text
+                font="subheadline"
+                foregroundStyle="secondaryLabel"
+                frame={{
+                  maxWidth: "infinity" as any,
+                  alignment: "trailing" as any,
+                }}
+              >
+                {settings.swipeTriggerDistance} pt
+              </Text>
+            </HStack>
+            <Slider
+              min={SWIPE_TRIGGER_DISTANCE_MIN}
+              max={SWIPE_TRIGGER_DISTANCE_MAX}
+              step={1}
+              value={settings.swipeTriggerDistance}
+              onChanged={(value) =>
+                patchSettings({ swipeTriggerDistance: Math.round(value) })}
+              label={<Text>上下划触发距离</Text>}
+              minValueLabel={<Text>灵敏</Text>}
+              maxValueLabel={<Text>稳妥</Text>}
             />
           </VStack>
           <Toggle

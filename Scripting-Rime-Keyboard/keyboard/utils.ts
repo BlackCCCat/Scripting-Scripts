@@ -75,10 +75,11 @@ export function hapticInterval(settings: RimeKeyboardSettings) {
 
 export function dragDirection(
   details: any,
+  threshold = 16,
 ): "up" | "down" | "left" | "right" | null {
   const dx = Number(details?.translation?.width ?? 0);
   const dy = Number(details?.translation?.height ?? 0);
-  if (Math.abs(dx) < 16 && Math.abs(dy) < 16) return null;
+  if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return null;
   if (Math.abs(dy) >= Math.abs(dx)) return dy < 0 ? "up" : "down";
   return dx < 0 ? "left" : "right";
 }

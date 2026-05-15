@@ -77,6 +77,7 @@ export function KeyFace(props: {
   onSwipeDown?: () => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
+  swipeTriggerDistance?: number | (() => number);
   contextMenu?: any;
 }) {
   const gestureStartedRef = useRef(false);
@@ -171,7 +172,11 @@ export function KeyFace(props: {
             resetGesture();
             return;
           }
-          const direction = dragDirection(details);
+          const swipeTriggerDistance =
+            typeof props.swipeTriggerDistance === "function"
+              ? props.swipeTriggerDistance()
+              : props.swipeTriggerDistance;
+          const direction = dragDirection(details, swipeTriggerDistance);
           if (direction === "up" && props.onSwipeUp) props.onSwipeUp();
           else if (direction === "down" && props.onSwipeDown) {
             props.onSwipeDown();

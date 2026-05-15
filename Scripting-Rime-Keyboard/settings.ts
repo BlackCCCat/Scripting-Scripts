@@ -59,6 +59,7 @@ export type RimeKeyboardSettings = {
   modeComposingIcon: string;
   numericEqualsSwipeUp: string;
   letterLongPressDuration: number;
+  swipeTriggerDistance: number;
   inputClicks: boolean;
   inputClickLevel: number;
   haptics: boolean;
@@ -169,8 +170,8 @@ export const DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS: SwipeSettings = {
   m: "rectangle.3.group.fill",
 };
 
-export const DEFAULT_LETTER_ACTION_MODES: ActionModeSettings =
-  Object.fromEntries(LETTER_KEYS.map((key) => [key, "auto" as ActionSendMode]));
+export const DEFAULT_LETTER_ACTION_MODES: ActionModeSettings = Object
+  .fromEntries(LETTER_KEYS.map((key) => [key, "auto" as ActionSendMode]));
 
 export const FUNCTION_KEYS = [
   "left",
@@ -215,8 +216,8 @@ export const DEFAULT_IDLE_FUNCTION_SWIPE_DOWN: SwipeSettings = {
   right: "{right}",
 };
 
-export const DEFAULT_FUNCTION_ACTION_MODES: ActionModeSettings =
-  Object.fromEntries(
+export const DEFAULT_FUNCTION_ACTION_MODES: ActionModeSettings = Object
+  .fromEntries(
     FUNCTION_KEYS.map((key) => [key, "auto" as ActionSendMode]),
   );
 
@@ -306,6 +307,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   modeComposingIcon: "lightbulb",
   numericEqualsSwipeUp: "V",
   letterLongPressDuration: 520,
+  swipeTriggerDistance: 80,
   inputClicks: true,
   inputClickLevel: 3,
   haptics: true,
@@ -319,6 +321,8 @@ export const CANDIDATE_BAR_HEIGHT_MIN = 34;
 export const CANDIDATE_BAR_HEIGHT_MAX = 56;
 export const LETTER_LONG_PRESS_DURATION_MIN = 360;
 export const LETTER_LONG_PRESS_DURATION_MAX = 900;
+export const SWIPE_TRIGGER_DISTANCE_MIN = 40;
+export const SWIPE_TRIGGER_DISTANCE_MAX = 120;
 
 function clampNumber(
   value: unknown,
@@ -360,8 +364,9 @@ function normalizeColorPair(
   raw: unknown,
   defaults: KeyColorPair,
 ): KeyColorPair {
-  const source =
-    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const source = raw && typeof raw === "object"
+    ? (raw as Record<string, unknown>)
+    : {};
   return {
     light: normalizeColor(source.light, defaults.light),
     dark: normalizeColor(source.dark, defaults.dark),
@@ -369,8 +374,9 @@ function normalizeColorPair(
 }
 
 function normalizeKeyColors(raw: unknown): KeyColorSettings {
-  const source =
-    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const source = raw && typeof raw === "object"
+    ? (raw as Record<string, unknown>)
+    : {};
   const overrideSource =
     source.overrides && typeof source.overrides === "object"
       ? (source.overrides as Record<string, unknown>)
@@ -395,8 +401,9 @@ function normalizeSwipeSettings(
   defaults: SwipeSettings,
   keys: string[],
 ): SwipeSettings {
-  const source =
-    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const source = raw && typeof raw === "object"
+    ? (raw as Record<string, unknown>)
+    : {};
   const result: SwipeSettings = {};
   for (const key of keys) {
     const value = source[key];
@@ -410,8 +417,9 @@ function normalizeActionModeSettings(
   defaults: ActionModeSettings,
   keys: string[],
 ): ActionModeSettings {
-  const source =
-    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const source = raw && typeof raw === "object"
+    ? (raw as Record<string, unknown>)
+    : {};
   const result: ActionModeSettings = {};
   for (const key of keys) {
     result[key] = normalizeActionSendMode(source[key] ?? defaults[key]);
@@ -439,10 +447,9 @@ function migrateComposingSwipeSettings(
     defaults,
     COMPOSING_FUNCTION_KEYS,
   );
-  const legacyToneValues =
-    direction === "up"
-      ? { tone1: "1", tone2: "2", tone3: "3", tone4: "4" }
-      : { tone1: "7", tone2: "8", tone3: "9", tone4: "0" };
+  const legacyToneValues = direction === "up"
+    ? { tone1: "1", tone2: "2", tone3: "3", tone4: "4" }
+    : { tone1: "7", tone2: "8", tone3: "9", tone4: "0" };
   for (const key of ["tone1", "tone2", "tone3", "tone4"]) {
     if (
       normalized[key] === legacyToneValues[key as keyof typeof legacyToneValues]
@@ -457,10 +464,9 @@ function migrateComposingSwipeSettings(
 export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
   return {
     theme: normalizeTheme(raw?.theme),
-    useCustomKeyboardHeight:
-      typeof raw?.useCustomKeyboardHeight === "boolean"
-        ? raw.useCustomKeyboardHeight
-        : false,
+    useCustomKeyboardHeight: typeof raw?.useCustomKeyboardHeight === "boolean"
+      ? raw.useCustomKeyboardHeight
+      : false,
     keyboardHeight: clampNumber(
       raw?.keyboardHeight,
       DEFAULT_RIME_KEYBOARD_SETTINGS.keyboardHeight,
@@ -476,34 +482,35 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     candidateRightButtonMode: normalizeCandidateRightButtonMode(
       raw?.candidateRightButtonMode,
     ),
-    customKeyColors:
-      typeof raw?.customKeyColors === "boolean" ? raw.customKeyColors : false,
-    customKeyColorLight:
-      typeof raw?.customKeyColorLight === "boolean"
-        ? raw.customKeyColorLight
-        : false,
-    customKeyColorDark:
-      typeof raw?.customKeyColorDark === "boolean"
-        ? raw.customKeyColorDark
-        : Boolean(raw?.customKeyColors),
+    customKeyColors: typeof raw?.customKeyColors === "boolean"
+      ? raw.customKeyColors
+      : false,
+    customKeyColorLight: typeof raw?.customKeyColorLight === "boolean"
+      ? raw.customKeyColorLight
+      : false,
+    customKeyColorDark: typeof raw?.customKeyColorDark === "boolean"
+      ? raw.customKeyColorDark
+      : Boolean(raw?.customKeyColors),
     keyColors: normalizeKeyColors(raw?.keyColors),
-    showCandidateComment:
-      typeof raw?.showCandidateComment === "boolean"
-        ? raw.showCandidateComment
-        : raw?.candidateCommentMode !== "hidden",
-    showPreeditCaret:
-      typeof raw?.showPreeditCaret === "boolean" ? raw.showPreeditCaret : true,
-    showFunctionRow:
-      typeof raw?.showFunctionRow === "boolean" ? raw.showFunctionRow : true,
-    showHintSymbols:
-      typeof raw?.showHintSymbols === "boolean" ? raw.showHintSymbols : true,
-    showWanxiangLabel:
-      typeof raw?.showWanxiangLabel === "boolean"
-        ? raw.showWanxiangLabel
-        : true,
+    showCandidateComment: typeof raw?.showCandidateComment === "boolean"
+      ? raw.showCandidateComment
+      : raw?.candidateCommentMode !== "hidden",
+    showPreeditCaret: typeof raw?.showPreeditCaret === "boolean"
+      ? raw.showPreeditCaret
+      : true,
+    showFunctionRow: typeof raw?.showFunctionRow === "boolean"
+      ? raw.showFunctionRow
+      : true,
+    showHintSymbols: typeof raw?.showHintSymbols === "boolean"
+      ? raw.showHintSymbols
+      : true,
+    showWanxiangLabel: typeof raw?.showWanxiangLabel === "boolean"
+      ? raw.showWanxiangLabel
+      : true,
     spaceLabel: typeof raw?.spaceLabel === "string" ? raw.spaceLabel : "万象",
-    inlinePreedit:
-      typeof raw?.inlinePreedit === "boolean" ? raw.inlinePreedit : true,
+    inlinePreedit: typeof raw?.inlinePreedit === "boolean"
+      ? raw.inlinePreedit
+      : true,
     letterSwipeUp: normalizeSwipeSettings(
       raw?.letterSwipeUp,
       DEFAULT_LETTER_SWIPE_UP,
@@ -572,81 +579,77 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
       COMPOSING_FUNCTION_KEYS,
     ),
-    shiftComposingEnabled:
-      typeof raw?.shiftComposingEnabled === "boolean"
-        ? raw.shiftComposingEnabled
-        : true,
-    shiftComposingKey:
-      typeof raw?.shiftComposingKey === "string" ? raw.shiftComposingKey : "/",
+    shiftComposingEnabled: typeof raw?.shiftComposingEnabled === "boolean"
+      ? raw.shiftComposingEnabled
+      : true,
+    shiftComposingKey: typeof raw?.shiftComposingKey === "string"
+      ? raw.shiftComposingKey
+      : "/",
     shiftComposingKeyMode: normalizeActionSendMode(raw?.shiftComposingKeyMode),
-    shiftComposingSwipeUp:
-      typeof raw?.shiftComposingSwipeUp === "string"
-        ? raw.shiftComposingSwipeUp
-        : "`",
+    shiftComposingSwipeUp: typeof raw?.shiftComposingSwipeUp === "string"
+      ? raw.shiftComposingSwipeUp
+      : "`",
     shiftComposingSwipeUpMode: normalizeActionSendMode(
       raw?.shiftComposingSwipeUpMode,
     ),
-    shiftComposingIcon:
-      typeof raw?.shiftComposingIcon === "string"
-        ? raw.shiftComposingIcon
-        : "inset.filled.lefthalf.arrow.left.rectangle",
-    modeComposingEnabled:
-      typeof raw?.modeComposingEnabled === "boolean"
-        ? raw.modeComposingEnabled
-        : true,
-    modeComposingAction:
-      typeof raw?.modeComposingAction === "string"
-        ? raw.modeComposingAction === "{commitComposition}"
-          ? ","
-          : raw.modeComposingAction
-        : ",",
+    shiftComposingIcon: typeof raw?.shiftComposingIcon === "string"
+      ? raw.shiftComposingIcon
+      : "inset.filled.lefthalf.arrow.left.rectangle",
+    modeComposingEnabled: typeof raw?.modeComposingEnabled === "boolean"
+      ? raw.modeComposingEnabled
+      : true,
+    modeComposingAction: typeof raw?.modeComposingAction === "string"
+      ? raw.modeComposingAction === "{commitComposition}"
+        ? ","
+        : raw.modeComposingAction
+      : ",",
     modeComposingActionMode: normalizeActionSendMode(
       raw?.modeComposingActionMode,
     ),
-    modeComposingSwipeUp:
-      typeof raw?.modeComposingSwipeUp === "string"
-        ? raw.modeComposingSwipeUp
-        : "",
+    modeComposingSwipeUp: typeof raw?.modeComposingSwipeUp === "string"
+      ? raw.modeComposingSwipeUp
+      : "",
     modeComposingSwipeUpMode: normalizeActionSendMode(
       raw?.modeComposingSwipeUpMode,
     ),
-    modeComposingSwipeDown:
-      typeof raw?.modeComposingSwipeDown === "string"
-        ? raw.modeComposingSwipeDown
-        : "",
+    modeComposingSwipeDown: typeof raw?.modeComposingSwipeDown === "string"
+      ? raw.modeComposingSwipeDown
+      : "",
     modeComposingSwipeDownMode: normalizeActionSendMode(
       raw?.modeComposingSwipeDownMode,
     ),
-    modeComposingIcon:
-      typeof raw?.modeComposingIcon === "string"
-        ? raw.modeComposingIcon
-        : "lightbulb",
-    numericEqualsSwipeUp:
-      typeof raw?.numericEqualsSwipeUp === "string"
-        ? raw.numericEqualsSwipeUp
-        : "V",
+    modeComposingIcon: typeof raw?.modeComposingIcon === "string"
+      ? raw.modeComposingIcon
+      : "lightbulb",
+    numericEqualsSwipeUp: typeof raw?.numericEqualsSwipeUp === "string"
+      ? raw.numericEqualsSwipeUp
+      : "V",
     letterLongPressDuration: clampNumber(
       raw?.letterLongPressDuration,
       DEFAULT_RIME_KEYBOARD_SETTINGS.letterLongPressDuration,
       LETTER_LONG_PRESS_DURATION_MIN,
       LETTER_LONG_PRESS_DURATION_MAX,
     ),
+    swipeTriggerDistance: clampNumber(
+      raw?.swipeTriggerDistance,
+      DEFAULT_RIME_KEYBOARD_SETTINGS.swipeTriggerDistance,
+      SWIPE_TRIGGER_DISTANCE_MIN,
+      SWIPE_TRIGGER_DISTANCE_MAX,
+    ),
     inputClicks: typeof raw?.inputClicks === "boolean" ? raw.inputClicks : true,
     inputClickLevel: clampNumber(raw?.inputClickLevel, 3, 1, 5),
     haptics: typeof raw?.haptics === "boolean" ? raw.haptics : true,
     hapticLevel: clampNumber(raw?.hapticLevel, 3, 1, 5),
-    autoDeployOnLaunch:
-      typeof raw?.autoDeployOnLaunch === "boolean"
-        ? raw.autoDeployOnLaunch
-        : true,
+    autoDeployOnLaunch: typeof raw?.autoDeployOnLaunch === "boolean"
+      ? raw.autoDeployOnLaunch
+      : true,
   };
 }
 
 function getRawSettings(): unknown {
   const st = (globalThis as any).Storage;
   try {
-    const shared =
-      st?.get?.(SETTINGS_KEY, SHARED_OPTIONS) ??
+    const shared = st?.get?.(SETTINGS_KEY, SHARED_OPTIONS) ??
       st?.getString?.(SETTINGS_KEY, SHARED_OPTIONS);
     if (shared != null) return shared;
   } catch {}

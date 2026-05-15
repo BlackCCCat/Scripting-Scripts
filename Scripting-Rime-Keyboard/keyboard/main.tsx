@@ -142,6 +142,8 @@ function KeyboardContent(props: { availableHeight?: number }) {
   const lastDeleteHapticAtRef = useRef(0);
   const hapticQueueTimerRef = useRef<any>(null);
   const pendingPressHapticRef = useRef(false);
+  const swipeTriggerDistanceRef = useRef(settings.swipeTriggerDistance);
+  const lastSwipeSettingsReloadAtRef = useRef(0);
   const metrics = keyboardMetrics(settings, props.availableHeight);
 
   useEffect(() => {
@@ -378,6 +380,16 @@ function KeyboardContent(props: { availableHeight?: number }) {
     setKeyPressed(id, false);
   }
 
+  function currentSwipeTriggerDistance() {
+    const now = Date.now();
+    if (now - lastSwipeSettingsReloadAtRef.current > 1000) {
+      lastSwipeSettingsReloadAtRef.current = now;
+      swipeTriggerDistanceRef.current =
+        loadRimeKeyboardSettings().swipeTriggerDistance;
+    }
+    return swipeTriggerDistanceRef.current;
+  }
+
   function isSpaceCursorKey(id: string | undefined) {
     return id === "space" || id === "numeric-space";
   }
@@ -550,7 +562,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
       cancelRowGesture(rowId);
       return;
     }
-    const direction = dragDirection(details);
+    const direction = dragDirection(details, currentSwipeTriggerDistance());
     playReleaseFeedback();
     if (direction === "up" && target.onSwipeUp) target.onSwipeUp();
     else if (direction === "down" && target.onSwipeDown) target.onSwipeDown();
@@ -2305,6 +2317,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             onTouchEnd={() => endKeyTouch("shift")}
                             onPress={pressShift}
                             onSwipeUp={shiftSwipeUp}
+                            swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )
                         : null}
@@ -2351,6 +2364,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                           longPressDuration={settings.letterLongPressDuration}
                           onSwipeUp={() => runLetterSwipe("up", ch)}
                           onSwipeDown={() => runLetterSwipe("down", ch)}
+                          swipeTriggerDistance={currentSwipeTriggerDistance}
                         />
                       ))}
                       {rowIndex === 2
@@ -2372,6 +2386,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             onSwipeLeft={backspaceSwipeLeft}
                             onSwipeUp={backspaceSwipeUp}
                             onSwipeDown={backspaceSwipeDown}
+                            swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )
                         : null}
