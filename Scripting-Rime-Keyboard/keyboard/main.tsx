@@ -992,8 +992,18 @@ function KeyboardContent(props: {
         keyboard.selectText(0, CustomKeyboard.allText?.length ?? 0);
         return;
       }
-      const text = CustomKeyboard.allText;
-      if (text) await Pasteboard.setString(text);
+
+      const text = CustomKeyboard.allText ??
+        `${CustomKeyboard.textBeforeCursor ?? ""}${
+          CustomKeyboard.textAfterCursor ?? ""
+        }`;
+      if (!text) return;
+      const after = CustomKeyboard.textAfterCursor?.length ?? 0;
+      if (after > 0) CustomKeyboard.moveCursor(after);
+      for (let i = 0; i < text.length; i += 1) {
+        CustomKeyboard.deleteBackward();
+      }
+      CustomKeyboard.setMarkedText(text, 0, text.length);
     } catch {}
   }
 
@@ -1202,15 +1212,18 @@ function KeyboardContent(props: {
   const candidateHomeButtonVisible = !composing;
   const candidateHomeButtonWidth = 42;
   const candidateSettingsButtonWidth = candidateHomeButtonVisible ? 42 : 0;
+  const candidateSchemaButtonWidth = candidateHomeButtonVisible ? 42 : 0;
   const candidateRightButtonVisible =
     effectiveCandidateRightButtonMode !== "hidden";
   const candidateRightButtonWidth = candidateRightButtonVisible ? 42 : 0;
   const candidateFixedButtonWidth =
     (candidateHomeButtonVisible ? candidateHomeButtonWidth : 0) +
     candidateSettingsButtonWidth +
+    candidateSchemaButtonWidth +
     candidateRightButtonWidth;
   const candidateFixedButtonCount = (candidateHomeButtonVisible ? 1 : 0) +
     (candidateSettingsButtonWidth > 0 ? 1 : 0) +
+    (candidateSchemaButtonWidth > 0 ? 1 : 0) +
     (candidateRightButtonVisible ? 1 : 0);
   const candidateFixedButtonGaps = KEY_SPACING * candidateFixedButtonCount;
   const candidateBarWidth = metrics.width - candidateFixedButtonWidth -
@@ -1337,7 +1350,7 @@ function KeyboardContent(props: {
         id: "idle-schema",
         x: step * 2,
         width: metrics.functionWidth8,
-        onPress: openRimeSchemaMenu,
+        onPress: () => void selectAllBestEffort(),
         onSwipeUp: () => runIdleFunctionSwipe("up", "select"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "select"),
       },
@@ -1700,6 +1713,24 @@ function KeyboardContent(props: {
               />
             )
             : null}
+          {candidateHomeButtonVisible
+            ? (
+              <KeyFace
+                id="candidate-schema"
+                image="list.bullet.rectangle"
+                palette={palette}
+                width={candidateSchemaButtonWidth}
+                height={metrics.candidateButtonHeight}
+                system
+                plain
+                foregroundStyle={palette.primary}
+                onPress={() => runWithFeedback(openRimeSchemaMenu)}
+                contextMenu={schemaMenu != null
+                  ? { menuItems: schemaMenu }
+                  : undefined}
+              />
+            )
+            : null}
           <ScrollView
             axes="horizontal"
             scrollIndicator="hidden"
@@ -2048,14 +2079,15 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-schema"
-                        image="list.bullet.rectangle"
+                        image="selection.pin.in.out"
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
                         system
                         passive
                         active={isPressed("idle-schema")}
-                        onPress={() => runWithFeedback(openRimeSchemaMenu)}
+                        onPress={() =>
+                          runWithFeedback(() => void selectAllBestEffort())}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "select")
@@ -2064,9 +2096,6 @@ function KeyboardContent(props: {
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("down", "select")
                           )}
-                        contextMenu={schemaMenu != null
-                          ? { menuItems: schemaMenu }
-                          : undefined}
                       />
                       <KeyFace
                         id="idle-cut"

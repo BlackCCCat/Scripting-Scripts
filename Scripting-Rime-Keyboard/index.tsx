@@ -62,7 +62,7 @@ const ACTION_MODE_OPTIONS: Array<{ value: ActionSendMode; label: string }> = [
 const FUNCTION_KEY_LABELS: Record<string, string> = {
   left: "左移",
   head: "行首",
-  select: "方案",
+  select: "全选",
   cut: "剪切",
   copy: "复制",
   paste: "粘贴",
@@ -101,7 +101,7 @@ const KEY_COLOR_GROUPS: Array<{
     keys: [
       { id: "idle-left", label: "左移" },
       { id: "idle-head", label: "行首" },
-      { id: "idle-schema", label: "方案" },
+      { id: "idle-schema", label: "全选" },
       { id: "idle-cut", label: "剪切" },
       { id: "idle-copy", label: "复制" },
       { id: "idle-paste", label: "粘贴" },
