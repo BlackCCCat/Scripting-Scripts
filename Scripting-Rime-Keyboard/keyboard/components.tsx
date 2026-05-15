@@ -77,6 +77,7 @@ export function KeyFace(props: {
   onSwipeDown?: () => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
+  onSwipeStart?: () => void;
   swipeTriggerDistance?: number | (() => number);
   contextMenu?: any;
 }) {
@@ -166,8 +167,8 @@ export function KeyFace(props: {
         .onEnded((details: any) => {
           const wasLongPress = longPressHandledRef.current;
           clearLongPressTimer();
-          props.onTouchEnd?.();
           if (wasLongPress) {
+            props.onTouchEnd?.();
             props.onLongPressEnd?.();
             resetGesture();
             return;
@@ -177,6 +178,12 @@ export function KeyFace(props: {
               ? props.swipeTriggerDistance()
               : props.swipeTriggerDistance;
           const direction = dragDirection(details, swipeTriggerDistance);
+          const hasSwipeAction = (direction === "up" && props.onSwipeUp) ||
+            (direction === "down" && props.onSwipeDown) ||
+            (direction === "left" && props.onSwipeLeft) ||
+            (direction === "right" && props.onSwipeRight);
+          if (hasSwipeAction) props.onSwipeStart?.();
+          props.onTouchEnd?.();
           if (direction === "up" && props.onSwipeUp) props.onSwipeUp();
           else if (direction === "down" && props.onSwipeDown) {
             props.onSwipeDown();

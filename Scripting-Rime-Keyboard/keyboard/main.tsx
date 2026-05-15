@@ -493,6 +493,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     ) {
       return;
     }
+    cancelPendingPressFeedback();
     rowLongPressCancelledRef.current.set(rowId, true);
     cancelRowGesture(rowId);
   }
@@ -563,6 +564,11 @@ function KeyboardContent(props: { availableHeight?: number }) {
       return;
     }
     const direction = dragDirection(details, currentSwipeTriggerDistance());
+    const hasSwipeAction = (direction === "up" && target.onSwipeUp) ||
+      (direction === "down" && target.onSwipeDown) ||
+      (direction === "left" && target.onSwipeLeft) ||
+      (direction === "right" && target.onSwipeRight);
+    if (hasSwipeAction) cancelPendingPressFeedback();
     playReleaseFeedback();
     if (direction === "up" && target.onSwipeUp) target.onSwipeUp();
     else if (direction === "down" && target.onSwipeDown) target.onSwipeDown();
@@ -2317,6 +2323,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             onTouchEnd={() => endKeyTouch("shift")}
                             onPress={pressShift}
                             onSwipeUp={shiftSwipeUp}
+                            onSwipeStart={cancelPendingPressFeedback}
                             swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )
@@ -2364,6 +2371,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                           longPressDuration={settings.letterLongPressDuration}
                           onSwipeUp={() => runLetterSwipe("up", ch)}
                           onSwipeDown={() => runLetterSwipe("down", ch)}
+                          onSwipeStart={cancelPendingPressFeedback}
                           swipeTriggerDistance={currentSwipeTriggerDistance}
                         />
                       ))}
@@ -2386,6 +2394,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             onSwipeLeft={backspaceSwipeLeft}
                             onSwipeUp={backspaceSwipeUp}
                             onSwipeDown={backspaceSwipeDown}
+                            onSwipeStart={cancelPendingPressFeedback}
                             swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )
