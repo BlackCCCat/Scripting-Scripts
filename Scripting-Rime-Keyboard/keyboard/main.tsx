@@ -1,5 +1,6 @@
 import {
   Button,
+  Device,
   DragGesture,
   FlowLayout,
   GeometryReader,
@@ -1218,6 +1219,11 @@ function KeyboardContent(props: {
     effectiveCandidateRightButtonMode === "expand"
       ? candidateExpanded ? "chevron.up.circle" : "chevron.down.circle"
       : "keyboard.chevron.compact.down";
+  const showNextKeyboardButton = Device.isiPad;
+  const bottomSplitButtonWidth = Math.max(
+    20,
+    (metrics.bottom.numbers - KEY_SPACING) / 2,
+  );
   const normalKeyboardBodyHeight =
     (settings.showFunctionRow ? metrics.functionKeyHeight + 6 : 0) +
     metrics.keyHeight * 4 +
@@ -1383,16 +1389,33 @@ function KeyboardContent(props: {
 
   function bottomRowHitTargets(): KeyHitTarget[] {
     let x = 0;
-    const targets: KeyHitTarget[] = [
-      {
+    const targets: KeyHitTarget[] = [];
+    if (showNextKeyboardButton) {
+      targets.push({
+        id: "next-keyboard",
+        x,
+        width: bottomSplitButtonWidth,
+        onPress: CustomKeyboard.nextKeyboard,
+      });
+      x += bottomSplitButtonWidth + KEY_SPACING;
+      targets.push({
+        id: "numbers",
+        x,
+        width: bottomSplitButtonWidth,
+        onPress: () => setSymbolLayer((value) => !value),
+        onSwipeUp: () => pressSymbol("`"),
+      });
+      x += bottomSplitButtonWidth + KEY_SPACING;
+    } else {
+      targets.push({
         id: "numbers",
         x,
         width: metrics.bottom.numbers,
         onPress: () => setSymbolLayer((value) => !value),
         onSwipeUp: () => pressSymbol("`"),
-      },
-    ];
-    x += metrics.bottom.numbers + KEY_SPACING;
+      });
+      x += metrics.bottom.numbers + KEY_SPACING;
+    }
     targets.push({
       id: "comma",
       x,
@@ -2504,20 +2527,52 @@ function KeyboardContent(props: {
             bottomRowHitTargets(),
           )}
         >
-          <KeyFace
-            id="numbers"
-            label={symbolLayer ? "ABC" : "123"}
-            palette={palette}
-            width={metrics.bottom.numbers}
-            height={metrics.keyHeight}
-            system
-            selected={symbolLayer}
-            passive
-            active={isPressed("numbers")}
-            onPress={() =>
-              runWithFeedback(() => setSymbolLayer((value) => !value))}
-            onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
-          />
+          {showNextKeyboardButton
+            ? (
+              <>
+                <KeyFace
+                  id="next-keyboard"
+                  image="globe"
+                  palette={palette}
+                  width={bottomSplitButtonWidth}
+                  height={metrics.keyHeight}
+                  system
+                  passive
+                  active={isPressed("next-keyboard")}
+                  onPress={() => runWithFeedback(CustomKeyboard.nextKeyboard)}
+                />
+                <KeyFace
+                  id="numbers"
+                  label={symbolLayer ? "ABC" : "123"}
+                  palette={palette}
+                  width={bottomSplitButtonWidth}
+                  height={metrics.keyHeight}
+                  system
+                  selected={symbolLayer}
+                  passive
+                  active={isPressed("numbers")}
+                  onPress={() =>
+                    runWithFeedback(() => setSymbolLayer((value) => !value))}
+                  onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
+                />
+              </>
+            )
+            : (
+              <KeyFace
+                id="numbers"
+                label={symbolLayer ? "ABC" : "123"}
+                palette={palette}
+                width={metrics.bottom.numbers}
+                height={metrics.keyHeight}
+                system
+                selected={symbolLayer}
+                passive
+                active={isPressed("numbers")}
+                onPress={() =>
+                  runWithFeedback(() => setSymbolLayer((value) => !value))}
+                onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
+              />
+            )}
           <KeyFace
             id="comma"
             label=","
