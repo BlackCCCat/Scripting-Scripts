@@ -61,6 +61,8 @@ function currentKeyboardAppearance(): KeyboardAppearance {
 
 let globalRepeatingDeleteTimer: any = null;
 let globalRepeatingDeleteToken = 0;
+const SPACE_CURSOR_DRAG_STEP = 12;
+const SPACE_CANDIDATE_DRAG_STEP = 24;
 
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
@@ -498,18 +500,38 @@ function KeyboardContent(props: { availableHeight?: number }) {
     cancelRowGesture(rowId);
   }
 
-  function updateSpaceCursorDrag(details: any) {
+  function moveHighlightedCandidateBySpaceDrag(steps: number) {
+    const s = sessionRef.current;
+    if (!s) return;
+    const count = Math.min(8, Math.abs(steps));
+    const key = steps > 0 ? KEY_DOWN : KEY_UP;
+    for (let i = 0; i < count; i += 1) {
+      s.processKey(key);
+    }
+    refresh(s);
+    playCursorMoveFeedback();
+  }
+
+  function updateSpaceLongPressDrag(details: any) {
     const x = Number(details?.location?.x ?? details?.startLocation?.x ?? 0);
     if (spaceCursorDragXRef.current == null) {
       spaceCursorDragXRef.current = x;
       return;
     }
+    const hasCandidateNavigation = preedit.length > 0 && candidates.length > 0;
+    const stepSize = hasCandidateNavigation
+      ? SPACE_CANDIDATE_DRAG_STEP
+      : SPACE_CURSOR_DRAG_STEP;
     const dx = x - spaceCursorDragXRef.current;
-    const steps = Math.trunc(dx / 12);
+    const steps = Math.trunc(dx / stepSize);
     if (steps === 0) return;
-    CustomKeyboard.moveCursor(steps);
-    playCursorMoveFeedback();
-    spaceCursorDragXRef.current += steps * 12;
+    if (hasCandidateNavigation) {
+      moveHighlightedCandidateBySpaceDrag(steps);
+    } else {
+      CustomKeyboard.moveCursor(steps);
+      playCursorMoveFeedback();
+    }
+    spaceCursorDragXRef.current += steps * stepSize;
   }
 
   function handleHitRowGestureChanged(
@@ -521,7 +543,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     if (rowLongPressHandledRef.current.get(rowId)) {
       const activeId = activeHitTargetRef.current.get(rowId)?.id;
       if (isSpaceCursorKey(activeId)) {
-        updateSpaceCursorDrag(details);
+        updateSpaceLongPressDrag(details);
       } else if (activeId === "backspace" || activeId === "numeric-backspace") {
         backspaceLongPressMove(details);
       }
