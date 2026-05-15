@@ -1395,7 +1395,7 @@ function KeyboardContent(props: {
         id: "next-keyboard",
         x,
         width: bottomSplitButtonWidth,
-        onPress: CustomKeyboard.nextKeyboard,
+        onPress: () => CustomKeyboard.nextKeyboard(),
       });
       x += bottomSplitButtonWidth + KEY_SPACING;
       targets.push({
@@ -2529,50 +2529,36 @@ function KeyboardContent(props: {
         >
           {showNextKeyboardButton
             ? (
-              <>
-                <KeyFace
-                  id="next-keyboard"
-                  image="globe"
-                  palette={palette}
-                  width={bottomSplitButtonWidth}
-                  height={metrics.keyHeight}
-                  system
-                  passive
-                  active={isPressed("next-keyboard")}
-                  onPress={() => runWithFeedback(CustomKeyboard.nextKeyboard)}
-                />
-                <KeyFace
-                  id="numbers"
-                  label={symbolLayer ? "ABC" : "123"}
-                  palette={palette}
-                  width={bottomSplitButtonWidth}
-                  height={metrics.keyHeight}
-                  system
-                  selected={symbolLayer}
-                  passive
-                  active={isPressed("numbers")}
-                  onPress={() =>
-                    runWithFeedback(() => setSymbolLayer((value) => !value))}
-                  onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
-                />
-              </>
-            )
-            : (
               <KeyFace
-                id="numbers"
-                label={symbolLayer ? "ABC" : "123"}
+                id="next-keyboard"
+                image="globe"
                 palette={palette}
-                width={metrics.bottom.numbers}
+                width={bottomSplitButtonWidth}
                 height={metrics.keyHeight}
                 system
-                selected={symbolLayer}
                 passive
-                active={isPressed("numbers")}
+                active={isPressed("next-keyboard")}
                 onPress={() =>
-                  runWithFeedback(() => setSymbolLayer((value) => !value))}
-                onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
+                  runWithFeedback(() => CustomKeyboard.nextKeyboard())}
               />
-            )}
+            )
+            : null}
+          <KeyFace
+            id="numbers"
+            label={symbolLayer ? "ABC" : "123"}
+            palette={palette}
+            width={showNextKeyboardButton
+              ? bottomSplitButtonWidth
+              : metrics.bottom.numbers}
+            height={metrics.keyHeight}
+            system
+            selected={symbolLayer}
+            passive
+            active={isPressed("numbers")}
+            onPress={() =>
+              runWithFeedback(() => setSymbolLayer((value) => !value))}
+            onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
+          />
           <KeyFace
             id="comma"
             label=","
