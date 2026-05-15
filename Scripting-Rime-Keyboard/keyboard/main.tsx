@@ -59,6 +59,17 @@ function currentKeyboardAppearance(): KeyboardAppearance {
   return value === "dark" || value === "light" ? value : "default";
 }
 
+let globalRepeatingDeleteTimer: any = null;
+let globalRepeatingDeleteToken = 0;
+
+function stopGlobalRepeatingDelete() {
+  globalRepeatingDeleteToken += 1;
+  if (globalRepeatingDeleteTimer != null) {
+    clearTimeout(globalRepeatingDeleteTimer);
+  }
+  globalRepeatingDeleteTimer = null;
+}
+
 export function KeyboardView() {
   return (
     <GeometryReader>
@@ -114,6 +125,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
   const lastShiftTapRef = useRef(0);
   const deletedTextRef = useRef("");
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
+  const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowLongPressHandledRef = useRef(new Map<string, boolean>());
   const rowLongPressTimerRef = useRef(new Map<string, number | null>());
@@ -128,12 +140,12 @@ function KeyboardContent(props: { availableHeight?: number }) {
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteClickAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
-  const repeatingDeleteTimerRef = useRef<number | null>(null);
   const hapticQueueTimerRef = useRef<any>(null);
   const pendingPressHapticRef = useRef(false);
   const metrics = keyboardMetrics(settings, props.availableHeight);
 
   useEffect(() => {
+    stopRepeatingBackspace();
     const syncKeyboardAppearance = (
       traits?: CustomKeyboard.TextInputTraits,
     ) => {
@@ -176,6 +188,12 @@ function KeyboardContent(props: { availableHeight?: number }) {
         if (timer != null) clearTimeout(timer);
       }
       rowLongPressTimerRef.current.clear();
+      for (const timer of pressedReleaseTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      pressedReleaseTimersRef.current.clear();
+      pressedKeyIdsRef.current = new Set();
+      setPressedKeyIds(new Set());
       stopRepeatingBackspace();
       if (hapticQueueTimerRef.current) {
         clearTimeout(hapticQueueTimerRef.current);
@@ -236,6 +254,14 @@ function KeyboardContent(props: { availableHeight?: number }) {
     action();
     playReleaseFeedback();
     playPressFeedback();
+  }
+
+  function cancelPendingPressFeedback() {
+    if (hapticQueueTimerRef.current) {
+      clearTimeout(hapticQueueTimerRef.current);
+      hapticQueueTimerRef.current = null;
+    }
+    pendingPressHapticRef.current = false;
   }
 
   function playPressFeedback() {
@@ -305,8 +331,27 @@ function KeyboardContent(props: { availableHeight?: number }) {
     }
   }
 
+  function clearPressedReleaseTimer(id: string) {
+    const timer = pressedReleaseTimersRef.current.get(id);
+    if (timer != null) clearTimeout(timer);
+    pressedReleaseTimersRef.current.delete(id);
+  }
+
+  function schedulePressedRelease(id: string) {
+    clearPressedReleaseTimer(id);
+    pressedReleaseTimersRef.current.set(
+      id,
+      setTimeout(() => {
+        pressedReleaseTimersRef.current.delete(id);
+        setKeyPressed(id, false);
+      }, 420),
+    );
+  }
+
   function setKeyPressed(id: string, pressed: boolean) {
     const current = pressedKeyIdsRef.current;
+    if (pressed) schedulePressedRelease(id);
+    else clearPressedReleaseTimer(id);
     if (pressed === current.has(id)) return;
     const next = new Set(current);
     if (pressed) next.add(id);
@@ -320,13 +365,21 @@ function KeyboardContent(props: { availableHeight?: number }) {
   }
 
   function beginKeyTouch(id: string) {
+    stopRepeatingBackspace();
     setKeyPressed(id, true);
     playPressFeedback();
   }
 
   function endKeyTouch(id: string) {
+    if (id === "backspace" || id === "numeric-backspace") {
+      stopRepeatingBackspace();
+    }
     playReleaseFeedback();
     setKeyPressed(id, false);
+  }
+
+  function isSpaceCursorKey(id: string | undefined) {
+    return id === "space" || id === "numeric-space";
   }
 
   function hitTargetFromGesture(details: any, targets: KeyHitTarget[]) {
@@ -353,7 +406,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     if (target?.id === "backspace" || target?.id === "numeric-backspace") {
       stopRepeatingBackspace();
     }
-    if (target?.id === "space") spaceCursorDragXRef.current = null;
+    if (isSpaceCursorKey(target?.id)) spaceCursorDragXRef.current = null;
   }
 
   function scheduleRowLongPress(rowId: string, target: KeyHitTarget | null) {
@@ -364,7 +417,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     spaceCursorDragXRef.current = null;
     if (!target?.onLongPress) return;
     const gestureToken = rowGestureTokenRef.current.get(rowId);
-    const isSpaceKey = target.id === "space";
+    const isSpaceKey = isSpaceCursorKey(target.id);
     const timer = setTimeout(() => {
       if (gestureToken == null) return;
       if (rowGestureTokenRef.current.get(rowId) !== gestureToken) return;
@@ -422,7 +475,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
     ) {
       return;
     }
-    const isSpace = activeHitTargetRef.current.get(rowId)?.id === "space";
+    const isSpace = isSpaceCursorKey(activeHitTargetRef.current.get(rowId)?.id);
     if (
       isSpace ? !isVerticalDragIntent(details) : !isLongPressDragIntent(details)
     ) {
@@ -453,8 +506,11 @@ function KeyboardContent(props: { availableHeight?: number }) {
   ) {
     rowLongPressLatestGestureRef.current.set(rowId, details);
     if (rowLongPressHandledRef.current.get(rowId)) {
-      if (activeHitTargetRef.current.get(rowId)?.id === "space") {
+      const activeId = activeHitTargetRef.current.get(rowId)?.id;
+      if (isSpaceCursorKey(activeId)) {
         updateSpaceCursorDrag(details);
+      } else if (activeId === "backspace" || activeId === "numeric-backspace") {
+        backspaceLongPressMove(details);
       }
       return;
     }
@@ -621,26 +677,29 @@ function KeyboardContent(props: { availableHeight?: number }) {
   }
 
   function stopRepeatingBackspace() {
-    if (repeatingDeleteTimerRef.current == null) return;
-    clearTimeout(repeatingDeleteTimerRef.current);
-    repeatingDeleteTimerRef.current = null;
+    stopGlobalRepeatingDelete();
   }
 
   function startRepeatingBackspace() {
     stopRepeatingBackspace();
+    cancelPendingPressFeedback();
+    const repeatToken = ++globalRepeatingDeleteToken;
     lastDeleteClickAtRef.current = 0;
     lastDeleteHapticAtRef.current = 0;
     pressBackspace();
     playRepeatingDeleteFeedback();
     const repeat = () => {
+      if (repeatToken !== globalRepeatingDeleteToken) return;
       pressBackspace();
       playRepeatingDeleteFeedback();
-      repeatingDeleteTimerRef.current = setTimeout(repeat, 82);
+      if (repeatToken !== globalRepeatingDeleteToken) return;
+      globalRepeatingDeleteTimer = setTimeout(repeat, 82);
     };
-    repeatingDeleteTimerRef.current = setTimeout(repeat, 82);
+    globalRepeatingDeleteTimer = setTimeout(repeat, 82);
   }
 
   function clearComposition() {
+    stopRepeatingBackspace();
     const s = sessionRef.current;
     if (s) {
       try {
@@ -691,6 +750,33 @@ function KeyboardContent(props: { availableHeight?: number }) {
 
   function insertNewline() {
     CustomKeyboard.insertText("\n");
+  }
+
+  function backspaceLongPressMove(details: any) {
+    const dx = Math.abs(Number(details?.translation?.width ?? 0));
+    const dy = Math.abs(Number(details?.translation?.height ?? 0));
+    if (dx >= 10 || dy >= 10) {
+      cancelPendingPressFeedback();
+      stopRepeatingBackspace();
+    }
+  }
+
+  function backspaceSwipeLeft() {
+    cancelPendingPressFeedback();
+    stopRepeatingBackspace();
+    clearComposition();
+  }
+
+  function backspaceSwipeUp() {
+    cancelPendingPressFeedback();
+    stopRepeatingBackspace();
+    deleteAllText();
+  }
+
+  function backspaceSwipeDown() {
+    cancelPendingPressFeedback();
+    stopRepeatingBackspace();
+    restoreDeletedText();
   }
 
   function toggleAscii() {
@@ -824,6 +910,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
   }
 
   function deleteAllText() {
+    stopRepeatingBackspace();
     try {
       const text = CustomKeyboard.allText ?? "";
       if (!text) return;
@@ -835,6 +922,7 @@ function KeyboardContent(props: { availableHeight?: number }) {
   }
 
   function restoreDeletedText() {
+    stopRepeatingBackspace();
     if (!deletedTextRef.current) return;
     CustomKeyboard.insertText(deletedTextRef.current);
   }
@@ -1290,6 +1378,28 @@ function KeyboardContent(props: { availableHeight?: number }) {
         else if (value === "space") pressSpace();
         else pressNumericDigit(value);
       },
+      onLongPress: value === "space"
+        ? () => {
+          spaceCursorDragXRef.current = null;
+        }
+        : undefined,
+      onLongPressEnd: value === "space"
+        ? () => {
+          spaceCursorDragXRef.current = null;
+        }
+        : undefined,
+      onSwipeUp: value === "space"
+        ? () => processSpaceSwipeCandidate("2")
+        : undefined,
+      onSwipeDown: value === "space"
+        ? () => processSpaceSwipeCandidate("3")
+        : undefined,
+      onSwipeLeft: value === "space"
+        ? () => CustomKeyboard.moveCursor(-1)
+        : undefined,
+      onSwipeRight: value === "space"
+        ? () => CustomKeyboard.moveCursor(1)
+        : undefined,
     }));
   }
 
@@ -1304,9 +1414,9 @@ function KeyboardContent(props: { availableHeight?: number }) {
         onPress: pressBackspace,
         onLongPress: startRepeatingBackspace,
         onLongPressEnd: stopRepeatingBackspace,
-        onSwipeLeft: clearComposition,
-        onSwipeUp: deleteAllText,
-        onSwipeDown: restoreDeletedText,
+        onSwipeLeft: backspaceSwipeLeft,
+        onSwipeUp: backspaceSwipeUp,
+        onSwipeDown: backspaceSwipeDown,
       },
       {
         id: "numeric-dot",
@@ -2114,9 +2224,9 @@ function KeyboardContent(props: { availableHeight?: number }) {
                       passive
                       active={isPressed("numeric-backspace")}
                       onPress={() => runWithFeedback(pressBackspace)}
-                      onSwipeLeft={() => runWithFeedback(clearComposition)}
-                      onSwipeUp={() => runWithFeedback(deleteAllText)}
-                      onSwipeDown={() => runWithFeedback(restoreDeletedText)}
+                      onSwipeLeft={() => runWithFeedback(backspaceSwipeLeft)}
+                      onSwipeUp={() => runWithFeedback(backspaceSwipeUp)}
+                      onSwipeDown={() => runWithFeedback(backspaceSwipeDown)}
                     />
                     <KeyFace
                       id="numeric-dot"
@@ -2258,9 +2368,10 @@ function KeyboardContent(props: { availableHeight?: number }) {
                             onPress={pressBackspace}
                             onLongPress={startRepeatingBackspace}
                             onLongPressEnd={stopRepeatingBackspace}
-                            onSwipeLeft={clearComposition}
-                            onSwipeUp={deleteAllText}
-                            onSwipeDown={restoreDeletedText}
+                            onLongPressMove={backspaceLongPressMove}
+                            onSwipeLeft={backspaceSwipeLeft}
+                            onSwipeUp={backspaceSwipeUp}
+                            onSwipeDown={backspaceSwipeDown}
                           />
                         )
                         : null}
