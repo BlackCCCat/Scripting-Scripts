@@ -5,6 +5,7 @@ import {
   Image,
   Spacer,
   Text,
+  useEffect,
   useRef,
   VStack,
   ZStack,
@@ -137,6 +138,20 @@ export function KeyFace(props: {
     longPressHandledRef.current = false;
     longPressCancelledRef.current = false;
   }
+
+  useEffect(() => {
+    return () => {
+      const wasStarted = gestureStartedRef.current;
+      const wasLongPress = longPressHandledRef.current;
+      clearLongPressTimer();
+      latestGestureRef.current = null;
+      gestureStartedRef.current = false;
+      longPressHandledRef.current = false;
+      longPressCancelledRef.current = true;
+      if (wasStarted) props.onTouchEnd?.();
+      if (wasLongPress) props.onLongPressEnd?.();
+    };
+  }, []);
 
   function startGesture() {
     if (gestureStartedRef.current) return;

@@ -170,6 +170,24 @@ export const DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS: SwipeSettings = {
   m: "rectangle.3.group.fill",
 };
 
+export const FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN: SwipeSettings = {
+  a: "{selectAll}",
+  x: "{cut}",
+  c: "{copy}",
+  v: "{paste}",
+  b: "{home}",
+  n: "{end}",
+};
+
+export const FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS: SwipeSettings = {
+  a: "selection.pin.in.out",
+  x: "scissors",
+  c: "doc.on.doc",
+  v: "doc.on.clipboard",
+  b: "text.line.first.and.arrowtriangle.forward",
+  n: "text.line.last.and.arrowtriangle.forward",
+};
+
 export const DEFAULT_LETTER_ACTION_MODES: ActionModeSettings = Object
   .fromEntries(LETTER_KEYS.map((key) => [key, "auto" as ActionSendMode]));
 
@@ -462,7 +480,7 @@ function migrateComposingSwipeSettings(
 }
 
 export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
-  return {
+  const normalized: RimeKeyboardSettings = {
     theme: normalizeTheme(raw?.theme),
     useCustomKeyboardHeight: typeof raw?.useCustomKeyboardHeight === "boolean"
       ? raw.useCustomKeyboardHeight
@@ -644,6 +662,50 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       ? raw.autoDeployOnLaunch
       : true,
   };
+  if (!normalized.showFunctionRow) {
+    for (
+      const key of Object.keys(FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN)
+    ) {
+      const rawAction = raw?.letterSwipeDown?.[key];
+      if (
+        typeof rawAction !== "string" ||
+        rawAction === DEFAULT_LETTER_SWIPE_DOWN[key]
+      ) {
+        normalized.letterSwipeDown[key] =
+          FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN[key];
+        normalized.letterSwipeDownModes[key] = "auto";
+      }
+
+      const rawSymbol = raw?.letterSwipeDownSymbols?.[key];
+      if (
+        typeof rawSymbol !== "string" ||
+        rawSymbol === DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS[key]
+      ) {
+        normalized.letterSwipeDownSymbols[key] =
+          FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS[key];
+      }
+    }
+  } else {
+    for (
+      const key of Object.keys(FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN)
+    ) {
+      if (
+        normalized.letterSwipeDown[key] ===
+          FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN[key]
+      ) {
+        normalized.letterSwipeDown[key] = DEFAULT_LETTER_SWIPE_DOWN[key];
+        normalized.letterSwipeDownModes[key] = "auto";
+      }
+      if (
+        normalized.letterSwipeDownSymbols[key] ===
+          FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS[key]
+      ) {
+        normalized.letterSwipeDownSymbols[key] =
+          DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS[key];
+      }
+    }
+  }
+  return normalized;
 }
 
 function getRawSettings(): unknown {

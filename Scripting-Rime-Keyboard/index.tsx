@@ -22,8 +22,12 @@ import {
   CANDIDATE_BAR_HEIGHT_MIN,
   type CandidateRightButtonMode,
   COMPOSING_FUNCTION_KEYS,
+  DEFAULT_LETTER_SWIPE_DOWN,
+  DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS,
   DEFAULT_RIME_KEYBOARD_SETTINGS,
   FUNCTION_KEYS,
+  FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN,
+  FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS,
   KEYBOARD_HEIGHT_MAX,
   KEYBOARD_HEIGHT_MIN,
   type KeyColorPair,
@@ -388,6 +392,47 @@ function SettingsView() {
 
   function patchSettings(patch: Partial<RimeKeyboardSettings>) {
     updateSettings({ ...settings, ...patch });
+  }
+
+  function setFunctionRowVisible(value: boolean) {
+    const next: RimeKeyboardSettings = {
+      ...settings,
+      showFunctionRow: value,
+      letterSwipeDown: { ...settings.letterSwipeDown },
+      letterSwipeDownSymbols: { ...settings.letterSwipeDownSymbols },
+      letterSwipeDownModes: { ...settings.letterSwipeDownModes },
+    };
+    for (const key of Object.keys(FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN)) {
+      if (value) {
+        if (
+          next.letterSwipeDown[key] ===
+            FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN[key]
+        ) {
+          next.letterSwipeDown[key] = DEFAULT_LETTER_SWIPE_DOWN[key];
+          next.letterSwipeDownModes[key] = "auto";
+        }
+        if (
+          next.letterSwipeDownSymbols[key] ===
+            FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS[key]
+        ) {
+          next.letterSwipeDownSymbols[key] =
+            DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS[key];
+        }
+      } else {
+        if (next.letterSwipeDown[key] === DEFAULT_LETTER_SWIPE_DOWN[key]) {
+          next.letterSwipeDown[key] = FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN[key];
+          next.letterSwipeDownModes[key] = "auto";
+        }
+        if (
+          next.letterSwipeDownSymbols[key] ===
+            DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS[key]
+        ) {
+          next.letterSwipeDownSymbols[key] =
+            FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS[key];
+        }
+      }
+    }
+    updateSettings(next);
   }
 
   function patchKeyBaseColor(
@@ -766,8 +811,7 @@ function SettingsView() {
             title="显示功能行"
             systemImage="rectangle.split.3x1"
             value={settings.showFunctionRow}
-            onChanged={(value) =>
-              patchSettings({ showFunctionRow: value })}
+            onChanged={setFunctionRowVisible}
           />
           <VStack alignment="leading" spacing={8}>
             <HStack>
@@ -864,7 +908,8 @@ function SettingsView() {
             title="触感反馈"
             systemImage="iphone.radiowaves.left.and.right"
             value={settings.haptics}
-            onChanged={(value) => patchSettings({ haptics: value })}
+            onChanged={(value) =>
+              patchSettings({ haptics: value })}
           />
           {settings.haptics
             ? (

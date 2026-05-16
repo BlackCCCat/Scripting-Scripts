@@ -13,6 +13,7 @@ import {
   useRef,
   useState,
   VStack,
+  ZStack,
 } from "scripting";
 import {
   type ActionSendMode,
@@ -61,17 +62,32 @@ function currentKeyboardAppearance(): KeyboardAppearance {
 }
 
 let globalRepeatingDeleteTimer: any = null;
+let globalRepeatingDeleteSafetyTimer: any = null;
 let globalRepeatingDeleteToken = 0;
 const SPACE_CURSOR_DRAG_STEP = 12;
 const SPACE_CANDIDATE_DRAG_STEP = 24;
-const DELETE_LONG_PRESS_DURATION = 760;
+const DELETE_LONG_PRESS_DURATION = 920;
+const DELETE_REPEAT_SAFETY_DURATION = 4200;
+const CURSOR_REPEAT_DURATION = 420;
+const PRESSED_RELEASE_DELAY = 260;
+const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
+const EXPANDED_RIME_PAGE_BATCH = 4;
+
+type ExpandedCandidateItem = {
+  candidate: Rime.Candidate;
+  absoluteIndex: number;
+};
 
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
   if (globalRepeatingDeleteTimer != null) {
     clearTimeout(globalRepeatingDeleteTimer);
   }
+  if (globalRepeatingDeleteSafetyTimer != null) {
+    clearTimeout(globalRepeatingDeleteSafetyTimer);
+  }
   globalRepeatingDeleteTimer = null;
+  globalRepeatingDeleteSafetyTimer = null;
 }
 
 export function KeyboardView() {
@@ -108,6 +124,7 @@ function KeyboardContent(props: {
     highlightedIdx: 0,
     pageNo: 0,
     rimePageSize: 5,
+    isLastPage: true,
     ascii: false,
     currentSchemaId: null as string | null,
   });
@@ -118,6 +135,7 @@ function KeyboardContent(props: {
     highlightedIdx,
     pageNo,
     rimePageSize,
+    isLastPage,
     ascii,
     currentSchemaId,
   } = rimeState;
@@ -126,12 +144,18 @@ function KeyboardContent(props: {
   const [symbolLayer, setSymbolLayer] = useState(false);
   const [backslashWrapMode, setBackslashWrapMode] = useState(false);
   const [candidateExpanded, setCandidateExpanded] = useState(false);
+  const [expandedCandidates, setExpandedCandidates] = useState<
+    ExpandedCandidateItem[]
+  >([]);
+  const [expandedBatchHasMore, setExpandedBatchHasMore] = useState(false);
   const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [schemas, setSchemas] = useState<Rime.Schema[]>([]);
   const lastShiftTapRef = useRef(0);
   const deletedTextRef = useRef("");
+  const cursorRepeatTimerRef = useRef<any>(null);
+  const cursorRepeatTokenRef = useRef(0);
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
@@ -204,6 +228,7 @@ function KeyboardContent(props: {
       }
       rowLongPressTimerRef.current.clear();
       rowSpaceDragConsumedRef.current.clear();
+      stopRepeatingCursorMove();
       for (const timer of pressedReleaseTimersRef.current.values()) {
         clearTimeout(timer);
       }
@@ -257,6 +282,7 @@ function KeyboardContent(props: {
       highlightedIdx: menu?.highlightedIndex ?? 0,
       pageNo: menu?.pageNo ?? 0,
       rimePageSize: menu?.pageSize ?? 5,
+      isLastPage: menu?.isLastPage ?? true,
       currentSchemaId: session.currentSchema?.id ?? null,
       ascii: session.getOption("ascii_mode"),
     });
@@ -264,9 +290,16 @@ function KeyboardContent(props: {
     else if (backslashWrapMode && !nextPreedit.includes("\\")) {
       setBackslashWrapMode(false);
     }
+    if (!nextPreedit) {
+      setCandidateExpanded(false);
+      setExpandedCandidates([]);
+      setExpandedBatchHasMore(false);
+    }
   }
 
   function runWithFeedback(action: () => void) {
+    stopRepeatingBackspace();
+    stopRepeatingCursorMove();
     action();
     playReleaseFeedback();
     playPressFeedback();
@@ -359,19 +392,22 @@ function KeyboardContent(props: {
       id,
       setTimeout(() => {
         pressedReleaseTimersRef.current.delete(id);
+        cleanupContinuousActionForKey(id);
         setKeyPressed(id, false);
       }, delay),
     );
   }
 
   function schedulePressedRelease(id: string) {
-    schedulePressedFallbackRelease(id, 420);
+    schedulePressedFallbackRelease(id, PRESSED_RELEASE_DELAY);
   }
 
-  function setKeyPressed(id: string, pressed: boolean) {
+  function setKeyPressed(id: string, pressed: boolean, fallback = true) {
     const current = pressedKeyIdsRef.current;
-    if (pressed) schedulePressedRelease(id);
-    else clearPressedReleaseTimer(id);
+    if (pressed) {
+      if (fallback) schedulePressedRelease(id);
+      else clearPressedReleaseTimer(id);
+    } else clearPressedReleaseTimer(id);
     if (pressed === current.has(id)) return;
     const next = new Set(current);
     if (pressed) next.add(id);
@@ -380,12 +416,39 @@ function KeyboardContent(props: {
     setPressedKeyIds(next);
   }
 
+  function holdKeyPressedUntilRelease(id: string) {
+    setKeyPressed(id, true, false);
+    schedulePressedFallbackRelease(id, LONG_PRESS_PRESSED_RELEASE_DELAY);
+  }
+
+  function releaseAllPressedKeys() {
+    for (const timer of pressedReleaseTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    pressedReleaseTimersRef.current.clear();
+    if (pressedKeyIdsRef.current.size === 0) return;
+    pressedKeyIdsRef.current = new Set();
+    setPressedKeyIds(new Set());
+  }
+
+  function cleanupContinuousActionForKey(id: string) {
+    if (id === "backspace" || id === "numeric-backspace") {
+      stopRepeatingBackspace();
+    } else if (
+      id === "idle-left" || id === "idle-right" || id === "func-left" ||
+      id === "func-right"
+    ) {
+      stopRepeatingCursorMove();
+    }
+  }
+
   function isPressed(id: string) {
     return pressedKeyIds.has(id);
   }
 
   function beginKeyTouch(id: string) {
     stopRepeatingBackspace();
+    stopRepeatingCursorMove();
     setKeyPressed(id, true);
     playPressFeedback();
   }
@@ -424,6 +487,20 @@ function KeyboardContent(props: {
     rowLongPressTimerRef.current.delete(rowId);
   }
 
+  function clearAllRowGestureState() {
+    for (const timer of rowLongPressTimerRef.current.values()) {
+      if (timer != null) clearTimeout(timer);
+    }
+    rowLongPressTimerRef.current.clear();
+    rowLongPressHandledRef.current.clear();
+    rowLongPressCancelledRef.current.clear();
+    rowLongPressLatestGestureRef.current.clear();
+    rowSpaceDragConsumedRef.current.clear();
+    activeHitTargetRef.current.clear();
+    rowGestureTokenRef.current.clear();
+    spaceCursorDragXRef.current = null;
+  }
+
   function cancelRowGesture(rowId: string) {
     const target = activeHitTargetRef.current.get(rowId);
     if (target) setKeyPressed(target.id, false);
@@ -436,6 +513,12 @@ function KeyboardContent(props: {
     rowGestureTokenRef.current.delete(rowId);
     if (target?.id === "backspace" || target?.id === "numeric-backspace") {
       stopRepeatingBackspace();
+    }
+    if (
+      target?.id === "idle-left" || target?.id === "idle-right" ||
+      target?.id === "func-left" || target?.id === "func-right"
+    ) {
+      stopRepeatingCursorMove();
     }
     if (isSpaceCursorKey(target?.id)) spaceCursorDragXRef.current = null;
   }
@@ -465,6 +548,7 @@ function KeyboardContent(props: {
         return;
       }
       rowLongPressHandledRef.current.set(rowId, true);
+      holdKeyPressedUntilRelease(target.id);
       target.onLongPress?.();
     }, target.longPressDuration ?? 360);
     rowLongPressTimerRef.current.set(rowId, timer as any);
@@ -763,8 +847,19 @@ function KeyboardContent(props: {
     stopGlobalRepeatingDelete();
   }
 
-  function startRepeatingBackspace() {
+  function stopRepeatingCursorMove() {
+    cursorRepeatTokenRef.current += 1;
+    if (cursorRepeatTimerRef.current != null) {
+      clearTimeout(cursorRepeatTimerRef.current);
+    }
+    cursorRepeatTimerRef.current = null;
+  }
+
+  function startRepeatingBackspace(
+    id: "backspace" | "numeric-backspace" = "backspace",
+  ) {
     stopRepeatingBackspace();
+    stopRepeatingCursorMove();
     cancelPendingPressFeedback();
     const repeatToken = ++globalRepeatingDeleteToken;
     lastDeleteClickAtRef.current = 0;
@@ -779,6 +874,25 @@ function KeyboardContent(props: {
       globalRepeatingDeleteTimer = setTimeout(repeat, 82);
     };
     globalRepeatingDeleteTimer = setTimeout(repeat, 82);
+    globalRepeatingDeleteSafetyTimer = setTimeout(() => {
+      if (repeatToken !== globalRepeatingDeleteToken) return;
+      stopRepeatingBackspace();
+      setKeyPressed(id, false);
+    }, DELETE_REPEAT_SAFETY_DURATION);
+  }
+
+  function startRepeatingCursorMove(offset: number) {
+    stopRepeatingCursorMove();
+    stopRepeatingBackspace();
+    cancelPendingPressFeedback();
+    const repeatToken = ++cursorRepeatTokenRef.current;
+    const repeat = () => {
+      if (repeatToken !== cursorRepeatTokenRef.current) return;
+      CustomKeyboard.moveCursor(offset);
+      playCursorMoveFeedback();
+      cursorRepeatTimerRef.current = setTimeout(repeat, 72);
+    };
+    repeat();
   }
 
   function clearComposition() {
@@ -798,8 +912,11 @@ function KeyboardContent(props: {
       candidates: [],
       highlightedIdx: 0,
       pageNo: 0,
+      isLastPage: true,
     }));
     setCandidateExpanded(false);
+    setExpandedCandidates([]);
+    setExpandedBatchHasMore(false);
     setBackslashWrapMode(false);
     try {
       CustomKeyboard.setMarkedText("", 0, 0);
@@ -838,7 +955,18 @@ function KeyboardContent(props: {
   function backspaceLongPressMove(details: any) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
-    if (dx >= 10 || dy >= 10) {
+    const vx = Math.abs(Number(details?.velocity?.width ?? 0));
+    const vy = Math.abs(Number(details?.velocity?.height ?? 0));
+    const predictedDx = Math.abs(
+      Number(details?.predictedEndTranslation?.width ?? 0),
+    );
+    const predictedDy = Math.abs(
+      Number(details?.predictedEndTranslation?.height ?? 0),
+    );
+    if (
+      dx >= 5 || dy >= 5 || vx >= 8 || vy >= 8 || predictedDx >= 8 ||
+      predictedDy >= 8
+    ) {
       cancelPendingPressFeedback();
       stopRepeatingBackspace();
     }
@@ -860,6 +988,11 @@ function KeyboardContent(props: {
     cancelPendingPressFeedback();
     stopRepeatingBackspace();
     restoreDeletedText();
+  }
+
+  function cancelBackspaceSwipeStart() {
+    cancelPendingPressFeedback();
+    stopRepeatingBackspace();
   }
 
   function toggleAscii() {
@@ -1232,6 +1365,10 @@ function KeyboardContent(props: {
     effectiveCandidateRightButtonMode === "expand"
       ? candidateExpanded ? "chevron.up.circle" : "chevron.down.circle"
       : "keyboard.chevron.compact.down";
+  const highlightedAbsoluteIndex = pageNo * rimePageSize + highlightedIdx;
+  const expandedPagerWidth = 42;
+  const expandedCandidateWidth = metrics.width - expandedPagerWidth -
+    KEY_SPACING;
   const showNextKeyboardButton = Device.isiPad;
   const bottomSplitButtonWidth = Math.max(
     20,
@@ -1332,6 +1469,9 @@ function KeyboardContent(props: {
         x: 0,
         width: metrics.functionWidth8,
         onPress: () => CustomKeyboard.moveCursor(-1),
+        onLongPress: () => startRepeatingCursorMove(-1),
+        onLongPressEnd: stopRepeatingCursorMove,
+        longPressDuration: CURSOR_REPEAT_DURATION,
         onSwipeUp: () => runIdleFunctionSwipe("up", "left"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "left"),
       },
@@ -1394,6 +1534,9 @@ function KeyboardContent(props: {
         x: step * 7,
         width: metrics.functionWidth8,
         onPress: () => CustomKeyboard.moveCursor(1),
+        onLongPress: () => startRepeatingCursorMove(1),
+        onLongPressEnd: stopRepeatingCursorMove,
+        longPressDuration: CURSOR_REPEAT_DURATION,
         onSwipeUp: () => runIdleFunctionSwipe("up", "right"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "right"),
       },
@@ -1549,7 +1692,7 @@ function KeyboardContent(props: {
         width: numericRightWidth,
         height: metrics.keyHeight,
         onPress: pressBackspace,
-        onLongPress: startRepeatingBackspace,
+        onLongPress: () => startRepeatingBackspace("numeric-backspace"),
         onLongPressEnd: stopRepeatingBackspace,
         longPressDuration: DELETE_LONG_PRESS_DURATION,
         onSwipeLeft: backspaceSwipeLeft,
@@ -1586,9 +1729,83 @@ function KeyboardContent(props: {
     ];
   }
 
+  function collectExpandedCandidateBatch(session = sessionRef.current) {
+    const menu = session?.context?.menu;
+    if (!session || !menu) {
+      setExpandedCandidates([]);
+      setExpandedBatchHasMore(false);
+      return;
+    }
+
+    const originalPage = menu.pageNo;
+    const items: ExpandedCandidateItem[] = [];
+    let hasMore = false;
+
+    for (let page = 0; page < EXPANDED_RIME_PAGE_BATCH; page += 1) {
+      const currentMenu = session.context?.menu;
+      if (!currentMenu) break;
+      currentMenu.candidates.forEach((candidate, index) => {
+        items.push({
+          candidate,
+          absoluteIndex: currentMenu.pageNo * currentMenu.pageSize + index,
+        });
+      });
+      if (currentMenu.isLastPage) break;
+      if (page === EXPANDED_RIME_PAGE_BATCH - 1) {
+        hasMore = true;
+        break;
+      }
+      if (!session.processKey(KEY_PAGE_DOWN)) break;
+    }
+
+    const currentPage = session.context?.menu?.pageNo ?? originalPage;
+    for (let page = currentPage; page > originalPage; page -= 1) {
+      session.processKey(KEY_PAGE_UP);
+    }
+
+    setExpandedCandidates(items);
+    setExpandedBatchHasMore(hasMore);
+    refresh(session);
+  }
+
+  function moveExpandedCandidateBatch(direction: "up" | "down") {
+    const s = sessionRef.current;
+    if (!s) return;
+    stopRepeatingBackspace();
+    stopRepeatingCursorMove();
+    clearAllRowGestureState();
+    releaseAllPressedKeys();
+
+    if (direction === "up") {
+      const menu = s.context?.menu;
+      const steps = Math.min(EXPANDED_RIME_PAGE_BATCH, menu?.pageNo ?? 0);
+      for (let i = 0; i < steps; i += 1) {
+        s.processKey(KEY_PAGE_UP);
+      }
+    } else {
+      for (let i = 0; i < EXPANDED_RIME_PAGE_BATCH; i += 1) {
+        const menu = s.context?.menu;
+        if (!menu || menu.isLastPage) break;
+        if (!s.processKey(KEY_PAGE_DOWN)) break;
+      }
+    }
+    collectExpandedCandidateBatch(s);
+  }
+
   function pressCandidateRightButton() {
+    stopRepeatingBackspace();
+    stopRepeatingCursorMove();
+    clearAllRowGestureState();
+    releaseAllPressedKeys();
     if (effectiveCandidateRightButtonMode === "expand") {
-      setCandidateExpanded((value) => !value);
+      if (candidateExpanded) {
+        setCandidateExpanded(false);
+        setExpandedCandidates([]);
+        setExpandedBatchHasMore(false);
+      } else {
+        collectExpandedCandidateBatch();
+        setCandidateExpanded(true);
+      }
     } else if (effectiveCandidateRightButtonMode === "dismiss") {
       CustomKeyboard.dismiss();
     }
@@ -1777,71 +1994,16 @@ function KeyboardContent(props: {
         </HStack>
       </VStack>
 
-      {candidateExpanded
-        ? (
-          <ScrollView
-            axes="vertical"
-            scrollIndicator="hidden"
-            frame={{ width: metrics.width, height: expandedPanelHeight }}
-            background={"rgba(0,0,0,0.001)" as any}
-            contentShape="rect"
-          >
-            <VStack
-              spacing={KEY_SPACING}
-              frame={{
-                width: metrics.width,
-                minHeight: expandedPanelHeight,
-                alignment: "top" as any,
-              }}
-              background={"rgba(0,0,0,0.001)" as any}
-              contentShape="rect"
-            >
-              <FlowLayout
-                spacing={KEY_SPACING}
-                frame={{ width: metrics.width, alignment: "leading" as any }}
-              >
-                {candidates.map((candidate, absoluteIndex) => {
-                  const comment = candidateComment(candidate);
-                  const naturalWidth = candidateButtonNaturalWidth({
-                    text: candidate.text,
-                    comment,
-                    index: absoluteIndex,
-                    candidateFontSize: metrics.candidateFontSize,
-                    commentFontSize: metrics.candidateCommentFontSize,
-                    expanded: true,
-                  });
-                  const width = naturalWidth > metrics.width
-                    ? metrics.width
-                    : undefined;
-                  return (
-                    <CandidateButton
-                      key={`expanded-${absoluteIndex}-${candidate.text}`}
-                      index={absoluteIndex}
-                      candidate={candidate}
-                      comment={comment}
-                      selected={absoluteIndex === highlightedIdx}
-                      palette={palette}
-                      width={width}
-                      naturalWidth={naturalWidth}
-                      height={Math.max(52, metrics.candidateButtonHeight + 12)}
-                      candidateFontSize={metrics.candidateFontSize}
-                      commentFontSize={metrics.candidateCommentFontSize}
-                      expanded
-                      onPress={() =>
-                        runWithFeedback(() => {
-                          selectCandidateAbsolute(
-                            pageNo * rimePageSize + absoluteIndex,
-                          );
-                          setCandidateExpanded(false);
-                        })}
-                    />
-                  );
-                })}
-              </FlowLayout>
-            </VStack>
-          </ScrollView>
-        )
-        : (
+      <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
+        <VStack
+          spacing={6}
+          frame={{
+            width: metrics.width,
+            height: expandedPanelHeight,
+            alignment: "top" as any,
+          }}
+          opacity={candidateExpanded ? 0 : 1}
+        >
           <Group>
             {settings.showFunctionRow
               ? (
@@ -2459,7 +2621,7 @@ function KeyboardContent(props: {
                             onTouchStart={() => beginKeyTouch("shift")}
                             onTouchEnd={() => endKeyTouch("shift")}
                             onSwipeUp={shiftSwipeUp}
-                            onSwipeStart={cancelPendingPressFeedback}
+                            onSwipeStart={cancelBackspaceSwipeStart}
                             swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )
@@ -2503,7 +2665,10 @@ function KeyboardContent(props: {
                           onPress={() => pressLetter(ch)}
                           onTouchStart={() => beginKeyTouch(ch)}
                           onTouchEnd={() => endKeyTouch(ch)}
-                          onLongPress={() => pressUppercaseLetter(ch)}
+                          onLongPress={() => {
+                            holdKeyPressedUntilRelease(ch);
+                            pressUppercaseLetter(ch);
+                          }}
                           longPressDuration={settings.letterLongPressDuration}
                           onSwipeUp={() => runLetterSwipe("up", ch)}
                           onSwipeDown={() => runLetterSwipe("down", ch)}
@@ -2524,7 +2689,10 @@ function KeyboardContent(props: {
                             onPress={pressBackspace}
                             onTouchStart={() => beginKeyTouch("backspace")}
                             onTouchEnd={() => endKeyTouch("backspace")}
-                            onLongPress={startRepeatingBackspace}
+                            onLongPress={() => {
+                              holdKeyPressedUntilRelease("backspace");
+                              startRepeatingBackspace("backspace");
+                            }}
                             onLongPressEnd={stopRepeatingBackspace}
                             onLongPressMove={backspaceLongPressMove}
                             longPressDuration={DELETE_LONG_PRESS_DURATION}
@@ -2544,156 +2712,282 @@ function KeyboardContent(props: {
                 })
               )}
           </Group>
-        )}
 
-      {candidateExpanded || symbolLayer ? null : (
-        <HStack
-          spacing={KEY_SPACING}
-          frame={{ width: metrics.width, height: metrics.keyHeight }}
-          contentShape="rect"
-          highPriorityGesture={hitRowGesture(
-            "bottom-row",
-            bottomRowHitTargets(),
-          )}
-        >
-          {showNextKeyboardButton
-            ? (
+          {symbolLayer ? null : (
+            <HStack
+              spacing={KEY_SPACING}
+              frame={{ width: metrics.width, height: metrics.keyHeight }}
+              contentShape="rect"
+              highPriorityGesture={hitRowGesture(
+                "bottom-row",
+                bottomRowHitTargets(),
+              )}
+            >
+              {showNextKeyboardButton
+                ? (
+                  <KeyFace
+                    id="next-keyboard"
+                    image="globe"
+                    palette={palette}
+                    width={bottomSplitButtonWidth}
+                    height={metrics.keyHeight}
+                    system
+                    passive
+                    active={isPressed("next-keyboard")}
+                    onPress={() =>
+                      runWithFeedback(() => CustomKeyboard.nextKeyboard())}
+                  />
+                )
+                : null}
               <KeyFace
-                id="next-keyboard"
-                image="globe"
+                id="numbers"
+                label={symbolLayer ? "ABC" : "123"}
                 palette={palette}
-                width={bottomSplitButtonWidth}
+                width={showNextKeyboardButton
+                  ? bottomSplitButtonWidth
+                  : metrics.bottom.numbers}
+                height={metrics.keyHeight}
+                system
+                selected={symbolLayer}
+                passive
+                active={isPressed("numbers")}
+                onPress={() =>
+                  runWithFeedback(() => setSymbolLayer((value) => !value))}
+                onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
+              />
+              <KeyFace
+                id="comma"
+                label=","
+                topCenter="."
+                topCenterForeground={palette.primary}
+                palette={palette}
+                width={metrics.bottom.comma}
+                height={metrics.keyHeight}
+                passive
+                active={isPressed("comma")}
+                onPress={() => runWithFeedback(() => pressRimePunctuation(","))}
+                onSwipeUp={() =>
+                  runWithFeedback(() => pressRimePunctuation("."))}
+              />
+              <KeyFace
+                id="space"
+                image="space"
+                bottomRight={settings.showWanxiangLabel
+                  ? settings.spaceLabel
+                  : undefined}
+                bottomRightFontSize={settings.spaceLabel.length > 4
+                  ? 8
+                  : settings.spaceLabel.length > 2
+                  ? 10
+                  : 12}
+                palette={palette}
+                width={metrics.bottom.space}
                 height={metrics.keyHeight}
                 system
                 passive
-                active={isPressed("next-keyboard")}
-                onPress={() =>
-                  runWithFeedback(() => CustomKeyboard.nextKeyboard())}
+                active={isPressed("space")}
+                onPress={() => runWithFeedback(pressSpace)}
+                onSwipeUp={() =>
+                  runWithFeedback(() => processSpaceSwipeCandidate("2"))}
+                onSwipeDown={() =>
+                  runWithFeedback(() => processSpaceSwipeCandidate("3"))}
+                onSwipeLeft={() =>
+                  runWithFeedback(() => CustomKeyboard.moveCursor(-1))}
+                onSwipeRight={() =>
+                  runWithFeedback(() => CustomKeyboard.moveCursor(1))}
               />
-            )
-            : null}
-          <KeyFace
-            id="numbers"
-            label={symbolLayer ? "ABC" : "123"}
-            palette={palette}
-            width={showNextKeyboardButton
-              ? bottomSplitButtonWidth
-              : metrics.bottom.numbers}
-            height={metrics.keyHeight}
-            system
-            selected={symbolLayer}
-            passive
-            active={isPressed("numbers")}
-            onPress={() =>
-              runWithFeedback(() => setSymbolLayer((value) => !value))}
-            onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
-          />
-          <KeyFace
-            id="comma"
-            label=","
-            topCenter="."
-            topCenterForeground={palette.primary}
-            palette={palette}
-            width={metrics.bottom.comma}
-            height={metrics.keyHeight}
-            passive
-            active={isPressed("comma")}
-            onPress={() => runWithFeedback(() => pressRimePunctuation(","))}
-            onSwipeUp={() => runWithFeedback(() => pressRimePunctuation("."))}
-          />
-          <KeyFace
-            id="space"
-            image="space"
-            bottomRight={settings.showWanxiangLabel
-              ? settings.spaceLabel
-              : undefined}
-            bottomRightFontSize={settings.spaceLabel.length > 4
-              ? 8
-              : settings.spaceLabel.length > 2
-              ? 10
-              : 12}
-            palette={palette}
-            width={metrics.bottom.space}
-            height={metrics.keyHeight}
-            system
-            passive
-            active={isPressed("space")}
-            onPress={() => runWithFeedback(pressSpace)}
-            onSwipeUp={() =>
-              runWithFeedback(() => processSpaceSwipeCandidate("2"))}
-            onSwipeDown={() =>
-              runWithFeedback(() => processSpaceSwipeCandidate("3"))}
-            onSwipeLeft={() =>
-              runWithFeedback(() => CustomKeyboard.moveCursor(-1))}
-            onSwipeRight={() =>
-              runWithFeedback(() => CustomKeyboard.moveCursor(1))}
-          />
-          <KeyFace
-            id="mode"
-            image={composing && settings.modeComposingEnabled
-              ? settings.modeComposingIcon
-              : undefined}
-            modeTopLeft={composing && settings.modeComposingEnabled
-              ? undefined
-              : "中"}
-            modeBottomRight={composing && settings.modeComposingEnabled
-              ? undefined
-              : "英"}
-            modeTopLeftActive={!ascii}
-            palette={palette}
-            width={metrics.bottom.mode}
-            height={metrics.keyHeight}
-            system
-            passive
-            active={isPressed("mode")}
-            labelFontSize={18}
-            onPress={() =>
-              runWithFeedback(() => {
-                if (composing && settings.modeComposingEnabled) {
-                  runConfiguredAction(
-                    settings.modeComposingAction,
-                    settings.modeComposingActionMode,
-                  );
-                } else {
-                  toggleAscii();
-                }
-              })}
-            onSwipeUp={() =>
-              runWithFeedback(() => {
-                if (composing && settings.modeComposingEnabled) {
-                  runConfiguredAction(
-                    settings.modeComposingSwipeUp,
-                    settings.modeComposingSwipeUpMode,
-                  );
-                }
-              })}
-            onSwipeDown={() =>
-              runWithFeedback(() => {
-                if (composing && settings.modeComposingEnabled) {
-                  runConfiguredAction(
-                    settings.modeComposingSwipeDown,
-                    settings.modeComposingSwipeDownMode,
-                  );
-                }
-              })}
-            contextMenu={schemaMenu != null
-              ? { menuItems: schemaMenu }
-              : undefined}
-          />
-          <KeyFace
-            id="enter"
-            image="paperplane.fill"
-            palette={palette}
-            width={metrics.bottom.enter}
-            height={metrics.keyHeight}
-            system
-            passive
-            active={isPressed("enter")}
-            onPress={() => runWithFeedback(pressReturn)}
-            onSwipeUp={() => runWithFeedback(insertNewline)}
-          />
-        </HStack>
-      )}
+              <KeyFace
+                id="mode"
+                image={composing && settings.modeComposingEnabled
+                  ? settings.modeComposingIcon
+                  : undefined}
+                modeTopLeft={composing && settings.modeComposingEnabled
+                  ? undefined
+                  : "中"}
+                modeBottomRight={composing && settings.modeComposingEnabled
+                  ? undefined
+                  : "英"}
+                modeTopLeftActive={!ascii}
+                palette={palette}
+                width={metrics.bottom.mode}
+                height={metrics.keyHeight}
+                system
+                passive
+                active={isPressed("mode")}
+                labelFontSize={18}
+                onPress={() =>
+                  runWithFeedback(() => {
+                    if (composing && settings.modeComposingEnabled) {
+                      runConfiguredAction(
+                        settings.modeComposingAction,
+                        settings.modeComposingActionMode,
+                      );
+                    } else {
+                      toggleAscii();
+                    }
+                  })}
+                onSwipeUp={() =>
+                  runWithFeedback(() => {
+                    if (composing && settings.modeComposingEnabled) {
+                      runConfiguredAction(
+                        settings.modeComposingSwipeUp,
+                        settings.modeComposingSwipeUpMode,
+                      );
+                    }
+                  })}
+                onSwipeDown={() =>
+                  runWithFeedback(() => {
+                    if (composing && settings.modeComposingEnabled) {
+                      runConfiguredAction(
+                        settings.modeComposingSwipeDown,
+                        settings.modeComposingSwipeDownMode,
+                      );
+                    }
+                  })}
+                contextMenu={schemaMenu != null
+                  ? { menuItems: schemaMenu }
+                  : undefined}
+              />
+              <KeyFace
+                id="enter"
+                image="paperplane.fill"
+                palette={palette}
+                width={metrics.bottom.enter}
+                height={metrics.keyHeight}
+                system
+                passive
+                active={isPressed("enter")}
+                onPress={() => runWithFeedback(pressReturn)}
+                onSwipeUp={() => runWithFeedback(insertNewline)}
+              />
+            </HStack>
+          )}
+        </VStack>
+
+        {candidateExpanded
+          ? (
+            <HStack
+              spacing={KEY_SPACING}
+              frame={{ width: metrics.width, height: expandedPanelHeight }}
+              background={"rgba(0,0,0,0.001)" as any}
+              contentShape="rect"
+            >
+              <ScrollView
+                axes="vertical"
+                scrollIndicator="hidden"
+                frame={{
+                  width: expandedCandidateWidth,
+                  height: expandedPanelHeight,
+                }}
+                background={"rgba(0,0,0,0.001)" as any}
+                contentShape="rect"
+              >
+                <VStack
+                  spacing={KEY_SPACING}
+                  frame={{
+                    width: expandedCandidateWidth,
+                    minHeight: expandedPanelHeight,
+                    alignment: "top" as any,
+                  }}
+                  background={"rgba(0,0,0,0.001)" as any}
+                  contentShape="rect"
+                >
+                  <FlowLayout
+                    spacing={KEY_SPACING}
+                    frame={{
+                      width: expandedCandidateWidth,
+                      alignment: "leading" as any,
+                    }}
+                  >
+                    {(expandedCandidates.length > 0
+                      ? expandedCandidates
+                      : candidates.map((candidate, index) => ({
+                        candidate,
+                        absoluteIndex: pageNo * rimePageSize + index,
+                      }))).map(({ candidate, absoluteIndex }) => {
+                        const comment = candidateComment(candidate);
+                        const naturalWidth = candidateButtonNaturalWidth({
+                          text: candidate.text,
+                          comment,
+                          index: absoluteIndex,
+                          candidateFontSize: metrics.candidateFontSize,
+                          commentFontSize: metrics.candidateCommentFontSize,
+                          expanded: true,
+                        });
+                        const width = naturalWidth > expandedCandidateWidth
+                          ? expandedCandidateWidth
+                          : undefined;
+                        return (
+                          <CandidateButton
+                            key={`expanded-${absoluteIndex}-${candidate.text}`}
+                            index={absoluteIndex}
+                            candidate={candidate}
+                            comment={comment}
+                            selected={absoluteIndex ===
+                              highlightedAbsoluteIndex}
+                            palette={palette}
+                            width={width}
+                            naturalWidth={naturalWidth}
+                            height={Math.max(
+                              52,
+                              metrics.candidateButtonHeight + 12,
+                            )}
+                            candidateFontSize={metrics.candidateFontSize}
+                            commentFontSize={metrics.candidateCommentFontSize}
+                            expanded
+                            onPress={() =>
+                              runWithFeedback(() => {
+                                selectCandidateAbsolute(absoluteIndex);
+                                setCandidateExpanded(false);
+                                setExpandedCandidates([]);
+                                setExpandedBatchHasMore(false);
+                              })}
+                          />
+                        );
+                      })}
+                  </FlowLayout>
+                </VStack>
+              </ScrollView>
+              <VStack
+                spacing={KEY_SPACING}
+                frame={{
+                  width: expandedPagerWidth,
+                  height: expandedPanelHeight,
+                }}
+              >
+                <KeyFace
+                  id="expanded-page-up"
+                  image="chevron.up"
+                  palette={palette}
+                  width={expandedPagerWidth}
+                  height={(expandedPanelHeight - KEY_SPACING) / 2}
+                  system
+                  foregroundStyle={pageNo > 0 ? palette.primary : palette.hint}
+                  onPress={pageNo > 0
+                    ? () =>
+                      runWithFeedback(() => moveExpandedCandidateBatch("up"))
+                    : () => {}}
+                />
+                <KeyFace
+                  id="expanded-page-down"
+                  image="chevron.down"
+                  palette={palette}
+                  width={expandedPagerWidth}
+                  height={(expandedPanelHeight - KEY_SPACING) / 2}
+                  system
+                  foregroundStyle={expandedBatchHasMore
+                    ? palette.primary
+                    : palette.hint}
+                  onPress={expandedBatchHasMore
+                    ? () =>
+                      runWithFeedback(() => moveExpandedCandidateBatch("down"))
+                    : () => {}}
+                />
+              </VStack>
+            </HStack>
+          )
+          : null}
+      </ZStack>
     </VStack>
   );
 }
