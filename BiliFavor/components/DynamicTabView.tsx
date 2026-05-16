@@ -20,7 +20,7 @@ import {
 } from "scripting"
 
 import { FollowingsFilterView } from "./FollowingsFilterView"
-import { InlineVideoPlayerPage } from "./InlineVideoPlayerPage"
+import { InlineVideoPlayerPage, stopActiveInlinePlayback } from "./InlineVideoPlayerPage"
 import type {
   BiliAuthSession,
   BiliAuthorFilterRule,
@@ -370,8 +370,6 @@ export function DynamicTabView(props: {
             <List
               navigationTitle="动态"
               navigationBarTitleDisplayMode="large"
-              listStyle="plain"
-              background="systemGroupedBackground"
               listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
               refreshable={props.isLoggedIn ? props.onRefresh : undefined}
@@ -379,6 +377,7 @@ export function DynamicTabView(props: {
                 isPresented: filterPresented || playingItem != null,
                 onChanged: (value) => {
                   if (!value) {
+                    void stopActiveInlinePlayback()
                     setFilterPresented(false)
                     setPlayingItem(null)
                   }

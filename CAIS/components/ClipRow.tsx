@@ -1,6 +1,7 @@
 import { HStack, Image, Spacer, Text, useColorScheme, VStack } from "scripting"
 import type { ClipItem } from "../types"
 import { formatDateTime, summarizeContent } from "../utils/common"
+import { imagePreviewPath } from "../storage/image_store"
 
 function iconName(kind: ClipItem["kind"]): string {
   if (kind === "image") return "photo"
@@ -20,6 +21,7 @@ export function ClipRow(props: {
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
+  const previewPath = item.kind === "image" ? imagePreviewPath(item.imagePath) : undefined
   const colorScheme = useColorScheme()
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   return (
@@ -51,14 +53,16 @@ export function ClipRow(props: {
           {item.favorite ? <Image systemName="star.fill" foregroundStyle="systemYellow" /> : null}
           {item.pinned ? <Image systemName="pin.fill" foregroundStyle="systemOrange" /> : null}
         </HStack>
-        {item.kind === "image" && item.imagePath ? (
-          <Image
-            filePath={item.imagePath}
-            resizable
-            scaleToFit
-            frame={{ width: 96, height: 64, alignment: "leading" as any }}
-            clipShape={{ type: "rect", cornerRadius: 8 } as any}
-          />
+        {previewPath ? (
+          <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+            <Image
+              filePath={previewPath}
+              resizable
+              scaleToFit
+              frame={{ width: 96, height: 64, alignment: "center" as any }}
+              clipShape={{ type: "rect", cornerRadius: 8 } as any}
+            />
+          </HStack>
         ) : (
           <Text
             font="subheadline"

@@ -14,6 +14,7 @@ import {
   Tab,
   TabView,
   Text,
+  TextField,
   VStack,
   useEffect,
   useMemo,
@@ -66,6 +67,47 @@ import { OverallReportView } from "./OverallReportView";
 const createTimerActivity = PomodoroLiveActivity;
 // 兼容历史名称，清理残留活动
 const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"];
+
+function NoteEditorPage(props: { title: string; content: string }) {
+  const dismiss = Navigation.useDismiss();
+  const [content, setContent] = useState(props.content);
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarLeading: (
+            <Button title="取消" action={() => dismiss(null)} />
+          ),
+          topBarTrailing: (
+            <Button title="保存" action={() => dismiss(content)} />
+          ),
+        }}
+        padding={16}
+        spacing={12}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+      >
+        <TextField
+          title=""
+          prompt="输入本次计时的笔记"
+          value={content}
+          onChanged={setContent}
+          axis="vertical"
+          autofocus
+          textFieldStyle="plain"
+          frame={{
+            minHeight: 360,
+            maxWidth: "infinity",
+            maxHeight: "infinity",
+            alignment: "topLeading" as any,
+          }}
+        />
+      </VStack>
+    </NavigationStack>
+  );
+}
 
 export function CalendarTimerView() {
   // 任务列表与当前选中任务
@@ -1129,21 +1171,11 @@ export function CalendarTimerView() {
   }
 
   async function editNote(content: string, title = "笔记"): Promise<string> {
-    // 打开全屏编辑器（支持 Markdown），返回编辑后的文本
-    const controller = new EditorController({
-      content,
-      ext: "md",
-      readOnly: false,
+    const next = await Navigation.present<string | null>({
+      element: <NoteEditorPage title={title} content={content} />,
+      modalPresentationStyle: "pageSheet",
     });
-    try {
-      await controller.present({
-        navigationTitle: title,
-        fullscreen: false,
-      });
-      return String(controller.content ?? "");
-    } finally {
-      controller.dispose();
-    }
+    return next == null ? content : String(next);
   }
 
   async function openNoteEditor() {

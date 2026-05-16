@@ -1,4 +1,4 @@
-import type { ClipGroup, ClipItem, ClipListScope } from "../types"
+import type { ClipboardClearRange, ClipGroup, ClipItem, ClipListScope } from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
 
 type DB = {
@@ -185,6 +185,22 @@ function clipTimeGroups(now: number): TimeGroup[] {
   ]
 }
 
+function clipboardRangeClause(range: ClipboardClearRange, now = Date.now()): { clause: string; params: number[] } {
+  const oneDayAgo = now - ONE_DAY_MS
+  const threeDaysAgo = now - ONE_DAY_MS * 3
+  const sevenDaysAgo = now - ONE_DAY_MS * 7
+  switch (range) {
+    case "recent":
+      return { clause: "updated_at >= ?", params: [oneDayAgo] }
+    case "threeDays":
+      return { clause: "updated_at < ? AND updated_at >= ?", params: [oneDayAgo, threeDaysAgo] }
+    case "sevenDays":
+      return { clause: "updated_at < ? AND updated_at >= ?", params: [threeDaysAgo, sevenDaysAgo] }
+    case "older":
+      return { clause: "updated_at < ?", params: [sevenDaysAgo] }
+  }
+}
+
 function scopeClause(scope: ClipListScope): string {
   return scope === "favorites" ? "favorite = 1" : "manual_favorite = 0"
 }
@@ -274,9 +290,13 @@ export async function deleteClip(id: string): Promise<void> {
   await db.execute("DELETE FROM clips WHERE id = ?", [id])
 }
 
-export async function deleteAllClips(): Promise<void> {
+export async function deleteClipboardClipsByRange(range: ClipboardClearRange): Promise<void> {
   const db = await initializeDatabase()
-  await db.execute("DELETE FROM clips WHERE manual_favorite = 0")
+  const filter = clipboardRangeClause(range)
+  await db.execute(
+    `DELETE FROM clips WHERE manual_favorite = 0 AND ${filter.clause}`,
+    filter.params
+  )
 }
 
 export async function deleteFavoriteClips(): Promise<void> {
@@ -284,13 +304,21 @@ export async function deleteFavoriteClips(): Promise<void> {
   await db.execute("DELETE FROM clips WHERE favorite = 1")
 }
 
-export async function listImagePaths(options: { favoritesOnly?: boolean } = {}): Promise<string[]> {
+export async function listImagePaths(options: { favoritesOnly?: boolean; clipboardRange?: ClipboardClearRange } = {}): Promise<string[]> {
   const db = await initializeDatabase()
-  const rows = await db.fetchAll(
-    options.favoritesOnly
-      ? "SELECT image_path FROM clips WHERE image_path IS NOT NULL AND favorite = 1"
-      : "SELECT image_path FROM clips WHERE image_path IS NOT NULL AND manual_favorite = 0"
-  )
+  const clauses = ["image_path IS NOT NULL"]
+  const params: any[] = []
+  if (options.favoritesOnly) {
+    clauses.push("favorite = 1")
+  } else {
+    clauses.push("manual_favorite = 0")
+  }
+  if (options.clipboardRange) {
+    const filter = clipboardRangeClause(options.clipboardRange)
+    clauses.push(filter.clause)
+    params.push(...filter.params)
+  }
+  const rows = await db.fetchAll(`SELECT image_path FROM clips WHERE ${clauses.join(" AND ")}`, params)
   return rows.map((row) => String(row.image_path ?? "")).filter(Boolean)
 }
 

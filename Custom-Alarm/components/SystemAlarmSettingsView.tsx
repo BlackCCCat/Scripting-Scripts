@@ -21,6 +21,7 @@ type AdvancedCleanupItem = {
 
 type AdvancedCleanupSnapshot = {
   items: AdvancedCleanupItem[]
+  diagnosticItems: AdvancedCleanupItem[]
 }
 
 type AdvancedCleanupGroup = {
@@ -46,20 +47,28 @@ function buildGroups(items: AdvancedCleanupItem[]): AdvancedCleanupGroup[] {
 
 export function SystemAlarmSettingsView(props: {
   items: AdvancedCleanupItem[]
+  diagnosticItems: AdvancedCleanupItem[]
   onRefresh: () => AdvancedCleanupSnapshot | void | Promise<AdvancedCleanupSnapshot | void>
   onDeleteIds: (ids: string[]) => AdvancedCleanupSnapshot | void | Promise<AdvancedCleanupSnapshot | void>
 }) {
   const [items, setItems] = useState(props.items)
+  const [diagnosticItems, setDiagnosticItems] = useState(props.diagnosticItems)
 
   useEffect(() => {
     setItems(props.items)
   }, [props.items])
 
+  useEffect(() => {
+    setDiagnosticItems(props.diagnosticItems)
+  }, [props.diagnosticItems])
+
   const groups = useMemo(() => buildGroups(items), [items])
+  const diagnosticGroups = useMemo(() => buildGroups(diagnosticItems), [diagnosticItems])
 
   function applySnapshot(snapshot: AdvancedCleanupSnapshot | void) {
     if (!snapshot) return
     setItems(snapshot.items)
+    setDiagnosticItems(snapshot.diagnosticItems)
   }
 
   async function refresh() {
@@ -69,6 +78,14 @@ export function SystemAlarmSettingsView(props: {
   async function deleteGroup(group: AdvancedCleanupGroup) {
     const ok = await Dialog.confirm({
       message: `确定清理 ${group.timeLabel} 的 ${group.items.length} 个系统实例吗？`,
+    })
+    if (!ok) return
+    applySnapshot(await props.onDeleteIds(group.items.map((item) => item.alarmId)))
+  }
+
+  async function deleteDiagnosticGroup(group: AdvancedCleanupGroup) {
+    const ok = await Dialog.confirm({
+      message: `确定删除 ${group.timeLabel} 的 ${group.items.length} 个系统实例吗？此操作可能影响当前首页仍在使用的闹钟。`,
     })
     if (!ok) return
     applySnapshot(await props.onDeleteIds(group.items.map((item) => item.alarmId)))
@@ -134,6 +151,51 @@ export function SystemAlarmSettingsView(props: {
         ) : (
           <Section>
             <Text foregroundStyle="secondaryLabel">当前没有需要手动清理的残留闹钟。</Text>
+          </Section>
+        )}
+
+        <Section footer={<Text>这里会列出系统接口当前返回的全部闹钟实例。它们不一定都属于首页里的闹钟，删除前请先确认。</Text>}>
+          <Text foregroundStyle="secondaryLabel">
+            当前共扫描到 {diagnosticItems.length} 个系统实例
+          </Text>
+        </Section>
+
+        {diagnosticGroups.length ? (
+          diagnosticGroups.map((group) => (
+            <Section
+              key={`diagnostic-${group.timeLabel}`}
+              header={<Text>{`全部实例 · ${group.timeLabel} · ${group.items.length}`}</Text>}
+            >
+              {group.items.map((item) => (
+                <VStack key={`diagnostic-${item.alarmId}`} spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                  <Text font="subheadline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                    {item.title}
+                  </Text>
+                  <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                    {item.summary}
+                  </Text>
+                  <Text font="caption" foregroundStyle="tertiaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                    {item.detail}
+                  </Text>
+                  <Text font="caption2" foregroundStyle="tertiaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                    {item.sourceLabel}
+                  </Text>
+                </VStack>
+              ))}
+
+              <Button
+                title={`删除 ${group.timeLabel} 的全部实例`}
+                role="destructive"
+                tint="red"
+                action={() => {
+                  void deleteDiagnosticGroup(group)
+                }}
+              />
+            </Section>
+          ))
+        ) : (
+          <Section>
+            <Text foregroundStyle="secondaryLabel">当前没有扫描到任何系统闹钟实例。</Text>
           </Section>
         )}
       </Form>

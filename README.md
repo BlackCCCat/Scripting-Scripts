@@ -14,6 +14,7 @@
 - [BiliFavor](./BiliFavor/)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/BiliFavor.zip)
 - [Sleep Tracker](./Sleep-Tracker/): [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Sleep-Tracker.zip)
 - [CAIS](./CAIS/)：`Clipboard All in Scripting`，[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
+- [Scripting Rime Keyboard](./Scripting-Rime-Keyboard)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Scripting-Rime-Keyboard.zip)
 
 
 **Codex完成几乎所有代码**
@@ -26,3 +27,4 @@
 - [快递助手](./Package-Helper/) 修改自 [快递小助手](https://raw.githubusercontent.com/1085481057/Scripting/refs/heads/main/%E5%BF%AB%E9%80%92%E5%B0%8F%E5%8A%A9%E6%89%8B.scripting)
 - [BiliFavor](./BiliFavor/) 参考了哔哩哔哩相关API
 - [CAIS](./CAIS/) 参考了`CAIO`的键盘样式
+- [Scripting Rime Keyboard](./Scripting-Rime-Keyboard) 的全选功能由仓/元书开发者提供帮助实现

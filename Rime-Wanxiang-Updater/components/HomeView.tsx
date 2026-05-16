@@ -1,6 +1,7 @@
 // File: components/HomeView.tsx
 import {
   Button,
+  Editor,
   Image,
   List,
   Navigation,
@@ -833,6 +834,52 @@ function isSameEditorPath(a: string, b: string): boolean {
   return av.some((item) => bv.has(item));
 }
 
+function FileEditorSheet(props: {
+  title: string;
+  content: string;
+  ext: string;
+}) {
+  const dismiss = Navigation.useDismiss();
+  const [controller] = useState(
+    () =>
+      new EditorController({
+        content: props.content,
+        ext: props.ext as any,
+        readOnly: false,
+      }),
+  );
+
+  useEffect(() => {
+    return () => {
+      controller.dispose();
+    };
+  }, [controller]);
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode="inline"
+        presentationDetents={["large"]}
+        presentationDragIndicator="visible"
+        toolbar={{
+          topBarLeading: (
+            <Button title="取消" role="cancel" action={() => dismiss(null)} />
+          ),
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => dismiss(String(controller.content ?? ""))}
+            />
+          ),
+        }}
+      >
+        <Editor controller={controller} />
+      </VStack>
+    </NavigationStack>
+  );
+}
+
 export function HomeView() {
   const supportsMinimization =
     typeof Script.supportsMinimization === "function" &&
@@ -1329,24 +1376,19 @@ export function HomeView() {
       if (!filePath) return;
       const ext = Path.extname(filePath).slice(1) || "md";
       const content = await FileManager.readAsString(filePath, "utf-8");
-      const editor = new EditorController({
-        ext: ext as any,
+      const nextContent = await Navigation.present<string | null>({
+        element: (
+          <FileEditorSheet
+            title={Path.basename(filePath) || "编辑文件"}
+            content={content}
+            ext={ext}
+          />
+        ),
+        modalPresentationStyle: "pageSheet",
       });
-      editor.content = content;
-      editor.onContentChanged = async (newContent: string) => {
-        try {
-          await FileManager.writeAsString(filePath, newContent, "utf-8");
-        } catch (error: any) {
-          setStageAndMaybeLog(
-            `保存文件失败：${String(error?.message ?? error)}`,
-            "SYSTEM",
-            "ERROR",
-            true,
-          );
-        }
-      };
-      await editor.present();
-      editor.dispose();
+      if (nextContent != null && nextContent !== content) {
+        await FileManager.writeAsString(filePath, nextContent, "utf-8");
+      }
       const items = await listFileBrowserEntries(editorCurrentPath);
       setEditorEntries(items);
     } catch (error: any) {

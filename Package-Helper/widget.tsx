@@ -15,11 +15,29 @@ function statusTone(item: PickupInfo): Color {
 
 function badgeText(item: PickupInfo) {
   if (item.picked) return "已处理"
-  if (!item.date) return "待领取"
+  if (!item.date) return ""
   const diff = (Date.now() - new Date(item.date).getTime()) / 3600000
   if (diff <= 12) return "刚到件"
   if (diff <= 36) return "待处理"
   return "请尽快领取"
+}
+
+function locationTitle(item: PickupInfo) {
+  return item.courier || "快递包裹"
+}
+
+function locationFont(item: PickupInfo, compact: boolean) {
+  const length = locationTitle(item).length
+
+  if (compact) {
+    if (length <= 8) return "caption"
+    if (length <= 14) return "caption2"
+    return "footnote"
+  }
+
+  if (length <= 10) return "subheadline"
+  if (length <= 16) return "caption"
+  return "footnote"
 }
 
 function EmptyBlock() {
@@ -36,6 +54,13 @@ function PickupTile(props: {
   item: PickupInfo
   compact: boolean
 }) {
+  const badge = badgeText(props.item)
+  const extraInfo = (props.item.snippet || "").trim()
+  const tileSpacing = props.compact ? 1 : 5
+  const tilePadding = props.compact
+    ? { top: 4, leading: 8, bottom: 4, trailing: 8 }
+    : 12
+
   return (
     <Button
       buttonStyle="plain"
@@ -44,39 +69,44 @@ function PickupTile(props: {
       <VStack
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         alignment="leading"
-        spacing={props.compact ? 4 : 6}
-        padding={props.compact ? 10 : 12}
-        background={{
-          style: "secondarySystemBackground",
-          shape: { type: "rect", cornerRadius: props.compact ? 16 : 18 },
-        }}
+        spacing={tileSpacing}
+        padding={tilePadding}
       >
+        {badge ? (
+          <Text
+            font="caption2"
+            foregroundStyle={statusTone(props.item)}
+            lineLimit={1}
+          >
+            {badge}
+          </Text>
+        ) : null}
         <Text
-          font="caption2"
-          foregroundStyle={statusTone(props.item)}
-          lineLimit={1}
-        >
-          {badgeText(props.item)}
-        </Text>
-        <Text
-          font={props.compact ? "caption" : "subheadline"}
+          font={locationFont(props.item, props.compact)}
           fontWeight="semibold"
-          lineLimit={1}
+          lineLimit={{ min: 2, max: 2, reservesSpace: true }}
+          fixedSize={{ horizontal: false, vertical: true }}
+          multilineTextAlignment="leading"
+          allowsTightening={true}
         >
-          {props.item.courier || "快递包裹"}
+          {locationTitle(props.item)}
         </Text>
+        {extraInfo ? (
+          <Text
+            font="caption2"
+            opacity={0.56}
+            lineLimit={props.compact ? 1 : 2}
+          >
+            {extraInfo}
+          </Text>
+        ) : null}
         <Text
-          font={props.compact ? "subheadline" : "headline"}
+          font={props.compact ? "body" : "headline"}
           fontWeight="bold"
           lineLimit={1}
         >
           {props.item.code}
         </Text>
-        {!props.compact ? (
-          <Text font="caption2" opacity={0.52} lineLimit={2}>
-            {props.item.snippet}
-          </Text>
-        ) : null}
       </VStack>
     </Button>
   )
@@ -90,7 +120,7 @@ function SmallWidget(props: { items: PickupInfo[] }) {
   }
 
   return (
-    <VStack padding={12} alignment="leading" spacing={8}>
+    <VStack padding={{ top: 10, leading: 12, bottom: 10, trailing: 12 }} alignment="leading" spacing={4}>
       {show.map((item, index) => (
         <PickupTile
           key={`${item.code}-${index}`}
@@ -132,7 +162,7 @@ function CollectionWidget(props: {
   const compact = show.length >= 3
 
   return (
-    <VStack padding={12} alignment="leading" spacing={8}>
+    <VStack padding={{ top: 10, leading: 12, bottom: 10, trailing: 12 }} alignment="leading" spacing={6}>
       {rows.map((row, rowIndex) => (
         <HStack key={`row-${rowIndex}`} spacing={8}>
           {row.map((item, index) => (

@@ -1,11 +1,11 @@
 {
-  "name": "Surge模块管理",
-  "description": "",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Surge-Module-Manager.zip",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Surge-Module-Manager.zip",
     "hash": "",
-    "autoUpdateInterval": 86400
+    "autoUpdateInterval": null
   },
+  "name": "Surge模块管理",
+  "description": "Surge 模块管理：管理、分类、下载/更新 Surge .sgmodule 模块，支持递归子文件夹、链接格式识别、本地模块、并发更新和 HTTP 远程开关控制。\n\n快捷指令：可用 Scripting 的“运行脚本”调用本脚本来更新模块。\n参数示例：\n1. 不传参数，或传 all / 全部：更新全部远程模块。\n2. 传分类名，例如 广告拦截：只更新该分类。\n3. 传 JSON：{\"category\":\"广告拦截\",\"dir\":\"子文件夹名称\",\"name\":\"模块名称\"}\n4. 传多个模块名：{\"names\":[\"模块1\",\"模块2\"]}\n\n注意：需要先在设置页选择有效书签文件夹；如果书签权限失效，快捷指令会返回“书签路径不可用，请在设置页重新选择书签文件夹”。",
   "localizedNames": {
     "de": "",
     "ja": "",
@@ -20,24 +20,24 @@
   "icon": "square.grid.2x2.fill",
   "contributors": [],
   "color": "rgba(28, 140, 255,1)",
-  "intentInputTypes": [],
+  "intentInputTypes": ["Text"],
   "localizedDescriptions": {
-    "en": "",
+    "en": "Manage, categorize, download, and update Surge .sgmodule files. Supports recursive folders, custom link prefixes, local modules, concurrent updates, and HTTP remote module toggles.\n\nShortcuts: run this script from Scripting to update modules.\nExamples:\n1. No input, or all: update all remote modules.\n2. Category text, e.g. Ads: update that category only.\n3. JSON: {\"category\":\"Ads\",\"dir\":\"Folder\",\"name\":\"Module Name\"}\n4. Multiple names: {\"names\":[\"Module 1\",\"Module 2\"]}\n\nA valid bookmarked folder must be selected in Settings. If bookmark permission is lost, the Shortcut returns an error asking you to reselect the folder.",
     "ru": "",
     "pt": "",
     "fr": "",
     "de": "",
-    "zh": "",
+    "zh": "Surge 模块管理：管理、分类、下载/更新 Surge .sgmodule 模块，支持递归子文件夹、链接格式识别、本地模块、并发更新和 HTTP 远程开关控制。\n\n快捷指令：可用 Scripting 的“运行脚本”调用本脚本来更新模块。\n参数示例：\n1. 不传参数，或传 all / 全部：更新全部远程模块。\n2. 传分类名，例如 广告拦截：只更新该分类。\n3. 传 JSON：{\"category\":\"广告拦截\",\"dir\":\"子文件夹名称\",\"name\":\"模块名称\"}\n4. 传多个模块名：{\"names\":[\"模块1\",\"模块2\"]}\n\n注意：需要先在设置页选择有效书签文件夹；如果书签权限失效，快捷指令会返回“书签路径不可用，请在设置页重新选择书签文件夹”。",
     "ja": "",
     "it": "",
     "es": ""
   },
-  "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/Surge-Module-Manager.PNG",
+  "iconImage": "https://raw.githubusercontent.com/BlackCCCat/Scripting-Scripts/refs/heads/main/src/Surge-Module-Manager.PNG",
   "runInApp": false,
   "author": {
     "email": null,
     "name": "BlackCCCat",
-    "homepage": "https:\/\/github.com\/BlackCCCat"
+    "homepage": "https://github.com/BlackCCCat"
   },
   "version": ""
 }

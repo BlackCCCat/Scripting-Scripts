@@ -13,6 +13,7 @@ import {
   Spacer,
   Text,
   Toggle,
+  useObservable,
   useState,
 } from "scripting"
 
@@ -84,9 +85,11 @@ function targetLanguageLabel(code: string) {
 
 export function TranslatorSettingsView() {
   const [settings, setSettings] = useState(() => loadTranslatorSettings())
+  const engines = useObservable<TranslatorEngineEntry[]>(() => loadTranslatorSettings().engines)
 
   function persist(next: ReturnType<typeof loadTranslatorSettings>) {
     setSettings(next)
+    engines.setValue(next.engines)
     saveTranslatorSettings(next)
   }
 
@@ -254,9 +257,8 @@ export function TranslatorSettingsView() {
 
         <Section>
           <ForEach
-            count={settings.engines.length}
-            itemBuilder={(index) => {
-              const engine = settings.engines[index]
+            data={engines}
+            builder={(engine: TranslatorEngineEntry) => {
               const available = isEngineAvailable(engine)
 
               return (
@@ -297,6 +299,7 @@ export function TranslatorSettingsView() {
                 />
               )
             }}
+            editActions="move"
             onMove={(indices, newOffset) => {
               persist(reorderEngines(settings, indices, newOffset))
             }}

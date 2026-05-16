@@ -16,7 +16,7 @@ import {
 } from "scripting"
 
 import { FavoriteAuthorsManagerView } from "./FavoriteAuthorsManagerView"
-import { InlineVideoPlayerPage } from "./InlineVideoPlayerPage"
+import { InlineVideoPlayerPage, stopActiveInlinePlayback } from "./InlineVideoPlayerPage"
 import type {
   BiliAuthSession,
   BiliFavoriteAuthor,
@@ -244,8 +244,6 @@ export function FavoritesTabView(props: {
       <List
         navigationTitle="收藏"
         navigationBarTitleDisplayMode="large"
-        listStyle="plain"
-        background="systemGroupedBackground"
         listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
         listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
         refreshable={props.favoriteAuthors.length > 0 ? props.onRefresh : undefined}
@@ -253,6 +251,7 @@ export function FavoritesTabView(props: {
           isPresented: managerPresented || playingItem != null,
           onChanged: (value) => {
             if (!value) {
+              void stopActiveInlinePlayback()
               setManagerPresented(false)
               setPlayingItem(null)
             }

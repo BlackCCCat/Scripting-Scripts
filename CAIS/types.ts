@@ -27,6 +27,8 @@ export type ClipItem = {
 
 export type ClipListScope = "favorites" | "clipboard"
 
+export type ClipboardClearRange = "recent" | "threeDays" | "sevenDays" | "older"
+
 export type ClipGroup = {
   title: string
   items: ClipItem[]
@@ -57,6 +59,8 @@ export type KeyboardMenuBuiltinAction =
   | "base64Encode"
   | "base64Decode"
   | "cleanWhitespace"
+  | "removeBlankLines"
+  | "splitLines"
   | "uppercase"
   | "lowercase"
   | "chineseAmount"
@@ -86,6 +90,7 @@ export type MonitorStatus = {
   lastMessage: string
   lastCheckedAt?: number
   lastCapturedAt?: number
+  capturedCount?: number
 }
 
 export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
@@ -104,6 +109,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
       base64Encode: true,
       base64Decode: true,
       cleanWhitespace: true,
+      removeBlankLines: true,
+      splitLines: true,
       uppercase: true,
       lowercase: true,
       chineseAmount: false,

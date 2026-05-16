@@ -8,27 +8,6 @@ import type {
 
 export const DEFAULT_HOLIDAY_SOURCE_ID = "cn-holiday-calendar"
 export const DEFAULT_HOLIDAY_URL = "https://calendars.icloud.com/holidays/cn_zh.ics"
-export const DEFAULT_SOUND_OPTIONS = [
-  "Default",
-  "Radar",
-  "Beacon",
-  "Bulletin",
-  "By The Seaside",
-  "Chimes",
-  "Circuit",
-  "Crickets",
-  "Hillside",
-  "Night Owl",
-  "Opening",
-  "Playtime",
-  "Presto",
-  "Sencha",
-  "Signal",
-  "Silk",
-  "Slow Rise",
-  "Summit",
-  "Unfold",
-]
 
 const STORAGE_KEY = "custom_alarm_state_v2"
 export const DEFAULT_SNOOZE_MINUTES = 5
@@ -74,18 +53,6 @@ function normalizeStringIdList(value: unknown): string[] {
   )
 }
 
-function normalizeSoundOptions(value: unknown): string[] {
-  if (!Array.isArray(value)) return [...DEFAULT_SOUND_OPTIONS]
-  const normalized = Array.from(
-    new Set(
-      value
-        .map((item: unknown) => String(item ?? "").trim())
-        .filter(Boolean)
-    )
-  )
-  return normalized
-}
-
 export function collectRecordSystemAlarmIds(records: AlarmRecord[]): string[] {
   return Array.from(new Set(records.flatMap((record) => record.systemAlarmIds)))
 }
@@ -98,7 +65,6 @@ function emptyState(): CustomAlarmState {
   return {
     alarms: [],
     holidaySources: [defaultHolidaySource()],
-    availableSounds: [...DEFAULT_SOUND_OPTIONS],
     managedSystemAlarmIds: [],
     cleanupCandidateAlarmIds: [],
   }
@@ -137,11 +103,6 @@ function clampSnoozeMinutes(value: unknown): number {
   const num = Number(value)
   if (!Number.isFinite(num)) return DEFAULT_SNOOZE_MINUTES
   return Math.min(60, Math.max(1, Math.floor(num)))
-}
-
-function normalizeSoundName(value: unknown): string | null {
-  const soundName = String(value ?? "").trim()
-  return soundName ? soundName : null
 }
 
 function normalizeWeekdays(value: unknown): number[] {
@@ -255,7 +216,6 @@ function normalizeRecord(value: any): AlarmRecord | null {
     title,
     enabled: Boolean(value.enabled ?? true),
     snoozeMinutes: clampSnoozeMinutes(value.snoozeMinutes),
-    soundName: normalizeSoundName(value.soundName),
     repeatRule,
     systemAlarmIds: Array.isArray(value.systemAlarmIds)
       ? (value.systemAlarmIds as unknown[]).map((item: unknown) => String(item)).filter(Boolean)
@@ -341,7 +301,6 @@ export function loadCustomAlarmState(): CustomAlarmState {
     return {
       alarms,
       holidaySources: [builtinHolidaySource(normalizedSources)],
-      availableSounds: normalizeSoundOptions(data?.availableSounds),
       managedSystemAlarmIds: mergeManagedSystemAlarmIds(
         normalizeStringIdList(data?.managedSystemAlarmIds),
         collectRecordSystemAlarmIds(alarms)
@@ -363,7 +322,6 @@ export function saveCustomAlarmState(state: CustomAlarmState): void {
     JSON.stringify({
       alarms: state.alarms,
       holidaySources: [builtinHolidaySource(state.holidaySources)],
-      availableSounds: normalizeSoundOptions(state.availableSounds),
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds: normalizeStringIdList(state.cleanupCandidateAlarmIds),
     }, null, 2)

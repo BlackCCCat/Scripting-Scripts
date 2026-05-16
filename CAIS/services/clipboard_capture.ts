@@ -12,11 +12,12 @@ let monitorActive = false
 let lastChangeCount = -1
 let lastMessage = "未启动"
 let lastStatus: MonitorStatus = { active: false, lastMessage }
+let capturedCount = 0
 const listeners = new Set<MonitorListener>()
 
 function emit(status: MonitorStatus) {
-  lastStatus = status
-  for (const listener of listeners) listener(status)
+  lastStatus = status.active ? { ...status, capturedCount } : status
+  for (const listener of listeners) listener(lastStatus)
 }
 
 export async function captureCurrentClipboard(settings: CaisSettings): Promise<CaptureResult> {
@@ -25,7 +26,7 @@ export async function captureCurrentClipboard(settings: CaisSettings): Promise<C
   return addClipFromPayload(payload, settings)
 }
 
-export function stopClipboardMonitor(listener?: MonitorListener): void {
+export function stopClipboardMonitor(): void {
   const previousListeners = Array.from(listeners)
   monitorActive = false
   listeners.clear()
@@ -34,9 +35,9 @@ export function stopClipboardMonitor(listener?: MonitorListener): void {
     monitorTimer = null
   }
   lastMessage = "监听已停止"
+  capturedCount = 0
   lastStatus = { active: false, lastMessage, lastCheckedAt: Date.now() }
   for (const previousListener of previousListeners) previousListener(lastStatus)
-  if (listener && !previousListeners.includes(listener)) listener(lastStatus)
 }
 
 export function startClipboardMonitor(settings: CaisSettings, listener?: MonitorListener, options: MonitorOptions = {}): () => void {
@@ -49,6 +50,7 @@ export function startClipboardMonitor(settings: CaisSettings, listener?: Monitor
   }
   monitorActive = true
   lastMessage = "监听中"
+  capturedCount = 0
   emit({ active: true, lastMessage, lastCheckedAt: Date.now() })
   let skipInitialCapture = Boolean(options.skipInitialCapture)
   let firstTick = true
@@ -72,6 +74,9 @@ export function startClipboardMonitor(settings: CaisSettings, listener?: Monitor
           result.status === "created" ? `已采集：${result.item.title}` :
           result.status === "updated" ? `已更新：${result.item.title}` :
           result.reason
+        if (result.status === "created" || result.status === "updated") {
+          capturedCount += 1
+        }
         emit({
           active: true,
           lastMessage,

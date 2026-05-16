@@ -13,7 +13,6 @@ import {
   RoundedRectangle,
   Script,
   ScrollView,
-  Spacer,
   Text,
   VStack,
   type Font,
@@ -22,6 +21,7 @@ import {
   useObservable,
   useRef,
   useState,
+  ZStack,
 } from "scripting"
 
 import type {
@@ -65,10 +65,9 @@ const KEYBOARD_ROOT_SIDE_PADDING = 6
 const CLIP_SCROLL_SIDE_PADDING = 8
 const CLIP_GRID_SPACING = 10
 const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
-const KEYBOARD_ROW_COUNT_KEY = "cais_keyboard_row_count_v1"
+const KEYBOARD_LAYOUT_KEY = "cais_keyboard_row_count_v1"
 const SHARED_STORAGE_OPTIONS = { shared: true }
 let deleteRepeatTimer: any = null
-let lastInsertedText = ""
 let lastPastedText = ""
 let keyboardRefreshGeneration = 0
 let keyboardLifecycleGeneration = 0
@@ -87,6 +86,8 @@ export type KeyboardInitialState = {
   scope: ClipListScope
 }
 
+type KeyboardLayoutMode = "twoByTwo" | "oneByTwo" | "twoByThree"
+
 function keyboard(): any {
   return (globalThis as any).CustomKeyboard
 }
@@ -95,30 +96,36 @@ function storage(): any {
   return (globalThis as any).Storage
 }
 
-function readKeyboardRowCount(): 1 | 2 {
+function readKeyboardLayout(): KeyboardLayoutMode {
   const st = storage()
   try {
-    const raw = st?.get?.(KEYBOARD_ROW_COUNT_KEY, SHARED_STORAGE_OPTIONS) ?? st?.getString?.(KEYBOARD_ROW_COUNT_KEY, SHARED_STORAGE_OPTIONS)
-    return Number(raw) === 1 ? 1 : 2
+    const raw = st?.get?.(KEYBOARD_LAYOUT_KEY, SHARED_STORAGE_OPTIONS) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY, SHARED_STORAGE_OPTIONS)
+    return normalizeKeyboardLayout(raw)
   } catch {
   }
   try {
-    const raw = st?.get?.(KEYBOARD_ROW_COUNT_KEY) ?? st?.getString?.(KEYBOARD_ROW_COUNT_KEY)
-    return Number(raw) === 1 ? 1 : 2
+    const raw = st?.get?.(KEYBOARD_LAYOUT_KEY) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY)
+    return normalizeKeyboardLayout(raw)
   } catch {
-    return 2
+    return "twoByTwo"
   }
 }
 
-function writeKeyboardRowCount(value: 1 | 2) {
+function normalizeKeyboardLayout(value: any): KeyboardLayoutMode {
+  if (value === "oneByTwo" || value === "1x2" || Number(value) === 1) return "oneByTwo"
+  if (value === "twoByThree" || value === "2x3") return "twoByThree"
+  return "twoByTwo"
+}
+
+function writeKeyboardLayout(value: KeyboardLayoutMode) {
   const st = storage()
   try {
     if (typeof st?.set === "function") {
-      st.set(KEYBOARD_ROW_COUNT_KEY, value)
-      st.set(KEYBOARD_ROW_COUNT_KEY, value, SHARED_STORAGE_OPTIONS)
+      st.set(KEYBOARD_LAYOUT_KEY, value)
+      st.set(KEYBOARD_LAYOUT_KEY, value, SHARED_STORAGE_OPTIONS)
     } else if (typeof st?.setString === "function") {
-      st.setString(KEYBOARD_ROW_COUNT_KEY, String(value))
-      st.setString(KEYBOARD_ROW_COUNT_KEY, String(value), SHARED_STORAGE_OPTIONS)
+      st.setString(KEYBOARD_LAYOUT_KEY, value)
+      st.setString(KEYBOARD_LAYOUT_KEY, value, SHARED_STORAGE_OPTIONS)
     }
   } catch {
   }
@@ -136,7 +143,6 @@ function playClick() {
 function insertKeyboardText(text: string) {
   if (!text) return
   keyboard()?.insertText?.(text)
-  lastInsertedText = text
   lastPastedText = text
 }
 
@@ -193,6 +199,7 @@ function IconButton(props: {
 function BottomKey(props: {
   title?: string
   systemImage?: string
+  tint?: string
   width?: number
   onPress: () => void | Promise<void>
   onLongPress?: () => void
@@ -221,9 +228,9 @@ function BottomKey(props: {
       overlay={
         <HStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}>
           {props.systemImage ? (
-            <Image systemName={props.systemImage} font="title3" />
+            <Image systemName={props.systemImage} font="title3" foregroundStyle={props.tint as any} />
           ) : (
-            <Text font="title3" lineLimit={1}>{props.title ?? ""}</Text>
+            <Text font="title3" lineLimit={1} foregroundStyle={props.tint as any}>{props.title ?? ""}</Text>
           )}
         </HStack>
       }
@@ -233,19 +240,6 @@ function BottomKey(props: {
 
 function characterCount(value: string | null | undefined): number {
   return Array.from(String(value ?? "")).length
-}
-
-function clipTypeIcon(item: ClipItem): string {
-  if (item.kind === "image") return "photo"
-  const content = item.content.trim()
-  if (/^[+-]?\d+(?:[.,]\d+)?$/.test(content)) return "number"
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(content)) return "envelope"
-  if (
-    item.kind === "url" ||
-    /^[a-z][a-z0-9+.-]*:\/\//i.test(content) ||
-    /^www\./i.test(content)
-  ) return "link"
-  return "doc.text"
 }
 
 function selectedKeyboardText(): string {
@@ -268,18 +262,37 @@ function clipListKey(items: ClipItem[]): string {
   ].join(":")).join("|")
 }
 
-function clipTileWidth(): number {
+function clipTileWidth(columns: number): number {
   const availableWidth = Device.screen.width - KEYBOARD_ROOT_SIDE_PADDING * 2 - CLIP_SCROLL_SIDE_PADDING * 2
-  return Math.max(132, Math.floor((availableWidth - CLIP_GRID_SPACING) / 2))
+  const minWidth = columns >= 3 ? 80 : 132
+  return Math.max(minWidth, Math.floor((availableWidth - CLIP_GRID_SPACING * (columns - 1)) / columns))
+}
+
+function keyboardLayoutRows(layout: KeyboardLayoutMode): 1 | 2 {
+  return layout === "oneByTwo" ? 1 : 2
+}
+
+function keyboardLayoutColumns(layout: KeyboardLayoutMode): 2 | 3 {
+  return layout === "twoByThree" ? 3 : 2
+}
+
+function nextKeyboardLayout(layout: KeyboardLayoutMode): KeyboardLayoutMode {
+  if (layout === "twoByTwo") return "oneByTwo"
+  if (layout === "oneByTwo") return "twoByThree"
+  return "twoByTwo"
+}
+
+function keyboardLayoutIcon(layout: KeyboardLayoutMode): string {
+  if (layout === "oneByTwo") return "square.split.2x1"
+  if (layout === "twoByThree") return "square.grid.3x2"
+  return "square.grid.2x2"
 }
 
 type ClipTileMetrics = {
   padding: number
   spacing: number
   showTitle: boolean
-  showFooter: boolean
   contentLineLimit: number
-  contentPreviewLimit: number
   iconFont: Font
 }
 
@@ -290,24 +303,17 @@ function clipTileMetrics(height: number, titleEnabled = true): ClipTileMetrics {
   const padding = minimal ? 6 : compact ? 8 : 10
   const spacing = minimal ? 2 : compact ? 4 : 6
   const showTitle = titleEnabled && !compact
-  const showFooter = !minimal
   const reservedHeight =
     padding * 2 +
-    (showTitle ? 21 + spacing : 0) +
-    (showFooter ? 16 + spacing : 0)
-  const dynamicLineLimit = Math.max(1, Math.floor(Math.max(0, height - reservedHeight) / 14))
-  const contentLineLimit = minimal
-    ? 1
-    : tiny
-      ? 1
-      : Math.max(1, Math.min(dynamicLineLimit, 12))
+    (showTitle ? 21 + spacing : 0)
+  const estimatedLineHeight = height >= 128 ? 11 : 12
+  const dynamicLineLimit = Math.max(1, Math.floor(Math.max(0, height - reservedHeight) / estimatedLineHeight))
+  const contentLineLimit = tiny ? 1 : Math.max(1, Math.min(dynamicLineLimit, 18))
   return {
     padding,
     spacing,
     showTitle,
-    showFooter,
     contentLineLimit,
-    contentPreviewLimit: KEYBOARD_TILE_PREVIEW_LIMIT,
     iconFont: tiny ? "caption2" : "caption",
   }
 }
@@ -342,6 +348,8 @@ export async function preloadKeyboardInitialState(): Promise<KeyboardInitialStat
 function ClipTile(props: {
   item: ClipItem
   settings: CaisSettings
+  tileWidth: number
+  hideTitle?: boolean
   onInsert: (item: ClipItem) => void | Promise<void>
   onStatus: (message: string) => void
   onRefresh: () => void | Promise<void>
@@ -352,7 +360,7 @@ function ClipTile(props: {
   return (
     <Button
       buttonStyle="plain"
-      frame={{ width: clipTileWidth(), maxHeight: "infinity" as any }}
+      frame={{ width: props.tileWidth, maxHeight: "infinity" as any }}
       action={() => {
         playClick()
         void props.onInsert(item)
@@ -377,66 +385,65 @@ function ClipTile(props: {
         overlay={
           <GeometryReader>
             {(proxy) => {
-              const metrics = clipTileMetrics(proxy.size.height, props.settings.keyboardShowTitle)
+              const metrics = clipTileMetrics(proxy.size.height, props.settings.keyboardShowTitle && !props.hideTitle)
               const showTitle = metrics.showTitle
               return (
-                <VStack
-                  frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
-                  padding={metrics.padding}
-                  spacing={metrics.spacing}
-                  clipped
-                >
-                  {isImage && previewPath ? (
-                    <Image
-                      filePath={previewPath}
-                      resizable
-                      scaleToFit
-                      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-                    />
-                  ) : isImage ? (
-                    <Image
-                      systemName="photo"
-                      font={proxy.size.height < 76 ? "title2" : "largeTitle"}
-                      foregroundStyle="secondaryLabel"
-                      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-                    />
-                  ) : (
-                    <>
-                      {showTitle ? (
+                <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+                  <VStack
+                    frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+                    padding={metrics.padding}
+                    spacing={metrics.spacing}
+                    clipped
+                  >
+                    {isImage && previewPath ? (
+                      <Image
+                        filePath={previewPath}
+                        resizable
+                        scaleToFit
+                        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+                      />
+                    ) : isImage ? (
+                      <Image
+                        systemName="photo"
+                        font={proxy.size.height < 76 ? "title2" : "largeTitle"}
+                        foregroundStyle="secondaryLabel"
+                        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+                      />
+                    ) : (
+                      <>
+                        {showTitle ? (
+                          <Text
+                            font="headline"
+                            lineLimit={1}
+                            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                            multilineTextAlignment="leading"
+                          >
+                            {item.title}
+                          </Text>
+                        ) : null}
                         <Text
-                          font="headline"
-                          lineLimit={1}
+                          font="caption"
+                          foregroundStyle={showTitle ? "secondaryLabel" : "label"}
+                          lineLimit={metrics.contentLineLimit}
                           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                           multilineTextAlignment="leading"
                         >
-                          {item.title}
+                          {summarizeContent(item.content, KEYBOARD_TILE_PREVIEW_LIMIT)}
                         </Text>
-                      ) : null}
-                      <Text
-                        font="caption"
-                        foregroundStyle={showTitle ? "secondaryLabel" : "label"}
-                        lineLimit={metrics.contentLineLimit}
-                        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                        multilineTextAlignment="leading"
-                      >
-                        {summarizeContent(item.content, metrics.contentPreviewLimit)}
-                      </Text>
-                      <Spacer />
-                    </>
-                  )}
-                  {metrics.showFooter ? (
-                    <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                      <Image
-                        systemName={clipTypeIcon(item)}
-                        font={metrics.iconFont}
-                        foregroundStyle="secondaryLabel"
-                      />
-                      <Spacer />
+                      </>
+                    )}
+                  </VStack>
+                  {item.pinned || item.favorite ? (
+                    <HStack
+                      spacing={4}
+                      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+                      padding={{ bottom: metrics.padding, trailing: metrics.padding }}
+                    >
                       {item.pinned ? <Image systemName="pin.fill" font={metrics.iconFont} foregroundStyle="systemOrange" /> : null}
                       {item.favorite ? <Image systemName="star.fill" font={metrics.iconFont} foregroundStyle="systemYellow" /> : null}
                     </HStack>
                   ) : null}
-                </VStack>
+                </ZStack>
               )
             }}
           </GeometryReader>
@@ -478,17 +485,27 @@ function ClipTileMenu(props: {
   async function saveMenuResult(result: MenuActionResult, source: string) {
     const saveSettings = { ...props.settings, captureText: true, captureImages: true }
     if (result.kind === "text") {
-      if (!result.text.trim() || result.text === source) return false
+      if (!result.text.trim() || result.text === source) return 0
       const saved = await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
       await props.onRefresh()
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
+    }
+    if (result.kind === "texts") {
+      let savedCount = 0
+      for (const text of result.texts) {
+        if (!text.trim() || text === source) continue
+        const saved = await addClipFromPayload({ kind: "text", text }, saveSettings)
+        if (saved.status !== "skipped") savedCount += 1
+      }
+      await props.onRefresh()
+      return savedCount
     }
     if (result.kind === "image") {
       const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
       await props.onRefresh()
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
     }
-    return false
+    return 0
   }
 
   async function handleMenuResult(result: MenuActionResult | null, source: string) {
@@ -504,6 +521,11 @@ function ClipTileMenu(props: {
       insertKeyboardText(result.text)
       const saved = await saveMenuResult(result, source)
       props.onStatus(saved ? "已上屏并保存" : "已上屏")
+      return
+    }
+    if (result.kind === "texts") {
+      const saved = await saveMenuResult(result, source)
+      props.onStatus(saved ? `已拆分保存 ${saved} 条` : "没有新的拆分结果")
       return
     }
     await Pasteboard.setImage(result.image)
@@ -579,6 +601,14 @@ function ClipTileMenu(props: {
         return !isImage && builtins.cleanWhitespace ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
+      case "removeBlankLines":
+        return !isImage && builtins.removeBlankLines ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
+        ) : null
+      case "splitLines":
+        return !isImage && builtins.splitLines ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
+        ) : null
       case "uppercase":
         return !isImage && builtins.uppercase ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
@@ -644,7 +674,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   activeKeyboardScope = keyboardScopeForTab(activeTab)
   const [items, setItems] = useState<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
-  const [clipRowCount, setClipRowCount] = useState<1 | 2>(() => readKeyboardRowCount())
+  const [keyboardLayout, setKeyboardLayout] = useState<KeyboardLayoutMode>(() => readKeyboardLayout())
+  const [cursorMode, setCursorMode] = useState(false)
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
@@ -656,8 +687,11 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     return items.slice(0, settings.keyboardMaxItems)
   }, [items, settings.keyboardMaxItems])
   const clipGridRows = useMemo(() => {
-    return Array.from({ length: clipRowCount }, () => ({ size: { type: "flexible" as const } }))
-  }, [clipRowCount])
+    return Array.from({ length: keyboardLayoutRows(keyboardLayout) }, () => ({ size: { type: "flexible" as const } }))
+  }, [keyboardLayout])
+  const clipGridColumns = keyboardLayoutColumns(keyboardLayout)
+  const clipTileCardWidth = clipTileWidth(clipGridColumns)
+  const hideClipTitle = keyboardLayout === "twoByThree"
 
   useEffect(() => {
     const lifecycle = ++keyboardLifecycleGeneration
@@ -771,7 +805,6 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     for (let index = 0; index < total; index += 1) {
       deleteBackward()
     }
-    lastInsertedText = ""
   }
 
   async function captureNow() {
@@ -801,6 +834,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     keyboard()?.deleteBackward?.()
   }
 
+  function moveCursorHorizontal(offset: number) {
+    keyboard()?.moveCursor?.(offset)
+  }
+
   function startContinuousDelete() {
     stopContinuousDelete()
     deleteBackward()
@@ -811,16 +848,6 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     if (!deleteRepeatTimer) return
     ;(globalThis as any).clearInterval?.(deleteRepeatTimer)
     deleteRepeatTimer = null
-  }
-
-  function undoInput() {
-    if (!lastInsertedText) {
-      return
-    }
-    for (let index = 0; index < Array.from(lastInsertedText).length; index += 1) {
-      deleteBackward()
-    }
-    lastInsertedText = ""
   }
 
   function startPipMonitor() {
@@ -836,9 +863,9 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   function toggleClipLayout() {
-    setClipRowCount((value) => {
-      const next = value === 2 ? 1 : 2
-      writeKeyboardRowCount(next)
+    setKeyboardLayout((value) => {
+      const next = nextKeyboardLayout(value)
+      writeKeyboardLayout(next)
       return next
     })
   }
@@ -891,6 +918,18 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     kb?.insertText?.("\n")
   }
 
+  function spaceOrCursorKeys() {
+    if (!cursorMode) {
+      return <BottomKey systemImage="space" onPress={() => keyboard()?.insertText?.(" ")} />
+    }
+    return (
+      <HStack spacing={4} frame={{ maxWidth: "infinity", height: 42 }}>
+        <BottomKey systemImage="arrow.left" onPress={() => moveCursorHorizontal(-1)} />
+        <BottomKey systemImage="arrow.right" onPress={() => moveCursorHorizontal(1)} />
+      </HStack>
+    )
+  }
+
   return (
     <VStack
       spacing={7}
@@ -937,7 +976,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             <IconButton systemImage="square.and.arrow.down.on.square" disabled={loading} onPress={captureNow} />
             <IconButton systemImage="keyboard.chevron.compact.down" onPress={() => keyboard()?.dismiss?.()} />
             <IconButton
-              systemImage={clipRowCount === 2 ? "square.grid.2x2" : "rectangle.split.3x1.fill"}
+              systemImage={keyboardLayoutIcon(keyboardLayout)}
               onPress={toggleClipLayout}
             />
             <IconButton
@@ -970,6 +1009,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                     key={item.id}
                     item={item}
                     settings={settings}
+                    tileWidth={clipTileCardWidth}
+                    hideTitle={hideClipTitle}
                     onInsert={insertClip}
                     onRefresh={refresh}
                     onStatus={() => {}}
@@ -1000,8 +1041,13 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
 
       <HStack spacing={6} frame={{ maxWidth: "infinity", height: 42 }}>
         <BottomKey systemImage="globe" width={46} onPress={() => keyboard()?.nextKeyboard?.()} />
-        <BottomKey systemImage="arrow.uturn.backward" width={46} onPress={undoInput} />
-        <BottomKey systemImage="space" onPress={() => keyboard()?.insertText?.(" ")} />
+        <BottomKey
+          systemImage="arrow.left.and.right"
+          tint={cursorMode ? "systemBlue" : undefined}
+          width={46}
+          onPress={() => setCursorMode((value) => !value)}
+        />
+        {spaceOrCursorKeys()}
         <BottomKey
           systemImage="delete.left"
           width={46}
@@ -1012,7 +1058,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
         <BottomKey
           title={undefined}
           systemImage={returnKeySymbol(traits?.returnKeyType)}
-          width={76}
+          width={68}
           onPress={sendReturn}
         />
       </HStack>

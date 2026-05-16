@@ -24,7 +24,6 @@ import {
 import type { AlarmDraft, AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { AddAlarmView } from "./AddAlarmView"
 import { CalendarSettingsView } from "./CalendarSettingsView"
-import { SoundSettingsView } from "./SoundSettingsView"
 import { StatusView } from "./StatusView"
 import { SystemAlarmSettingsView } from "./SystemAlarmSettingsView"
 import {
@@ -40,7 +39,6 @@ import {
 import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
 import {
   collectRecordSystemAlarmIds,
-  DEFAULT_SOUND_OPTIONS,
   DEFAULT_HOLIDAY_SOURCE_ID,
   loadCustomAlarmState,
   mergeManagedSystemAlarmIds,
@@ -64,6 +62,7 @@ type AdvancedCleanupItem = {
 }
 type AdvancedCleanupSnapshot = {
   items: AdvancedCleanupItem[]
+  diagnosticItems: AdvancedCleanupItem[]
 }
 
 function isContentTab(value: RootTab): value is ContentTab {
@@ -161,7 +160,6 @@ function alarmDraftKey(draft: AlarmDraft): string {
   return JSON.stringify({
     title: draft.title.trim(),
     snoozeMinutes: draft.snoozeMinutes,
-    soundName: draft.soundName ?? null,
     repeatRule: normalizeRepeatRule(draft.repeatRule),
   })
 }
@@ -170,7 +168,6 @@ function toAlarmDraft(record: AlarmRecord): AlarmDraft {
   return {
     title: record.title,
     snoozeMinutes: record.snoozeMinutes,
-    soundName: record.soundName,
     repeatRule: record.repeatRule,
   }
 }
@@ -218,6 +215,15 @@ function describeSystemAlarm(alarm: AlarmManager.Alarm): string {
   }
 
   return alarm.state
+}
+
+function alarmScheduleKindLabel(alarm: AlarmManager.Alarm): string {
+  const schedule = alarm.schedule
+  if (!schedule) return "未知规则"
+  if (schedule.type === "fixed" && schedule.date) return "固定时间"
+  if (schedule.weekdays?.length) return "每周重复"
+  if (typeof schedule.hour === "number" && typeof schedule.minute === "number") return "每日重复"
+  return "未知规则"
 }
 
 function rowSwipeActions(props: {
@@ -320,7 +326,6 @@ export function HomeView() {
   const [initialState] = useState(() => loadCustomAlarmState())
   const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
-  const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
   const [managedSystemAlarmIds, setManagedSystemAlarmIds] = useState<string[]>(() => initialState.managedSystemAlarmIds)
   const [cleanupCandidateAlarmIds, setCleanupCandidateAlarmIds] = useState<string[]>(() => initialState.cleanupCandidateAlarmIds)
   const [systemAlarms, setSystemAlarms] = useState<AlarmManager.Alarm[]>([])
@@ -374,17 +379,23 @@ export function HomeView() {
   function saveStateSnapshot(
     nextRecords: AlarmRecord[],
     nextHolidaySources = holidaySources,
-    nextAvailableSounds = availableSounds,
     nextManagedSystemAlarmIds = managedSystemAlarmIds,
     nextCleanupCandidateAlarmIds = cleanupCandidateAlarmIds
   ) {
     saveCustomAlarmState({
       alarms: nextRecords,
       holidaySources: nextHolidaySources,
-      availableSounds: nextAvailableSounds,
       managedSystemAlarmIds: nextManagedSystemAlarmIds,
       cleanupCandidateAlarmIds: nextCleanupCandidateAlarmIds,
     })
+  }
+
+  function markCleanupCandidates(ids: string[]): string[] {
+    if (!ids.length) return cleanupCandidateAlarmIds
+    const next = mergeManagedSystemAlarmIds(cleanupCandidateAlarmIds, ids)
+    setCleanupCandidateAlarmIds(next)
+    saveStateSnapshot(records, holidaySources, managedSystemAlarmIds, next)
+    return next
   }
 
   function buildAdvancedCleanupItems(
@@ -412,15 +423,45 @@ export function HomeView() {
       .filter((item: AdvancedCleanupItem | null): item is AdvancedCleanupItem => Boolean(item))
   }
 
+  function buildDiagnosticItems(
+    nextSystemAlarms = systemAlarms,
+    nextRecords = records,
+    nextManagedIds = managedSystemAlarmIds,
+    nextCleanupCandidateIds = cleanupCandidateAlarmIds
+  ): AdvancedCleanupItem[] {
+    const managedIdSet = new Set(nextManagedIds)
+    const cleanupIdSet = new Set(nextCleanupCandidateIds)
+
+    return [...nextSystemAlarms]
+      .sort((a, b) => systemAlarmTimeLabel(a).localeCompare(systemAlarmTimeLabel(b)))
+      .map((alarm): AdvancedCleanupItem => {
+        const owner = nextRecords.find((record) => record.systemAlarmIds.includes(alarm.id))
+        const linkedLabel = owner ? displaySubtitle(owner, holidaySourceMap) : "未关联到当前首页闹钟"
+        const sourceParts = [
+          owner ? "当前首页闹钟已关联" : "当前首页闹钟未关联",
+          managedIdSet.has(alarm.id) ? "脚本已登记" : "脚本未登记",
+          cleanupIdSet.has(alarm.id) ? "已标记为残留候选" : null,
+        ].filter(Boolean)
+
+        return {
+          alarmId: alarm.id,
+          timeLabel: systemAlarmTimeLabel(alarm),
+          title: owner?.title || "未关联到当前首页闹钟",
+          summary: `${alarmScheduleKindLabel(alarm)} · ${linkedLabel}`,
+          detail: describeSystemAlarm(alarm),
+          sourceLabel: sourceParts.join(" · "),
+        }
+      })
+  }
+
   useEffect(() => {
     saveCustomAlarmState({
       alarms: records,
       holidaySources,
-      availableSounds,
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds,
     })
-  }, [records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds])
+  }, [records, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds])
 
   useEffect(() => {
     if (!AlarmManager.isAvailable) return
@@ -488,6 +529,7 @@ export function HomeView() {
       setSystemAlarms([])
       return {
         items: [],
+        diagnosticItems: [],
       }
     }
     try {
@@ -503,24 +545,28 @@ export function HomeView() {
       const referencedIds = collectRecordSystemAlarmIds(nextRecordsSnapshot)
       const nextManagedIds = mergeManagedSystemAlarmIds(storedState.managedSystemAlarmIds, referencedIds)
       const orphanIds = nextManagedIds.filter((id) => !referencedIds.includes(id))
+      const cleanupCandidateSet = new Set([
+        ...storedState.cleanupCandidateAlarmIds,
+        ...orphanIds,
+      ])
       if (orphanIds.length) {
         await cancelManagedSystemAlarmIds(orphanIds)
       }
-      const cleanupCandidateSet = new Set(storedState.cleanupCandidateAlarmIds)
       const referencedIdSet = new Set(referencedIds)
       const nextCleanupCandidateIds = alarms
         .map((item) => item.id)
         .filter((id) => cleanupCandidateSet.has(id) && !referencedIdSet.has(id))
       setManagedSystemAlarmIds(referencedIds)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      setAvailableSounds(storedState.availableSounds.length ? storedState.availableSounds : DEFAULT_SOUND_OPTIONS)
-      saveStateSnapshot(nextRecordsSnapshot, holidaySources, storedState.availableSounds.length ? storedState.availableSounds : DEFAULT_SOUND_OPTIONS, referencedIds, nextCleanupCandidateIds)
+      saveStateSnapshot(nextRecordsSnapshot, holidaySources, referencedIds, nextCleanupCandidateIds)
       return {
         items: buildAdvancedCleanupItems(alarms, nextRecordsSnapshot, nextCleanupCandidateIds),
+        diagnosticItems: buildDiagnosticItems(alarms, nextRecordsSnapshot, referencedIds, nextCleanupCandidateIds),
       }
     } catch {
       return {
         items: buildAdvancedCleanupItems(systemAlarms, records, cleanupCandidateAlarmIds),
+        diagnosticItems: buildDiagnosticItems(systemAlarms, records, managedSystemAlarmIds, cleanupCandidateAlarmIds),
       }
     }
   }
@@ -530,6 +576,7 @@ export function HomeView() {
       element: (
         <SystemAlarmSettingsView
           items={buildAdvancedCleanupItems()}
+          diagnosticItems={buildDiagnosticItems()}
           onRefresh={refreshSystemState}
           onDeleteIds={deleteSystemAlarmIds}
         />
@@ -545,7 +592,7 @@ export function HomeView() {
         : [...current, nextRecord]
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(next))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(next, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(next, holidaySources, nextManagedIds, cleanupCandidateAlarmIds)
       return next
     })
   }
@@ -555,7 +602,7 @@ export function HomeView() {
       const movingItems = indices.map((index) => current[index]).filter(Boolean)
       const next = current.filter((_, index) => !indices.includes(index))
       next.splice(newOffset, 0, ...movingItems)
-      saveStateSnapshot(next, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(next, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       return next
     })
   }
@@ -566,7 +613,6 @@ export function HomeView() {
       element: (
         <AddAlarmView
           holidaySources={holidaySources}
-          availableSounds={availableSounds}
           existingDrafts={records.map(toAlarmDraft)}
           mode="create"
         />
@@ -577,7 +623,6 @@ export function HomeView() {
     if (records.some((item) => alarmDraftKey({
       title: item.title,
       snoozeMinutes: item.snoozeMinutes,
-      soundName: item.soundName,
       repeatRule: item.repeatRule,
     }) === alarmDraftKey(draft))) {
       await Dialog.alert({ message: "闹钟已存在。" })
@@ -597,7 +642,6 @@ export function HomeView() {
         title: draft.title,
         enabled: true,
         snoozeMinutes: draft.snoozeMinutes,
-        soundName: draft.soundName,
         repeatRule: draft.repeatRule,
         systemAlarmIds: [],
         lastScheduledAt: null,
@@ -615,21 +659,6 @@ export function HomeView() {
     }
   }
 
-  async function openSoundSettings() {
-    await Navigation.present({
-      element: (
-        <SoundSettingsView
-          sounds={availableSounds}
-          onSave={async (sounds) => {
-            const nextSounds = sounds.map((item) => item.trim()).filter(Boolean)
-            setAvailableSounds(nextSounds)
-            saveStateSnapshot(records, holidaySources, nextSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
-          }}
-        />
-      ),
-    })
-  }
-
   async function applyHolidaySources(updatedSources: HolidayCalendarSource[], options?: { muteBusy?: boolean }) {
     // 节假日日历更新后，只重新排期受影响的节假日闹钟，避免把其他规则的闹钟也重排一遍。
     setHolidaySources(updatedSources)
@@ -638,6 +667,11 @@ export function HomeView() {
     const affectedRecords = records.filter((item) => item.enabled && item.repeatRule.kind === "holiday")
 
     if (!affectedRecords.length || !AlarmManager.isAvailable) return
+
+    const replacingIds = collectRecordSystemAlarmIds(affectedRecords)
+    const nextCleanupCandidateIds = replacingIds.length
+      ? markCleanupCandidates(replacingIds)
+      : cleanupCandidateAlarmIds
 
     if (!options?.muteBusy) setGlobalBusy(true)
     try {
@@ -657,7 +691,7 @@ export function HomeView() {
       setRecords(updatedRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(updatedRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(updatedRecords, updatedSources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(updatedRecords, updatedSources, nextManagedIds, nextCleanupCandidateIds)
       await refreshSystemState()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
@@ -672,13 +706,11 @@ export function HomeView() {
       element: (
         <AddAlarmView
           holidaySources={holidaySources}
-          availableSounds={availableSounds}
           existingDrafts={records.filter((item) => item.id !== record.id).map(toAlarmDraft)}
           mode="edit"
           initial={{
             title: record.title,
             snoozeMinutes: record.snoozeMinutes,
-            soundName: record.soundName,
             repeatRule: record.repeatRule,
           }}
         />
@@ -691,7 +723,6 @@ export function HomeView() {
       return alarmDraftKey({
         title: item.title,
         snoozeMinutes: item.snoozeMinutes,
-        soundName: item.soundName,
         repeatRule: item.repeatRule,
       }) === alarmDraftKey(draft)
     })) {
@@ -701,30 +732,32 @@ export function HomeView() {
 
     setGlobalBusy(true)
     try {
+      const nextCleanupCandidateIds = record.systemAlarmIds.length
+        ? markCleanupCandidates(record.systemAlarmIds)
+        : cleanupCandidateAlarmIds
       const optimisticRecord: AlarmRecord = {
         ...record,
         title: draft.title,
         snoozeMinutes: draft.snoozeMinutes,
-        soundName: draft.soundName,
         repeatRule: draft.repeatRule,
         enabled: record.enabled,
         updatedAt: Date.now(),
       }
       const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
       setRecords(optimisticRecords)
-      saveStateSnapshot(optimisticRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       const nextRecord = await scheduleAlarm(optimisticRecord, holidaySourceMap)
       const nextRecords = optimisticRecords.map((item) => (item.id === record.id ? nextRecord : item))
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(nextRecords, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, nextCleanupCandidateIds)
       await refreshSystemState()
     } catch (error: any) {
       const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
       setRecords(rollbackRecords)
-      saveStateSnapshot(rollbackRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(rollbackRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setGlobalBusy(false)
@@ -740,6 +773,9 @@ export function HomeView() {
 
     setBusyRecordId(record.id)
     try {
+      const nextCleanupCandidateIds = !enabled && record.systemAlarmIds.length
+        ? markCleanupCandidates(record.systemAlarmIds)
+        : cleanupCandidateAlarmIds
       const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
       const optimisticRecord: AlarmRecord = {
         ...record,
@@ -748,7 +784,7 @@ export function HomeView() {
       }
       const optimisticRecords = records.map((item) => (item.id === record.id ? optimisticRecord : item))
       setRecords(optimisticRecords)
-      saveStateSnapshot(optimisticRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(optimisticRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       const nextRecord = enabled
         ? await scheduleAlarm(optimisticRecord, holidaySourceMap)
@@ -757,12 +793,12 @@ export function HomeView() {
       setRecords(nextRecords)
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(nextRecords))
       setManagedSystemAlarmIds(nextManagedIds)
-      saveStateSnapshot(nextRecords, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, nextCleanupCandidateIds)
       void refreshSystemState()
     } catch (error: any) {
       const rollbackRecords = records.map((item) => (item.id === record.id ? record : item))
       setRecords(rollbackRecords)
-      saveStateSnapshot(rollbackRecords, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(rollbackRecords, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setBusyRecordId(null)
@@ -778,7 +814,6 @@ export function HomeView() {
           enabledCount={enabledCount}
           managedInstanceCount={managedInstanceCount}
           cleanupCandidateCount={cleanupCandidateAlarmIds.length}
-          soundCount={availableSounds.length}
           currentHolidayTitle={selectedHolidaySource?.title || ""}
           syncedHolidayCount={selectedHolidaySource?.holidayDates.length ?? 0}
           currentMonthTotalOffCount={currentMonthSummary.totalOff}
@@ -786,7 +821,6 @@ export function HomeView() {
           currentMonthTotalWorkCount={currentMonthSummary.totalWork}
           currentMonthRemainingWorkCount={currentMonthSummary.remainingWork}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
-          onOpenSoundSettings={openSoundSettings}
         />
       </NavigationStack>
     )
@@ -871,7 +905,7 @@ export function HomeView() {
     try {
       setRecords(nextRecords)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      saveStateSnapshot(nextRecords, holidaySources, availableSounds, managedSystemAlarmIds, nextCleanupCandidateIds)
+      saveStateSnapshot(nextRecords, holidaySources, managedSystemAlarmIds, nextCleanupCandidateIds)
 
       // 先取消系统里已经注册的实例，再从首页记录里删掉它。
       await deleteAlarm(record, systemAlarmMap)
@@ -879,7 +913,7 @@ export function HomeView() {
     } catch (error: any) {
       setRecords(records)
       setCleanupCandidateAlarmIds(cleanupCandidateAlarmIds)
-      saveStateSnapshot(records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      saveStateSnapshot(records, holidaySources, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
       setAlarmDeleting(false)
@@ -892,6 +926,7 @@ export function HomeView() {
     if (!ids.length) {
       return {
         items: buildAdvancedCleanupItems(systemAlarms, records, cleanupCandidateAlarmIds),
+        diagnosticItems: buildDiagnosticItems(systemAlarms, records, managedSystemAlarmIds, cleanupCandidateAlarmIds),
       }
     }
 
@@ -917,13 +952,14 @@ export function HomeView() {
       setRecords(nextRecords)
       setManagedSystemAlarmIds(nextManagedIds)
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
-      saveStateSnapshot(nextRecords, holidaySources, availableSounds, nextManagedIds, nextCleanupCandidateIds)
+      saveStateSnapshot(nextRecords, holidaySources, nextManagedIds, nextCleanupCandidateIds)
       const snapshot = await refreshSystemState()
       return snapshot
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
       return {
         items: buildAdvancedCleanupItems(systemAlarms, records, cleanupCandidateAlarmIds),
+        diagnosticItems: buildDiagnosticItems(systemAlarms, records, managedSystemAlarmIds, cleanupCandidateAlarmIds),
       }
     } finally {
       setGlobalBusy(false)

@@ -47,7 +47,6 @@ export type AlarmRecord = {
   title: string
   enabled: boolean
   snoozeMinutes: number
-  soundName: string | null
   repeatRule: AlarmRepeatRule
   systemAlarmIds: string[]
   lastScheduledAt: number | null
@@ -72,14 +71,12 @@ export type HolidayCalendarSource = {
 export type AlarmDraft = {
   title: string
   snoozeMinutes: number
-  soundName: string | null
   repeatRule: AlarmRepeatRule
 }
 
 export type CustomAlarmState = {
   alarms: AlarmRecord[]
   holidaySources: HolidayCalendarSource[]
-  availableSounds: string[]
   managedSystemAlarmIds: string[]
   cleanupCandidateAlarmIds: string[]
 }

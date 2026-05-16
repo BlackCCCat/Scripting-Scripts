@@ -1,6 +1,6 @@
-import type { CaptureResult, ClipGroup, ClipItem, ClipListScope, ClipPayload, CaisSettings } from "../types"
+import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipListScope, ClipPayload, CaisSettings } from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeClipContent, normalizeText } from "../utils/common"
-import { deleteAllClips, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
+import { deleteClipboardClipsByRange, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 import { bumpClipDataVersion } from "./change_signal"
 
@@ -112,16 +112,16 @@ export async function softDeleteClip(item: ClipItem): Promise<void> {
   bumpClipDataVersion()
 }
 
-export async function clearAllClips(): Promise<void> {
-  const imagePaths = await listImagePaths()
-  await deleteAllClips()
+export async function clearFavoriteClips(): Promise<void> {
+  const imagePaths = await listImagePaths({ favoritesOnly: true })
+  await deleteFavoriteClips()
   for (const path of imagePaths) await removeImage(path)
   bumpClipDataVersion()
 }
 
-export async function clearFavoriteClips(): Promise<void> {
-  const imagePaths = await listImagePaths({ favoritesOnly: true })
-  await deleteFavoriteClips()
+export async function clearClipboardClipsByRange(range: ClipboardClearRange): Promise<void> {
+  const imagePaths = await listImagePaths({ clipboardRange: range })
+  await deleteClipboardClipsByRange(range)
   for (const path of imagePaths) await removeImage(path)
   bumpClipDataVersion()
 }

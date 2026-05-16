@@ -1,11 +1,10 @@
 import {
-  AppEvents,
   Button,
   EmptyView,
+  Editor,
   Group,
   HStack,
   Image,
-  List,
   NavigationStack,
   Section,
   Script,
@@ -13,22 +12,22 @@ import {
   TabView,
   Text,
   TextField,
-  Toggle,
   VStack,
   useEffect,
   useObservable,
+  useRef,
   useState,
   Form,
   Navigation,
-  type ScenePhase,
+  useColorScheme,
 } from "scripting"
 
-import type { CaisSettings, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
+import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
   addClipFromPayload,
-  clearAllClips,
+  clearClipboardClipsByRange,
   clearFavoriteClips,
   editClipContent,
   getClipGroups,
@@ -41,10 +40,11 @@ import {
   addFavoriteFromInput,
 } from "../storage/clip_repository"
 import { initializeDatabase } from "../storage/database"
-import { loadSettings, saveSettings } from "../storage/settings_store"
 import { readClipDataVersion } from "../storage/change_signal"
+import { loadSettings, saveSettings } from "../storage/settings_store"
 import { formatDateTime, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
+import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { SettingsView } from "./SettingsView"
@@ -63,7 +63,13 @@ const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
 const APP_GROUP_PAGE_SIZE = 300
-type ClearScope = "all" | "favorites"
+const TOAST_DURATION_MS = 1200
+const CAIS_APP_RESUME_HANDLER = "__CAIS_APP_RESUME_HANDLER__"
+const APP_SCROLL_CONTENT_MARGINS = {
+  insets: { top: 0, bottom: 0, leading: 0, trailing: 0 },
+  placement: "scrollContent" as const,
+}
+type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
@@ -77,16 +83,32 @@ function EmptyState(props: {
   message: string
   systemImage: string
 }) {
+  const colorScheme = useColorScheme()
+  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+
   return (
-    <VStack
+    <HStack
       frame={{ maxWidth: "infinity", alignment: "center" as any }}
-      padding={{ top: 32, bottom: 32 }}
-      spacing={10}
+      listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
+      listRowSeparator="hidden"
+      listRowBackground={<EmptyView />}
     >
-      <Image systemName={props.systemImage} font="largeTitle" foregroundStyle="secondaryLabel" />
-      <Text font="headline">{props.title}</Text>
-      <Text foregroundStyle="secondaryLabel" multilineTextAlignment="center">{props.message}</Text>
-    </VStack>
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "center" as any }}
+        padding={{ top: 40, bottom: 40, leading: 16, trailing: 16 }}
+        spacing={12}
+        background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
+        shadow={{
+          color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
+          radius: 10,
+          y: 4,
+        }}
+      >
+        <Image systemName={props.systemImage} font="largeTitle" foregroundStyle="secondaryLabel" />
+        <Text font="headline">{props.title}</Text>
+        <Text foregroundStyle="secondaryLabel" multilineTextAlignment="center">{props.message}</Text>
+      </VStack>
+    </HStack>
   )
 }
 
@@ -130,6 +152,45 @@ function AddFavoriteView() {
   )
 }
 
+function ClipContentEditorView(props: {
+  content: string
+}) {
+  const dismiss = Navigation.useDismiss()
+  const [controller] = useState(() => new EditorController({
+    content: props.content,
+    ext: "txt",
+    readOnly: false,
+  }))
+
+  useEffect(() => {
+    return () => {
+      controller.dispose()
+    }
+  }, [controller])
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle="编辑内容"
+        navigationBarTitleDisplayMode="inline"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        presentationDetents={["large"]}
+        presentationDragIndicator="visible"
+        toolbar={{
+          topBarLeading: <Button title="取消" role="cancel" action={() => dismiss(null)} />,
+          topBarTrailing: <Button title="保存" action={() => dismiss(controller.content)} />,
+        }}
+      >
+        <Editor
+          controller={controller}
+          scriptName="CAIS"
+          showAccessoryView
+        />
+      </VStack>
+    </NavigationStack>
+  )
+}
+
 function ImageViewerView(props: {
   item: ClipItem
 }) {
@@ -161,26 +222,39 @@ function ImageViewerView(props: {
 }
 
 export function AppRoot() {
+  const colorScheme = useColorScheme()
   const activeTab = useObservable(TAB_CLIPS)
   const pipPresented = useObservable(false)
   const deleteDialogPresented = useObservable(false)
-  const clearDialogPresented = useObservable(false)
   const toastPresented = useObservable(false)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
-  const [pendingClearScope, setPendingClearScope] = useState<ClearScope>("all")
   const [addCustomActionToken, setAddCustomActionToken] = useState(0)
   const [query, setQuery] = useState("")
-  const [searchVisible, setSearchVisible] = useState(false)
+  const settingsRef = useRef(settings)
+  const queryRef = useRef(query)
+  const lastObservedPasteboardChangeCount = useRef<number | null>(null)
+  const toastHideTimer = useRef<any>(null)
+  const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
   const [loading, setLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
     lastMessage: "未启动",
+    capturedCount: 0,
   })
+  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+
+  useEffect(() => {
+    queryRef.current = query
+  }, [query])
 
   useEffect(() => {
     deleteDialogPresented.setValue(false)
@@ -189,23 +263,9 @@ export function AppRoot() {
   }, [activeTab.value])
 
   useEffect(() => {
+    const previousResumeHandler = (globalThis as any)[CAIS_APP_RESUME_HANDLER]
+    ;(globalThis as any)[CAIS_APP_RESUME_HANDLER] = handleScriptResume
     void boot()
-    const handleScenePhase = (phase: ScenePhase) => {
-      if (phase === "active") void refresh(true)
-    }
-    AppEvents.scenePhase.addListener(handleScenePhase)
-    const removeResume = Script.onResume?.((details) => {
-      const pipCommand = details.queryParameters?.pip
-      if (pipCommand === "0") {
-        deactivatePipFromExternal({ exitAfter: true })
-        return
-      }
-      if (details.queryParameters?.pip === "1") {
-        void activatePipFromApp()
-        return
-      }
-      void refresh(true)
-    })
     const removeMinimize = Script.onMinimize?.(() => {
       if (intentionalMinimize) {
         intentionalMinimize = false
@@ -214,9 +274,13 @@ export function AppRoot() {
       Script.exit()
     })
     return () => {
-      AppEvents.scenePhase.removeListener(handleScenePhase)
-      removeResume?.()
+      if (previousResumeHandler) {
+        ;(globalThis as any)[CAIS_APP_RESUME_HANDLER] = previousResumeHandler
+      } else {
+        delete (globalThis as any)[CAIS_APP_RESUME_HANDLER]
+      }
       removeMinimize?.()
+      clearToastHideTimer()
       stopPipMonitor()
     }
   }, [])
@@ -244,10 +308,45 @@ export function AppRoot() {
       const version = readClipDataVersion()
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
-      void refresh(true)
+      void refresh(true, settingsRef.current)
     }, 700)
     return () => {
       if (timer) (globalThis as any).clearInterval?.(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let stopped = false
+    let checking = false
+    let timer: any = null
+
+    function schedule() {
+      if (stopped) return
+      const interval = Math.max(300, settingsRef.current.monitorIntervalMs || 500)
+      timer = (globalThis as any).setTimeout?.(tick, interval)
+    }
+
+    function tick() {
+      if (stopped) return
+      if (checking) {
+        schedule()
+        return
+      }
+      checking = true
+      void (async () => {
+        try {
+          await captureClipboardChangeAndRefresh()
+        } finally {
+          checking = false
+          schedule()
+        }
+      })()
+    }
+
+    timer = (globalThis as any).setTimeout?.(tick, 500)
+    return () => {
+      stopped = true
+      if (timer) (globalThis as any).clearTimeout?.(timer)
     }
   }, [])
 
@@ -264,8 +363,7 @@ export function AppRoot() {
     setLoading(true)
     try {
       await initializeDatabase()
-      await captureCurrentClipboard(settings)
-      await refresh(true)
+      await captureClipboardAndRefresh(settingsRef.current, true)
       if (Script.queryParameters?.pip === "1") {
         await activatePipFromApp()
       }
@@ -275,10 +373,51 @@ export function AppRoot() {
     }
   }
 
+  async function captureClipboardAndRefresh(currentSettings = settingsRef.current, force = false) {
+    await captureClipboardIfChanged(currentSettings, force)
+    await refresh(true, currentSettings)
+  }
+
+  async function captureClipboardChangeAndRefresh() {
+    if (pipPresented.value || appMonitorStopper) return
+    const changed = await captureClipboardIfChanged(settingsRef.current)
+    if (changed) {
+      await refresh(true, settingsRef.current)
+    }
+  }
+
+  async function captureClipboardIfChanged(currentSettings = settingsRef.current, force = false): Promise<boolean> {
+    try {
+      const changeCount = await currentChangeCount()
+      if (!force && lastObservedPasteboardChangeCount.current === changeCount) return false
+      lastObservedPasteboardChangeCount.current = changeCount
+      const result = await captureCurrentClipboard(currentSettings)
+      return result.status === "created" || result.status === "updated"
+    } catch {
+      return false
+    }
+  }
+
+  function handleScriptResume(details: any = {}) {
+    if (details.resumeFromMinimized) {
+      intentionalMinimize = false
+    }
+    const pipCommand = details.queryParameters?.pip
+    if (pipCommand === "0") {
+      deactivatePipFromExternal({ exitAfter: true })
+      return
+    }
+    if (pipCommand === "1") {
+      void activatePipFromApp()
+      return
+    }
+    void captureClipboardChangeAndRefresh()
+  }
+
   async function refresh(_force = false, currentSettings = settings) {
     const generation = ++appRefreshGeneration
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
-    const search = query.trim()
+    const search = queryRef.current.trim()
     const [nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
       getClipGroups("favorites", search, groupLimit),
       getClipGroups("clipboard", search, groupLimit),
@@ -290,23 +429,36 @@ export function AppRoot() {
 
   function updateSettings(nextSettings: CaisSettings) {
     const next = saveSettings(nextSettings)
+    settingsRef.current = next
     setSettings(next)
     void refresh(true, next)
   }
 
+  function clearToastHideTimer() {
+    if (toastHideTimer.current) {
+      ;(globalThis as any).clearTimeout?.(toastHideTimer.current)
+      toastHideTimer.current = null
+    }
+  }
+
   function showToast(message: string) {
+    clearToastHideTimer()
     setToastMessage(message)
     toastPresented.setValue(false)
     ;(globalThis as any).setTimeout?.(() => {
       toastPresented.setValue(true)
     }, 0)
+    toastHideTimer.current = (globalThis as any).setTimeout?.(() => {
+      toastPresented.setValue(false)
+      toastHideTimer.current = null
+    }, TOAST_DURATION_MS)
   }
 
   function toastOptions() {
     return {
       isPresented: toastPresented,
       message: toastMessage,
-      duration: 1.2,
+      duration: TOAST_DURATION_MS / 1000,
       position: "bottom" as any,
     }
   }
@@ -359,18 +511,37 @@ export function AppRoot() {
     await refresh()
   }
 
-  function requestClear(scope: ClearScope) {
-    setPendingClearScope(scope)
-    clearDialogPresented.setValue(true)
+  async function requestClear(scope: ClearScope) {
+    const ok = await Dialog.confirm({
+      title: `清空${clearScopeLabel(scope)}？`,
+      message: "此操作无法撤销。",
+      cancelLabel: "取消",
+      confirmLabel: "清空",
+    })
+    if (!ok) return
+    await clearData(scope)
   }
 
-  async function confirmClear() {
-    const scope = pendingClearScope
-    clearDialogPresented.setValue(false)
+  function clearScopeLabel(scope: ClearScope): string {
+    switch (scope) {
+      case "favorites": return "收藏数据"
+      case "recent": return "最近内容"
+      case "threeDays": return "近三天剪贴板数据"
+      case "sevenDays": return "近七天剪贴板数据"
+      case "older": return "更早剪贴板数据"
+    }
+  }
+
+  async function clearData(scope: ClearScope) {
+    showToast("正在删除...")
+    // Yield to let toast render before blocking on async work
+    await new Promise((r) => (globalThis as any).setTimeout?.(r, 50))
     if (scope === "favorites") {
       await clearFavoriteClips()
+      showToast("已清空收藏数据")
     } else {
-      await clearAllClips()
+      await clearClipboardClipsByRange(scope)
+      showToast("已清空剪贴板数据")
     }
     await refresh()
   }
@@ -396,33 +567,24 @@ export function AppRoot() {
       return
     }
     const fullContent = await getFullClipContent(item.id)
-    const controller = new EditorController({
-      content: fullContent,
-      ext: "txt",
-      readOnly: false,
-    })
     const initialChangeCount = await currentChangeCount()
     try {
-      await controller.present({
-        navigationTitle: "编辑内容",
-        scriptName: "CAIS",
-        fullscreen: false,
+      const nextContent = await Navigation.present<string | null>({
+        element: <ClipContentEditorView content={fullContent} />,
+        modalPresentationStyle: "pageSheet",
       })
       let needsRefresh = false
       if (await currentChangeCount() !== initialChangeCount) {
         await captureCurrentClipboard(settings)
         needsRefresh = true
       }
-      const nextContent = controller.content
-      if (nextContent !== fullContent) {
+      if (nextContent != null && nextContent !== fullContent) {
         await editClipContent(item, nextContent)
         needsRefresh = true
       }
       if (needsRefresh) await refresh()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "编辑失败") })
-    } finally {
-      controller.dispose()
     }
   }
 
@@ -438,23 +600,38 @@ export function AppRoot() {
     return renderClipOutput(item, await getFullClipContent(item.id))
   }
 
-  async function saveTransformedResult(result: MenuActionResult, source: string): Promise<boolean> {
-    const saveSettings = { ...settings, captureText: true, captureImages: true }
+  async function saveTransformedResult(result: MenuActionResult, source: string): Promise<number> {
+    const saveSettings = { ...settingsRef.current, captureText: true, captureImages: true }
     if (result.kind === "text") {
-      if (!result.text.trim() || result.text === source) return false
+      if (!result.text.trim() || result.text === source) return 0
       const saved = await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
+    }
+    if (result.kind === "texts") {
+      let savedCount = 0
+      for (const text of result.texts) {
+        if (!text.trim() || text === source) continue
+        const saved = await addClipFromPayload({ kind: "text", text }, saveSettings)
+        if (saved.status !== "skipped") savedCount += 1
+      }
+      return savedCount
     }
     if (result.kind === "image") {
       const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
-      return saved.status !== "skipped"
+      return saved.status !== "skipped" ? 1 : 0
     }
-    return false
+    return 0
   }
 
   async function copyMenuResult(result: MenuActionResult, source: string) {
     if (result.kind === "openUrl") {
       await Safari.openURL(result.url)
+      return
+    }
+    if (result.kind === "texts") {
+      const saved = await saveTransformedResult(result, source)
+      showToast(saved ? `已拆分保存 ${saved} 条` : "没有新的拆分结果")
+      await refresh()
       return
     }
     if (result.kind === "text") {
@@ -505,7 +682,7 @@ export function AppRoot() {
   }
 
   function startPipMonitor() {
-    const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now() }
+    const status = { active: true, lastMessage: "监听启动中", lastCheckedAt: Date.now(), capturedCount: 0 }
     setMonitorStatus(status)
     writePipControlState({ active: true, command: undefined })
     if (appMonitorStopper) return
@@ -525,7 +702,7 @@ export function AppRoot() {
     } else {
       stopClipboardMonitor()
     }
-    setMonitorStatus({ active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now() })
+    setMonitorStatus({ active: false, lastMessage: "监听已停止", lastCheckedAt: Date.now(), capturedCount: 0 })
     writePipControlState({ active: false, command: undefined })
   }
 
@@ -560,6 +737,27 @@ export function AppRoot() {
     } catch (error: any) {
       intentionalMinimize = false
       await Dialog.alert({ message: String(error?.message ?? error ?? "最小化失败") })
+    }
+  }
+
+  function toggleFullscreenMode() {
+    const next = !appFullscreen
+    setAppFullscreen(next)
+    writeAppFullscreen(next)
+    void restartScript()
+  }
+
+  async function restartScript() {
+    try {
+      const url = Script.createRunURLScheme("CAIS", { restart: String(Date.now()) })
+      const ok = await Safari.openURL(url)
+      if (ok === false) {
+        showToast("已保存显示模式，下次运行生效")
+        return
+      }
+      Script.exit()
+    } catch {
+      showToast("已保存显示模式，下次运行生效")
     }
   }
 
@@ -696,24 +894,29 @@ export function AppRoot() {
     )
   }
 
-  function toolbarLeading(scope: ClearScope | null) {
+  function toolbarLeading() {
     return (
       <HStack spacing={10}>
-        {scope ? (
-          <Button
-            title=""
-            systemImage="trash"
-            role="destructive"
-            action={withHaptic(() => requestClear(scope))}
-          />
-        ) : null}
+        <Button
+          title=""
+          systemImage="xmark.circle.fill"
+          foregroundStyle="systemRed"
+          action={withHaptic(() => Script.exit())}
+        />
         {Script.supportsMinimization?.() ? (
           <Button
             title=""
-            systemImage="minus.circle"
+            systemImage="minus.circle.fill"
+            foregroundStyle="systemYellow"
             action={withHaptic(minimizeScript)}
           />
         ) : null}
+        <Button
+          title=""
+          systemImage={appFullscreen ? "arrow.down.right.and.arrow.up.left.circle.fill" : "arrow.up.left.and.arrow.down.right.circle.fill"}
+          foregroundStyle="systemBlue"
+          action={withHaptic(toggleFullscreenMode)}
+        />
       </HStack>
     )
   }
@@ -721,11 +924,7 @@ export function AppRoot() {
   function clipToolbarButtons() {
     return (
       <HStack spacing={10}>
-        <Button
-          title=""
-          systemImage="magnifyingglass"
-          action={withHaptic(() => setSearchVisible((v) => !v))}
-        />
+        {pipToolbarButton()}
         <Button
           title=""
           systemImage="doc.badge.plus"
@@ -739,11 +938,7 @@ export function AppRoot() {
   function favoriteToolbarButtons() {
     return (
       <HStack spacing={10}>
-        <Button
-          title=""
-          systemImage="magnifyingglass"
-          action={withHaptic(() => setSearchVisible((v) => !v))}
-        />
+        {pipToolbarButton()}
         <Button
           title=""
           systemImage="plus"
@@ -763,6 +958,17 @@ export function AppRoot() {
     )
   }
 
+  function pipToolbarButton() {
+    return (
+      <Button
+        title=""
+        systemImage={pipPresented.value ? "pip.exit" : "pip.enter"}
+        foregroundStyle={pipPresented.value ? "systemBlue" : undefined}
+        action={withHaptic(togglePip)}
+      />
+    )
+  }
+
   function settingsTrailingToolbar() {
     return (
       <Button
@@ -774,28 +980,37 @@ export function AppRoot() {
   }
 
   function searchPanel() {
-    if (!searchVisible) return null
     return (
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+        listRowInsets={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
+        listRowSeparator="hidden"
+        listRowBackground={<EmptyView />}
       >
         <VStack
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
           padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
-          background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+          background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
         >
-          <TextField title="搜索" value={query} prompt="输入关键词" onChanged={setQuery} />
+          <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+            <Image systemName="magnifyingglass" foregroundStyle="secondaryLabel" frame={{ width: 18 }} />
+            <TextField title="" value={query} prompt="输入关键词" onChanged={setQuery} />
+          </HStack>
         </VStack>
       </VStack>
     )
   }
 
   function pipControlPanel() {
+    if (!pipPresented.value) return null
     return (
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+        listRowInsets={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
+        listRowSeparator="hidden"
+        listRowBackground={<EmptyView />}
       >
         <VStack
           spacing={8}
@@ -803,21 +1018,21 @@ export function AppRoot() {
           padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
           background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
         >
-          <Toggle
-            title="开启 PiP 监听"
-            value={pipPresented.value}
-            onChanged={() => withHaptic(togglePip)()}
-          />
-          {pipPresented.value ? (
-            <Text
-              font="caption"
-              foregroundStyle="secondaryLabel"
-              multilineTextAlignment="leading"
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            >
-              [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage}
-            </Text>
-          ) : null}
+          <Text
+            font="headline"
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            multilineTextAlignment="leading"
+          >
+            PiP 监听状态
+          </Text>
+          <Text
+            font="caption"
+            foregroundStyle="secondaryLabel"
+            multilineTextAlignment="leading"
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          >
+            [{formatDateTime(monitorStatus.lastCheckedAt)}] {monitorStatus.lastMessage} · 已复制 {monitorStatus.capturedCount ?? 0} 条
+          </Text>
         </VStack>
       </VStack>
     )
@@ -840,79 +1055,60 @@ export function AppRoot() {
           />
         ),
       }}
-      confirmationDialog={{
-        title: pendingClearScope === "favorites" ? "清空收藏？" : "清空剪贴板？",
-        isPresented: clearDialogPresented,
-        actions: (
-          <Group>
-            <Button title="清空" systemImage="trash" role="destructive" action={() => void confirmClear()} />
-            <Button title="取消" role="cancel" action={() => clearDialogPresented.setValue(false)} />
-          </Group>
-        ),
-      }}
     >
       <Tab title="收藏" systemImage="star" value={TAB_FAVORITES}>
         <NavigationStack>
-          <VStack
-            navigationTitle="收藏"
-            navigationBarTitleDisplayMode="inline"
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
-            background="systemGroupedBackground"
-            toolbar={{ topBarLeading: toolbarLeading("favorites"), topBarTrailing: favoriteToolbarButtons() }}
+          <Form
+            formStyle="grouped"
+            listRowSpacing={10}
+            contentMargins={APP_SCROLL_CONTENT_MARGINS}
+            frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+            toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
             {searchPanel()}
-            <List
-              listStyle="plain"
-              scrollContentBackground="hidden"
-              listRowSpacing={10}
-              background="systemGroupedBackground"
-              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-            >
-              {renderGroupedClipList(favoriteGroups, searchVisible && query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
-            </List>
-          </VStack>
+            {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+          </Form>
         </NavigationStack>
       </Tab>
 
       <Tab title="剪贴板" systemImage="doc.on.clipboard" value={TAB_CLIPS}>
         <NavigationStack>
-          <VStack
-            navigationTitle="CAIS"
-            navigationBarTitleDisplayMode="inline"
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
-            background="systemGroupedBackground"
-            toolbar={{ topBarLeading: toolbarLeading("all"), topBarTrailing: clipToolbarButtons() }}
+          <Form
+            formStyle="grouped"
+            listRowSpacing={10}
+            contentMargins={APP_SCROLL_CONTENT_MARGINS}
+            frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+            toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: clipToolbarButtons() }}
             toast={toastOptions()}
           >
             {pipControlPanel()}
             {searchPanel()}
-            <List
-              listStyle="plain"
-              scrollContentBackground="hidden"
-              listRowSpacing={10}
-              background="systemGroupedBackground"
-              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-            >
-              {renderGroupedClipList(
-                clipboardGroups,
-                searchVisible && query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-                { allowDelete: (item) => !item.manualFavorite }
-              )}
-            </List>
-          </VStack>
+            {renderGroupedClipList(
+              clipboardGroups,
+              query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+              { allowDelete: (item) => !item.manualFavorite }
+            )}
+          </Form>
         </NavigationStack>
       </Tab>
 
       <Tab title="设置" systemImage="gearshape" value={TAB_SETTINGS}>
         <NavigationStack>
-          <SettingsView
-            value={settings}
-            onChanged={updateSettings}
-            addActionToken={addCustomActionToken}
-            leadingToolbar={toolbarLeading(null)}
-            trailingToolbar={settingsTrailingToolbar()}
-          />
+          <VStack
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
+            toast={toastOptions()}
+          >
+            <SettingsView
+              value={settings}
+              onChanged={updateSettings}
+              onClearFavorites={() => void requestClear("favorites")}
+              onClearClipboard={(range) => void requestClear(range)}
+              addActionToken={addCustomActionToken}
+              leadingToolbar={toolbarLeading()}
+              trailingToolbar={settingsTrailingToolbar()}
+            />
+          </VStack>
         </NavigationStack>
       </Tab>
     </TabView>
