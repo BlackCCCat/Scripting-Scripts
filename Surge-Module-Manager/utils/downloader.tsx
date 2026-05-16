@@ -31,7 +31,8 @@ function injectUrl(content: string, url?: string, preferredPrefix?: string): str
     const t = line.trimStart()
     return !prefixes.some((p) => t.startsWith(p))
   })
-  return `${first}${u}\n${filtered.join("\n")}`
+  const space = first.includes("=") ? "" : " "
+  return `${first}${space}${u}\n${filtered.join("\n")}`
 }
 
 export async function downloadModule(info: ModuleInfo & { linkPrefix?: string }): Promise<{ ok: boolean; message?: string }> {

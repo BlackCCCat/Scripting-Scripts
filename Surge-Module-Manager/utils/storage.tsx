@@ -349,7 +349,8 @@ function upsertLink(content: string, prefixes: string[], value?: string): string
     return !hit
   })
   const prefix = matchedPrefix ?? prefixes[0] ?? "#url="
-  return `${prefix}${trimmed}\n${filtered.join("\n")}`
+  const space = prefix.includes("=") ? "" : " "
+  return `${prefix}${space}${trimmed}\n${filtered.join("\n")}`
 }
 
 export async function updateModuleMetadata(
