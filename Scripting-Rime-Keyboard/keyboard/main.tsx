@@ -449,7 +449,7 @@ function KeyboardContent(props: {
   function beginKeyTouch(id: string) {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
-    setKeyPressed(id, true);
+    setKeyPressed(id, true, false);
     playPressFeedback();
   }
 
@@ -501,9 +501,9 @@ function KeyboardContent(props: {
     spaceCursorDragXRef.current = null;
   }
 
-  function cancelRowGesture(rowId: string) {
+  function cancelRowGesture(rowId: string, keepVisual = false) {
     const target = activeHitTargetRef.current.get(rowId);
-    if (target) setKeyPressed(target.id, false);
+    if (target && !keepVisual) setKeyPressed(target.id, false);
     clearRowLongPressTimer(rowId);
     rowLongPressCancelledRef.current.set(rowId, true);
     rowLongPressHandledRef.current.delete(rowId);
@@ -600,7 +600,7 @@ function KeyboardContent(props: {
     }
     cancelPendingPressFeedback();
     rowLongPressCancelledRef.current.set(rowId, true);
-    cancelRowGesture(rowId);
+    clearRowLongPressTimer(rowId);
   }
 
   function moveHighlightedCandidateBySpaceDrag(steps: number) {
@@ -677,7 +677,7 @@ function KeyboardContent(props: {
     if (target) activeHitTargetRef.current.set(rowId, target);
     else activeHitTargetRef.current.delete(rowId);
     rowGestureTokenRef.current.set(rowId, ++nextGestureTokenRef.current);
-    if (target) setKeyPressed(target.id, true);
+    if (target) setKeyPressed(target.id, true, false);
     if (target) playPressFeedback();
     scheduleRowLongPress(rowId, target);
   }
@@ -702,6 +702,7 @@ function KeyboardContent(props: {
       rowLongPressHandledRef.current.delete(rowId);
       spaceCursorDragXRef.current = null;
       target.onLongPressEnd?.();
+      setKeyPressed(target.id, false);
       cancelRowGesture(rowId);
       return;
     }
@@ -709,6 +710,7 @@ function KeyboardContent(props: {
       isSpaceCursorKey(target.id) && rowSpaceDragConsumedRef.current.get(rowId)
     ) {
       cancelPendingPressFeedback();
+      setKeyPressed(target.id, false);
       cancelRowGesture(rowId);
       return;
     }
@@ -726,6 +728,7 @@ function KeyboardContent(props: {
       target.onSwipeRight();
     } else target.onPress();
 
+    setKeyPressed(target.id, false);
     cancelRowGesture(rowId);
   }
 
