@@ -29,9 +29,35 @@ export function paletteFor(
     (customColorScheme === "light"
       ? settings.customKeyColorLight
       : settings.customKeyColorDark);
+  const usesCustomFontColors = settings.customKeyFontColors &&
+    customColorScheme != null &&
+    (customColorScheme === "light"
+      ? settings.customKeyFontColorLight
+      : settings.customKeyFontColorDark);
+  const usesCustomHintColors = settings.customKeyHintColors &&
+    customColorScheme != null &&
+    (customColorScheme === "light"
+      ? settings.customKeyHintColorLight
+      : settings.customKeyHintColorDark);
   const keyOverrides = usesCustomColors
     ? Object.fromEntries(
       Object.entries(settings.keyColors.overrides).map(([key, value]) => [
+        key,
+        value[customColorScheme],
+      ]),
+    )
+    : {};
+  const primaryOverrides = usesCustomFontColors
+    ? Object.fromEntries(
+      Object.entries(settings.keyFontColors.overrides).map(([key, value]) => [
+        key,
+        value[customColorScheme],
+      ]),
+    )
+    : {};
+  const hintOverrides = usesCustomHintColors
+    ? Object.fromEntries(
+      Object.entries(settings.keyHintColors.overrides).map(([key, value]) => [
         key,
         value[customColorScheme],
       ]),
@@ -42,9 +68,11 @@ export function paletteFor(
       keyBg: usesCustomColors ? settings.keyColors.normal.dark : "#5f6064",
       enterBg: usesCustomColors ? settings.keyColors.enter.dark : "#5f6064",
       keyOverrides,
-      primary: "#f5f5f7",
+      primary: usesCustomFontColors ? settings.keyFontColors.normal.dark : "#f5f5f7",
       secondary: "#d0d0d4",
-      hint: "#b2b2b7",
+      hint: usesCustomHintColors ? settings.keyHintColors.normal.dark : "#b2b2b7",
+      primaryOverrides,
+      hintOverrides,
       accent: "#0a84ff",
       accentText: "#ffffff",
       shadow: "rgba(0,0,0,0.45)",
@@ -55,9 +83,11 @@ export function paletteFor(
       keyBg: usesCustomColors ? settings.keyColors.normal.light : "#ffffff",
       enterBg: usesCustomColors ? settings.keyColors.enter.light : "#ffffff",
       keyOverrides,
-      primary: "#000000",
+      primary: usesCustomFontColors ? settings.keyFontColors.normal.light : "#000000",
       secondary: "#3a3a3c",
-      hint: "#8a8a8e",
+      hint: usesCustomHintColors ? settings.keyHintColors.normal.light : "#8a8a8e",
+      primaryOverrides,
+      hintOverrides,
       accent: "#007aff",
       accentText: "#ffffff",
       shadow: "rgba(0,0,0,0.22)",
@@ -71,9 +101,15 @@ export function paletteFor(
       ? settings.keyColors.enter[customColorScheme]
       : "systemBackground",
     keyOverrides,
-    primary: "label",
+    primary: usesCustomFontColors
+      ? settings.keyFontColors.normal[customColorScheme]
+      : "label",
     secondary: "secondaryLabel",
-    hint: "tertiaryLabel",
+    hint: usesCustomHintColors
+      ? settings.keyHintColors.normal[customColorScheme]
+      : "tertiaryLabel",
+    primaryOverrides,
+    hintOverrides,
     accent: "accentColor",
     accentText: "white",
     shadow: "rgba(0,0,0,0.22)",

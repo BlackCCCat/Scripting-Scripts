@@ -27,6 +27,8 @@ export type Palette = {
   primary: string;
   secondary: string;
   hint: string;
+  primaryOverrides: Record<string, string>;
+  hintOverrides: Record<string, string>;
   accent: string;
   accentText: string;
   shadow: string;

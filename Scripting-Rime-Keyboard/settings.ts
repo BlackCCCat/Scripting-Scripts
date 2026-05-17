@@ -25,7 +25,16 @@ export type RimeKeyboardSettings = {
   customKeyColors: boolean;
   customKeyColorLight: boolean;
   customKeyColorDark: boolean;
+
   keyColors: KeyColorSettings;
+  customKeyFontColors: boolean;
+  customKeyFontColorLight: boolean;
+  customKeyFontColorDark: boolean;
+  keyFontColors: KeyColorSettings;
+  customKeyHintColors: boolean;
+  customKeyHintColorLight: boolean;
+  customKeyHintColorDark: boolean;
+  keyHintColors: KeyColorSettings;
   showCandidateComment: boolean;
   candidateMenuCustomEnabled: boolean;
   candidateMenuActions: CandidateMenuAction[];
@@ -336,6 +345,30 @@ export const DEFAULT_KEY_COLORS: KeyColorSettings = {
   overrides: {},
 };
 
+export const DEFAULT_KEY_FONT_COLORS: KeyColorSettings = {
+  normal: {
+    light: "#000000",
+    dark: "#f5f5f7",
+  },
+  enter: {
+    light: "#000000",
+    dark: "#f5f5f7",
+  },
+  overrides: {},
+};
+
+export const DEFAULT_KEY_HINT_COLORS: KeyColorSettings = {
+  normal: {
+    light: "#8a8a8e",
+    dark: "#b2b2b7",
+  },
+  enter: {
+    light: "#8a8a8e",
+    dark: "#b2b2b7",
+  },
+  overrides: {},
+};
+
 export const DEFAULT_CANDIDATE_MENU_ACTIONS: CandidateMenuAction[] = [
   { name: "左移", action: "Control+j" },
   { name: "右移", action: "Control+k" },
@@ -354,6 +387,14 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   customKeyColorLight: false,
   customKeyColorDark: false,
   keyColors: DEFAULT_KEY_COLORS,
+  customKeyFontColors: false,
+  customKeyFontColorLight: false,
+  customKeyFontColorDark: false,
+  keyFontColors: DEFAULT_KEY_FONT_COLORS,
+  customKeyHintColors: false,
+  customKeyHintColorLight: false,
+  customKeyHintColorDark: false,
+  keyHintColors: DEFAULT_KEY_HINT_COLORS,
   showCandidateComment: true,
   candidateMenuCustomEnabled: false,
   candidateMenuActions: [],
@@ -467,7 +508,10 @@ function normalizeColorPair(
   };
 }
 
-function normalizeKeyColors(raw: unknown): KeyColorSettings {
+function normalizeKeyColors(
+  raw: unknown,
+  defaults: KeyColorSettings,
+): KeyColorSettings {
   const source = raw && typeof raw === "object"
     ? (raw as Record<string, unknown>)
     : {};
@@ -478,14 +522,17 @@ function normalizeKeyColors(raw: unknown): KeyColorSettings {
   const overrides: Record<string, KeyColorPair> = {};
   for (const [key, value] of Object.entries(overrideSource)) {
     if (!key) continue;
+    const fallback = key === "enter" || key === "numeric-enter"
+      ? defaults.enter
+      : defaults.normal;
     overrides[key] = normalizeColorPair(value, {
-      light: DEFAULT_KEY_COLORS.normal.light,
-      dark: DEFAULT_KEY_COLORS.normal.dark,
+      light: fallback.light,
+      dark: fallback.dark,
     });
   }
   return {
-    normal: normalizeColorPair(source.normal, DEFAULT_KEY_COLORS.normal),
-    enter: normalizeColorPair(source.enter, DEFAULT_KEY_COLORS.enter),
+    normal: normalizeColorPair(source.normal, defaults.normal),
+    enter: normalizeColorPair(source.enter, defaults.enter),
     overrides,
   };
 }
@@ -600,7 +647,33 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     customKeyColorDark: typeof raw?.customKeyColorDark === "boolean"
       ? raw.customKeyColorDark
       : Boolean(raw?.customKeyColors),
-    keyColors: normalizeKeyColors(raw?.keyColors),
+    keyColors: normalizeKeyColors(raw?.keyColors, DEFAULT_KEY_COLORS),
+    customKeyFontColors: typeof raw?.customKeyFontColors === "boolean"
+      ? raw.customKeyFontColors
+      : false,
+    customKeyFontColorLight: typeof raw?.customKeyFontColorLight === "boolean"
+      ? raw.customKeyFontColorLight
+      : false,
+    customKeyFontColorDark: typeof raw?.customKeyFontColorDark === "boolean"
+      ? raw.customKeyFontColorDark
+      : Boolean(raw?.customKeyFontColors),
+    keyFontColors: normalizeKeyColors(
+      raw?.keyFontColors,
+      DEFAULT_KEY_FONT_COLORS,
+    ),
+    customKeyHintColors: typeof raw?.customKeyHintColors === "boolean"
+      ? raw.customKeyHintColors
+      : false,
+    customKeyHintColorLight: typeof raw?.customKeyHintColorLight === "boolean"
+      ? raw.customKeyHintColorLight
+      : false,
+    customKeyHintColorDark: typeof raw?.customKeyHintColorDark === "boolean"
+      ? raw.customKeyHintColorDark
+      : Boolean(raw?.customKeyHintColors),
+    keyHintColors: normalizeKeyColors(
+      raw?.keyHintColors,
+      DEFAULT_KEY_HINT_COLORS,
+    ),
     showCandidateComment: typeof raw?.showCandidateComment === "boolean"
       ? raw.showCandidateComment
       : raw?.candidateCommentMode !== "hidden",

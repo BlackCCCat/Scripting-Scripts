@@ -104,10 +104,13 @@ export function KeyFace(props: {
       ? props.palette.enterBg
       : props.palette.keyBg);
   const bg = props.active && !props.plain ? "tertiarySystemFill" : baseBg;
+  const baseFg = props.palette.primaryOverrides?.[props.id] ??
+    props.palette.primary;
   const fg = props.foregroundStyle ??
     (props.accent
       ? props.palette.accentText
-      : (props.selected ? props.palette.accent : props.palette.primary));
+      : (props.selected ? props.palette.accent : baseFg));
+  const hintFg = props.palette.hintOverrides?.[props.id] ?? props.palette.hint;
   const width = props.width ?? 32;
   const height = props.height ?? BASE_KEY_HEIGHT;
   const touchWidth = props.touchWidth ?? width;
@@ -323,7 +326,7 @@ export function KeyFace(props: {
                 <Text
                   font="caption2"
                   foregroundStyle={(props.topCenterForeground ??
-                    props.palette.hint) as any}
+                    hintFg) as any}
                   frame={{
                     maxWidth: "infinity" as any,
                     maxHeight: "infinity" as any,
@@ -343,7 +346,7 @@ export function KeyFace(props: {
                     fontWeight="regular"
                     foregroundStyle={(props.modeTopLeftActive
                       ? fg
-                      : props.palette.hint) as any}
+                      : hintFg) as any}
                     frame={{
                       maxWidth: "infinity" as any,
                       maxHeight: "infinity" as any,
@@ -357,7 +360,7 @@ export function KeyFace(props: {
                     font={modeFontSize}
                     fontWeight="regular"
                     foregroundStyle={(props.modeTopLeftActive
-                      ? props.palette.hint
+                      ? hintFg
                       : fg) as any}
                     frame={{
                       maxWidth: "infinity" as any,
@@ -393,13 +396,13 @@ export function KeyFace(props: {
                           height: 10,
                           alignment: "leading" as any,
                         }}
-                        foregroundStyle={props.palette.hint as any}
+                        foregroundStyle={hintFg as any}
                       />
                     )
                     : (
                       <Text
                         font={hintFontSize}
-                        foregroundStyle={props.palette.hint as any}
+                        foregroundStyle={hintFg as any}
                         lineLimit={1}
                         minScaleFactor={0.45}
                         allowsTightening
@@ -423,13 +426,13 @@ export function KeyFace(props: {
                           height: 10,
                           alignment: "trailing" as any,
                         }}
-                        foregroundStyle={props.palette.hint as any}
+                        foregroundStyle={hintFg as any}
                       />
                     )
                     : (
                       <Text
                         font={hintFontSize}
-                        foregroundStyle={props.palette.hint as any}
+                        foregroundStyle={hintFg as any}
                         lineLimit={1}
                         minScaleFactor={0.45}
                         allowsTightening
@@ -481,7 +484,7 @@ export function KeyFace(props: {
                 >
                   <Text
                     font={props.bottomRightFontSize ?? "caption"}
-                    foregroundStyle={props.palette.hint as any}
+                    foregroundStyle={hintFg as any}
                     lineLimit={1}
                   >
                     {props.bottomRight}

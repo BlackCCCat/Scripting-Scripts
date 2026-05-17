@@ -524,16 +524,17 @@ function SettingsView() {
   }
 
   function patchKeyBaseColor(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
     kind: "normal" | "enter",
     scheme: KeyColorScheme,
     value: string,
   ) {
     updateSettings({
       ...settings,
-      keyColors: {
-        ...settings.keyColors,
+      [settingKey]: {
+        ...settings[settingKey],
         [kind]: {
-          ...settings.keyColors[kind],
+          ...settings[settingKey][kind],
           [scheme]: value,
         },
       },
@@ -542,6 +543,7 @@ function SettingsView() {
   }
 
   function patchKeyOverrideColor(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
     key: string,
     scheme: KeyColorScheme,
     fallback: KeyColorPair,
@@ -549,12 +551,12 @@ function SettingsView() {
   ) {
     updateSettings({
       ...settings,
-      keyColors: {
-        ...settings.keyColors,
+      [settingKey]: {
+        ...settings[settingKey],
         overrides: {
-          ...settings.keyColors.overrides,
+          ...settings[settingKey].overrides,
           [key]: {
-            ...(settings.keyColors.overrides[key] ?? fallback),
+            ...(settings[settingKey].overrides[key] ?? fallback),
             [scheme]: value,
           },
         },
@@ -563,12 +565,15 @@ function SettingsView() {
     });
   }
 
-  function resetKeyOverrideColor(key: string) {
-    const { [key]: _, ...overrides } = settings.keyColors.overrides;
+  function resetKeyOverrideColor(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
+    key: string,
+  ) {
+    const { [key]: _, ...overrides } = settings[settingKey].overrides;
     updateSettings({
       ...settings,
-      keyColors: {
-        ...settings.keyColors,
+      [settingKey]: {
+        ...settings[settingKey],
         overrides,
       },
     });
@@ -717,7 +722,7 @@ function SettingsView() {
         </Section>
 
         <Section
-          header={<Text>按键颜色</Text>}
+          header={<Text>按键背景色</Text>}
           footer={
             <SettingHint>
               关闭时使用键盘原始配色，并跟随上方主题；开启后才使用下面的浅色/深色颜色选择。
@@ -734,91 +739,243 @@ function SettingsView() {
 
         {settings.customKeyColors
           ? (
-            <Section
-              header={<Text>按键颜色 · 生效主题</Text>}
-              footer={
-                <SettingHint>
-                  只开启需要自定义的主题。未开启的主题继续使用键盘原始配色。
-                </SettingHint>
-              }
-            >
-              <Toggle
-                title="浅色主题使用自定义颜色"
-                systemImage="sun.max"
-                value={settings.customKeyColorLight}
-                onChanged={(value) =>
-                  patchSettings({ customKeyColorLight: value })}
-              />
-              <Toggle
-                title="深色主题使用自定义颜色"
-                systemImage="moon"
-                value={settings.customKeyColorDark}
-                onChanged={(value) =>
-                  patchSettings({ customKeyColorDark: value })}
-              />
-            </Section>
-          )
-          : null}
-
-        {settings.customKeyColors
-          ? (
-            <Section
-              header={<Text>按键颜色 · 统一默认</Text>}
-              footer={
-                <SettingHint>
-                  普通按键用于未单独配置的按键；回车按键用于底部回车和数字键盘提交键。
-                </SettingHint>
-              }
-            >
-              <ColorPairConfigRow
-                title="普通按键"
-                value={settings.keyColors.normal}
-                onLightChanged={(value) =>
-                  patchKeyBaseColor("normal", "light", value)}
-                onDarkChanged={(value) =>
-                  patchKeyBaseColor("normal", "dark", value)}
-              />
-              <ColorPairConfigRow
-                title="回车按键"
-                value={settings.keyColors.enter}
-                onLightChanged={(value) =>
-                  patchKeyBaseColor("enter", "light", value)}
-                onDarkChanged={(value) =>
-                  patchKeyBaseColor("enter", "dark", value)}
-              />
-            </Section>
-          )
-          : null}
-
-        {settings.customKeyColors
-          ? (
-            <Section header={<Text>按键颜色 · 单键覆盖</Text>}>
-              {KEY_COLOR_GROUPS.map((group) => (
-                <NavigationLink
-                  key={"color-link-" + group.title}
-                  title={group.title}
-                  destination={renderKeyColorPage(group)}
+            <>
+              <Section
+                header={<Text>按键背景色 · 生效主题</Text>}
+                footer={
+                  <SettingHint>
+                    只开启需要自定义的主题。未开启的主题继续使用键盘原始配色。
+                  </SettingHint>
+                }
+              >
+                <Toggle
+                  title="浅色主题使用自定义颜色"
+                  systemImage="sun.max"
+                  value={settings.customKeyColorLight}
+                  onChanged={(value) =>
+                    patchSettings({ customKeyColorLight: value })}
                 />
-              ))}
-            </Section>
+                <Toggle
+                  title="深色主题使用自定义颜色"
+                  systemImage="moon"
+                  value={settings.customKeyColorDark}
+                  onChanged={(value) =>
+                    patchSettings({ customKeyColorDark: value })}
+                />
+              </Section>
+
+              <Section
+                header={<Text>按键背景色 · 统一默认</Text>}
+                footer={
+                  <SettingHint>
+                    普通按键用于未单独配置的按键；回车按键用于底部回车和数字键盘提交键。
+                  </SettingHint>
+                }
+              >
+                <ColorPairConfigRow
+                  title="普通按键"
+                  value={settings.keyColors.normal}
+                  onLightChanged={(value) =>
+                    patchKeyBaseColor("keyColors", "normal", "light", value)}
+                  onDarkChanged={(value) =>
+                    patchKeyBaseColor("keyColors", "normal", "dark", value)}
+                />
+                <ColorPairConfigRow
+                  title="回车按键"
+                  value={settings.keyColors.enter}
+                  onLightChanged={(value) =>
+                    patchKeyBaseColor("keyColors", "enter", "light", value)}
+                  onDarkChanged={(value) =>
+                    patchKeyBaseColor("keyColors", "enter", "dark", value)}
+                />
+              </Section>
+
+              <Section header={<Text>按键背景色 · 单键覆盖</Text>}>
+                {KEY_COLOR_GROUPS.map((group) => (
+                  <NavigationLink
+                    key={"color-link-" + group.title}
+                    title={group.title}
+                    destination={renderKeyColorPage("keyColors", group, "按键背景色")}
+                  />
+                ))}
+              </Section>
+            </>
+          )
+          : null}
+
+        <Section
+          header={<Text>按键字体颜色</Text>}
+          footer={
+            <SettingHint>
+              关闭时使用键盘原始配色，并跟随上方主题；开启后才使用下面的浅色/深色颜色选择。
+            </SettingHint>
+          }
+        >
+          <Toggle
+            title="启用自定义按键字体颜色"
+            systemImage="textformat"
+            value={settings.customKeyFontColors}
+            onChanged={(value) => patchSettings({ customKeyFontColors: value })}
+          />
+        </Section>
+
+        {settings.customKeyFontColors
+          ? (
+            <>
+              <Section
+                header={<Text>按键字体颜色 · 生效主题</Text>}
+                footer={
+                  <SettingHint>
+                    只开启需要自定义的主题。未开启的主题继续使用键盘原始配色。
+                  </SettingHint>
+                }
+              >
+                <Toggle
+                  title="浅色主题使用自定义颜色"
+                  systemImage="sun.max"
+                  value={settings.customKeyFontColorLight}
+                  onChanged={(value) =>
+                    patchSettings({ customKeyFontColorLight: value })}
+                />
+                <Toggle
+                  title="深色主题使用自定义颜色"
+                  systemImage="moon"
+                  value={settings.customKeyFontColorDark}
+                  onChanged={(value) =>
+                    patchSettings({ customKeyFontColorDark: value })}
+                />
+              </Section>
+
+              <Section
+                header={<Text>按键字体颜色 · 统一默认</Text>}
+              >
+                <ColorPairConfigRow
+                  title="普通按键"
+                  value={settings.keyFontColors.normal}
+                  onLightChanged={(value) =>
+                    patchKeyBaseColor("keyFontColors", "normal", "light", value)}
+                  onDarkChanged={(value) =>
+                    patchKeyBaseColor("keyFontColors", "normal", "dark", value)}
+                />
+                <ColorPairConfigRow
+                  title="回车按键"
+                  value={settings.keyFontColors.enter}
+                  onLightChanged={(value) =>
+                    patchKeyBaseColor("keyFontColors", "enter", "light", value)}
+                  onDarkChanged={(value) =>
+                    patchKeyBaseColor("keyFontColors", "enter", "dark", value)}
+                />
+              </Section>
+
+              <Section header={<Text>按键字体颜色 · 单键覆盖</Text>}>
+                {KEY_COLOR_GROUPS.map((group) => (
+                  <NavigationLink
+                    key={"font-color-link-" + group.title}
+                    title={group.title}
+                    destination={renderKeyColorPage("keyFontColors", group, "按键字体颜色")}
+                  />
+                ))}
+              </Section>
+            </>
+          )
+          : null}
+
+        <Section
+          header={<Text>角标颜色</Text>}
+          footer={
+            <SettingHint>
+              关闭时使用键盘原始配色，并跟随上方主题；开启后才使用下面的浅色/深色颜色选择。
+            </SettingHint>
+          }
+        >
+          <Toggle
+            title="启用自定义角标颜色"
+            systemImage="tag"
+            value={settings.customKeyHintColors}
+            onChanged={(value) => patchSettings({ customKeyHintColors: value })}
+          />
+        </Section>
+
+        {settings.customKeyHintColors
+          ? (
+            <>
+              <Section
+                header={<Text>角标颜色 · 生效主题</Text>}
+                footer={
+                  <SettingHint>
+                    只开启需要自定义的主题。未开启的主题继续使用键盘原始配色。
+                  </SettingHint>
+                }
+              >
+                <Toggle
+                  title="浅色主题使用自定义颜色"
+                  systemImage="sun.max"
+                  value={settings.customKeyHintColorLight}
+                  onChanged={(value) =>
+                    patchSettings({ customKeyHintColorLight: value })}
+                />
+                <Toggle
+                  title="深色主题使用自定义颜色"
+                  systemImage="moon"
+                  value={settings.customKeyHintColorDark}
+                  onChanged={(value) =>
+                    patchSettings({ customKeyHintColorDark: value })}
+                />
+              </Section>
+
+              <Section
+                header={<Text>角标颜色 · 统一默认</Text>}
+              >
+                <ColorPairConfigRow
+                  title="普通按键"
+                  value={settings.keyHintColors.normal}
+                  onLightChanged={(value) =>
+                    patchKeyBaseColor("keyHintColors", "normal", "light", value)}
+                  onDarkChanged={(value) =>
+                    patchKeyBaseColor("keyHintColors", "normal", "dark", value)}
+                />
+                <ColorPairConfigRow
+                  title="回车按键"
+                  value={settings.keyHintColors.enter}
+                  onLightChanged={(value) =>
+                    patchKeyBaseColor("keyHintColors", "enter", "light", value)}
+                  onDarkChanged={(value) =>
+                    patchKeyBaseColor("keyHintColors", "enter", "dark", value)}
+                />
+              </Section>
+
+              <Section header={<Text>角标颜色 · 单键覆盖</Text>}>
+                {KEY_COLOR_GROUPS.map((group) => (
+                  <NavigationLink
+                    key={"hint-color-link-" + group.title}
+                    title={group.title}
+                    destination={renderKeyColorPage("keyHintColors", group, "角标颜色")}
+                  />
+                ))}
+              </Section>
+            </>
           )
           : null}
       </List>
     );
   }
 
-  function renderKeyColorPage(group: typeof KEY_COLOR_GROUPS[number]) {
+  function renderKeyColorPage(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
+    group: typeof KEY_COLOR_GROUPS[number],
+    pageTitle: string,
+  ) {
     return (
       <List
-        navigationTitle={"按键颜色 · " + group.title}
+        navigationTitle={pageTitle + " · " + group.title}
         navigationBarTitleDisplayMode="inline"
       >
         <Section>
           {group.keys.map((item) => {
             const fallback = item.id === "enter" || item.id === "numeric-enter"
-              ? settings.keyColors.enter
-              : settings.keyColors.normal;
-            const override = settings.keyColors.overrides[item.id];
+              ? settings[settingKey].enter
+              : settings[settingKey].normal;
+            const override = settings[settingKey].overrides[item.id];
             return (
               <ColorPairConfigRow
                 key={"color-" + item.id}
@@ -826,10 +983,10 @@ function SettingsView() {
                 value={override ?? fallback}
                 overridden={override != null}
                 onLightChanged={(value) =>
-                  patchKeyOverrideColor(item.id, "light", fallback, value)}
+                  patchKeyOverrideColor(settingKey, item.id, "light", fallback, value)}
                 onDarkChanged={(value) =>
-                  patchKeyOverrideColor(item.id, "dark", fallback, value)}
-                onReset={() => resetKeyOverrideColor(item.id)}
+                  patchKeyOverrideColor(settingKey, item.id, "dark", fallback, value)}
+                onReset={() => resetKeyOverrideColor(settingKey, item.id)}
               />
             );
           })}
