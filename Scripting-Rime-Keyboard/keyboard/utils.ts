@@ -124,13 +124,28 @@ export function estimatedTextWidth(
   fallbackCharWidth: number,
 ) {
   let total = 0;
-  for (const ch of text) {
-    if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(ch)) total += fontSize * 0.94;
-    else if (/[A-Z0-9]/.test(ch)) total += fontSize * 0.56;
-    else if (/[a-z]/.test(ch)) total += fontSize * 0.5;
-    else if (/\p{Script=Latin}/u.test(ch)) total += fontSize * 0.5;
-    else if (/\s/.test(ch)) total += fontSize * 0.32;
-    else total += fallbackCharWidth;
+  const Segmenter = (Intl as any).Segmenter;
+  const segments: string[] = typeof Segmenter === "function"
+    ? Array.from(
+      new Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+      (item: any) => item.segment,
+    )
+    : Array.from(text);
+  for (const segment of segments) {
+    if (
+      /\p{Extended_Pictographic}|\p{Emoji_Presentation}|\p{Regional_Indicator}/u
+        .test(segment)
+    ) {
+      total += fontSize * 1.8;
+    } else if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(segment)) {
+      total += fontSize * 0.94;
+    } else if (/[A-Z]/.test(segment)) total += fontSize * 0.64;
+    else if (/[0-9]/.test(segment)) total += fontSize * 0.58;
+    else if (/[mwMW]/.test(segment)) total += fontSize * 0.78;
+    else if (/[a-z]/.test(segment)) total += fontSize * 0.56;
+    else if (/\p{Script=Latin}/u.test(segment)) total += fontSize * 0.58;
+    else if (/\s/.test(segment)) total += fontSize * 0.36;
+    else total += Math.max(fallbackCharWidth, fontSize * 0.58);
   }
   return total;
 }

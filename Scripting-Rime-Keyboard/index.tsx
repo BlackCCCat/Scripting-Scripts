@@ -20,8 +20,10 @@ import {
   type ActionSendMode,
   CANDIDATE_BAR_HEIGHT_MAX,
   CANDIDATE_BAR_HEIGHT_MIN,
+  type CandidateMenuAction,
   type CandidateRightButtonMode,
   COMPOSING_FUNCTION_KEYS,
+  DEFAULT_CANDIDATE_MENU_ACTIONS,
   DEFAULT_LETTER_SWIPE_DOWN,
   DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS,
   DEFAULT_RIME_KEYBOARD_SETTINGS,
@@ -77,7 +79,7 @@ const FUNCTION_KEY_LABELS: Record<string, string> = {
   tone2: "二声",
   tone3: "三声",
   tone4: "四声",
-  filter: "筛选",
+  filter: "包裹",
 };
 
 const KEY_COLOR_GROUPS: Array<{
@@ -122,7 +124,7 @@ const KEY_COLOR_GROUPS: Array<{
       { id: "tone-2", label: "二声" },
       { id: "tone-3", label: "三声" },
       { id: "tone-4", label: "四声" },
-      { id: "func-backslash", label: "筛选" },
+      { id: "func-backslash", label: "包裹" },
       { id: "func-right", label: "右括号" },
     ],
   },
@@ -324,12 +326,56 @@ function ActionConfigRow(props: {
   );
 }
 
+function CandidateMenuActionRow(props: {
+  index: number;
+  item: CandidateMenuAction;
+  onNameChanged: (value: string) => void;
+  onActionChanged: (value: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <VStack
+      alignment="leading"
+      spacing={8}
+      frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+    >
+      <HStack>
+        <Text font="headline">菜单 {props.index + 1}</Text>
+        <Button
+          title="清空"
+          systemImage="xmark.circle"
+          action={props.onClear}
+          buttonStyle="plain"
+        />
+      </HStack>
+      <LabeledTextField
+        title="名称"
+        value={props.item.name}
+        titleWidth={54}
+        onChanged={props.onNameChanged}
+      />
+      <LabeledTextField
+        title="动作"
+        value={props.item.action}
+        titleWidth={54}
+        onChanged={props.onActionChanged}
+      />
+    </VStack>
+  );
+}
+
 function FunctionSwipeConfigRow(props: {
   title: string;
+  pressAction?: string;
+  pressMode?: ActionSendMode;
+  symbol?: string;
   upAction: string;
   upMode: ActionSendMode;
   downAction: string;
   downMode: ActionSendMode;
+  onPressActionChanged?: (value: string) => void;
+  onPressModeChanged?: (value: ActionSendMode) => void;
+  onSymbolChanged?: (value: string) => void;
   onUpActionChanged: (value: string) => void;
   onUpModeChanged: (value: ActionSendMode) => void;
   onDownActionChanged: (value: string) => void;
@@ -342,6 +388,48 @@ function FunctionSwipeConfigRow(props: {
       frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
     >
       <Text font="headline">{props.title}</Text>
+      {props.pressAction != null && props.pressMode != null
+        ? (
+          <VStack
+            alignment="leading"
+            spacing={8}
+            frame={{
+              maxWidth: "infinity" as any,
+              alignment: "leading" as any,
+            }}
+          >
+            <LabeledTextField
+              title="点击动作"
+              value={props.pressAction}
+              titleWidth={78}
+              onChanged={(value) => props.onPressActionChanged?.(value)}
+            />
+            <Picker
+              title="点击发送"
+              value={props.pressMode}
+              onChanged={(value: string) =>
+                props.onPressModeChanged?.(value as ActionSendMode)}
+              pickerStyle="segmented"
+            >
+              {ACTION_MODE_OPTIONS.map((option) => (
+                <Text key={option.value} tag={option.value}>
+                  {option.label}
+                </Text>
+              ))}
+            </Picker>
+          </VStack>
+        )
+        : null}
+      {props.symbol != null
+        ? (
+          <LabeledTextField
+            title="显示图标"
+            value={props.symbol}
+            titleWidth={78}
+            onChanged={(value) => props.onSymbolChanged?.(value)}
+          />
+        )
+        : null}
       <LabeledTextField
         title="上划动作"
         value={props.upAction}
@@ -499,8 +587,14 @@ function SettingsView() {
       | "idleFunctionSwipeDown"
       | "composingFunctionSwipeUp"
       | "composingFunctionSwipeDown"
+      | "idleFunctionPress"
+      | "idleFunctionSymbols"
+      | "composingFunctionPress"
+      | "composingFunctionSymbols"
+      | "idleFunctionPressModes"
       | "idleFunctionSwipeUpModes"
       | "idleFunctionSwipeDownModes"
+      | "composingFunctionPressModes"
       | "composingFunctionSwipeUpModes"
       | "composingFunctionSwipeDownModes"
     >,
@@ -514,6 +608,26 @@ function SettingsView() {
         [actionKey]: value,
       },
     });
+  }
+
+  function candidateMenuSlot(index: number): CandidateMenuAction {
+    return settings.candidateMenuActions[index] ?? { name: "", action: "" };
+  }
+
+  function patchCandidateMenuAction(
+    index: number,
+    patch: Partial<CandidateMenuAction>,
+  ) {
+    const actions = settings.candidateMenuActions.slice();
+    while (actions.length <= index) actions.push({ name: "", action: "" });
+    actions[index] = { ...actions[index], ...patch };
+    updateSettings({ ...settings, candidateMenuActions: actions });
+  }
+
+  function clearCandidateMenuAction(index: number) {
+    const actions = settings.candidateMenuActions.slice();
+    actions[index] = { name: "", action: "" };
+    updateSettings({ ...settings, candidateMenuActions: actions });
   }
 
   function resetSettings() {
@@ -785,6 +899,65 @@ function SettingsView() {
           />
         </Section>
         <Section
+          header={<Text>候选词长按菜单</Text>}
+          footer={
+            <SettingHint>
+              关闭自定义时使用默认菜单；开启自定义后只显示已填写名称和动作的菜单项。
+            </SettingHint>
+          }
+        >
+          <Toggle
+            title="自定义菜单"
+            systemImage="list.bullet.rectangle"
+            value={settings.candidateMenuCustomEnabled}
+            onChanged={(value) =>
+              patchSettings({ candidateMenuCustomEnabled: value })}
+          />
+          {!settings.candidateMenuCustomEnabled
+            ? (
+              <VStack
+                alignment="leading"
+                spacing={4}
+                frame={{
+                  maxWidth: "infinity" as any,
+                  alignment: "leading" as any,
+                }}
+              >
+                {DEFAULT_CANDIDATE_MENU_ACTIONS.map((item) => (
+                  <Text
+                    key={item.name}
+                    font="caption"
+                    foregroundStyle="secondaryLabel"
+                  >
+                    {item.name}：{item.action}
+                  </Text>
+                ))}
+              </VStack>
+            )
+            : null}
+        </Section>
+        {settings.candidateMenuCustomEnabled
+          ? (
+            <Section header={<Text>候选菜单动作</Text>}>
+              {Array.from({ length: 5 }, (_, index) => {
+                const item = candidateMenuSlot(index);
+                return (
+                  <CandidateMenuActionRow
+                    key={index}
+                    index={index}
+                    item={item}
+                    onNameChanged={(value) =>
+                      patchCandidateMenuAction(index, { name: value })}
+                    onActionChanged={(value) =>
+                      patchCandidateMenuAction(index, { action: value })}
+                    onClear={() => clearCandidateMenuAction(index)}
+                  />
+                );
+              })}
+            </Section>
+          )
+          : null}
+        <Section
           header={<Text>预编辑</Text>}
           footer={
             <SettingHint>
@@ -813,6 +986,17 @@ function SettingsView() {
             value={settings.showFunctionRow}
             onChanged={setFunctionRowVisible}
           />
+          {settings.showFunctionRow
+            ? (
+              <Toggle
+                title="启用预编辑功能行"
+                systemImage="text.cursor"
+                value={settings.composingFunctionRowEnabled}
+                onChanged={(value) =>
+                  patchSettings({ composingFunctionRowEnabled: value })}
+              />
+            )
+            : null}
           <VStack alignment="leading" spacing={8}>
             <HStack>
               <Text>字母长按时长</Text>
@@ -957,7 +1141,7 @@ function SettingsView() {
       <List navigationTitle="Shift 行为" navigationBarTitleDisplayMode="inline">
         <Section>
           <Toggle
-            title="预编辑时使用筛选键"
+            title="预编辑时使用包裹键"
             systemImage="shift"
             value={settings.shiftComposingEnabled}
             onChanged={(value) =>
@@ -1129,6 +1313,28 @@ function SettingsView() {
         navigationTitle={composing ? "功能键 · 预编辑" : "功能键 · 无预编辑"}
         navigationBarTitleDisplayMode="inline"
       >
+        {composing
+          ? (
+            <Section
+              footer={
+                <SettingHint>
+                  开启后，按下包裹键会切换 26
+                  键包裹显示；关闭后只发送配置的点击动作。
+                </SettingHint>
+              }
+            >
+              <Toggle
+                title="包裹键启用包裹显示"
+                systemImage="viewfinder"
+                value={settings.composingFunctionWrapDisplayEnabled}
+                onChanged={(value) =>
+                  patchSettings({
+                    composingFunctionWrapDisplayEnabled: value,
+                  })}
+              />
+            </Section>
+          )
+          : null}
         <Section
           footer={!composing
             ? (
@@ -1144,6 +1350,15 @@ function SettingsView() {
             <FunctionSwipeConfigRow
               key={(composing ? "comp-func-" : "idle-func-") + key}
               title={FUNCTION_KEY_LABELS[key]}
+              pressAction={composing
+                ? settings.composingFunctionPress[key]
+                : settings.idleFunctionPress[key]}
+              pressMode={composing
+                ? settings.composingFunctionPressModes[key]
+                : settings.idleFunctionPressModes[key]}
+              symbol={composing
+                ? settings.composingFunctionSymbols[key]
+                : settings.idleFunctionSymbols[key]}
               upAction={composing
                 ? settings.composingFunctionSwipeUp[key]
                 : settings.idleFunctionSwipeUp[key]}
@@ -1156,6 +1371,18 @@ function SettingsView() {
               downMode={composing
                 ? settings.composingFunctionSwipeDownModes[key]
                 : settings.idleFunctionSwipeDownModes[key]}
+              onPressActionChanged={composing
+                ? (value) => patchSwipeMap("composingFunctionPress", key, value)
+                : (value) => patchSwipeMap("idleFunctionPress", key, value)}
+              onPressModeChanged={composing
+                ? (value) =>
+                  patchSwipeMap("composingFunctionPressModes", key, value)
+                : (value) =>
+                  patchSwipeMap("idleFunctionPressModes", key, value)}
+              onSymbolChanged={composing
+                ? (value) =>
+                  patchSwipeMap("composingFunctionSymbols", key, value)
+                : (value) => patchSwipeMap("idleFunctionSymbols", key, value)}
               onUpActionChanged={(value) =>
                 patchSwipeMap(
                   composing
@@ -1240,10 +1467,14 @@ function SettingsView() {
                 title="无预编辑"
                 destination={renderFunctionSwipePage(false)}
               />
-              <NavigationLink
-                title="预编辑"
-                destination={renderFunctionSwipePage(true)}
-              />
+              {settings.composingFunctionRowEnabled
+                ? (
+                  <NavigationLink
+                    title="预编辑"
+                    destination={renderFunctionSwipePage(true)}
+                  />
+                )
+                : null}
             </Section>
           )
           : null}

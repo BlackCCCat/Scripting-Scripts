@@ -17,6 +17,7 @@ import {
 } from "scripting";
 import {
   type ActionSendMode,
+  DEFAULT_CANDIDATE_MENU_ACTIONS,
   loadRimeKeyboardSettings,
   type RimeKeyboardSettings,
 } from "../settings";
@@ -70,6 +71,7 @@ const DELETE_LONG_PRESS_DURATION = 920;
 const DELETE_REPEAT_SAFETY_DURATION = 4200;
 const CURSOR_REPEAT_DURATION = 420;
 const PRESSED_RELEASE_DELAY = 260;
+const GESTURE_PRESSED_SAFETY_RELEASE_DELAY = 1500;
 const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
 
@@ -168,6 +170,7 @@ function KeyboardContent(props: {
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowLongPressHandledRef = useRef(new Map<string, boolean>());
   const rowLongPressTimerRef = useRef(new Map<string, number | null>());
+  const rowGestureSafetyTimerRef = useRef(new Map<string, any>());
   const rowLongPressCancelledRef = useRef(new Map<string, boolean>());
   const rowLongPressLatestGestureRef = useRef(new Map<string, any>());
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
@@ -234,6 +237,10 @@ function KeyboardContent(props: {
         if (timer != null) clearTimeout(timer);
       }
       rowLongPressTimerRef.current.clear();
+      for (const timer of rowGestureSafetyTimerRef.current.values()) {
+        if (timer != null) clearTimeout(timer);
+      }
+      rowGestureSafetyTimerRef.current.clear();
       rowSpaceDragConsumedRef.current.clear();
       stopRepeatingCursorMove();
       for (const timer of pressedReleaseTimersRef.current.values()) {
@@ -270,6 +277,15 @@ function KeyboardContent(props: {
     } catch {}
   }
 
+  function displayedPreeditCursor(preedit: string, cursor: number) {
+    const safeCursor = Math.min(preedit.length, Math.max(0, cursor));
+    const tipStart = preedit.indexOf("〔");
+    if (tipStart > 0 && preedit.indexOf("〕", tipStart + 1) > tipStart) {
+      return Math.min(safeCursor, tipStart);
+    }
+    return safeCursor;
+  }
+
   function refresh(session = sessionRef.current) {
     if (!session) return;
     const ctx = session.context;
@@ -278,9 +294,9 @@ function KeyboardContent(props: {
     if (commit) CustomKeyboard.insertText(commit);
     updateMarkedText(ctx, Boolean(commit));
     const nextPreedit = ctx?.preedit ?? "";
-    const nextCursor = Math.min(
-      nextPreedit.length,
-      Math.max(0, ctx?.cursorPos ?? nextPreedit.length),
+    const nextCursor = displayedPreeditCursor(
+      nextPreedit,
+      ctx?.cursorPos ?? nextPreedit.length,
     );
     setRimeState({
       preedit: nextPreedit,
@@ -294,9 +310,6 @@ function KeyboardContent(props: {
       ascii: session.getOption("ascii_mode"),
     });
     if (!nextPreedit) setBackslashWrapMode(false);
-    else if (backslashWrapMode && !nextPreedit.includes("\\")) {
-      setBackslashWrapMode(false);
-    }
     if (!nextPreedit) {
       setCandidateExpanded(false);
       setExpandedCandidates([]);
@@ -533,11 +546,21 @@ function KeyboardContent(props: {
     rowLongPressTimerRef.current.delete(rowId);
   }
 
+  function clearRowGestureSafetyTimer(rowId: string) {
+    const timer = rowGestureSafetyTimerRef.current.get(rowId);
+    if (timer != null) clearTimeout(timer);
+    rowGestureSafetyTimerRef.current.delete(rowId);
+  }
+
   function clearAllRowGestureState() {
     for (const timer of rowLongPressTimerRef.current.values()) {
       if (timer != null) clearTimeout(timer);
     }
+    for (const timer of rowGestureSafetyTimerRef.current.values()) {
+      if (timer != null) clearTimeout(timer);
+    }
     rowLongPressTimerRef.current.clear();
+    rowGestureSafetyTimerRef.current.clear();
     rowLongPressHandledRef.current.clear();
     rowLongPressCancelledRef.current.clear();
     rowLongPressLatestGestureRef.current.clear();
@@ -551,6 +574,7 @@ function KeyboardContent(props: {
     const target = activeHitTargetRef.current.get(rowId);
     if (target && !keepVisual) setKeyPressed(target.id, false);
     clearRowLongPressTimer(rowId);
+    clearRowGestureSafetyTimer(rowId);
     rowLongPressCancelledRef.current.set(rowId, true);
     rowLongPressHandledRef.current.delete(rowId);
     rowLongPressLatestGestureRef.current.delete(rowId);
@@ -596,8 +620,35 @@ function KeyboardContent(props: {
       rowLongPressHandledRef.current.set(rowId, true);
       holdKeyPressedUntilRelease(target.id);
       target.onLongPress?.();
+      scheduleRowGestureSafetyRelease(
+        rowId,
+        target,
+        LONG_PRESS_PRESSED_RELEASE_DELAY,
+      );
     }, target.longPressDuration ?? 360);
     rowLongPressTimerRef.current.set(rowId, timer as any);
+  }
+
+  function scheduleRowGestureSafetyRelease(
+    rowId: string,
+    target: KeyHitTarget | null,
+    delay = GESTURE_PRESSED_SAFETY_RELEASE_DELAY,
+  ) {
+    clearRowGestureSafetyTimer(rowId);
+    if (!target) return;
+    const gestureToken = rowGestureTokenRef.current.get(rowId);
+    rowGestureSafetyTimerRef.current.set(
+      rowId,
+      setTimeout(() => {
+        if (gestureToken == null) return;
+        if (rowGestureTokenRef.current.get(rowId) !== gestureToken) return;
+        if (activeHitTargetRef.current.get(rowId)?.id !== target.id) return;
+        if (rowLongPressHandledRef.current.get(rowId)) {
+          target.onLongPressEnd?.();
+        }
+        cancelRowGesture(rowId);
+      }, delay),
+    );
   }
 
   function isLongPressDragIntent(details: any) {
@@ -726,6 +777,7 @@ function KeyboardContent(props: {
     if (target) setKeyPressed(target.id, true, false);
     if (target) playPressFeedback();
     scheduleRowLongPress(rowId, target);
+    scheduleRowGestureSafetyRelease(rowId, target);
   }
 
   function handleHitRowGestureEnded(
@@ -736,6 +788,7 @@ function KeyboardContent(props: {
     const target = activeHitTargetRef.current.get(rowId) ??
       hitTargetFromGesture(details, targets);
     clearRowLongPressTimer(rowId);
+    clearRowGestureSafetyTimer(rowId);
     rowLongPressCancelledRef.current.set(rowId, true);
     rowLongPressLatestGestureRef.current.delete(rowId);
     rowGestureTokenRef.current.delete(rowId);
@@ -1108,6 +1161,47 @@ function KeyboardContent(props: {
     if (s.selectCandidate(index)) refresh(s);
   }
 
+  function highlightCandidateAbsolute(index: number): boolean {
+    const s = sessionRef.current;
+    let menu = s?.context?.menu;
+    if (!s || !menu) return false;
+    const pageSize = Math.max(1, menu.pageSize || rimePageSize || 1);
+    const targetPage = Math.floor(index / pageSize);
+    const targetIndex = index % pageSize;
+
+    while (menu.pageNo < targetPage) {
+      if (menu.isLastPage || !s.processKey(KEY_PAGE_DOWN)) break;
+      menu = s.context?.menu ?? null;
+      if (!menu) return false;
+    }
+    while (menu.pageNo > targetPage) {
+      if (!s.processKey(KEY_PAGE_UP)) break;
+      menu = s.context?.menu ?? null;
+      if (!menu) return false;
+    }
+    if (menu.pageNo !== targetPage) {
+      refresh(s);
+      return false;
+    }
+    if (!menu.candidates[targetIndex]) {
+      refresh(s);
+      return false;
+    }
+
+    let current = menu.highlightedIndex ?? 0;
+    const key = targetIndex > current ? KEY_DOWN : KEY_UP;
+    while (current !== targetIndex) {
+      if (!s.processKey(key)) break;
+      menu = s.context?.menu ?? null;
+      if (!menu) return false;
+      current = menu.highlightedIndex ?? current;
+      if (menu.pageNo !== targetPage) break;
+    }
+    refresh(s);
+    return s.context?.menu?.pageNo === targetPage &&
+      s.context?.menu?.highlightedIndex === targetIndex;
+  }
+
   function processSpaceSwipeCandidate(numberKey: "2" | "3") {
     if (preedit) {
       if (selectCandidateByKey(numberKey)) return;
@@ -1259,11 +1353,12 @@ function KeyboardContent(props: {
     CustomKeyboard.insertText(deletedTextRef.current);
   }
 
-  function runConfiguredAction(
-    action: string,
-    mode: ActionSendMode = "auto",
-    options: { allowBackslashWrap?: boolean } = {},
-  ) {
+  function activateWrapDisplayMode() {
+    if (!settings.composingFunctionWrapDisplayEnabled) return;
+    setBackslashWrapMode(true);
+  }
+
+  function runConfiguredAction(action: string, mode: ActionSendMode = "auto") {
     if (!action) return;
     if (mode === "direct") {
       insertConfiguredText(action);
@@ -1271,14 +1366,6 @@ function KeyboardContent(props: {
     }
     if (mode === "rime") {
       processText(action);
-      if (
-        options.allowBackslashWrap &&
-        (action === "{backslash}" ||
-          action === "backslash" ||
-          action === "\\")
-      ) {
-        setBackslashWrapMode(true);
-      }
       return;
     }
     switch (action) {
@@ -1300,6 +1387,9 @@ function KeyboardContent(props: {
         return;
       case "{selectAll}":
         void selectAllBestEffort();
+        return;
+      case "{toggleSelectAll}":
+        toggleSelectAll();
         return;
       case "{cut}":
         void cutSelectedText();
@@ -1336,13 +1426,12 @@ function KeyboardContent(props: {
         return;
       case "{backslashWrap}":
         processText("\\");
-        setBackslashWrapMode(true);
+        activateWrapDisplayMode();
         return;
       case "{backslash}":
       case "backslash":
       case "\\":
         processText("\\");
-        if (options.allowBackslashWrap) setBackslashWrapMode(true);
         return;
       default:
         if (processRimeKeySpec(action)) return;
@@ -1374,6 +1463,13 @@ function KeyboardContent(props: {
     runConfiguredAction(actions[key], modes[key]);
   }
 
+  function runIdleFunctionPress(key: string) {
+    runConfiguredAction(
+      settings.idleFunctionPress[key],
+      settings.idleFunctionPressModes[key],
+    );
+  }
+
   function runComposingFunctionSwipe(direction: "up" | "down", key: string) {
     const actions = direction === "up"
       ? settings.composingFunctionSwipeUp
@@ -1381,14 +1477,26 @@ function KeyboardContent(props: {
     const modes = direction === "up"
       ? settings.composingFunctionSwipeUpModes
       : settings.composingFunctionSwipeDownModes;
-    runConfiguredAction(actions[key], modes[key], {
-      allowBackslashWrap: key === "filter",
-    });
+    runConfiguredAction(actions[key], modes[key]);
   }
 
-  function pressBackslashFilter() {
-    processText("\\");
-    setBackslashWrapMode(true);
+  function runComposingFunctionPress(key: string) {
+    const action = settings.composingFunctionPress[key];
+    const mode = settings.composingFunctionPressModes[key];
+    runConfiguredAction(action, mode);
+    if (
+      key === "filter" &&
+      action.trim().length > 0 &&
+      settings.composingFunctionWrapDisplayEnabled
+    ) {
+      setBackslashWrapMode(true);
+    }
+  }
+
+  function runCandidateMenuAction(absoluteIndex: number, action: string) {
+    if (!highlightCandidateAbsolute(absoluteIndex)) return;
+    runConfiguredAction(action, "rime");
+    if (candidateExpanded) collectExpandedCandidateBatch();
   }
 
   function openRimeSchemaMenu() {
@@ -1402,6 +1510,8 @@ function KeyboardContent(props: {
   }
 
   const composing = preedit.length > 0;
+  const usesComposingFunctionRow = composing &&
+    settings.composingFunctionRowEnabled;
   const schemaMenu = schemas.length > 1
     ? (
       <Group>
@@ -1417,6 +1527,32 @@ function KeyboardContent(props: {
       </Group>
     )
     : null;
+  const candidateMenuActions =
+    (settings.candidateMenuCustomEnabled
+      ? settings.candidateMenuActions
+      : DEFAULT_CANDIDATE_MENU_ACTIONS).filter((item) =>
+        item.name.trim().length > 0 && item.action.trim().length > 0
+      );
+  function candidateContextMenu(absoluteIndex: number) {
+    return candidateMenuActions.length > 0
+      ? (
+        <Group>
+          {candidateMenuActions.map((item, index) => (
+            <Button
+              key={`${index}-${item.name}-${item.action}`}
+              title={item.name}
+              action={() => runCandidateMenuAction(absoluteIndex, item.action)}
+            />
+          ))}
+        </Group>
+      )
+      : null;
+  }
+
+  function candidateContextMenuProps(absoluteIndex: number) {
+    const menuItems = candidateContextMenu(absoluteIndex);
+    return menuItems != null ? { menuItems } : undefined;
+  }
   const showsPreeditCaret = !error &&
     !settings.inlinePreedit &&
     settings.showPreeditCaret &&
@@ -1504,56 +1640,56 @@ function KeyboardContent(props: {
       {
         id: "func-left",
         ...frame(0),
-        onPress: () => processKey(KEY_UP),
+        onPress: () => runComposingFunctionPress("left"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "left"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "left"),
       },
       {
         id: "func-page-down",
         ...frame(1),
-        onPress: () => processKey(KEY_PAGE_DOWN),
+        onPress: () => runComposingFunctionPress("page"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "page"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "page"),
       },
       {
         id: "tone-1",
         ...frame(2),
-        onPress: () => processText("7"),
+        onPress: () => runComposingFunctionPress("tone1"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone1"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone1"),
       },
       {
         id: "tone-2",
         ...frame(3),
-        onPress: () => processText("8"),
+        onPress: () => runComposingFunctionPress("tone2"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone2"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone2"),
       },
       {
         id: "tone-3",
         ...frame(4),
-        onPress: () => processText("9"),
+        onPress: () => runComposingFunctionPress("tone3"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone3"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone3"),
       },
       {
         id: "tone-4",
         ...frame(5),
-        onPress: () => processText("0"),
+        onPress: () => runComposingFunctionPress("tone4"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone4"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone4"),
       },
       {
         id: "func-backslash",
         ...frame(6),
-        onPress: pressBackslashFilter,
+        onPress: () => runComposingFunctionPress("filter"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "filter"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "filter"),
       },
       {
         id: "func-right",
         ...frame(7),
-        onPress: () => processKey(KEY_DOWN),
+        onPress: () => runComposingFunctionPress("right"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "right"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "right"),
       },
@@ -1568,7 +1704,7 @@ function KeyboardContent(props: {
       {
         id: "idle-left",
         ...frame(0),
-        onPress: () => CustomKeyboard.moveCursor(-1),
+        onPress: () => runIdleFunctionPress("left"),
         onLongPress: () => startRepeatingCursorMove(-1),
         onLongPressEnd: stopRepeatingCursorMove,
         longPressDuration: CURSOR_REPEAT_DURATION,
@@ -1578,55 +1714,49 @@ function KeyboardContent(props: {
       {
         id: "idle-head",
         ...frame(1),
-        onPress: () =>
-          CustomKeyboard.moveCursor(
-            -(CustomKeyboard.textBeforeCursor?.length ?? 0),
-          ),
+        onPress: () => runIdleFunctionPress("head"),
         onSwipeUp: () => runIdleFunctionSwipe("up", "head"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "head"),
       },
       {
         id: "idle-schema",
         ...frame(2),
-        onPress: toggleSelectAll,
+        onPress: () => runIdleFunctionPress("select"),
         onSwipeUp: () => runIdleFunctionSwipe("up", "select"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "select"),
       },
       {
         id: "idle-cut",
         ...frame(3),
-        onPress: () => void cutSelectedText(),
+        onPress: () => runIdleFunctionPress("cut"),
         onSwipeUp: () => runIdleFunctionSwipe("up", "cut"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "cut"),
       },
       {
         id: "idle-copy",
         ...frame(4),
-        onPress: () => void copySelectedText(),
+        onPress: () => runIdleFunctionPress("copy"),
         onSwipeUp: () => runIdleFunctionSwipe("up", "copy"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "copy"),
       },
       {
         id: "idle-paste",
         ...frame(5),
-        onPress: () => void pasteText(),
+        onPress: () => runIdleFunctionPress("paste"),
         onSwipeUp: () => runIdleFunctionSwipe("up", "paste"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "paste"),
       },
       {
         id: "idle-tail",
         ...frame(6),
-        onPress: () =>
-          CustomKeyboard.moveCursor(
-            CustomKeyboard.textAfterCursor?.length ?? 0,
-          ),
+        onPress: () => runIdleFunctionPress("tail"),
         onSwipeUp: () => runIdleFunctionSwipe("up", "tail"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "tail"),
       },
       {
         id: "idle-right",
         ...frame(7),
-        onPress: () => CustomKeyboard.moveCursor(1),
+        onPress: () => runIdleFunctionPress("right"),
         onLongPress: () => startRepeatingCursorMove(1),
         onLongPressEnd: stopRepeatingCursorMove,
         longPressDuration: CURSOR_REPEAT_DURATION,
@@ -2088,6 +2218,9 @@ function KeyboardContent(props: {
                   height={metrics.candidateButtonHeight}
                   candidateFontSize={metrics.candidateFontSize}
                   commentFontSize={metrics.candidateCommentFontSize}
+                  contextMenu={candidateContextMenuProps(
+                    pageNo * rimePageSize + idx,
+                  )}
                   onPress={() =>
                     runWithFeedback(() =>
                       selectCandidateAbsolute(pageNo * rimePageSize + idx)
@@ -2127,7 +2260,7 @@ function KeyboardContent(props: {
           <Group>
             {settings.showFunctionRow
               ? (
-                composing
+                usesComposingFunctionRow
                   ? (
                     <HStack
                       spacing={KEY_SPACING}
@@ -2143,7 +2276,7 @@ function KeyboardContent(props: {
                     >
                       <KeyFace
                         id="func-left"
-                        image="arrow.left"
+                        image={settings.composingFunctionSymbols.left}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2153,7 +2286,9 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("func-left")}
                         onPress={() =>
-                          runWithFeedback(() => processKey(KEY_UP))}
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("left")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "left")
@@ -2165,7 +2300,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="func-page-down"
-                        image="arrow.up.arrow.down"
+                        image={settings.composingFunctionSymbols.page}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2175,7 +2310,9 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("func-page-down")}
                         onPress={() =>
-                          runWithFeedback(() => processKey(KEY_PAGE_DOWN))}
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("page")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "page")
@@ -2187,7 +2324,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="tone-1"
-                        image="1.circle"
+                        image={settings.composingFunctionSymbols.tone1}
                         imageScale="medium"
                         palette={palette}
                         width={metrics.functionWidth8}
@@ -2197,7 +2334,10 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("tone-1")}
-                        onPress={() => runWithFeedback(() => processText("7"))}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("tone1")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "tone1")
@@ -2209,7 +2349,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="tone-2"
-                        image="2.circle"
+                        image={settings.composingFunctionSymbols.tone2}
                         imageScale="medium"
                         palette={palette}
                         width={metrics.functionWidth8}
@@ -2219,7 +2359,10 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("tone-2")}
-                        onPress={() => runWithFeedback(() => processText("8"))}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("tone2")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "tone2")
@@ -2231,7 +2374,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="tone-3"
-                        image="3.circle"
+                        image={settings.composingFunctionSymbols.tone3}
                         imageScale="medium"
                         palette={palette}
                         width={metrics.functionWidth8}
@@ -2241,7 +2384,10 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("tone-3")}
-                        onPress={() => runWithFeedback(() => processText("9"))}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("tone3")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "tone3")
@@ -2253,7 +2399,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="tone-4"
-                        image="4.circle"
+                        image={settings.composingFunctionSymbols.tone4}
                         imageScale="medium"
                         palette={palette}
                         width={metrics.functionWidth8}
@@ -2263,7 +2409,10 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("tone-4")}
-                        onPress={() => runWithFeedback(() => processText("0"))}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("tone4")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "tone4")
@@ -2275,7 +2424,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="func-backslash"
-                        image="viewfinder"
+                        image={settings.composingFunctionSymbols.filter}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2284,7 +2433,10 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("func-backslash")}
-                        onPress={() => runWithFeedback(pressBackslashFilter)}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("filter")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "filter")
@@ -2296,7 +2448,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="func-right"
-                        image="arrow.right"
+                        image={settings.composingFunctionSymbols.right}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2306,7 +2458,9 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("func-right")}
                         onPress={() =>
-                          runWithFeedback(() => processKey(KEY_DOWN))}
+                          runWithFeedback(() =>
+                            runComposingFunctionPress("right")
+                          )}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runComposingFunctionSwipe("up", "right")
@@ -2333,7 +2487,7 @@ function KeyboardContent(props: {
                     >
                       <KeyFace
                         id="idle-left"
-                        image="arrow.left"
+                        image={settings.idleFunctionSymbols.left}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2343,7 +2497,7 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-left")}
                         onPress={() =>
-                          runWithFeedback(() => CustomKeyboard.moveCursor(-1))}
+                          runWithFeedback(() => runIdleFunctionPress("left"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "left")
@@ -2355,7 +2509,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-head"
-                        image="text.line.first.and.arrowtriangle.forward"
+                        image={settings.idleFunctionSymbols.head}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2365,11 +2519,7 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-head")}
                         onPress={() =>
-                          runWithFeedback(() =>
-                            CustomKeyboard.moveCursor(
-                              -(CustomKeyboard.textBeforeCursor?.length ?? 0),
-                            )
-                          )}
+                          runWithFeedback(() => runIdleFunctionPress("head"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "head")
@@ -2381,9 +2531,11 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-schema"
-                        image={selectAllActive
+                        image={selectAllActive &&
+                            settings.idleFunctionSymbols.select ===
+                              "selection.pin.in.out"
                           ? "xmark.circle"
-                          : "selection.pin.in.out"}
+                          : settings.idleFunctionSymbols.select}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2393,7 +2545,8 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-schema")}
                         selected={selectAllActive}
-                        onPress={() => runWithFeedback(toggleSelectAll)}
+                        onPress={() =>
+                          runWithFeedback(() => runIdleFunctionPress("select"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "select")
@@ -2405,7 +2558,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-cut"
-                        image="scissors"
+                        image={settings.idleFunctionSymbols.cut}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2415,7 +2568,7 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-cut")}
                         onPress={() =>
-                          runWithFeedback(() => void cutSelectedText())}
+                          runWithFeedback(() => runIdleFunctionPress("cut"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "cut")
@@ -2427,7 +2580,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-copy"
-                        image="doc.on.doc"
+                        image={settings.idleFunctionSymbols.copy}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2437,7 +2590,7 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-copy")}
                         onPress={() =>
-                          runWithFeedback(() => void copySelectedText())}
+                          runWithFeedback(() => runIdleFunctionPress("copy"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "copy")
@@ -2449,7 +2602,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-paste"
-                        image="doc.on.clipboard"
+                        image={settings.idleFunctionSymbols.paste}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2458,7 +2611,8 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("idle-paste")}
-                        onPress={() => runWithFeedback(() => void pasteText())}
+                        onPress={() =>
+                          runWithFeedback(() => runIdleFunctionPress("paste"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "paste")
@@ -2470,7 +2624,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-tail"
-                        image="text.line.last.and.arrowtriangle.forward"
+                        image={settings.idleFunctionSymbols.tail}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2480,11 +2634,7 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-tail")}
                         onPress={() =>
-                          runWithFeedback(() =>
-                            CustomKeyboard.moveCursor(
-                              CustomKeyboard.textAfterCursor?.length ?? 0,
-                            )
-                          )}
+                          runWithFeedback(() => runIdleFunctionPress("tail"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "tail")
@@ -2496,7 +2646,7 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-right"
-                        image="arrow.right"
+                        image={settings.idleFunctionSymbols.right}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2506,7 +2656,7 @@ function KeyboardContent(props: {
                         passive
                         active={isPressed("idle-right")}
                         onPress={() =>
-                          runWithFeedback(() => CustomKeyboard.moveCursor(1))}
+                          runWithFeedback(() => runIdleFunctionPress("right"))}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "right")
@@ -2753,10 +2903,12 @@ function KeyboardContent(props: {
                         active={isPressed("numeric-equal")}
                         onPress={() => runWithFeedback(() => pressSymbol("="))}
                         onSwipeUp={() =>
-                          runWithFeedback(() => runConfiguredAction(
-                            settings.numericEqualsSwipeUp,
-                            "rime",
-                          ))}
+                          runWithFeedback(() =>
+                            runConfiguredAction(
+                              settings.numericEqualsSwipeUp,
+                              "rime",
+                            )
+                          )}
                       />
                       <KeyFace
                         id="numeric-enter"
@@ -3177,6 +3329,9 @@ function KeyboardContent(props: {
                             candidateFontSize={metrics.candidateFontSize}
                             commentFontSize={metrics.candidateCommentFontSize}
                             expanded
+                            contextMenu={candidateContextMenuProps(
+                              absoluteIndex,
+                            )}
                             onPress={() =>
                               runWithFeedback(() => {
                                 selectCandidateAbsolute(absoluteIndex);

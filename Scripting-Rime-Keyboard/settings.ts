@@ -8,6 +8,10 @@ export type KeyColorSettings = {
   enter: KeyColorPair;
   overrides: Record<string, KeyColorPair>;
 };
+export type CandidateMenuAction = {
+  name: string;
+  action: string;
+};
 
 export type SwipeSettings = Record<string, string>;
 export type ActionModeSettings = Record<string, ActionSendMode>;
@@ -23,8 +27,12 @@ export type RimeKeyboardSettings = {
   customKeyColorDark: boolean;
   keyColors: KeyColorSettings;
   showCandidateComment: boolean;
+  candidateMenuCustomEnabled: boolean;
+  candidateMenuActions: CandidateMenuAction[];
   showPreeditCaret: boolean;
   showFunctionRow: boolean;
+  composingFunctionRowEnabled: boolean;
+  composingFunctionWrapDisplayEnabled: boolean;
   showHintSymbols: boolean;
   showWanxiangLabel: boolean;
   spaceLabel: string;
@@ -39,8 +47,14 @@ export type RimeKeyboardSettings = {
   idleFunctionSwipeDown: SwipeSettings;
   composingFunctionSwipeUp: SwipeSettings;
   composingFunctionSwipeDown: SwipeSettings;
+  idleFunctionPress: SwipeSettings;
+  idleFunctionSymbols: SwipeSettings;
+  composingFunctionPress: SwipeSettings;
+  composingFunctionSymbols: SwipeSettings;
+  idleFunctionPressModes: ActionModeSettings;
   idleFunctionSwipeUpModes: ActionModeSettings;
   idleFunctionSwipeDownModes: ActionModeSettings;
+  composingFunctionPressModes: ActionModeSettings;
   composingFunctionSwipeUpModes: ActionModeSettings;
   composingFunctionSwipeDownModes: ActionModeSettings;
   shiftComposingEnabled: boolean;
@@ -234,6 +248,28 @@ export const DEFAULT_IDLE_FUNCTION_SWIPE_DOWN: SwipeSettings = {
   right: "{right}",
 };
 
+export const DEFAULT_IDLE_FUNCTION_PRESS: SwipeSettings = {
+  left: "{left}",
+  head: "{home}",
+  select: "{toggleSelectAll}",
+  cut: "{cut}",
+  copy: "{copy}",
+  paste: "{paste}",
+  tail: "{end}",
+  right: "{right}",
+};
+
+export const DEFAULT_IDLE_FUNCTION_SYMBOLS: SwipeSettings = {
+  left: "arrow.left",
+  head: "text.line.first.and.arrowtriangle.forward",
+  select: "selection.pin.in.out",
+  cut: "scissors",
+  copy: "doc.on.doc",
+  paste: "doc.on.clipboard",
+  tail: "text.line.last.and.arrowtriangle.forward",
+  right: "arrow.right",
+};
+
 export const DEFAULT_FUNCTION_ACTION_MODES: ActionModeSettings = Object
   .fromEntries(
     FUNCTION_KEYS.map((key) => [key, "auto" as ActionSendMode]),
@@ -246,7 +282,7 @@ export const DEFAULT_COMPOSING_FUNCTION_SWIPE_UP: SwipeSettings = {
   tone2: "{control+2}",
   tone3: "{control+3}",
   tone4: "{control+4}",
-  filter: "{backslash}",
+  filter: "\\",
   right: "]",
 };
 
@@ -257,8 +293,30 @@ export const DEFAULT_COMPOSING_FUNCTION_SWIPE_DOWN: SwipeSettings = {
   tone2: "{control+2}",
   tone3: "{control+3}",
   tone4: "{control+4}",
-  filter: "{backslash}",
+  filter: "\\",
   right: "{rimeDown}",
+};
+
+export const DEFAULT_COMPOSING_FUNCTION_PRESS: SwipeSettings = {
+  left: "{rimeUp}",
+  page: "{rimePageDown}",
+  tone1: "7",
+  tone2: "8",
+  tone3: "9",
+  tone4: "0",
+  filter: "backslash",
+  right: "{rimeDown}",
+};
+
+export const DEFAULT_COMPOSING_FUNCTION_SYMBOLS: SwipeSettings = {
+  left: "arrow.left",
+  page: "arrow.up.arrow.down",
+  tone1: "1.circle",
+  tone2: "2.circle",
+  tone3: "3.circle",
+  tone4: "4.circle",
+  filter: "viewfinder",
+  right: "arrow.right",
 };
 
 export const DEFAULT_COMPOSING_FUNCTION_ACTION_MODES: ActionModeSettings =
@@ -278,6 +336,14 @@ export const DEFAULT_KEY_COLORS: KeyColorSettings = {
   overrides: {},
 };
 
+export const DEFAULT_CANDIDATE_MENU_ACTIONS: CandidateMenuAction[] = [
+  { name: "左移", action: "Control+j" },
+  { name: "右移", action: "Control+k" },
+  { name: "重置", action: "Control+l" },
+  { name: "置顶", action: "Control+p" },
+  { name: "移除", action: "Control+Delete" },
+];
+
 export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   theme: "system",
   useCustomKeyboardHeight: false,
@@ -289,8 +355,12 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   customKeyColorDark: false,
   keyColors: DEFAULT_KEY_COLORS,
   showCandidateComment: true,
+  candidateMenuCustomEnabled: false,
+  candidateMenuActions: [],
   showPreeditCaret: true,
   showFunctionRow: true,
+  composingFunctionRowEnabled: true,
+  composingFunctionWrapDisplayEnabled: true,
   showHintSymbols: true,
   showWanxiangLabel: true,
   spaceLabel: "万象",
@@ -305,8 +375,14 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   idleFunctionSwipeDown: DEFAULT_IDLE_FUNCTION_SWIPE_DOWN,
   composingFunctionSwipeUp: DEFAULT_COMPOSING_FUNCTION_SWIPE_UP,
   composingFunctionSwipeDown: DEFAULT_COMPOSING_FUNCTION_SWIPE_DOWN,
+  idleFunctionPress: DEFAULT_IDLE_FUNCTION_PRESS,
+  idleFunctionSymbols: DEFAULT_IDLE_FUNCTION_SYMBOLS,
+  composingFunctionPress: DEFAULT_COMPOSING_FUNCTION_PRESS,
+  composingFunctionSymbols: DEFAULT_COMPOSING_FUNCTION_SYMBOLS,
+  idleFunctionPressModes: DEFAULT_FUNCTION_ACTION_MODES,
   idleFunctionSwipeUpModes: DEFAULT_FUNCTION_ACTION_MODES,
   idleFunctionSwipeDownModes: DEFAULT_FUNCTION_ACTION_MODES,
+  composingFunctionPressModes: DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
   composingFunctionSwipeUpModes: DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
   composingFunctionSwipeDownModes: DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
   shiftComposingEnabled: true,
@@ -414,6 +490,21 @@ function normalizeKeyColors(raw: unknown): KeyColorSettings {
   };
 }
 
+function normalizeCandidateMenuActions(raw: unknown): CandidateMenuAction[] {
+  if (!Array.isArray(raw)) return [];
+  const result: CandidateMenuAction[] = [];
+  for (const item of raw.slice(0, 8)) {
+    const source = item && typeof item === "object"
+      ? (item as Record<string, unknown>)
+      : {};
+    const name = typeof source.name === "string" ? source.name : "";
+    const action = typeof source.action === "string" ? source.action : "";
+    if (!name && !action) continue;
+    result.push({ name, action });
+  }
+  return result;
+}
+
 function normalizeSwipeSettings(
   raw: unknown,
   defaults: SwipeSettings,
@@ -475,7 +566,7 @@ function migrateComposingSwipeSettings(
       normalized[key] = defaults[key];
     }
   }
-  if (normalized.filter === "\\") normalized.filter = "{backslash}";
+  if (normalized.filter === "{backslash}") normalized.filter = defaults.filter;
   return normalized;
 }
 
@@ -513,12 +604,27 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     showCandidateComment: typeof raw?.showCandidateComment === "boolean"
       ? raw.showCandidateComment
       : raw?.candidateCommentMode !== "hidden",
+    candidateMenuCustomEnabled:
+      typeof raw?.candidateMenuCustomEnabled === "boolean"
+        ? raw.candidateMenuCustomEnabled
+        : false,
+    candidateMenuActions: normalizeCandidateMenuActions(
+      raw?.candidateMenuActions,
+    ),
     showPreeditCaret: typeof raw?.showPreeditCaret === "boolean"
       ? raw.showPreeditCaret
       : true,
     showFunctionRow: typeof raw?.showFunctionRow === "boolean"
       ? raw.showFunctionRow
       : true,
+    composingFunctionRowEnabled:
+      typeof raw?.composingFunctionRowEnabled === "boolean"
+        ? raw.composingFunctionRowEnabled
+        : true,
+    composingFunctionWrapDisplayEnabled:
+      typeof raw?.composingFunctionWrapDisplayEnabled === "boolean"
+        ? raw.composingFunctionWrapDisplayEnabled
+        : true,
     showHintSymbols: typeof raw?.showHintSymbols === "boolean"
       ? raw.showHintSymbols
       : true,
@@ -577,6 +683,31 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       DEFAULT_COMPOSING_FUNCTION_SWIPE_DOWN,
       "down",
     ),
+    idleFunctionPress: normalizeSwipeSettings(
+      raw?.idleFunctionPress,
+      DEFAULT_IDLE_FUNCTION_PRESS,
+      FUNCTION_KEYS,
+    ),
+    idleFunctionSymbols: normalizeSwipeSettings(
+      raw?.idleFunctionSymbols,
+      DEFAULT_IDLE_FUNCTION_SYMBOLS,
+      FUNCTION_KEYS,
+    ),
+    composingFunctionPress: normalizeSwipeSettings(
+      raw?.composingFunctionPress,
+      DEFAULT_COMPOSING_FUNCTION_PRESS,
+      COMPOSING_FUNCTION_KEYS,
+    ),
+    composingFunctionSymbols: normalizeSwipeSettings(
+      raw?.composingFunctionSymbols,
+      DEFAULT_COMPOSING_FUNCTION_SYMBOLS,
+      COMPOSING_FUNCTION_KEYS,
+    ),
+    idleFunctionPressModes: normalizeActionModeSettings(
+      raw?.idleFunctionPressModes,
+      DEFAULT_FUNCTION_ACTION_MODES,
+      FUNCTION_KEYS,
+    ),
     idleFunctionSwipeUpModes: normalizeActionModeSettings(
       raw?.idleFunctionSwipeUpModes,
       DEFAULT_FUNCTION_ACTION_MODES,
@@ -586,6 +717,11 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       raw?.idleFunctionSwipeDownModes,
       DEFAULT_FUNCTION_ACTION_MODES,
       FUNCTION_KEYS,
+    ),
+    composingFunctionPressModes: normalizeActionModeSettings(
+      raw?.composingFunctionPressModes,
+      DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
+      COMPOSING_FUNCTION_KEYS,
     ),
     composingFunctionSwipeUpModes: normalizeActionModeSettings(
       raw?.composingFunctionSwipeUpModes,
@@ -662,6 +798,10 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       ? raw.autoDeployOnLaunch
       : true,
   };
+  if (normalized.composingFunctionPress.filter === "{backslashWrap}") {
+    normalized.composingFunctionPress.filter =
+      DEFAULT_COMPOSING_FUNCTION_PRESS.filter;
+  }
   if (!normalized.showFunctionRow) {
     for (
       const key of Object.keys(FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN)

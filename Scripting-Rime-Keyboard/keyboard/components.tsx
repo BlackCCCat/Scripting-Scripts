@@ -14,6 +14,9 @@ import { BASE_KEY_HEIGHT } from "./constants";
 import type { Palette } from "./types";
 import { dragDirection, estimatedTextWidth } from "./utils";
 
+const GESTURE_SAFETY_RELEASE_DELAY = 1500;
+const LONG_PRESS_GESTURE_SAFETY_RELEASE_DELAY = 2600;
+
 export function candidateButtonNaturalWidth(params: {
   text: string;
   comment: string;
@@ -37,7 +40,9 @@ export function candidateButtonNaturalWidth(params: {
     params.commentFontSize * (params.expanded ? 0.54 : 0.54),
   );
   const minWidth = params.expanded ? 54 : 42;
-  return Math.max(minWidth, textWidth, commentWidth) + horizontalPadding * 2;
+  return Math.ceil(
+    Math.max(minWidth, textWidth, commentWidth) + horizontalPadding * 2,
+  );
 }
 
 export function KeyFace(props: {
@@ -90,6 +95,8 @@ export function KeyFace(props: {
   const longPressHandledRef = useRef(false);
   const longPressCancelledRef = useRef(false);
   const longPressTimerRef = useRef<any>(null);
+  const gestureSafetyTimerRef = useRef<any>(null);
+  const gestureSafetyEndedRef = useRef(false);
   const latestGestureRef = useRef<any>(null);
   const usesEnterColor = props.id === "enter" || props.id === "numeric-enter";
   const baseBg = props.palette.keyOverrides[props.id] ??
@@ -132,6 +139,13 @@ export function KeyFace(props: {
     longPressTimerRef.current = null;
   }
 
+  function clearGestureSafetyTimer() {
+    if (gestureSafetyTimerRef.current != null) {
+      clearTimeout(gestureSafetyTimerRef.current);
+    }
+    gestureSafetyTimerRef.current = null;
+  }
+
   function dragIntent(details: any) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
@@ -142,6 +156,7 @@ export function KeyFace(props: {
 
   function resetGesture() {
     clearLongPressTimer();
+    clearGestureSafetyTimer();
     latestGestureRef.current = null;
     gestureStartedRef.current = false;
     longPressHandledRef.current = false;
@@ -153,21 +168,39 @@ export function KeyFace(props: {
       const wasStarted = gestureStartedRef.current;
       const wasLongPress = longPressHandledRef.current;
       clearLongPressTimer();
+      clearGestureSafetyTimer();
       latestGestureRef.current = null;
       gestureStartedRef.current = false;
       longPressHandledRef.current = false;
       longPressCancelledRef.current = true;
+      gestureSafetyEndedRef.current = false;
       if (wasStarted) props.onTouchEnd?.();
       if (wasLongPress) props.onLongPressEnd?.();
     };
   }, []);
+
+  function scheduleGestureSafetyRelease(
+    delay = GESTURE_SAFETY_RELEASE_DELAY,
+  ) {
+    clearGestureSafetyTimer();
+    gestureSafetyTimerRef.current = setTimeout(() => {
+      if (!gestureStartedRef.current) return;
+      const wasLongPress = longPressHandledRef.current;
+      gestureSafetyEndedRef.current = true;
+      props.onTouchEnd?.();
+      if (wasLongPress) props.onLongPressEnd?.();
+      resetGesture();
+    }, delay);
+  }
 
   function startGesture() {
     if (gestureStartedRef.current) return;
     gestureStartedRef.current = true;
     longPressHandledRef.current = false;
     longPressCancelledRef.current = false;
+    gestureSafetyEndedRef.current = false;
     props.onTouchStart?.();
+    scheduleGestureSafetyRelease();
     if (!props.onLongPress) return;
     longPressTimerRef.current = setTimeout(() => {
       if (!gestureStartedRef.current || longPressCancelledRef.current) return;
@@ -177,6 +210,7 @@ export function KeyFace(props: {
       }
       longPressHandledRef.current = true;
       props.onLongPress?.();
+      scheduleGestureSafetyRelease(LONG_PRESS_GESTURE_SAFETY_RELEASE_DELAY);
     }, props.longPressDuration ?? 360);
   }
 
@@ -184,6 +218,7 @@ export function KeyFace(props: {
     ? {
       gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
         .onChanged((details: any) => {
+          if (gestureSafetyEndedRef.current) return;
           latestGestureRef.current = details;
           startGesture();
           if (longPressHandledRef.current) {
@@ -196,6 +231,11 @@ export function KeyFace(props: {
           }
         })
         .onEnded((details: any) => {
+          if (gestureSafetyEndedRef.current) {
+            gestureSafetyEndedRef.current = false;
+            resetGesture();
+            return;
+          }
           latestGestureRef.current = details;
           const wasLongPress = longPressHandledRef.current;
           clearLongPressTimer();
@@ -468,6 +508,7 @@ export function CandidateButton(props: {
   candidateFontSize?: number;
   commentFontSize?: number;
   expanded?: boolean;
+  contextMenu?: any;
   onPress: () => void;
 }) {
   const comment = props.comment ?? "";
@@ -487,12 +528,11 @@ export function CandidateButton(props: {
       commentFontSize,
       expanded: props.expanded,
     });
+  const frameWidth = props.width ?? naturalWidth;
+  const frameHeight = props.height ?? (props.expanded ? 56 : 40);
   const contentWidth = Math.max(1, naturalWidth - horizontalPadding * 2);
   return (
-    <VStack
-      alignment="leading"
-      spacing={0}
-      padding={{ horizontal: horizontalPadding, vertical: 3 }}
+    <ZStack
       background={(props.selected
         ? {
           style: props.palette.keyBg as any,
@@ -500,41 +540,53 @@ export function CandidateButton(props: {
         }
         : "clear") as any}
       onTapGesture={props.onPress}
+      {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
       frame={{
-        width: props.width ?? naturalWidth,
-        height: props.height ?? (props.expanded ? 56 : 40),
+        width: frameWidth,
+        height: frameHeight,
         alignment: "leading" as any,
       }}
     >
-      <Text
-        font={candidateFontSize}
-        lineLimit={1}
-        truncationMode="tail"
-        fixedSize={props.width ? false : { horizontal: true, vertical: true }}
-        foregroundStyle={props.palette.primary as any}
+      <VStack
+        alignment="leading"
+        spacing={0}
+        padding={{ horizontal: horizontalPadding, vertical: 3 }}
         frame={{
-          width: props.width ? undefined : contentWidth,
-          maxWidth: props.width ? "infinity" as any : undefined,
+          width: frameWidth,
+          height: frameHeight,
           alignment: "leading" as any,
         }}
       >
-        {props.candidate.text}
-      </Text>
-      <Text
-        font={commentFontSize}
-        lineLimit={1}
-        truncationMode="tail"
-        fixedSize={props.width ? false : { horizontal: true, vertical: true }}
-        allowsTightening
-        foregroundStyle={props.palette.secondary as any}
-        frame={{
-          width: props.width ? undefined : contentWidth,
-          maxWidth: props.width ? "infinity" as any : undefined,
-          alignment: "leading" as any,
-        }}
-      >
-        {commentLine}
-      </Text>
-    </VStack>
+        <Text
+          font={candidateFontSize}
+          lineLimit={1}
+          truncationMode="tail"
+          fixedSize={props.width ? false : { horizontal: true, vertical: true }}
+          foregroundStyle={props.palette.primary as any}
+          frame={{
+            width: props.width ? undefined : contentWidth,
+            maxWidth: props.width ? "infinity" as any : undefined,
+            alignment: "leading" as any,
+          }}
+        >
+          {props.candidate.text}
+        </Text>
+        <Text
+          font={commentFontSize}
+          lineLimit={1}
+          truncationMode="tail"
+          fixedSize={props.width ? false : { horizontal: true, vertical: true }}
+          allowsTightening
+          foregroundStyle={props.palette.secondary as any}
+          frame={{
+            width: props.width ? undefined : contentWidth,
+            maxWidth: props.width ? "infinity" as any : undefined,
+            alignment: "leading" as any,
+          }}
+        >
+          {commentLine}
+        </Text>
+      </VStack>
+    </ZStack>
   );
 }
