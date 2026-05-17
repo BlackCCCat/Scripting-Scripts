@@ -78,6 +78,11 @@ type ExpandedCandidateItem = {
   absoluteIndex: number;
 };
 
+type SelectAllSnapshot = {
+  text: string;
+  cursorBefore: number;
+};
+
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
   if (globalRepeatingDeleteTimer != null) {
@@ -148,12 +153,14 @@ function KeyboardContent(props: {
     ExpandedCandidateItem[]
   >([]);
   const [expandedBatchHasMore, setExpandedBatchHasMore] = useState(false);
+  const [selectAllActive, setSelectAllActive] = useState(false);
   const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [schemas, setSchemas] = useState<Rime.Schema[]>([]);
   const lastShiftTapRef = useRef(0);
   const deletedTextRef = useRef("");
+  const selectAllSnapshotRef = useRef<SelectAllSnapshot | null>(null);
   const cursorRepeatTimerRef = useRef<any>(null);
   const cursorRepeatTokenRef = useRef(0);
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
@@ -1152,34 +1159,86 @@ function KeyboardContent(props: {
     } catch {}
   }
 
+  function clearSelectAllState() {
+    selectAllSnapshotRef.current = null;
+    setSelectAllActive(false);
+  }
+
+  function textSnapshot() {
+    return CustomKeyboard.allText ??
+      `${CustomKeyboard.textBeforeCursor ?? ""}${
+        CustomKeyboard.textAfterCursor ?? ""
+      }`;
+  }
+
   async function selectAllBestEffort() {
     try {
+      const text = textSnapshot();
+      if (!text) {
+        clearSelectAllState();
+        return false;
+      }
+      selectAllSnapshotRef.current = {
+        text,
+        cursorBefore: CustomKeyboard.textBeforeCursor?.length ?? 0,
+      };
+
       const keyboard = CustomKeyboard as any;
       if (typeof keyboard.selectAll === "function") {
         keyboard.selectAll();
-        return;
+        setSelectAllActive(true);
+        return true;
       }
       if (typeof keyboard.setSelectionRange === "function") {
         keyboard.setSelectionRange(0, CustomKeyboard.allText?.length ?? 0);
-        return;
+        setSelectAllActive(true);
+        return true;
       }
       if (typeof keyboard.selectText === "function") {
         keyboard.selectText(0, CustomKeyboard.allText?.length ?? 0);
-        return;
+        setSelectAllActive(true);
+        return true;
       }
 
-      const text = CustomKeyboard.allText ??
-        `${CustomKeyboard.textBeforeCursor ?? ""}${
-          CustomKeyboard.textAfterCursor ?? ""
-        }`;
-      if (!text) return;
       const after = CustomKeyboard.textAfterCursor?.length ?? 0;
       if (after > 0) CustomKeyboard.moveCursor(after);
       for (let i = 0; i < text.length; i += 1) {
         CustomKeyboard.deleteBackward();
       }
       CustomKeyboard.setMarkedText(text, 0, text.length);
+      setSelectAllActive(true);
+      return true;
     } catch {}
+    clearSelectAllState();
+    return false;
+  }
+
+  function cancelSelectAllBestEffort() {
+    try {
+      const snapshot = selectAllSnapshotRef.current;
+      if (!snapshot) {
+        clearSelectAllState();
+        return;
+      }
+      if (CustomKeyboard.selectedText === snapshot.text) {
+        CustomKeyboard.insertText(snapshot.text);
+        const cursorFromEnd = snapshot.text.length - snapshot.cursorBefore;
+        if (cursorFromEnd !== 0) CustomKeyboard.moveCursor(-cursorFromEnd);
+      } else {
+        try {
+          CustomKeyboard.unmarkText();
+        } catch {}
+      }
+    } catch {}
+    clearSelectAllState();
+  }
+
+  function toggleSelectAll() {
+    if (selectAllActive) {
+      cancelSelectAllBestEffort();
+    } else {
+      void selectAllBestEffort();
+    }
   }
 
   function deleteAllText() {
@@ -1529,7 +1588,7 @@ function KeyboardContent(props: {
       {
         id: "idle-schema",
         ...frame(2),
-        onPress: () => void selectAllBestEffort(),
+        onPress: toggleSelectAll,
         onSwipeUp: () => runIdleFunctionSwipe("up", "select"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "select"),
       },
@@ -2322,7 +2381,9 @@ function KeyboardContent(props: {
                       />
                       <KeyFace
                         id="idle-schema"
-                        image="selection.pin.in.out"
+                        image={selectAllActive
+                          ? "xmark.circle"
+                          : "selection.pin.in.out"}
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
@@ -2331,8 +2392,8 @@ function KeyboardContent(props: {
                         system
                         passive
                         active={isPressed("idle-schema")}
-                        onPress={() =>
-                          runWithFeedback(() => void selectAllBestEffort())}
+                        selected={selectAllActive}
+                        onPress={() => runWithFeedback(toggleSelectAll)}
                         onSwipeUp={() =>
                           runWithFeedback(() =>
                             runIdleFunctionSwipe("up", "select")
