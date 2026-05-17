@@ -86,15 +86,26 @@ export function nearestHitTarget(
 ) {
   let best: KeyHitTarget | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
+  const fallbackThreshold = 3;
+  const fallbackThresholdSquared = fallbackThreshold * fallbackThreshold;
   for (const target of targets) {
+    const hasVerticalFrame = target.y != null && target.height != null;
+    const withinX = x >= target.x && x <= target.x + target.width;
+    const withinY = !hasVerticalFrame ||
+      (y >= target.y! && y <= target.y! + target.height!);
+    if (withinX && withinY) return target;
+
     const dx = x < target.x
       ? target.x - x
       : (x > target.x + target.width ? x - target.x - target.width : 0);
-    const dy = target.y == null || target.height == null
-      ? 0
-      : (y < target.y
-        ? target.y - y
-        : (y > target.y + target.height ? y - target.y - target.height : 0));
+    let dy = 0;
+    if (hasVerticalFrame) {
+      const targetY = target.y!;
+      const targetHeight = target.height!;
+      dy = y < targetY
+        ? targetY - y
+        : (y > targetY + targetHeight ? y - targetY - targetHeight : 0);
+    }
     const distance = dx * dx + dy * dy;
     if (
       distance < bestDistance ||
@@ -104,7 +115,7 @@ export function nearestHitTarget(
       bestDistance = distance;
     }
   }
-  return best;
+  return bestDistance <= fallbackThresholdSquared ? best : null;
 }
 
 export function estimatedTextWidth(

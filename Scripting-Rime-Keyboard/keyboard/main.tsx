@@ -1918,7 +1918,7 @@ function KeyboardContent(props: {
   }
 
   function pressCandidateSettingsButton() {
-    const url = Script.createRunURLScheme(Script.name, {
+    const url = Script.createRunSingleURLScheme(Script.name, {
       source: "keyboard-settings",
     });
     try {
