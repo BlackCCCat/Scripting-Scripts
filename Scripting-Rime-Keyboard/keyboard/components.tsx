@@ -56,6 +56,10 @@ export function KeyFace(props: {
   modeTopLeftActive?: boolean;
   width?: number;
   height?: number;
+  touchWidth?: number;
+  touchHeight?: number;
+  visualOffsetX?: number;
+  visualOffsetY?: number;
   system?: boolean;
   accent?: boolean;
   selected?: boolean;
@@ -98,16 +102,21 @@ export function KeyFace(props: {
       ? props.palette.accentText
       : (props.selected ? props.palette.accent : props.palette.primary));
   const width = props.width ?? 32;
+  const height = props.height ?? BASE_KEY_HEIGHT;
+  const touchWidth = props.touchWidth ?? width;
+  const touchHeight = props.touchHeight ?? height;
+  const visualOffsetX = props.visualOffsetX ?? (touchWidth - width) / 2;
+  const visualOffsetY = props.visualOffsetY ?? (touchHeight - height) / 2;
   const hintPadding = width < 34 ? 5 : 7;
   const hintSlotWidth = Math.max(8, (width - hintPadding * 2) / 2);
   const hintFontSize = Math.max(7, Math.min(10, width * 0.3));
   const modeFontSize = Math.max(
     11,
-    Math.min(16, (props.height ?? BASE_KEY_HEIGHT) * 0.32),
+    Math.min(16, height * 0.32),
   );
   const modeInset = Math.max(
     4,
-    Math.min(9, (props.height ?? BASE_KEY_HEIGHT) * 0.13),
+    Math.min(9, height * 0.13),
   );
   const hasSwipe = !!(
     props.onSwipeUp || props.onSwipeDown || props.onSwipeLeft ||
@@ -227,190 +236,222 @@ export function KeyFace(props: {
   return (
     <ZStack
       key={props.id}
-      alignment="center"
-      frame={{ width, height: props.height ?? BASE_KEY_HEIGHT }}
-      background={(props.plain ? "rgba(0,0,0,0.001)" : bg) as any}
-      foregroundStyle={fg as any}
+      alignment="topLeading"
+      frame={{ width: touchWidth, height: touchHeight }}
+      background={"rgba(0,0,0,0.001)" as any}
       contentShape="rect"
-      clipShape={props.plain ? undefined : { type: "rect", cornerRadius: 8 }}
-      shadow={props.plain
-        ? undefined
-        : { color: props.palette.shadow as any, radius: 1, y: 1 }}
       {...tapGesture}
       {...(manualGesture ? { highPriorityGesture: manualGesture } : {})}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
     >
-      {props.topCenter
-        ? (
-          <Text
-            font="caption2"
-            foregroundStyle={(props.topCenterForeground ??
-              props.palette.hint) as any}
-            frame={{
-              maxWidth: "infinity" as any,
-              maxHeight: "infinity" as any,
-              alignment: "top" as any,
-            }}
-            padding={{ top: 4 }}
-          >
-            {props.topCenter}
-          </Text>
-        )
-        : null}
-      {props.modeTopLeft || props.modeBottomRight
-        ? (
-          <Group>
-            <Text
-              font={modeFontSize}
-              fontWeight="regular"
-              foregroundStyle={(props.modeTopLeftActive
-                ? fg
-                : props.palette.hint) as any}
-              frame={{
-                maxWidth: "infinity" as any,
-                maxHeight: "infinity" as any,
-                alignment: "topLeading" as any,
-              }}
-              padding={{ leading: modeInset, top: modeInset }}
-            >
-              {props.modeTopLeft ?? ""}
-            </Text>
-            <Text
-              font={modeFontSize}
-              fontWeight="regular"
-              foregroundStyle={(props.modeTopLeftActive
-                ? props.palette.hint
-                : fg) as any}
-              frame={{
-                maxWidth: "infinity" as any,
-                maxHeight: "infinity" as any,
-                alignment: "bottomTrailing" as any,
-              }}
-              padding={{ trailing: modeInset, bottom: modeInset }}
-            >
-              {props.modeBottomRight ?? ""}
-            </Text>
-          </Group>
-        )
-        : null}
-      {props.topLeft || props.topRight || props.topLeftImage ||
-          props.topRightImage
-        ? (
-          <HStack
-            frame={{
-              maxWidth: "infinity" as any,
-              maxHeight: "infinity" as any,
-              alignment: "top" as any,
-            }}
-            padding={{ horizontal: hintPadding, top: 4 }}
-          >
-            {props.topLeftImage
-              ? (
-                <Image
-                  systemName={props.topLeftImage}
-                  imageScale="small"
-                  font={hintFontSize}
-                  frame={{
-                    width: hintSlotWidth,
-                    height: 10,
-                    alignment: "leading" as any,
-                  }}
-                  foregroundStyle={props.palette.hint as any}
-                />
-              )
-              : (
-                <Text
-                  font={hintFontSize}
-                  foregroundStyle={props.palette.hint as any}
-                  lineLimit={1}
-                  minScaleFactor={0.45}
-                  allowsTightening
-                  frame={{
-                    width: hintSlotWidth,
-                    alignment: "leading" as any,
-                  }}
-                >
-                  {props.topLeft ?? ""}
-                </Text>
-              )}
-            <Spacer />
-            {props.topRightImage
-              ? (
-                <Image
-                  systemName={props.topRightImage}
-                  imageScale="small"
-                  font={hintFontSize}
-                  frame={{
-                    width: hintSlotWidth,
-                    height: 10,
-                    alignment: "trailing" as any,
-                  }}
-                  foregroundStyle={props.palette.hint as any}
-                />
-              )
-              : (
-                <Text
-                  font={hintFontSize}
-                  foregroundStyle={props.palette.hint as any}
-                  lineLimit={1}
-                  minScaleFactor={0.45}
-                  allowsTightening
-                  frame={{
-                    width: hintSlotWidth,
-                    alignment: "trailing" as any,
-                  }}
-                >
-                  {props.topRight ?? ""}
-                </Text>
-              )}
-          </HStack>
-        )
-        : null}
-      {props.image
-        ? (
-          <Image
-            systemName={props.image}
-            imageScale={props.imageScale ?? "large"}
+      <VStack
+        spacing={0}
+        frame={{
+          width: touchWidth,
+          height: touchHeight,
+          alignment: "topLeading" as any,
+        }}
+      >
+        {visualOffsetY > 0
+          ? <VStack frame={{ width: touchWidth, height: visualOffsetY }} />
+          : null}
+        <HStack
+          spacing={0}
+          frame={{
+            width: touchWidth,
+            height,
+            alignment: "leading" as any,
+          }}
+        >
+          {visualOffsetX > 0
+            ? <VStack frame={{ width: visualOffsetX, height }} />
+            : null}
+          <ZStack
+            alignment="center"
+            frame={{ width, height }}
+            background={(props.plain ? "rgba(0,0,0,0.001)" : bg) as any}
             foregroundStyle={fg as any}
-          />
-        )
-        : (
-          <Text
-            font={props.labelFontSize ??
-              (props.label && props.label.length > 2 ? 16 : 28)}
-            fontWeight="regular"
-            lineLimit={1}
-            minScaleFactor={0.62}
-            frame={{
-              maxWidth: "infinity" as any,
-              maxHeight: "infinity" as any,
-              alignment: "center" as any,
-            }}
-            padding={{ horizontal: 3 }}
+            clipShape={props.plain
+              ? undefined
+              : { type: "rect", cornerRadius: 8 }}
+            shadow={props.plain
+              ? undefined
+              : { color: props.palette.shadow as any, radius: 1, y: 1 }}
           >
-            {props.label ?? ""}
-          </Text>
-        )}
-      {props.bottomRight
-        ? (
-          <HStack
-            frame={{
-              maxWidth: "infinity" as any,
-              maxHeight: "infinity" as any,
-              alignment: "bottomTrailing" as any,
-            }}
-            padding={{ trailing: 8, bottom: 5 }}
-          >
-            <Text
-              font={props.bottomRightFontSize ?? "caption"}
-              foregroundStyle={props.palette.hint as any}
-              lineLimit={1}
-            >
-              {props.bottomRight}
-            </Text>
-          </HStack>
-        )
-        : null}
+            {props.topCenter
+              ? (
+                <Text
+                  font="caption2"
+                  foregroundStyle={(props.topCenterForeground ??
+                    props.palette.hint) as any}
+                  frame={{
+                    maxWidth: "infinity" as any,
+                    maxHeight: "infinity" as any,
+                    alignment: "top" as any,
+                  }}
+                  padding={{ top: 4 }}
+                >
+                  {props.topCenter}
+                </Text>
+              )
+              : null}
+            {props.modeTopLeft || props.modeBottomRight
+              ? (
+                <Group>
+                  <Text
+                    font={modeFontSize}
+                    fontWeight="regular"
+                    foregroundStyle={(props.modeTopLeftActive
+                      ? fg
+                      : props.palette.hint) as any}
+                    frame={{
+                      maxWidth: "infinity" as any,
+                      maxHeight: "infinity" as any,
+                      alignment: "topLeading" as any,
+                    }}
+                    padding={{ leading: modeInset, top: modeInset }}
+                  >
+                    {props.modeTopLeft ?? ""}
+                  </Text>
+                  <Text
+                    font={modeFontSize}
+                    fontWeight="regular"
+                    foregroundStyle={(props.modeTopLeftActive
+                      ? props.palette.hint
+                      : fg) as any}
+                    frame={{
+                      maxWidth: "infinity" as any,
+                      maxHeight: "infinity" as any,
+                      alignment: "bottomTrailing" as any,
+                    }}
+                    padding={{ trailing: modeInset, bottom: modeInset }}
+                  >
+                    {props.modeBottomRight ?? ""}
+                  </Text>
+                </Group>
+              )
+              : null}
+            {props.topLeft || props.topRight || props.topLeftImage ||
+                props.topRightImage
+              ? (
+                <HStack
+                  frame={{
+                    maxWidth: "infinity" as any,
+                    maxHeight: "infinity" as any,
+                    alignment: "top" as any,
+                  }}
+                  padding={{ horizontal: hintPadding, top: 4 }}
+                >
+                  {props.topLeftImage
+                    ? (
+                      <Image
+                        systemName={props.topLeftImage}
+                        imageScale="small"
+                        font={hintFontSize}
+                        frame={{
+                          width: hintSlotWidth,
+                          height: 10,
+                          alignment: "leading" as any,
+                        }}
+                        foregroundStyle={props.palette.hint as any}
+                      />
+                    )
+                    : (
+                      <Text
+                        font={hintFontSize}
+                        foregroundStyle={props.palette.hint as any}
+                        lineLimit={1}
+                        minScaleFactor={0.45}
+                        allowsTightening
+                        frame={{
+                          width: hintSlotWidth,
+                          alignment: "leading" as any,
+                        }}
+                      >
+                        {props.topLeft ?? ""}
+                      </Text>
+                    )}
+                  <Spacer />
+                  {props.topRightImage
+                    ? (
+                      <Image
+                        systemName={props.topRightImage}
+                        imageScale="small"
+                        font={hintFontSize}
+                        frame={{
+                          width: hintSlotWidth,
+                          height: 10,
+                          alignment: "trailing" as any,
+                        }}
+                        foregroundStyle={props.palette.hint as any}
+                      />
+                    )
+                    : (
+                      <Text
+                        font={hintFontSize}
+                        foregroundStyle={props.palette.hint as any}
+                        lineLimit={1}
+                        minScaleFactor={0.45}
+                        allowsTightening
+                        frame={{
+                          width: hintSlotWidth,
+                          alignment: "trailing" as any,
+                        }}
+                      >
+                        {props.topRight ?? ""}
+                      </Text>
+                    )}
+                </HStack>
+              )
+              : null}
+            {props.image
+              ? (
+                <Image
+                  systemName={props.image}
+                  imageScale={props.imageScale ?? "large"}
+                  foregroundStyle={fg as any}
+                />
+              )
+              : (
+                <Text
+                  font={props.labelFontSize ??
+                    (props.label && props.label.length > 2 ? 16 : 28)}
+                  fontWeight="regular"
+                  lineLimit={1}
+                  minScaleFactor={0.62}
+                  frame={{
+                    maxWidth: "infinity" as any,
+                    maxHeight: "infinity" as any,
+                    alignment: "center" as any,
+                  }}
+                  padding={{ horizontal: 3 }}
+                >
+                  {props.label ?? ""}
+                </Text>
+              )}
+            {props.bottomRight
+              ? (
+                <HStack
+                  frame={{
+                    maxWidth: "infinity" as any,
+                    maxHeight: "infinity" as any,
+                    alignment: "bottomTrailing" as any,
+                  }}
+                  padding={{ trailing: 8, bottom: 5 }}
+                >
+                  <Text
+                    font={props.bottomRightFontSize ?? "caption"}
+                    foregroundStyle={props.palette.hint as any}
+                    lineLimit={1}
+                  >
+                    {props.bottomRight}
+                  </Text>
+                </HStack>
+              )
+              : null}
+          </ZStack>
+        </HStack>
+      </VStack>
     </ZStack>
   );
 }

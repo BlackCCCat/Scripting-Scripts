@@ -481,6 +481,45 @@ function KeyboardContent(props: {
     return nearestHitTarget(x, y, targets);
   }
 
+  function horizontalHitFrame(
+    x: number,
+    width: number,
+    index: number,
+    count: number,
+    leadingInset = 0,
+    trailingInset = 0,
+  ) {
+    const leading = index === 0 ? leadingInset : KEY_SPACING / 2;
+    const trailing = index === count - 1 ? trailingInset : KEY_SPACING / 2;
+    return { x: x - leading, width: width + leading + trailing };
+  }
+
+  function verticalHitFrame(
+    y: number,
+    height: number,
+    index: number,
+    count: number,
+    spacing = KEY_SPACING,
+  ) {
+    const leading = index === 0 ? 0 : spacing / 2;
+    const trailing = index === count - 1 ? 0 : spacing / 2;
+    return { y: y - leading, height: height + leading + trailing };
+  }
+
+  function verticalTouchFrame(
+    index: number,
+    count: number,
+    height: number,
+    spacing: number,
+  ) {
+    const top = index === 0 ? 0 : spacing / 2;
+    const bottom = index === count - 1 ? 0 : spacing / 2;
+    return {
+      touchHeight: height + top + bottom,
+      visualOffsetY: top,
+    };
+  }
+
   function clearRowLongPressTimer(rowId: string) {
     const timer = rowLongPressTimerRef.current.get(rowId);
     if (timer != null) clearTimeout(timer);
@@ -1377,10 +1416,14 @@ function KeyboardContent(props: {
     20,
     (metrics.bottom.numbers - KEY_SPACING) / 2,
   );
+  const bodyRowSpacing = 6;
+  const visibleBodyRowCount = (settings.showFunctionRow ? 1 : 0) + 4;
   const normalKeyboardBodyHeight =
-    (settings.showFunctionRow ? metrics.functionKeyHeight + 6 : 0) +
+    (settings.showFunctionRow
+      ? metrics.functionKeyHeight + bodyRowSpacing
+      : 0) +
     metrics.keyHeight * 4 +
-    6 * 3;
+    bodyRowSpacing * 3;
   const expandedPanelHeight = normalKeyboardBodyHeight;
 
   function shiftSwipeUp() {
@@ -1396,67 +1439,61 @@ function KeyboardContent(props: {
 
   function composingFunctionHitTargets(): KeyHitTarget[] {
     const step = metrics.functionWidth8 + KEY_SPACING;
+    const frame = (index: number) =>
+      horizontalHitFrame(step * index, metrics.functionWidth8, index, 8);
     return [
       {
         id: "func-left",
-        x: 0,
-        width: metrics.functionWidth8,
+        ...frame(0),
         onPress: () => processKey(KEY_UP),
         onSwipeUp: () => runComposingFunctionSwipe("up", "left"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "left"),
       },
       {
         id: "func-page-down",
-        x: step,
-        width: metrics.functionWidth8,
+        ...frame(1),
         onPress: () => processKey(KEY_PAGE_DOWN),
         onSwipeUp: () => runComposingFunctionSwipe("up", "page"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "page"),
       },
       {
         id: "tone-1",
-        x: step * 2,
-        width: metrics.functionWidth8,
+        ...frame(2),
         onPress: () => processText("7"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone1"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone1"),
       },
       {
         id: "tone-2",
-        x: step * 3,
-        width: metrics.functionWidth8,
+        ...frame(3),
         onPress: () => processText("8"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone2"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone2"),
       },
       {
         id: "tone-3",
-        x: step * 4,
-        width: metrics.functionWidth8,
+        ...frame(4),
         onPress: () => processText("9"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone3"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone3"),
       },
       {
         id: "tone-4",
-        x: step * 5,
-        width: metrics.functionWidth8,
+        ...frame(5),
         onPress: () => processText("0"),
         onSwipeUp: () => runComposingFunctionSwipe("up", "tone4"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "tone4"),
       },
       {
         id: "func-backslash",
-        x: step * 6,
-        width: metrics.functionWidth8,
+        ...frame(6),
         onPress: pressBackslashFilter,
         onSwipeUp: () => runComposingFunctionSwipe("up", "filter"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "filter"),
       },
       {
         id: "func-right",
-        x: step * 7,
-        width: metrics.functionWidth8,
+        ...frame(7),
         onPress: () => processKey(KEY_DOWN),
         onSwipeUp: () => runComposingFunctionSwipe("up", "right"),
         onSwipeDown: () => runComposingFunctionSwipe("down", "right"),
@@ -1466,11 +1503,12 @@ function KeyboardContent(props: {
 
   function idleFunctionHitTargets(): KeyHitTarget[] {
     const step = metrics.functionWidth8 + KEY_SPACING;
+    const frame = (index: number) =>
+      horizontalHitFrame(step * index, metrics.functionWidth8, index, 8);
     return [
       {
         id: "idle-left",
-        x: 0,
-        width: metrics.functionWidth8,
+        ...frame(0),
         onPress: () => CustomKeyboard.moveCursor(-1),
         onLongPress: () => startRepeatingCursorMove(-1),
         onLongPressEnd: stopRepeatingCursorMove,
@@ -1480,8 +1518,7 @@ function KeyboardContent(props: {
       },
       {
         id: "idle-head",
-        x: step,
-        width: metrics.functionWidth8,
+        ...frame(1),
         onPress: () =>
           CustomKeyboard.moveCursor(
             -(CustomKeyboard.textBeforeCursor?.length ?? 0),
@@ -1491,40 +1528,35 @@ function KeyboardContent(props: {
       },
       {
         id: "idle-schema",
-        x: step * 2,
-        width: metrics.functionWidth8,
+        ...frame(2),
         onPress: () => void selectAllBestEffort(),
         onSwipeUp: () => runIdleFunctionSwipe("up", "select"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "select"),
       },
       {
         id: "idle-cut",
-        x: step * 3,
-        width: metrics.functionWidth8,
+        ...frame(3),
         onPress: () => void cutSelectedText(),
         onSwipeUp: () => runIdleFunctionSwipe("up", "cut"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "cut"),
       },
       {
         id: "idle-copy",
-        x: step * 4,
-        width: metrics.functionWidth8,
+        ...frame(4),
         onPress: () => void copySelectedText(),
         onSwipeUp: () => runIdleFunctionSwipe("up", "copy"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "copy"),
       },
       {
         id: "idle-paste",
-        x: step * 5,
-        width: metrics.functionWidth8,
+        ...frame(5),
         onPress: () => void pasteText(),
         onSwipeUp: () => runIdleFunctionSwipe("up", "paste"),
         onSwipeDown: () => runIdleFunctionSwipe("down", "paste"),
       },
       {
         id: "idle-tail",
-        x: step * 6,
-        width: metrics.functionWidth8,
+        ...frame(6),
         onPress: () =>
           CustomKeyboard.moveCursor(
             CustomKeyboard.textAfterCursor?.length ?? 0,
@@ -1534,8 +1566,7 @@ function KeyboardContent(props: {
       },
       {
         id: "idle-right",
-        x: step * 7,
-        width: metrics.functionWidth8,
+        ...frame(7),
         onPress: () => CustomKeyboard.moveCursor(1),
         onLongPress: () => startRepeatingCursorMove(1),
         onLongPressEnd: stopRepeatingCursorMove,
@@ -1644,56 +1675,68 @@ function KeyboardContent(props: {
       onPress: pressReturn,
       onSwipeUp: insertNewline,
     });
-    return targets;
-  }
-
-  function numericRowHitTargets(row: string[]): KeyHitTarget[] {
-    return row.map((value, index) => ({
-      id: value === "ABC"
-        ? "numeric-abc"
-        : value === "space"
-        ? "numeric-space"
-        : `numeric-${value}`,
-      x: index * (numericKeyWidth + KEY_SPACING),
-      width: numericKeyWidth,
-      onPress: () => {
-        if (value === "ABC") setSymbolLayer(false);
-        else if (value === "space") pressSpace();
-        else pressNumericDigit(value);
-      },
-      onLongPress: value === "space"
-        ? () => {
-          spaceCursorDragXRef.current = null;
-        }
-        : undefined,
-      onLongPressEnd: value === "space"
-        ? () => {
-          spaceCursorDragXRef.current = null;
-        }
-        : undefined,
-      onSwipeUp: value === "space" && canSpaceSwipeCandidate("2")
-        ? () => processSpaceSwipeCandidate("2")
-        : undefined,
-      onSwipeDown: value === "space" && canSpaceSwipeCandidate("3")
-        ? () => processSpaceSwipeCandidate("3")
-        : undefined,
-      onSwipeLeft: value === "space"
-        ? () => CustomKeyboard.moveCursor(-1)
-        : undefined,
-      onSwipeRight: value === "space"
-        ? () => CustomKeyboard.moveCursor(1)
-        : undefined,
+    return targets.map((target, index) => ({
+      ...target,
+      ...horizontalHitFrame(target.x, target.width, index, targets.length),
     }));
   }
 
+  function numericRowHitTargets(row: string[]): KeyHitTarget[] {
+    return row.map((value, index) => {
+      const displayX = index * (numericKeyWidth + KEY_SPACING);
+      return {
+        id: value === "ABC"
+          ? "numeric-abc"
+          : value === "space"
+          ? "numeric-space"
+          : `numeric-${value}`,
+        ...horizontalHitFrame(displayX, numericKeyWidth, index, row.length),
+        onPress: () => {
+          if (value === "ABC") setSymbolLayer(false);
+          else if (value === "space") pressSpace();
+          else pressNumericDigit(value);
+        },
+        onLongPress: value === "space"
+          ? () => {
+            spaceCursorDragXRef.current = null;
+          }
+          : undefined,
+        onLongPressEnd: value === "space"
+          ? () => {
+            spaceCursorDragXRef.current = null;
+          }
+          : undefined,
+        onSwipeUp: value === "space" && canSpaceSwipeCandidate("2")
+          ? () => processSpaceSwipeCandidate("2")
+          : undefined,
+        onSwipeDown: value === "space" && canSpaceSwipeCandidate("3")
+          ? () => processSpaceSwipeCandidate("3")
+          : undefined,
+        onSwipeLeft: value === "space"
+          ? () => CustomKeyboard.moveCursor(-1)
+          : undefined,
+        onSwipeRight: value === "space"
+          ? () => CustomKeyboard.moveCursor(1)
+          : undefined,
+      };
+    });
+  }
+
   function numericRightHitTargets(): KeyHitTarget[] {
+    const frame = (index: number) =>
+      verticalHitFrame(
+        (metrics.keyHeight + numericRowSpacing) * index,
+        metrics.keyHeight,
+        index,
+        4,
+        numericRowSpacing,
+      );
     return [
       {
         id: "numeric-backspace",
         x: 0,
-        y: 0,
         width: numericRightWidth,
-        height: metrics.keyHeight,
+        ...frame(0),
         onPress: pressBackspace,
         onLongPress: () => startRepeatingBackspace("numeric-backspace"),
         onLongPressEnd: stopRepeatingBackspace,
@@ -1705,17 +1748,15 @@ function KeyboardContent(props: {
       {
         id: "numeric-dot",
         x: 0,
-        y: metrics.keyHeight + numericRowSpacing,
         width: numericRightWidth,
-        height: metrics.keyHeight,
+        ...frame(1),
         onPress: pressNumericDot,
       },
       {
         id: "numeric-equal",
         x: 0,
-        y: (metrics.keyHeight + numericRowSpacing) * 2,
         width: numericRightWidth,
-        height: metrics.keyHeight,
+        ...frame(2),
         onPress: () => pressSymbol("="),
         onSwipeUp: () =>
           runConfiguredAction(settings.numericEqualsSwipeUp, "rime"),
@@ -1723,9 +1764,8 @@ function KeyboardContent(props: {
       {
         id: "numeric-enter",
         x: 0,
-        y: (metrics.keyHeight + numericRowSpacing) * 3,
         width: numericRightWidth,
-        height: metrics.keyHeight,
+        ...frame(3),
         onPress: pressReturn,
         onSwipeUp: insertNewline,
       },
@@ -1837,6 +1877,24 @@ function KeyboardContent(props: {
   const numericCenterWidth = metrics.width - numericLeftWidth -
     numericRightWidth - KEY_SPACING * 2;
   const numericKeyWidth = (numericCenterWidth - KEY_SPACING * 2) / 3;
+  const numericPanelTopInset = settings.showFunctionRow
+    ? bodyRowSpacing / 2
+    : 0;
+  const numericTouchFrame = (index: number) =>
+    verticalTouchFrame(index, 4, metrics.keyHeight, numericRowSpacing);
+  const numericBottomTouch = numericTouchFrame(3);
+  const bodyTouchFrame = (index: number, height: number) =>
+    verticalTouchFrame(
+      index,
+      visibleBodyRowCount,
+      height,
+      bodyRowSpacing,
+    );
+  const functionRowTouch = bodyTouchFrame(0, metrics.functionKeyHeight);
+  const bottomRowTouch = bodyTouchFrame(
+    visibleBodyRowCount - 1,
+    metrics.keyHeight,
+  );
 
   return (
     <VStack
@@ -1999,7 +2057,7 @@ function KeyboardContent(props: {
 
       <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
         <VStack
-          spacing={6}
+          spacing={0}
           frame={{
             width: metrics.width,
             height: expandedPanelHeight,
@@ -2016,7 +2074,7 @@ function KeyboardContent(props: {
                       spacing={KEY_SPACING}
                       frame={{
                         width: metrics.width,
-                        height: metrics.functionKeyHeight,
+                        height: functionRowTouch.touchHeight,
                       }}
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
@@ -2030,6 +2088,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("func-left")}
@@ -2050,6 +2110,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("func-page-down")}
@@ -2071,6 +2133,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("tone-1")}
@@ -2091,6 +2155,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("tone-2")}
@@ -2111,6 +2177,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("tone-3")}
@@ -2131,6 +2199,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("tone-4")}
@@ -2150,6 +2220,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("func-backslash")}
@@ -2169,6 +2241,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("func-right")}
@@ -2190,7 +2264,7 @@ function KeyboardContent(props: {
                       spacing={KEY_SPACING}
                       frame={{
                         width: metrics.width,
-                        height: metrics.functionKeyHeight,
+                        height: functionRowTouch.touchHeight,
                       }}
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
@@ -2204,6 +2278,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-left")}
@@ -2224,6 +2300,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-head")}
@@ -2248,6 +2326,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-schema")}
@@ -2268,6 +2348,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-cut")}
@@ -2288,6 +2370,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-copy")}
@@ -2308,6 +2392,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-paste")}
@@ -2327,6 +2413,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-tail")}
@@ -2351,6 +2439,8 @@ function KeyboardContent(props: {
                         palette={palette}
                         width={metrics.functionWidth8}
                         height={metrics.functionKeyHeight}
+                        touchHeight={functionRowTouch.touchHeight}
+                        visualOffsetY={functionRowTouch.visualOffsetY}
                         system
                         passive
                         active={isPressed("idle-right")}
@@ -2372,237 +2462,301 @@ function KeyboardContent(props: {
 
             {symbolLayer
               ? (
-                <HStack
-                  spacing={KEY_SPACING}
-                  frame={{ width: metrics.width, height: numericPanelHeight }}
+                <VStack
+                  spacing={0}
+                  frame={{
+                    width: metrics.width,
+                    height: numericPanelHeight + numericPanelTopInset,
+                    alignment: "topLeading" as any,
+                  }}
                 >
-                  <VStack
-                    frame={{
-                      width: numericLeftWidth,
-                      height: numericPanelHeight,
-                    }}
-                    background={palette.keyBg as any}
-                    foregroundStyle={palette.primary as any}
-                    clipShape={{ type: "rect", cornerRadius: 8 }}
-                    shadow={{
-                      color: palette.shadow as any,
-                      radius: 1,
-                      y: 1,
-                    }}
+                  {numericPanelTopInset > 0
+                    ? (
+                      <VStack
+                        frame={{
+                          width: metrics.width,
+                          height: numericPanelTopInset,
+                        }}
+                      />
+                    )
+                    : null}
+                  <HStack
+                    spacing={KEY_SPACING}
+                    frame={{ width: metrics.width, height: numericPanelHeight }}
                   >
-                    <ScrollView
-                      axes="vertical"
-                      scrollIndicator="hidden"
+                    <VStack
                       frame={{
                         width: numericLeftWidth,
                         height: numericPanelHeight,
                       }}
+                      background={palette.keyBg as any}
+                      foregroundStyle={palette.primary as any}
+                      clipShape={{ type: "rect", cornerRadius: 8 }}
+                      shadow={{
+                        color: palette.shadow as any,
+                        radius: 1,
+                        y: 1,
+                      }}
                     >
-                      <VStack
-                        spacing={0}
+                      <ScrollView
+                        axes="vertical"
+                        scrollIndicator="hidden"
                         frame={{
                           width: numericLeftWidth,
-                          alignment: "top" as any,
+                          height: numericPanelHeight,
                         }}
                       >
-                        {NUMERIC_SYMBOLS.map((item) => (
-                          <Text
-                            key={`numeric-symbol-${item.label}`}
-                            font={18}
-                            frame={{
-                              width: numericLeftWidth,
-                              height: numericPanelHeight / 5,
-                              alignment: "center" as any,
-                            }}
-                            contentShape="rect"
-                            onTapGesture={() =>
-                              runWithFeedback(() => pressSymbol(item.value))}
-                          >
-                            {item.label}
-                          </Text>
-                        ))}
-                      </VStack>
-                    </ScrollView>
-                  </VStack>
-
-                  <VStack
-                    spacing={numericRowSpacing}
-                    frame={{
-                      width: numericCenterWidth,
-                      height: numericPanelHeight,
-                    }}
-                  >
-                    {[
-                      ["1", "2", "3"],
-                      ["4", "5", "6"],
-                      ["7", "8", "9"],
-                    ].map((row, rowIndex) => {
-                      const hitTargets = numericRowHitTargets(row);
-                      return (
-                        <HStack
-                          key={`numeric-row-${rowIndex}`}
-                          spacing={KEY_SPACING}
+                        <VStack
+                          spacing={0}
                           frame={{
-                            width: numericCenterWidth,
-                            height: metrics.keyHeight,
+                            width: numericLeftWidth,
+                            alignment: "top" as any,
                           }}
-                          contentShape="rect"
-                          highPriorityGesture={hitRowGesture(
-                            `num-row-${rowIndex}`,
-                            hitTargets,
-                          )}
                         >
-                          {row.map((value) => (
-                            <KeyFace
-                              key={`numeric-${value}`}
-                              id={`numeric-${value}`}
-                              label={value}
-                              palette={palette}
-                              width={numericKeyWidth}
-                              height={metrics.keyHeight}
-                              labelFontSize={24}
-                              passive
-                              active={isPressed(`numeric-${value}`)}
-                              onPress={() =>
-                                runWithFeedback(() => pressNumericDigit(value))}
-                            />
+                          {NUMERIC_SYMBOLS.map((item) => (
+                            <Text
+                              key={`numeric-symbol-${item.label}`}
+                              font={18}
+                              frame={{
+                                width: numericLeftWidth,
+                                height: numericPanelHeight / 5,
+                                alignment: "center" as any,
+                              }}
+                              contentShape="rect"
+                              onTapGesture={() =>
+                                runWithFeedback(() => pressSymbol(item.value))}
+                            >
+                              {item.label}
+                            </Text>
                           ))}
-                        </HStack>
-                      );
-                    })}
-                    <HStack
-                      spacing={KEY_SPACING}
+                        </VStack>
+                      </ScrollView>
+                    </VStack>
+
+                    <VStack
+                      spacing={0}
                       frame={{
                         width: numericCenterWidth,
-                        height: metrics.keyHeight,
+                        height: numericPanelHeight,
+                      }}
+                    >
+                      {[
+                        ["1", "2", "3"],
+                        ["4", "5", "6"],
+                        ["7", "8", "9"],
+                      ].map((row, rowIndex) => {
+                        const hitTargets = numericRowHitTargets(row);
+                        const rowTouch = numericTouchFrame(rowIndex);
+                        return (
+                          <HStack
+                            key={`numeric-row-${rowIndex}`}
+                            spacing={KEY_SPACING}
+                            frame={{
+                              width: numericCenterWidth,
+                              height: rowTouch.touchHeight,
+                            }}
+                            contentShape="rect"
+                            highPriorityGesture={hitRowGesture(
+                              `num-row-${rowIndex}`,
+                              hitTargets,
+                            )}
+                          >
+                            {row.map((value) => (
+                              <KeyFace
+                                key={`numeric-${value}`}
+                                id={`numeric-${value}`}
+                                label={value}
+                                palette={palette}
+                                width={numericKeyWidth}
+                                height={metrics.keyHeight}
+                                touchHeight={rowTouch.touchHeight}
+                                visualOffsetY={rowTouch.visualOffsetY}
+                                labelFontSize={24}
+                                passive
+                                active={isPressed(`numeric-${value}`)}
+                                onPress={() =>
+                                  runWithFeedback(() =>
+                                    pressNumericDigit(value)
+                                  )}
+                              />
+                            ))}
+                          </HStack>
+                        );
+                      })}
+                      <HStack
+                        spacing={KEY_SPACING}
+                        frame={{
+                          width: numericCenterWidth,
+                          height: numericBottomTouch.touchHeight,
+                        }}
+                        contentShape="rect"
+                        highPriorityGesture={hitRowGesture(
+                          "num-row-zero",
+                          numericRowHitTargets(["ABC", "0", "space"]),
+                        )}
+                      >
+                        <KeyFace
+                          id="numeric-abc"
+                          label="ABC"
+                          palette={palette}
+                          width={numericKeyWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={numericBottomTouch.touchHeight}
+                          visualOffsetY={numericBottomTouch.visualOffsetY}
+                          system
+                          labelFontSize={16}
+                          passive
+                          active={isPressed("numeric-abc")}
+                          onPress={() =>
+                            runWithFeedback(() => setSymbolLayer(false))}
+                        />
+                        <KeyFace
+                          id="numeric-0"
+                          label="0"
+                          palette={palette}
+                          width={numericKeyWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={numericBottomTouch.touchHeight}
+                          visualOffsetY={numericBottomTouch.visualOffsetY}
+                          labelFontSize={24}
+                          passive
+                          active={isPressed("numeric-0")}
+                          onPress={() =>
+                            runWithFeedback(() => pressNumericDigit("0"))}
+                        />
+                        <KeyFace
+                          id="numeric-space"
+                          image="space"
+                          palette={palette}
+                          width={numericKeyWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={numericBottomTouch.touchHeight}
+                          visualOffsetY={numericBottomTouch.visualOffsetY}
+                          system
+                          passive
+                          active={isPressed("numeric-space")}
+                          onPress={() => runWithFeedback(pressSpace)}
+                        />
+                      </HStack>
+                    </VStack>
+
+                    <VStack
+                      spacing={0}
+                      frame={{
+                        width: numericRightWidth,
+                        height: numericPanelHeight,
                       }}
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
-                        "num-row-zero",
-                        numericRowHitTargets(["ABC", "0", "space"]),
+                        "num-row-right",
+                        numericRightHitTargets(),
                       )}
                     >
                       <KeyFace
-                        id="numeric-abc"
-                        label="ABC"
+                        id="numeric-backspace"
+                        image="delete.left"
                         palette={palette}
-                        width={numericKeyWidth}
+                        width={numericRightWidth}
                         height={metrics.keyHeight}
-                        system
-                        labelFontSize={16}
-                        passive
-                        active={isPressed("numeric-abc")}
-                        onPress={() =>
-                          runWithFeedback(() => setSymbolLayer(false))}
-                      />
-                      <KeyFace
-                        id="numeric-0"
-                        label="0"
-                        palette={palette}
-                        width={numericKeyWidth}
-                        height={metrics.keyHeight}
-                        labelFontSize={24}
-                        passive
-                        active={isPressed("numeric-0")}
-                        onPress={() =>
-                          runWithFeedback(() => pressNumericDigit("0"))}
-                      />
-                      <KeyFace
-                        id="numeric-space"
-                        image="space"
-                        palette={palette}
-                        width={numericKeyWidth}
-                        height={metrics.keyHeight}
+                        touchHeight={numericTouchFrame(0).touchHeight}
+                        visualOffsetY={numericTouchFrame(0).visualOffsetY}
                         system
                         passive
-                        active={isPressed("numeric-space")}
-                        onPress={() => runWithFeedback(pressSpace)}
+                        active={isPressed("numeric-backspace")}
+                        onPress={() => runWithFeedback(pressBackspace)}
+                        onSwipeLeft={() => runWithFeedback(backspaceSwipeLeft)}
+                        onSwipeUp={() => runWithFeedback(backspaceSwipeUp)}
+                        onSwipeDown={() => runWithFeedback(backspaceSwipeDown)}
                       />
-                    </HStack>
-                  </VStack>
-
-                  <VStack
-                    spacing={numericRowSpacing}
-                    frame={{
-                      width: numericRightWidth,
-                      height: numericPanelHeight,
-                    }}
-                    contentShape="rect"
-                    highPriorityGesture={hitRowGesture(
-                      "num-row-right",
-                      numericRightHitTargets(),
-                    )}
-                  >
-                    <KeyFace
-                      id="numeric-backspace"
-                      image="delete.left"
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      system
-                      passive
-                      active={isPressed("numeric-backspace")}
-                      onPress={() => runWithFeedback(pressBackspace)}
-                      onSwipeLeft={() => runWithFeedback(backspaceSwipeLeft)}
-                      onSwipeUp={() => runWithFeedback(backspaceSwipeUp)}
-                      onSwipeDown={() => runWithFeedback(backspaceSwipeDown)}
-                    />
-                    <KeyFace
-                      id="numeric-dot"
-                      label="."
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      passive
-                      active={isPressed("numeric-dot")}
-                      onPress={() => runWithFeedback(pressNumericDot)}
-                    />
-                    <KeyFace
-                      id="numeric-equal"
-                      label="="
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      passive
-                      active={isPressed("numeric-equal")}
-                      onPress={() => runWithFeedback(() => pressSymbol("="))}
-                      onSwipeUp={() =>
-                        runWithFeedback(() =>
-                          runConfiguredAction(
+                      <KeyFace
+                        id="numeric-dot"
+                        label="."
+                        palette={palette}
+                        width={numericRightWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={numericTouchFrame(1).touchHeight}
+                        visualOffsetY={numericTouchFrame(1).visualOffsetY}
+                        passive
+                        active={isPressed("numeric-dot")}
+                        onPress={() => runWithFeedback(pressNumericDot)}
+                      />
+                      <KeyFace
+                        id="numeric-equal"
+                        label="="
+                        palette={palette}
+                        width={numericRightWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={numericTouchFrame(2).touchHeight}
+                        visualOffsetY={numericTouchFrame(2).visualOffsetY}
+                        passive
+                        active={isPressed("numeric-equal")}
+                        onPress={() => runWithFeedback(() => pressSymbol("="))}
+                        onSwipeUp={() =>
+                          runWithFeedback(() => runConfiguredAction(
                             settings.numericEqualsSwipeUp,
                             "rime",
-                          )
-                        )}
-                    />
-                    <KeyFace
-                      id="numeric-enter"
-                      image="paperplane.fill"
-                      palette={palette}
-                      width={numericRightWidth}
-                      height={metrics.keyHeight}
-                      system
-                      passive
-                      active={isPressed("numeric-enter")}
-                      onPress={() => runWithFeedback(pressReturn)}
-                      onSwipeUp={() => runWithFeedback(insertNewline)}
-                    />
-                  </VStack>
-                </HStack>
+                          ))}
+                      />
+                      <KeyFace
+                        id="numeric-enter"
+                        image="paperplane.fill"
+                        palette={palette}
+                        width={numericRightWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={numericBottomTouch.touchHeight}
+                        visualOffsetY={numericBottomTouch.visualOffsetY}
+                        system
+                        passive
+                        active={isPressed("numeric-enter")}
+                        onPress={() => runWithFeedback(pressReturn)}
+                        onSwipeUp={() => runWithFeedback(insertNewline)}
+                      />
+                    </VStack>
+                  </HStack>
+                </VStack>
               )
               : (
                 LETTER_ROWS.map((row, rowIndex) => {
+                  const sideInset = rowIndex === 1 ? metrics.secondRowInset : 0;
+                  const rowTouch = bodyTouchFrame(
+                    (settings.showFunctionRow ? 1 : 0) + rowIndex,
+                    metrics.keyHeight,
+                  );
+                  const letterTouchWidth = (index: number) => {
+                    if (rowIndex === 0) {
+                      return metrics.letterWidth +
+                        (index === 0 || index === row.length - 1
+                          ? KEY_SPACING / 2
+                          : KEY_SPACING);
+                    }
+                    if (rowIndex === 2) {
+                      return metrics.letterWidth + KEY_SPACING;
+                    }
+                    if (index === 0) {
+                      return sideInset + metrics.letterWidth + KEY_SPACING / 2;
+                    }
+                    if (index === row.length - 1) {
+                      return metrics.letterWidth + sideInset + KEY_SPACING / 2;
+                    }
+                    return metrics.letterWidth + KEY_SPACING;
+                  };
+                  const letterVisualOffset = (index: number) =>
+                    rowIndex === 0
+                      ? index === 0 ? 0 : KEY_SPACING / 2
+                      : rowIndex === 2
+                      ? KEY_SPACING / 2
+                      : index === 0
+                      ? sideInset
+                      : KEY_SPACING / 2;
                   return (
                     <HStack
                       key={`row-${rowIndex}`}
-                      spacing={KEY_SPACING}
+                      spacing={0}
                       frame={{
                         width: metrics.width,
-                        height: metrics.keyHeight,
+                        height: rowTouch.touchHeight,
                       }}
                     >
-                      {rowIndex === 1
-                        ? <VStack frame={{ width: metrics.secondRowInset }} />
-                        : null}
                       {rowIndex === 2
                         ? (
                           <KeyFace
@@ -2617,6 +2771,10 @@ function KeyboardContent(props: {
                             palette={palette}
                             width={metrics.shiftWidth}
                             height={metrics.keyHeight}
+                            touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
+                            touchHeight={rowTouch.touchHeight}
+                            visualOffsetX={0}
+                            visualOffsetY={rowTouch.visualOffsetY}
                             system
                             selected={shifted || capsLocked}
                             active={isPressed("shift")}
@@ -2629,7 +2787,7 @@ function KeyboardContent(props: {
                           />
                         )
                         : null}
-                      {row.map((ch) => (
+                      {row.map((ch, index) => (
                         <KeyFace
                           key={ch}
                           id={ch}
@@ -2664,6 +2822,10 @@ function KeyboardContent(props: {
                           palette={palette}
                           width={metrics.letterWidth}
                           height={metrics.keyHeight}
+                          touchWidth={letterTouchWidth(index)}
+                          touchHeight={rowTouch.touchHeight}
+                          visualOffsetX={letterVisualOffset(index)}
+                          visualOffsetY={rowTouch.visualOffsetY}
                           active={isPressed(ch)}
                           onPress={() => pressLetter(ch)}
                           onTouchStart={() => beginKeyTouch(ch)}
@@ -2687,6 +2849,10 @@ function KeyboardContent(props: {
                             palette={palette}
                             width={metrics.shiftWidth}
                             height={metrics.keyHeight}
+                            touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
+                            touchHeight={rowTouch.touchHeight}
+                            visualOffsetX={KEY_SPACING / 2}
+                            visualOffsetY={rowTouch.visualOffsetY}
                             system
                             active={isPressed("backspace")}
                             onPress={pressBackspace}
@@ -2707,9 +2873,6 @@ function KeyboardContent(props: {
                           />
                         )
                         : null}
-                      {rowIndex === 1
-                        ? <VStack frame={{ width: metrics.secondRowInset }} />
-                        : null}
                     </HStack>
                   );
                 })
@@ -2719,7 +2882,10 @@ function KeyboardContent(props: {
           {symbolLayer ? null : (
             <HStack
               spacing={KEY_SPACING}
-              frame={{ width: metrics.width, height: metrics.keyHeight }}
+              frame={{
+                width: metrics.width,
+                height: bottomRowTouch.touchHeight,
+              }}
               contentShape="rect"
               highPriorityGesture={hitRowGesture(
                 "bottom-row",
@@ -2734,6 +2900,8 @@ function KeyboardContent(props: {
                     palette={palette}
                     width={bottomSplitButtonWidth}
                     height={metrics.keyHeight}
+                    touchHeight={bottomRowTouch.touchHeight}
+                    visualOffsetY={bottomRowTouch.visualOffsetY}
                     system
                     passive
                     active={isPressed("next-keyboard")}
@@ -2750,6 +2918,8 @@ function KeyboardContent(props: {
                   ? bottomSplitButtonWidth
                   : metrics.bottom.numbers}
                 height={metrics.keyHeight}
+                touchHeight={bottomRowTouch.touchHeight}
+                visualOffsetY={bottomRowTouch.visualOffsetY}
                 system
                 selected={symbolLayer}
                 passive
@@ -2766,6 +2936,8 @@ function KeyboardContent(props: {
                 palette={palette}
                 width={metrics.bottom.comma}
                 height={metrics.keyHeight}
+                touchHeight={bottomRowTouch.touchHeight}
+                visualOffsetY={bottomRowTouch.visualOffsetY}
                 passive
                 active={isPressed("comma")}
                 onPress={() => runWithFeedback(() => pressRimePunctuation(","))}
@@ -2786,6 +2958,8 @@ function KeyboardContent(props: {
                 palette={palette}
                 width={metrics.bottom.space}
                 height={metrics.keyHeight}
+                touchHeight={bottomRowTouch.touchHeight}
+                visualOffsetY={bottomRowTouch.visualOffsetY}
                 system
                 passive
                 active={isPressed("space")}
@@ -2814,6 +2988,8 @@ function KeyboardContent(props: {
                 palette={palette}
                 width={metrics.bottom.mode}
                 height={metrics.keyHeight}
+                touchHeight={bottomRowTouch.touchHeight}
+                visualOffsetY={bottomRowTouch.visualOffsetY}
                 system
                 passive
                 active={isPressed("mode")}
@@ -2857,6 +3033,8 @@ function KeyboardContent(props: {
                 palette={palette}
                 width={metrics.bottom.enter}
                 height={metrics.keyHeight}
+                touchHeight={bottomRowTouch.touchHeight}
+                visualOffsetY={bottomRowTouch.visualOffsetY}
                 system
                 passive
                 active={isPressed("enter")}

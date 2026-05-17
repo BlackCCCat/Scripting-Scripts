@@ -5,11 +5,6 @@ export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function safeFeedback(settings: RimeKeyboardSettings) {
-  playConfiguredClick(settings);
-  playConfiguredHaptic(settings);
-}
-
 export function playConfiguredClick(settings: RimeKeyboardSettings) {
   if (!settings.inputClicks) return;
   try {
