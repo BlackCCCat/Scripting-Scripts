@@ -795,7 +795,11 @@ function SettingsView() {
                   <NavigationLink
                     key={"color-link-" + group.title}
                     title={group.title}
-                    destination={renderKeyColorPage("keyColors", group, "按键背景色")}
+                    destination={renderKeyColorPage(
+                      "keyColors",
+                      group,
+                      "按键背景色",
+                    )}
                   />
                 ))}
               </Section>
@@ -853,7 +857,12 @@ function SettingsView() {
                   title="普通按键"
                   value={settings.keyFontColors.normal}
                   onLightChanged={(value) =>
-                    patchKeyBaseColor("keyFontColors", "normal", "light", value)}
+                    patchKeyBaseColor(
+                      "keyFontColors",
+                      "normal",
+                      "light",
+                      value,
+                    )}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyFontColors", "normal", "dark", value)}
                 />
@@ -872,7 +881,11 @@ function SettingsView() {
                   <NavigationLink
                     key={"font-color-link-" + group.title}
                     title={group.title}
-                    destination={renderKeyColorPage("keyFontColors", group, "按键字体颜色")}
+                    destination={renderKeyColorPage(
+                      "keyFontColors",
+                      group,
+                      "按键字体颜色",
+                    )}
                   />
                 ))}
               </Section>
@@ -930,7 +943,12 @@ function SettingsView() {
                   title="普通按键"
                   value={settings.keyHintColors.normal}
                   onLightChanged={(value) =>
-                    patchKeyBaseColor("keyHintColors", "normal", "light", value)}
+                    patchKeyBaseColor(
+                      "keyHintColors",
+                      "normal",
+                      "light",
+                      value,
+                    )}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyHintColors", "normal", "dark", value)}
                 />
@@ -949,7 +967,11 @@ function SettingsView() {
                   <NavigationLink
                     key={"hint-color-link-" + group.title}
                     title={group.title}
-                    destination={renderKeyColorPage("keyHintColors", group, "角标颜色")}
+                    destination={renderKeyColorPage(
+                      "keyHintColors",
+                      group,
+                      "角标颜色",
+                    )}
                   />
                 ))}
               </Section>
@@ -983,9 +1005,21 @@ function SettingsView() {
                 value={override ?? fallback}
                 overridden={override != null}
                 onLightChanged={(value) =>
-                  patchKeyOverrideColor(settingKey, item.id, "light", fallback, value)}
+                  patchKeyOverrideColor(
+                    settingKey,
+                    item.id,
+                    "light",
+                    fallback,
+                    value,
+                  )}
                 onDarkChanged={(value) =>
-                  patchKeyOverrideColor(settingKey, item.id, "dark", fallback, value)}
+                  patchKeyOverrideColor(
+                    settingKey,
+                    item.id,
+                    "dark",
+                    fallback,
+                    value,
+                  )}
                 onReset={() => resetKeyOverrideColor(settingKey, item.id)}
               />
             );
@@ -1639,11 +1673,10 @@ function SettingsView() {
           footer={
             <VStack alignment="leading" spacing={4}>
               <SettingHint>
-                设置保存在 shared Storage，键盘扩展会在下次打开时读取。
+                设置保存在脚本专用 Storage，键盘扩展会在下次打开时读取。
               </SettingHint>
               <SettingHint>
-                请在系统键盘列表中启用
-                Scripting，并为需要剪贴板/网络能力的功能打开完全访问。
+                请在系统键盘列表中启用 Scripting，并打开完全访问。
               </SettingHint>
             </VStack>
           }

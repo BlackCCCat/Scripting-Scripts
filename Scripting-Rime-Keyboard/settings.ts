@@ -91,7 +91,7 @@ export type RimeKeyboardSettings = {
 };
 
 const SETTINGS_KEY = "rime_pinyin_keyboard_settings_v1";
-const SHARED_OPTIONS = { shared: true };
+const LEGACY_SHARED_OPTIONS = { shared: true };
 
 export const LETTER_KEYS = "qwertyuiopasdfghjklzxcvbnm".split("");
 
@@ -924,12 +924,23 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
 function getRawSettings(): unknown {
   const st = (globalThis as any).Storage;
   try {
-    const shared = st?.get?.(SETTINGS_KEY, SHARED_OPTIONS) ??
-      st?.getString?.(SETTINGS_KEY, SHARED_OPTIONS);
-    if (shared != null) return shared;
+    const local = st?.get?.(SETTINGS_KEY) ??
+      st?.getString?.(SETTINGS_KEY);
+    if (local != null) return local;
   } catch {}
   try {
-    return st?.get?.(SETTINGS_KEY) ?? st?.getString?.(SETTINGS_KEY) ?? null;
+    const legacyShared = st?.get?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS) ??
+      st?.getString?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
+    if (legacyShared == null) return null;
+    try {
+      if (
+        typeof legacyShared === "string" && typeof st?.setString === "function"
+      ) {
+        st.setString(SETTINGS_KEY, legacyShared);
+      } else st?.set?.(SETTINGS_KEY, legacyShared);
+      st?.remove?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
+    } catch {}
+    return legacyShared;
   } catch {
     return null;
   }
@@ -957,12 +968,11 @@ export function saveRimeKeyboardSettings(
   try {
     if (typeof st.set === "function") {
       st.set(SETTINGS_KEY, normalized);
-      st.set(SETTINGS_KEY, normalized, SHARED_OPTIONS);
     } else if (typeof st.setString === "function") {
       const raw = JSON.stringify(normalized);
       st.setString(SETTINGS_KEY, raw);
-      st.setString(SETTINGS_KEY, raw, SHARED_OPTIONS);
     }
+    st.remove?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
   } catch {}
   return normalized;
 }
