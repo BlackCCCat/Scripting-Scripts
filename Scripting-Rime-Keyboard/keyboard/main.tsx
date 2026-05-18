@@ -291,7 +291,7 @@ function KeyboardContent(props: {
     const ctx = session.context;
     const menu = ctx?.menu;
     const commit = session.commit;
-    if (commit) CustomKeyboard.insertText(commit);
+    if (commit) insertTextReplacingSelectAll(commit);
     updateMarkedText(ctx, Boolean(commit));
     const nextPreedit = ctx?.preedit ?? "";
     const nextCursor = displayedPreeditCursor(
@@ -847,18 +847,25 @@ function KeyboardContent(props: {
     };
   }
 
-  function processKey(keyCode: number, fallback?: string) {
+  function processKey(
+    keyCode: number,
+    fallback?: string,
+    replaceSelectAll = false,
+  ) {
+    if (replaceSelectAll) consumeSelectAllForReplacement();
+    else clearSelectAllStateForExternalAction();
     const s = sessionRef.current;
     if (!s) {
-      if (fallback) CustomKeyboard.insertText(fallback);
+      if (fallback) insertTextReplacingSelectAll(fallback);
       return;
     }
     const consumed = s.processKey(keyCode);
     refresh(s);
-    if (!consumed && fallback) CustomKeyboard.insertText(fallback);
+    if (!consumed && fallback) insertTextReplacingSelectAll(fallback);
   }
 
   function processKeyWithModifiers(keyCode: number, modifiers: number) {
+    clearSelectAllStateForExternalAction();
     const s = sessionRef.current;
     if (!s) return;
     s.processKey(keyCode, modifiers);
@@ -877,7 +884,9 @@ function KeyboardContent(props: {
       .replace(/\\n/g, "\n")
       .replace(/\\r/g, "\r")
       .replace(/\\t/g, "\t");
-    if (text) CustomKeyboard.insertText(text);
+    if (text) {
+      insertTextReplacingSelectAll(text);
+    }
   }
 
   function processText(text: string) {
@@ -887,17 +896,17 @@ function KeyboardContent(props: {
       processKey(KEY_TAB, "\t");
       return;
     }
-    for (const ch of text) processKey(ch.charCodeAt(0), ch);
+    for (const ch of text) processKey(ch.charCodeAt(0), ch, true);
   }
 
   function pressLetter(ch: string) {
     const typed = shifted || capsLocked ? ch.toUpperCase() : ch;
     if (ascii) {
-      CustomKeyboard.insertText(typed);
+      insertTextReplacingSelectAll(typed);
       if (shifted && !capsLocked) setShifted(false);
       return;
     }
-    processKey(typed.charCodeAt(0), typed);
+    processKey(typed.charCodeAt(0), typed, true);
     if (backslashWrapMode) setBackslashWrapMode(false);
     if (shifted && !capsLocked) setShifted(false);
   }
@@ -905,16 +914,16 @@ function KeyboardContent(props: {
   function pressUppercaseLetter(ch: string) {
     const typed = ch.toUpperCase();
     if (ascii) {
-      CustomKeyboard.insertText(typed);
+      insertTextReplacingSelectAll(typed);
       return;
     }
-    processKey(typed.charCodeAt(0), typed);
+    processKey(typed.charCodeAt(0), typed, true);
     if (backslashWrapMode) setBackslashWrapMode(false);
   }
 
   function pressSymbol(text: string) {
     if (ascii || preedit.length === 0) {
-      CustomKeyboard.insertText(text);
+      insertTextReplacingSelectAll(text);
       return;
     }
     processText(text);
@@ -925,11 +934,11 @@ function KeyboardContent(props: {
       processText(".");
       return;
     }
-    CustomKeyboard.insertText(".");
+    insertTextReplacingSelectAll(".");
   }
 
   function pressRimePunctuation(text: string) {
-    if (ascii) CustomKeyboard.insertText(text);
+    if (ascii) insertTextReplacingSelectAll(text);
     else processText(text);
   }
 
@@ -939,6 +948,7 @@ function KeyboardContent(props: {
       s.processKey(KEY_BACKSPACE);
       refresh(s);
     } else {
+      if (consumeSelectAllForDeletion()) return;
       const before = CustomKeyboard.textBeforeCursor ?? "";
       deletedTextRef.current = before.slice(-1) || deletedTextRef.current;
       CustomKeyboard.deleteBackward();
@@ -1029,23 +1039,23 @@ function KeyboardContent(props: {
   function pressSpace() {
     const s = sessionRef.current;
     if (ascii) {
-      CustomKeyboard.insertText(" ");
+      insertTextReplacingSelectAll(" ");
       return;
     }
     if (s && (s.context?.preedit?.length ?? 0) > 0) {
       s.processKey(KEY_SPACE);
       refresh(s);
     } else {
-      CustomKeyboard.insertText(" ");
+      insertTextReplacingSelectAll(" ");
     }
   }
 
   function pressReturn() {
-    processKey(KEY_RETURN, "\n");
+    processKey(KEY_RETURN, "\n", true);
   }
 
   function insertNewline() {
-    CustomKeyboard.insertText("\n");
+    insertTextReplacingSelectAll("\n");
   }
 
   function backspaceLongPressMove(details: any) {
@@ -1219,7 +1229,7 @@ function KeyboardContent(props: {
     const s = sessionRef.current;
     if (!s) return;
     const result = s.commitComposition();
-    if (result?.text) CustomKeyboard.insertText(result.text);
+    if (result?.text) insertTextReplacingSelectAll(result.text);
     void s.commit;
     refresh(s);
   }
@@ -1227,7 +1237,7 @@ function KeyboardContent(props: {
   async function pasteText() {
     try {
       const text = await Pasteboard.getString();
-      if (text) CustomKeyboard.insertText(text);
+      if (text) insertTextReplacingSelectAll(text);
     } catch {}
   }
 
@@ -1235,6 +1245,7 @@ function KeyboardContent(props: {
     try {
       if (CustomKeyboard.selectedText) {
         await Pasteboard.setString(CustomKeyboard.selectedText);
+        clearSelectAllStateForExternalAction();
       }
     } catch {}
   }
@@ -1243,6 +1254,7 @@ function KeyboardContent(props: {
     try {
       if (!CustomKeyboard.selectedText) return;
       await Pasteboard.setString(CustomKeyboard.selectedText);
+      clearSelectAllStateForExternalAction();
       CustomKeyboard.deleteBackward();
     } catch {}
   }
@@ -1252,11 +1264,63 @@ function KeyboardContent(props: {
     setSelectAllActive(false);
   }
 
+  function clearSelectAllStateForExternalAction() {
+    if (!selectAllActive && !selectAllSnapshotRef.current) return;
+    clearSelectAllState();
+  }
+
+  function selectedTextSnapshot() {
+    const before = CustomKeyboard.textBeforeCursor ?? "";
+    const after = CustomKeyboard.textAfterCursor ?? "";
+    const joined = `${before}${after}`;
+    return joined || CustomKeyboard.allText || "";
+  }
+
+  function deleteDeletableTextAroundCursor(): string {
+    const text = selectedTextSnapshot();
+    if (!text) return "";
+    const before = CustomKeyboard.textBeforeCursor ?? "";
+    const after = CustomKeyboard.textAfterCursor ?? "";
+    const deleteCount = before.length + after.length || text.length;
+    if (after.length > 0) CustomKeyboard.moveCursor(after.length);
+    for (let i = 0; i < deleteCount; i += 1) CustomKeyboard.deleteBackward();
+    return text;
+  }
+
+  function consumeSelectAllForReplacement() {
+    if (!selectAllActive && !selectAllSnapshotRef.current) return;
+    try {
+      if (CustomKeyboard.selectedText) {
+        CustomKeyboard.deleteBackward();
+      } else {
+        try {
+          CustomKeyboard.setMarkedText("", 0, 0);
+          CustomKeyboard.unmarkText();
+        } catch {}
+        deleteDeletableTextAroundCursor();
+      }
+    } catch {}
+    clearSelectAllState();
+  }
+
+  function consumeSelectAllForDeletion() {
+    if (!selectAllActive && !selectAllSnapshotRef.current) return false;
+    const deleted = deleteDeletableTextAroundCursor() ||
+      selectAllSnapshotRef.current?.text ||
+      "";
+    if (deleted) deletedTextRef.current = deleted;
+    clearSelectAllState();
+    return true;
+  }
+
+  function insertTextReplacingSelectAll(text: string) {
+    if (!text) return;
+    consumeSelectAllForReplacement();
+    CustomKeyboard.insertText(text);
+  }
+
   function textSnapshot() {
-    return CustomKeyboard.allText ??
-      `${CustomKeyboard.textBeforeCursor ?? ""}${
-        CustomKeyboard.textAfterCursor ?? ""
-      }`;
+    return CustomKeyboard.allText || selectedTextSnapshot();
   }
 
   async function selectAllBestEffort() {
@@ -1332,19 +1396,21 @@ function KeyboardContent(props: {
   function deleteAllText() {
     stopRepeatingBackspace();
     try {
-      const text = CustomKeyboard.allText ?? "";
-      if (!text) return;
+      const text = selectedTextSnapshot();
+      if (!text) {
+        clearSelectAllStateForExternalAction();
+        return;
+      }
+      clearSelectAllStateForExternalAction();
       deletedTextRef.current = text;
-      const after = CustomKeyboard.textAfterCursor?.length ?? 0;
-      if (after > 0) CustomKeyboard.moveCursor(after);
-      for (let i = 0; i < text.length; i += 1) CustomKeyboard.deleteBackward();
+      deleteDeletableTextAroundCursor();
     } catch {}
   }
 
   function restoreDeletedText() {
     stopRepeatingBackspace();
     if (!deletedTextRef.current) return;
-    CustomKeyboard.insertText(deletedTextRef.current);
+    insertTextReplacingSelectAll(deletedTextRef.current);
   }
 
   function activateWrapDisplayMode() {
@@ -1366,17 +1432,21 @@ function KeyboardContent(props: {
       case "":
         return;
       case "{left}":
+        clearSelectAllStateForExternalAction();
         CustomKeyboard.moveCursor(-1);
         return;
       case "{right}":
+        clearSelectAllStateForExternalAction();
         CustomKeyboard.moveCursor(1);
         return;
       case "{home}":
+        clearSelectAllStateForExternalAction();
         CustomKeyboard.moveCursor(
           -(CustomKeyboard.textBeforeCursor?.length ?? 0),
         );
         return;
       case "{end}":
+        clearSelectAllStateForExternalAction();
         CustomKeyboard.moveCursor(CustomKeyboard.textAfterCursor?.length ?? 0);
         return;
       case "{selectAll}":
