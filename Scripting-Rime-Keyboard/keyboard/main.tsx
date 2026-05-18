@@ -727,7 +727,7 @@ function KeyboardContent(props: {
     if (hasCandidateNavigation) {
       moveHighlightedCandidateBySpaceDrag(steps);
     } else {
-      CustomKeyboard.moveCursor(steps);
+      moveCursorSafely(steps);
       playCursorMoveFeedback();
     }
     spaceCursorDragXRef.current += steps * stepSize;
@@ -1000,7 +1000,7 @@ function KeyboardContent(props: {
     const repeatToken = ++cursorRepeatTokenRef.current;
     const repeat = () => {
       if (repeatToken !== cursorRepeatTokenRef.current) return;
-      CustomKeyboard.moveCursor(offset);
+      if (!moveCursorSafely(offset)) return;
       playCursorMoveFeedback();
       cursorRepeatTimerRef.current = setTimeout(repeat, 72);
     };
@@ -1353,7 +1353,7 @@ function KeyboardContent(props: {
       }
 
       const after = CustomKeyboard.textAfterCursor?.length ?? 0;
-      if (after > 0) CustomKeyboard.moveCursor(after);
+      if (after > 0) moveCursorSafely(after, true);
       for (let i = 0; i < text.length; i += 1) {
         CustomKeyboard.deleteBackward();
       }
@@ -1375,7 +1375,7 @@ function KeyboardContent(props: {
       if (CustomKeyboard.selectedText === snapshot.text) {
         CustomKeyboard.insertText(snapshot.text);
         const cursorFromEnd = snapshot.text.length - snapshot.cursorBefore;
-        if (cursorFromEnd !== 0) CustomKeyboard.moveCursor(-cursorFromEnd);
+        if (cursorFromEnd !== 0) moveCursorSafely(-cursorFromEnd, true);
       } else {
         try {
           CustomKeyboard.unmarkText();
@@ -1391,6 +1391,31 @@ function KeyboardContent(props: {
     } else {
       void selectAllBestEffort();
     }
+  }
+
+  function clearSelectAllForCursorMove(offset = 0) {
+    if (!selectAllActive && !selectAllSnapshotRef.current) return false;
+    try {
+      const snapshot = selectAllSnapshotRef.current;
+      if (snapshot) {
+        CustomKeyboard.insertText(snapshot.text);
+        if (offset < 0) {
+          CustomKeyboard.moveCursor(-snapshot.text.length);
+        }
+      } else {
+        try {
+          CustomKeyboard.unmarkText();
+        } catch {}
+      }
+    } catch {}
+    clearSelectAllState();
+    return true;
+  }
+
+  function moveCursorSafely(offset: number, force = false) {
+    if (!force && clearSelectAllForCursorMove(offset)) return false;
+    CustomKeyboard.moveCursor(offset);
+    return true;
   }
 
   function deleteAllText() {
@@ -1432,21 +1457,19 @@ function KeyboardContent(props: {
       case "":
         return;
       case "{left}":
-        clearSelectAllStateForExternalAction();
-        CustomKeyboard.moveCursor(-1);
+        moveCursorSafely(-1);
         return;
       case "{right}":
-        clearSelectAllStateForExternalAction();
-        CustomKeyboard.moveCursor(1);
+        moveCursorSafely(1);
         return;
       case "{home}":
-        clearSelectAllStateForExternalAction();
+        if (clearSelectAllForCursorMove(-1)) return;
         CustomKeyboard.moveCursor(
           -(CustomKeyboard.textBeforeCursor?.length ?? 0),
         );
         return;
       case "{end}":
-        clearSelectAllStateForExternalAction();
+        if (clearSelectAllForCursorMove(1)) return;
         CustomKeyboard.moveCursor(CustomKeyboard.textAfterCursor?.length ?? 0);
         return;
       case "{selectAll}":
@@ -1884,8 +1907,8 @@ function KeyboardContent(props: {
       onSwipeDown: canSpaceSwipeCandidate("3")
         ? () => processSpaceSwipeCandidate("3")
         : undefined,
-      onSwipeLeft: () => CustomKeyboard.moveCursor(-1),
-      onSwipeRight: () => CustomKeyboard.moveCursor(1),
+      onSwipeLeft: () => moveCursorSafely(-1),
+      onSwipeRight: () => moveCursorSafely(1),
     });
     x += metrics.bottom.space + KEY_SPACING;
     targets.push({
@@ -1965,12 +1988,8 @@ function KeyboardContent(props: {
         onSwipeDown: value === "space" && canSpaceSwipeCandidate("3")
           ? () => processSpaceSwipeCandidate("3")
           : undefined,
-        onSwipeLeft: value === "space"
-          ? () => CustomKeyboard.moveCursor(-1)
-          : undefined,
-        onSwipeRight: value === "space"
-          ? () => CustomKeyboard.moveCursor(1)
-          : undefined,
+        onSwipeLeft: value === "space" ? () => moveCursorSafely(-1) : undefined,
+        onSwipeRight: value === "space" ? () => moveCursorSafely(1) : undefined,
       };
     });
   }
@@ -3245,10 +3264,8 @@ function KeyboardContent(props: {
                   runWithFeedback(() => processSpaceSwipeCandidate("2"))}
                 onSwipeDown={() =>
                   runWithFeedback(() => processSpaceSwipeCandidate("3"))}
-                onSwipeLeft={() =>
-                  runWithFeedback(() => CustomKeyboard.moveCursor(-1))}
-                onSwipeRight={() =>
-                  runWithFeedback(() => CustomKeyboard.moveCursor(1))}
+                onSwipeLeft={() => runWithFeedback(() => moveCursorSafely(-1))}
+                onSwipeRight={() => runWithFeedback(() => moveCursorSafely(1))}
               />
               <KeyFace
                 id="mode"
