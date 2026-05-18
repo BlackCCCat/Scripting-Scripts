@@ -1041,13 +1041,7 @@ function KeyboardContent(props: {
   }
 
   function pressReturn() {
-    const s = sessionRef.current;
-    if (s && (s.context?.preedit?.length ?? 0) > 0) {
-      s.processKey(KEY_RETURN);
-      refresh(s);
-    } else {
-      CustomKeyboard.insertText("\n");
-    }
+    processKey(KEY_RETURN, "\n");
   }
 
   function insertNewline() {
