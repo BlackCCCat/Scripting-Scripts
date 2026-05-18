@@ -36,7 +36,7 @@ import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
 import { HomeSectionOrderView } from "./HomeSectionOrderView"
 
 const BUILTIN_SCRIPTING_BOOKMARK = "__builtin_scripting_rime__"
-const BUILTIN_SCRIPTING_LABEL = "使用Scripting内置Rime路径"
+const BUILTIN_SCRIPTING_LABEL = "Scripting Rime"
 
 type AlertNode = any
 type AlertState = {

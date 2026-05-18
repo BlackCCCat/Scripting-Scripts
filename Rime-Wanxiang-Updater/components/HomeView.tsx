@@ -1728,10 +1728,13 @@ export function HomeView() {
       } else if (autoResult.didDeploy) {
         setStageAndMaybeLog("自动更新完成（已部署）", "AUTO", "SUCCESS", true);
       } else {
+        const currentNow = loadConfig();
         setStageAndMaybeLog(
-          "自动更新完成（未自动部署）",
+          currentNow.inputMethod === "scripting"
+            ? "请到工具(Tools)-Rime输入法(Rime Input Method)手动部署"
+            : "自动更新完成（未自动部署）",
           "AUTO",
-          "SUCCESS",
+          currentNow.inputMethod === "scripting" ? "INFO" : "SUCCESS",
           true,
         );
       }
@@ -1861,8 +1864,13 @@ export function HomeView() {
         wrapDetailLogger("DEPLOY"),
       );
     } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (msg === "当前不支持自动部署，请到工具(Tools)-Rime输入法(Rime Input Method)手动部署") {
+        setStageAndMaybeLog(msg, "DEPLOY", "INFO", true);
+        return;
+      }
       setStageAndMaybeLog(
-        `部署失败：${String(e?.message ?? e)}`,
+        `部署失败：${msg}`,
         "DEPLOY",
         "ERROR",
         true,

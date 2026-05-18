@@ -58,6 +58,8 @@ export type UpdateDecision = {
   model: boolean
 }
 
+const SCRIPTING_MANUAL_DEPLOY_MESSAGE = "当前不支持自动部署，请到工具(Tools)-Rime输入法(Rime Input Method)手动部署"
+
 function normalizeMark(v?: string): string {
   return String(v ?? "").trim().toLowerCase()
 }
@@ -371,6 +373,11 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
 // ===== 部署（删 build 再 URL scheme）=====
 async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
   if (cfg.autoDeployAfterDownload === false) return
+  if (cfg.inputMethod === "scripting") {
+    onStage?.(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
+    onLog?.(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
+    return
+  }
   const detected = await detectRimeDir(cfg)
   const installRoot = await resolveRimeDir(cfg)
   const buildBase = cfg.inputMethod === "scripting"
@@ -393,6 +400,9 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, on
 }
 
 export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
+  if (cfg.inputMethod === "scripting") {
+    throw new Error(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
+  }
   const detected = await detectRimeDir(cfg)
   const installRoot = await resolveRimeDir(cfg)
   const buildBase = cfg.inputMethod === "scripting"
@@ -903,6 +913,6 @@ export async function autoUpdateAll(
     remote: r,
     updated: { scheme: needScheme, dict: needDict, model: needModel },
     didUpdate: true,
-    didDeploy: cfg.autoDeployAfterDownload !== false,
+    didDeploy: cfg.autoDeployAfterDownload !== false && cfg.inputMethod !== "scripting",
   }
 }
