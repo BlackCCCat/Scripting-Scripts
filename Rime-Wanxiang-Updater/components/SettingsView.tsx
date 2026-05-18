@@ -35,6 +35,9 @@ import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
 import { HomeSectionOrderView } from "./HomeSectionOrderView"
 
+const BUILTIN_SCRIPTING_BOOKMARK = "__builtin_scripting_rime__"
+const BUILTIN_SCRIPTING_LABEL = "使用Scripting内置Rime路径"
+
 type AlertNode = any
 type AlertState = {
   title: string
@@ -166,14 +169,17 @@ export function SettingsView(props: {
   // 当 picker 变化时，同步回 cfg（保持 cfg 是最终保存对象）
   useEffect(() => {
     const inputMethod = INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value
-    setCfg((c) => ({
-      ...c,
-      releaseSource: releaseIdx === 1 ? "github" : "cnb",
-      schemeEdition: schemeIdx === 1 ? "pro" : "base",
-      proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      inputMethod,
-      useBuiltinScriptingPath: inputMethod === "scripting" ? c.useBuiltinScriptingPath : false,
-    }))
+    setCfg((c) => {
+      const isBuiltinScripting = c.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
+      return {
+        ...c,
+        releaseSource: releaseIdx === 1 ? "github" : "cnb",
+        schemeEdition: schemeIdx === 1 ? "pro" : "base",
+        proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
+        inputMethod: isBuiltinScripting ? "scripting" : inputMethod,
+        useBuiltinScriptingPath: isBuiltinScripting ? true : (inputMethod === "scripting" ? c.useBuiltinScriptingPath : false),
+      }
+    })
   }, [releaseIdx, schemeIdx, proKeyIdx, inputIdx])
 
   const [alert, setAlert] = useState<AlertState>({
@@ -189,24 +195,38 @@ export function SettingsView(props: {
 
   useEffect(() => {
     const latest = props.initial ?? loadConfig()
-    setCfg(latest)
-    setReleaseIdx(latest.releaseSource === "github" ? 1 : 0)
-    setSchemeIdx(latest.schemeEdition === "pro" ? 1 : 0)
-    const i = PRO_KEYS.indexOf(latest.proSchemeKey)
+    const normalizedLatest =
+      latest.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
+        ? { ...latest, inputMethod: "scripting" as const, useBuiltinScriptingPath: true }
+        : latest
+    setCfg(normalizedLatest)
+    setReleaseIdx(normalizedLatest.releaseSource === "github" ? 1 : 0)
+    setSchemeIdx(normalizedLatest.schemeEdition === "pro" ? 1 : 0)
+    const i = PRO_KEYS.indexOf(normalizedLatest.proSchemeKey)
     setProKeyIdx(i >= 0 ? i : 0)
-    const im = INPUT_METHODS.findIndex((m) => m.value === latest.inputMethod)
+    const im = INPUT_METHODS.findIndex((m) => m.value === normalizedLatest.inputMethod)
     setInputIdx(im >= 0 ? im : 0)
       ; (async () => {
-        await refreshBookmarks(latest)
-        if (latest.inputMethod === "scripting" && latest.useBuiltinScriptingPath) {
+        await refreshBookmarks(normalizedLatest)
+        if (normalizedLatest.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK) {
           try {
             const scriptingPaths = await getScriptingRimePaths()
             if (scriptingPaths?.rootDir) {
-              setCfg((c) => ({ ...c, hamsterRootPath: scriptingPaths.rootDir, hamsterBookmarkName: "" }))
+              setCfg((c) => ({
+                ...c,
+                hamsterRootPath: scriptingPaths.rootDir,
+                hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
+                inputMethod: "scripting",
+                useBuiltinScriptingPath: true,
+              }))
             }
           } catch { }
         }
       })()
+  }, [])
+
+  useEffect(() => {
+    void refreshBookmarks(cfg)
   }, [])
 
   function closeAlert() {
@@ -332,50 +352,87 @@ export function SettingsView(props: {
     const cleaned = arr
       .map((x: any) => ({ name: String(x?.name ?? ""), path: String(x?.path ?? "") }))
       .filter((x: any) => x.name && x.path)
-    setBookmarks(cleaned)
+    let combined = cleaned
+    try {
+      const scriptingPaths = await getScriptingRimePaths()
+      if (scriptingPaths?.rootDir) {
+        combined = [
+          { name: BUILTIN_SCRIPTING_LABEL, path: scriptingPaths.rootDir },
+          ...cleaned,
+        ]
+      }
+    } catch { }
+    setBookmarks(combined)
 
     const targetName = current?.hamsterBookmarkName ?? cfg.hamsterBookmarkName
     const targetPath = current?.hamsterRootPath ?? cfg.hamsterRootPath
-    if (cleaned.length) {
+    if (combined.length) {
       let idx = -1
-      if (targetName) idx = cleaned.findIndex((b) => b.name === targetName)
-      if (idx < 0 && targetPath) idx = cleaned.findIndex((b) => normalizePath(b.path) === normalizePath(targetPath))
+      if (targetName === BUILTIN_SCRIPTING_BOOKMARK) {
+        idx = combined.findIndex((b) => b.name === BUILTIN_SCRIPTING_LABEL)
+      } else if (targetName) {
+        idx = combined.findIndex((b) => b.name === targetName)
+      }
+      if (idx < 0 && targetPath) idx = combined.findIndex((b) => normalizePath(b.path) === normalizePath(targetPath))
       setBookmarkIdx(idx >= 0 ? idx : 0)
       if (idx >= 0) {
-        const matched = cleaned[idx]
-        const canUseByName = fm?.bookmarkExists
+        const matched = combined[idx]
+        const isBuiltinScripting = matched.name === BUILTIN_SCRIPTING_LABEL
+        const canUseByName = !isBuiltinScripting && fm?.bookmarkExists
           ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [matched.name]))
           : true
-        const resolved = fm?.bookmarkedPath && canUseByName
+        const resolved = !isBuiltinScripting && fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? "")
           : matched.path
         const selectedPath = normalizePath(resolved || matched.path)
-        const pathChanged = selectedPath !== normalizePath(targetPath) || matched.name !== targetName
+        const nextBookmarkName = isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : matched.name
+        const pathChanged = selectedPath !== normalizePath(targetPath) || nextBookmarkName !== targetName
         if (pathChanged) {
           try {
-            let next = { ...loadConfig(), hamsterRootPath: selectedPath, hamsterBookmarkName: matched.name }
+            let next = {
+              ...loadConfig(),
+              hamsterRootPath: selectedPath,
+              hamsterBookmarkName: nextBookmarkName,
+              useBuiltinScriptingPath: isBuiltinScripting,
+              inputMethod: isBuiltinScripting ? "scripting" : (current?.inputMethod ?? cfg.inputMethod),
+            }
             next = await syncSchemeFromLocal(next)
+            if (isBuiltinScripting) {
+              next = {
+                ...next,
+                inputMethod: "scripting",
+                useBuiltinScriptingPath: true,
+                hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
+              }
+              setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
+            }
             setCfg(next)
           } catch { }
         }
       } else if (!targetPath) {
-        const first = cleaned[0]
-        const canUseByName = fm?.bookmarkExists
+        const first = combined[0]
+        const isBuiltinScripting = first.name === BUILTIN_SCRIPTING_LABEL
+        const canUseByName = !isBuiltinScripting && fm?.bookmarkExists
           ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [first.name]))
           : true
-        const resolved = fm?.bookmarkedPath && canUseByName
+        const resolved = !isBuiltinScripting && fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
           : first.path
         setCfg((c) => ({
           ...c,
           hamsterRootPath: resolved,
-          hamsterBookmarkName: first.name,
+          hamsterBookmarkName: isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : first.name,
+          useBuiltinScriptingPath: isBuiltinScripting,
+          inputMethod: isBuiltinScripting ? "scripting" : c.inputMethod,
         }))
+        if (isBuiltinScripting) {
+          setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
+        }
       }
     } else {
       setBookmarkIdx(0)
     }
-    return cleaned
+    return combined
   }
 
   async function saveAndClose() {
@@ -383,7 +440,10 @@ export function SettingsView(props: {
       ...cfg,
       // base 时 proKey 也可以保留，不影响；若你想 base 时清空也可以在这里处理
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
+      inputMethod:
+        cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
+          ? "scripting"
+          : INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
     }
 
     try {
@@ -395,7 +455,7 @@ export function SettingsView(props: {
         fixed = {
           ...fixed,
           hamsterRootPath: scriptingPaths.rootDir,
-          hamsterBookmarkName: "",
+          hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
         }
       }
       const pathChanged =
@@ -465,7 +525,7 @@ export function SettingsView(props: {
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
-  const useBuiltinScriptingPath = cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath
+  const useBuiltinScriptingPath = cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK || (cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath)
 
   useEffect(() => {
     props.registerSaveAction?.(() => {
@@ -492,51 +552,59 @@ export function SettingsView(props: {
         <Text font="caption" foregroundStyle="secondaryLabel">
           请在 工具-文件书签 中添加相应文件夹，并在此选择
         </Text>
-        {useBuiltinScriptingPath ? (
-            <HStack frame={{ width: "100%" as any }} padding={{ top: 8, bottom: 8 }}>
-              <Text foregroundStyle="secondaryLabel">书签文件夹</Text>
-              <Spacer />
-              <Text foregroundStyle="tertiaryLabel">已使用内置路径</Text>
-            </HStack>
-          ) : bookmarks.length ? (
-            <Picker
-              title={"书签文件夹"}
-              pickerStyle="menu"
-              value={bookmarkIdx}
-              onChanged={(idx: number) => {
-                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-                setBookmarkIdx(idx)
-                const b = bookmarks[idx]
-                if (b?.path) {
-                  ; (async () => {
-                    const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
-                    const canUseByName = fm?.bookmarkExists
-                      ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
-                      : true
-                    const resolved = fm?.bookmarkedPath && canUseByName
-                      ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
-                      : b.path
-                    const selectedPath = normalizePath(resolved || b.path)
-                    let next: AppConfig = {
-                      ...cfg,
-                      hamsterRootPath: selectedPath,
-                      hamsterBookmarkName: b.name,
+        {bookmarks.length ? (
+          <Picker
+            title={"书签文件夹"}
+            pickerStyle="menu"
+            value={bookmarkIdx}
+            onChanged={(idx: number) => {
+              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+              setBookmarkIdx(idx)
+              const b = bookmarks[idx]
+              if (b?.path) {
+                ; (async () => {
+                  const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
+                  const isBuiltinScripting = b.name === BUILTIN_SCRIPTING_LABEL
+                  const canUseByName = !isBuiltinScripting && fm?.bookmarkExists
+                    ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
+                    : true
+                  const resolved = !isBuiltinScripting && fm?.bookmarkedPath && canUseByName
+                    ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
+                    : b.path
+                  const selectedPath = normalizePath(resolved || b.path)
+                  let next: AppConfig = {
+                    ...cfg,
+                    hamsterRootPath: selectedPath,
+                    hamsterBookmarkName: isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : b.name,
+                    useBuiltinScriptingPath: isBuiltinScripting,
+                    inputMethod: isBuiltinScripting ? "scripting" : cfg.inputMethod,
+                  }
+                  if (isBuiltinScripting) {
+                    setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
+                  }
+                  try {
+                    next = await syncSchemeFromLocal(next)
+                    if (isBuiltinScripting) {
+                      next = {
+                        ...next,
+                        inputMethod: "scripting",
+                        useBuiltinScriptingPath: true,
+                        hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
+                      }
                     }
-                    try {
-                      next = await syncSchemeFromLocal(next)
-                      setCfg(next)
-                    } catch { }
-                  })()
-                }
-              }}
-            >
-              {bookmarks.map((b, index) => (
-                <Text key={b.name} tag={index}>
-                  {b.name}
-                </Text>
-              ))}
-            </Picker>
-          ) : null}
+                    setCfg(next)
+                  } catch { }
+                })()
+              }
+            }}
+          >
+            {bookmarks.map((b, index) => (
+              <Text key={b.name} tag={index}>
+                {b.name}
+              </Text>
+            ))}
+          </Picker>
+        ) : null}
       </Section>
 
       <Section header={<Text>发布源</Text>}>
@@ -629,36 +697,6 @@ export function SettingsView(props: {
             </Text>
           ))}
         </Picker>
-        {cfg.inputMethod === "scripting" ? (
-          <Toggle
-            title={"使用内置路径"}
-            value={cfg.useBuiltinScriptingPath}
-            onChanged={(v: boolean) => {
-              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-              setCfg((c) => ({
-                ...c,
-                useBuiltinScriptingPath: v,
-                hamsterBookmarkName: v ? "" : c.hamsterBookmarkName,
-              }))
-              void (async () => {
-                if (v) {
-                  try {
-                    const scriptingPaths = await getScriptingRimePaths()
-                    setCfg((c) => ({
-                      ...c,
-                      useBuiltinScriptingPath: true,
-                      hamsterRootPath: scriptingPaths?.rootDir ?? c.hamsterRootPath,
-                      hamsterBookmarkName: "",
-                    }))
-                  } catch {
-                    setCfg((c) => ({ ...c, useBuiltinScriptingPath: true, hamsterBookmarkName: "" }))
-                  }
-                }
-              })()
-            }}
-            toggleStyle="switch"
-          />
-        ) : null}
       </Section>
 
       <Section header={<Text>更新设置</Text>}>
