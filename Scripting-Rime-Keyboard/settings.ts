@@ -194,7 +194,7 @@ export const DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS: SwipeSettings = {
 };
 
 export const FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN: SwipeSettings = {
-  a: "{selectAll}",
+  a: "{toggleSelectAll}",
   x: "{cut}",
   c: "{copy}",
   v: "{paste}",
@@ -238,7 +238,7 @@ export const COMPOSING_FUNCTION_KEYS = [
 export const DEFAULT_IDLE_FUNCTION_SWIPE_UP: SwipeSettings = {
   left: "{home}",
   head: "{home}",
-  select: "",
+  select: "{toggleSelectAll}",
   cut: "{cut}",
   copy: "{copy}",
   paste: "{paste}",
@@ -249,7 +249,7 @@ export const DEFAULT_IDLE_FUNCTION_SWIPE_UP: SwipeSettings = {
 export const DEFAULT_IDLE_FUNCTION_SWIPE_DOWN: SwipeSettings = {
   left: "{left}",
   head: "{home}",
-  select: "",
+  select: "{toggleSelectAll}",
   cut: "{cut}",
   copy: "{copy}",
   paste: "{paste}",
@@ -447,7 +447,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   inputClickLevel: 3,
   haptics: true,
   hapticLevel: 1,
-  autoDeployOnLaunch: true,
+  autoDeployOnLaunch: false,
 };
 
 export const KEYBOARD_HEIGHT_MIN = 286;
@@ -869,11 +869,21 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     hapticLevel: clampNumber(raw?.hapticLevel, 1, 1, 5),
     autoDeployOnLaunch: typeof raw?.autoDeployOnLaunch === "boolean"
       ? raw.autoDeployOnLaunch
-      : true,
+      : false,
   };
   if (normalized.composingFunctionPress.filter === "{backslashWrap}") {
     normalized.composingFunctionPress.filter =
       DEFAULT_COMPOSING_FUNCTION_PRESS.filter;
+  }
+  if (normalized.idleFunctionSwipeUp.select === "") {
+    normalized.idleFunctionSwipeUp.select =
+      DEFAULT_IDLE_FUNCTION_SWIPE_UP.select;
+    normalized.idleFunctionSwipeUpModes.select = "auto";
+  }
+  if (normalized.idleFunctionSwipeDown.select === "") {
+    normalized.idleFunctionSwipeDown.select =
+      DEFAULT_IDLE_FUNCTION_SWIPE_DOWN.select;
+    normalized.idleFunctionSwipeDownModes.select = "auto";
   }
   if (!normalized.showFunctionRow) {
     for (
@@ -882,7 +892,8 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       const rawAction = raw?.letterSwipeDown?.[key];
       if (
         typeof rawAction !== "string" ||
-        rawAction === DEFAULT_LETTER_SWIPE_DOWN[key]
+        rawAction === DEFAULT_LETTER_SWIPE_DOWN[key] ||
+        (key === "a" && rawAction === "{selectAll}")
       ) {
         normalized.letterSwipeDown[key] =
           FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN[key];

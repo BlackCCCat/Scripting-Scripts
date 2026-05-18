@@ -10,6 +10,7 @@ import {
   Script,
   Section,
   Slider,
+  Spacer,
   Text,
   TextField,
   Toggle,
@@ -81,6 +82,92 @@ const FUNCTION_KEY_LABELS: Record<string, string> = {
   tone4: "四声",
   filter: "包裹",
 };
+
+const COMMAND_REFERENCE_GROUPS: Array<{
+  title: string;
+  items: Array<{ command: string; description: string }>;
+}> = [
+  {
+    title: "编辑与光标",
+    items: [
+      { command: "{left}", description: "光标左移一位" },
+      { command: "{right}", description: "光标右移一位" },
+      { command: "{home}", description: "移动到行首" },
+      { command: "{end}", description: "移动到行尾" },
+      { command: "{selectAll}", description: "执行全选" },
+      {
+        command: "{toggleSelectAll}",
+        description: "全选/取消全选切换",
+      },
+      { command: "{cut}", description: "剪切选中内容" },
+      { command: "{copy}", description: "复制选中内容" },
+      { command: "{paste}", description: "粘贴剪贴板文本" },
+    ],
+  },
+  {
+    title: "Rime 候选与预编辑",
+    items: [
+      { command: "{rimeUp}", description: "发送 Rime 上方向键" },
+      { command: "{rimeDown}", description: "发送 Rime 下方向键" },
+      { command: "{rimePageUp}", description: "发送 Rime 上翻页" },
+      { command: "{rimePageDown}", description: "发送 Rime 下翻页" },
+      { command: "{clearComposition}", description: "清空当前预编辑" },
+      { command: "{commitComposition}", description: "提交当前预编辑" },
+    ],
+  },
+  {
+    title: "文本处理",
+    items: [
+      { command: "{deleteAll}", description: "删除当前可删除文本" },
+      { command: "{restoreDeleted}", description: "恢复最近删除内容" },
+    ],
+  },
+  {
+    title: "Rime 按键名示例",
+    items: [
+      { command: "Break", description: "发送 Rime 支持的 Break 键" },
+      { command: "Page_Up", description: "发送 Rime Page Up 键" },
+      { command: "Page_Down", description: "发送 Rime Page Down 键" },
+      { command: "Up", description: "发送 Rime 上方向键" },
+      { command: "Down", description: "发送 Rime 下方向键" },
+      { command: "Left", description: "发送 Rime 左方向键" },
+      { command: "Right", description: "发送 Rime 右方向键" },
+      { command: "Home", description: "发送 Rime Home 键" },
+      { command: "End", description: "发送 Rime End 键" },
+      { command: "BackSpace", description: "发送 Rime BackSpace 键" },
+      { command: "Delete", description: "发送 Rime Delete 键" },
+      { command: "Escape", description: "发送 Rime Escape 键" },
+      { command: "Tab", description: "发送 Rime Tab 键" },
+      { command: "Return", description: "发送 Rime Return 键" },
+      { command: "space", description: "发送 Rime 空格键" },
+      { command: "backslash", description: "发送 Rime 反斜杠键" },
+      { command: "slash", description: "发送 Rime 斜杠键" },
+      { command: "grave", description: "发送 Rime 反引号键" },
+      { command: "asciitilde", description: "发送 Rime 波浪号键" },
+      { command: "bracketleft", description: "发送 Rime 左方括号键" },
+      { command: "bracketright", description: "发送 Rime 右方括号键" },
+      { command: "comma", description: "发送 Rime 逗号键" },
+      { command: "period", description: "发送 Rime 句号键" },
+      { command: "minus", description: "发送 Rime 减号键" },
+      { command: "equal", description: "发送 Rime 等号键" },
+      { command: "semicolon", description: "发送 Rime 分号键" },
+      { command: "apostrophe", description: "发送 Rime 单引号键" },
+    ],
+  },
+  {
+    title: "组合按键示例",
+    items: [
+      { command: "Control+j", description: "发送 Control + j" },
+      { command: "Control+k", description: "发送 Control + k" },
+      { command: "Control+l", description: "发送 Control + l" },
+      { command: "Control+p", description: "发送 Control + p" },
+      { command: "Control+Delete", description: "发送 Control + Delete" },
+      { command: "Control+grave", description: "发送 Control + `" },
+      { command: "Shift+Tab", description: "发送 Shift + Tab" },
+      { command: "Alt+Left", description: "发送 Alt + Left" },
+    ],
+  },
+];
 
 const KEY_COLOR_GROUPS: Array<{
   title: string;
@@ -289,6 +376,75 @@ function SwipeConfigRow(props: {
         />
       </HStack>
     </VStack>
+  );
+}
+
+function CommandReferencePage() {
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
+
+  function copyCommand(command: string) {
+    void Pasteboard.setString(command);
+    setShowCopiedToast(false);
+    setTimeout(() => setShowCopiedToast(true), 20);
+  }
+
+  return (
+    <List
+      navigationTitle="特殊命令"
+      navigationBarTitleDisplayMode="inline"
+      toast={{
+        isPresented: showCopiedToast,
+        onChanged: setShowCopiedToast,
+        message: "已复制命令",
+        duration: 1.2,
+        position: "bottom",
+      }}
+    >
+      {COMMAND_REFERENCE_GROUPS.map((group) => (
+        <Section
+          key={group.title}
+          header={<Text>{group.title}</Text>}
+        >
+          {group.items.map((item) => (
+            <Button
+              key={item.command}
+              action={() => copyCommand(item.command)}
+            >
+              <HStack
+                spacing={8}
+                frame={{
+                  maxWidth: "infinity" as any,
+                  alignment: "leading" as any,
+                }}
+              >
+                <VStack
+                  alignment="leading"
+                  spacing={4}
+                  frame={{ alignment: "leading" as any }}
+                >
+                  <Text font="body" fontDesign="monospaced">
+                    {item.command}
+                  </Text>
+                  <Text font="caption" foregroundStyle="secondaryLabel">
+                    {item.description}
+                  </Text>
+                </VStack>
+                <Spacer />
+              </HStack>
+            </Button>
+          ))}
+        </Section>
+      ))}
+      <Section
+        footer={
+          <SettingHint>
+            “自动”模式会先识别上面的脚本特殊命令，再尝试按 Rime
+            按键名或普通文本发送；“发送给 Rime”会跳过脚本特殊命令，直接按 Rime
+            按键/文本处理。
+          </SettingHint>
+        }
+      />
+    </List>
   );
 }
 
@@ -637,6 +793,16 @@ function SettingsView() {
 
   function resetSettings() {
     updateSettings(DEFAULT_RIME_KEYBOARD_SETTINGS);
+  }
+
+  function openCommandReferencePage() {
+    void Navigation.present({
+      element: (
+        <NavigationStack>
+          <CommandReferencePage />
+        </NavigationStack>
+      ),
+    });
   }
 
   function renderAppearancePage() {
@@ -1530,9 +1696,9 @@ function SettingsView() {
           footer={!composing
             ? (
               <SettingHint>
-                可用特殊值：{"{left}"}、{"{right}"}、{"{home}"}、{"{end}"}、{"{selectAll}"}、{"{cut}"}、{"{copy}"}、{"{paste}"}、{"{rimeUp}"}、{"{rimeDown}"}、{"{rimePageUp}"}、{"{rimePageDown}"}、{"{deleteAll}"}、{"{restoreDeleted}"}。
+                可用特殊值：{"{left}"}、{"{right}"}、{"{home}"}、{"{end}"}、{"{selectAll}"}、{"{toggleSelectAll}"}、{"{cut}"}、{"{copy}"}、{"{paste}"}、{"{rimeUp}"}、{"{rimeDown}"}、{"{rimePageUp}"}、{"{rimePageDown}"}、{"{deleteAll}"}、{"{restoreDeleted}"}。
                 也可直接填写 Rime 按键名，例如
-                Break、backslash、Page_Down、Control+grave。
+                Break、Page_Up、Page_Down、backslash，或组合键 Control+grave。
               </SettingHint>
             )
             : undefined}
@@ -1618,6 +1784,15 @@ function SettingsView() {
       <List
         navigationTitle="Scripting Rime Keyboard"
         navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarTrailing: (
+            <Button
+              title=""
+              systemImage="info.circle"
+              action={openCommandReferencePage}
+            />
+          ),
+        }}
       >
         <Section header={<Text>键盘</Text>}>
           <NavigationLink
