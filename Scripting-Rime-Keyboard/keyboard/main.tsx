@@ -1221,7 +1221,6 @@ function KeyboardContent(props: {
   }
 
   function pressNumericDigit(value: string) {
-    if (preedit && selectCandidateByKey(value)) return;
     pressSymbol(value);
   }
 
@@ -1534,9 +1533,6 @@ function KeyboardContent(props: {
       ? settings.letterSwipeUpModes
       : settings.letterSwipeDownModes;
     const action = actions[key];
-    if (preedit && modes[key] !== "direct" && /^[0-9]$/.test(action)) {
-      if (selectCandidateByKey(action)) return;
-    }
     runConfiguredAction(action, modes[key]);
   }
 
