@@ -79,6 +79,7 @@ export function KeyFace(props: {
   onPress: () => void;
   onLongPress?: () => void;
   onLongPressEnd?: () => void;
+  longPressEnabled?: boolean | (() => boolean);
   onTouchStart?: () => void;
   onTouchEnd?: () => void;
   onLongPressMove?: (details: any) => void;
@@ -166,6 +167,12 @@ export function KeyFace(props: {
     longPressCancelledRef.current = false;
   }
 
+  function isLongPressEnabled() {
+    return typeof props.longPressEnabled === "function"
+      ? props.longPressEnabled()
+      : props.longPressEnabled;
+  }
+
   useEffect(() => {
     return () => {
       const wasStarted = gestureStartedRef.current;
@@ -205,8 +212,16 @@ export function KeyFace(props: {
     props.onTouchStart?.();
     scheduleGestureSafetyRelease();
     if (!props.onLongPress) return;
+    if (isLongPressEnabled() === false) {
+      longPressCancelledRef.current = true;
+      return;
+    }
     longPressTimerRef.current = setTimeout(() => {
       if (!gestureStartedRef.current || longPressCancelledRef.current) return;
+      if (isLongPressEnabled() === false) {
+        longPressCancelledRef.current = true;
+        return;
+      }
       if (latestGestureRef.current && dragIntent(latestGestureRef.current)) {
         longPressCancelledRef.current = true;
         return;

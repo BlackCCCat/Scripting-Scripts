@@ -74,6 +74,7 @@ const PRESSED_RELEASE_DELAY = 260;
 const GESTURE_PRESSED_SAFETY_RELEASE_DELAY = 1500;
 const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
+const LETTER_LONG_PRESS_LAYER_GRACE_MS = 900;
 
 type ExpandedCandidateItem = {
   candidate: Rime.Candidate;
@@ -150,6 +151,7 @@ function KeyboardContent(props: {
   const [capsLocked, setCapsLocked] = useState(false);
   const [symbolLayer, setSymbolLayer] = useState(false);
   const [backslashWrapMode, setBackslashWrapMode] = useState(false);
+  const [rimeReady, setRimeReady] = useState(false);
   const [candidateExpanded, setCandidateExpanded] = useState(false);
   const [expandedCandidates, setExpandedCandidates] = useState<
     ExpandedCandidateItem[]
@@ -187,6 +189,12 @@ function KeyboardContent(props: {
   const pendingPressHapticRef = useRef(false);
   const swipeTriggerDistanceRef = useRef(settings.swipeTriggerDistance);
   const lastSwipeSettingsReloadAtRef = useRef(0);
+  const suppressLetterLongPressUntilRef = useRef(
+    Date.now() +
+      LETTER_LONG_PRESS_LAYER_GRACE_MS,
+  );
+  const rimeSetupStartedRef = useRef(false);
+  const disposedRef = useRef(false);
   const metrics = keyboardMetrics(
     settings,
     props.availableHeight,
@@ -207,24 +215,10 @@ function KeyboardContent(props: {
     syncKeyboardAppearance();
     CustomKeyboard.addListener("textDidChange", syncKeyboardAppearance);
     CustomKeyboard.addListener("selectionDidChange", syncKeyboardAppearance);
-
-    (async () => {
-      try {
-        await Rime.setup();
-        if (settings.autoDeployOnLaunch) {
-          await Rime.deploy({ fullCheck: false });
-        }
-        const list = await Rime.listSchemas();
-        setSchemas(list);
-        const s = new Rime.Session();
-        sessionRef.current = s;
-        refresh(s);
-      } catch (e) {
-        setError((e as Error).message ?? String(e));
-      }
-    })();
+    void setupRimeSession();
 
     return () => {
+      disposedRef.current = true;
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
       CustomKeyboard.removeListener(
         "selectionDidChange",
@@ -258,8 +252,42 @@ function KeyboardContent(props: {
       pressBurstCountRef.current = 0;
       sessionRef.current?.close();
       sessionRef.current = null;
+      setRimeReady(false);
     };
   }, []);
+
+  async function setupRimeSession() {
+    if (
+      disposedRef.current || rimeSetupStartedRef.current || sessionRef.current
+    ) {
+      return;
+    }
+    rimeSetupStartedRef.current = true;
+    try {
+      const result = await Thread.runInBackground(async () => {
+        await Rime.setup();
+        if (settings.autoDeployOnLaunch) {
+          await Rime.deploy({ fullCheck: false });
+        }
+        const list = await Rime.listSchemas();
+        const session = new Rime.Session();
+        return { list, session };
+      });
+      if (disposedRef.current) return;
+      setSchemas(result.list);
+      const s = result.session;
+      if (disposedRef.current) {
+        s.close();
+        return;
+      }
+      sessionRef.current = s;
+      refresh(s);
+      setRimeReady(true);
+    } catch (e) {
+      setRimeReady(false);
+      setError((e as Error).message ?? String(e));
+    }
+  }
 
   function updateMarkedText(ctx: Rime.Context | null, committed: boolean) {
     if (!settings.inlinePreedit || committed || !ctx?.preedit) {
@@ -464,6 +492,31 @@ function KeyboardContent(props: {
 
   function isPressed(id: string) {
     return pressedKeyIds.has(id);
+  }
+
+  function suppressLetterLongPress(
+    duration = LETTER_LONG_PRESS_LAYER_GRACE_MS,
+  ) {
+    suppressLetterLongPressUntilRef.current = Date.now() + duration;
+  }
+
+  function letterLongPressEnabled() {
+    return rimeReady && Date.now() >= suppressLetterLongPressUntilRef.current;
+  }
+
+  function switchToLetterLayer() {
+    suppressLetterLongPress();
+    clearAllRowGestureState();
+    releaseAllPressedKeys();
+    setSymbolLayer(false);
+  }
+
+  function toggleSymbolLayer() {
+    if (symbolLayer) switchToLetterLayer();
+    else {
+      releaseAllPressedKeys();
+      setSymbolLayer(true);
+    }
   }
 
   function beginKeyTouch(id: string) {
@@ -774,8 +827,10 @@ function KeyboardContent(props: {
     if (target) activeHitTargetRef.current.set(rowId, target);
     else activeHitTargetRef.current.delete(rowId);
     rowGestureTokenRef.current.set(rowId, ++nextGestureTokenRef.current);
-    if (target) setKeyPressed(target.id, true, false);
-    if (target) playPressFeedback();
+    if (target) {
+      setKeyPressed(target.id, true, false);
+      playPressFeedback();
+    }
     scheduleRowLongPress(rowId, target);
     scheduleRowGestureSafetyRelease(rowId, target);
   }
@@ -819,16 +874,19 @@ function KeyboardContent(props: {
       (direction === "left" && target.onSwipeLeft) ||
       (direction === "right" && target.onSwipeRight);
     if (hasSwipeAction) cancelPendingPressFeedback();
+    const action = direction === "up" && target.onSwipeUp
+      ? target.onSwipeUp
+      : direction === "down" && target.onSwipeDown
+      ? target.onSwipeDown
+      : direction === "left" && target.onSwipeLeft
+      ? target.onSwipeLeft
+      : direction === "right" && target.onSwipeRight
+      ? target.onSwipeRight
+      : target.onPress;
     playReleaseFeedback();
-    if (direction === "up" && target.onSwipeUp) target.onSwipeUp();
-    else if (direction === "down" && target.onSwipeDown) target.onSwipeDown();
-    else if (direction === "left" && target.onSwipeLeft) target.onSwipeLeft();
-    else if (direction === "right" && target.onSwipeRight) {
-      target.onSwipeRight();
-    } else target.onPress();
-
     setKeyPressed(target.id, false);
     cancelRowGesture(rowId);
+    action();
   }
 
   function hitRowGesture(rowId: string, targets: KeyHitTarget[]) {
@@ -1593,7 +1651,7 @@ function KeyboardContent(props: {
   }
 
   const composing = preedit.length > 0;
-  const usesComposingFunctionRow = composing &&
+  const usesComposingFunctionRow = composing && !symbolLayer &&
     settings.composingFunctionRowEnabled;
   const schemaMenu = schemas.length > 1
     ? (
@@ -1864,7 +1922,7 @@ function KeyboardContent(props: {
         id: "numbers",
         x,
         width: bottomSplitButtonWidth,
-        onPress: () => setSymbolLayer((value) => !value),
+        onPress: toggleSymbolLayer,
         onSwipeUp: () => pressSymbol("`"),
       });
       x += bottomSplitButtonWidth + KEY_SPACING;
@@ -1873,7 +1931,7 @@ function KeyboardContent(props: {
         id: "numbers",
         x,
         width: metrics.bottom.numbers,
-        onPress: () => setSymbolLayer((value) => !value),
+        onPress: toggleSymbolLayer,
         onSwipeUp: () => pressSymbol("`"),
       });
       x += metrics.bottom.numbers + KEY_SPACING;
@@ -1964,7 +2022,7 @@ function KeyboardContent(props: {
           : `numeric-${value}`,
         ...horizontalHitFrame(displayX, numericKeyWidth, index, row.length),
         onPress: () => {
-          if (value === "ABC") setSymbolLayer(false);
+          if (value === "ABC") switchToLetterLayer();
           else if (value === "space") pressSpace();
           else pressNumericDigit(value);
         },
@@ -2897,8 +2955,7 @@ function KeyboardContent(props: {
                           labelFontSize={16}
                           passive
                           active={isPressed("numeric-abc")}
-                          onPress={() =>
-                            runWithFeedback(() => setSymbolLayer(false))}
+                          onPress={() => runWithFeedback(switchToLetterLayer)}
                         />
                         <KeyFace
                           id="numeric-0"
@@ -3126,6 +3183,7 @@ function KeyboardContent(props: {
                             holdKeyPressedUntilRelease(ch);
                             pressUppercaseLetter(ch);
                           }}
+                          longPressEnabled={letterLongPressEnabled}
                           longPressDuration={settings.letterLongPressDuration}
                           onSwipeUp={() => runLetterSwipe("up", ch)}
                           onSwipeDown={() => runLetterSwipe("down", ch)}
@@ -3216,8 +3274,7 @@ function KeyboardContent(props: {
                 selected={symbolLayer}
                 passive
                 active={isPressed("numbers")}
-                onPress={() =>
-                  runWithFeedback(() => setSymbolLayer((value) => !value))}
+                onPress={() => runWithFeedback(toggleSymbolLayer)}
                 onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
               />
               <KeyFace
