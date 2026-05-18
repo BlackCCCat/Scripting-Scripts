@@ -446,7 +446,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   inputClicks: true,
   inputClickLevel: 3,
   haptics: true,
-  hapticLevel: 3,
+  hapticLevel: 1,
   autoDeployOnLaunch: true,
 };
 
@@ -866,7 +866,7 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     inputClicks: typeof raw?.inputClicks === "boolean" ? raw.inputClicks : true,
     inputClickLevel: clampNumber(raw?.inputClickLevel, 3, 1, 5),
     haptics: typeof raw?.haptics === "boolean" ? raw.haptics : true,
-    hapticLevel: clampNumber(raw?.hapticLevel, 3, 1, 5),
+    hapticLevel: clampNumber(raw?.hapticLevel, 1, 1, 5),
     autoDeployOnLaunch: typeof raw?.autoDeployOnLaunch === "boolean"
       ? raw.autoDeployOnLaunch
       : true,
