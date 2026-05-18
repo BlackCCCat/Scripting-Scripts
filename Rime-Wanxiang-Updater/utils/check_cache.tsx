@@ -36,6 +36,8 @@ export function getCheckCacheKey(cfg: AppConfig) {
     cfg.usePrereleaseScheme ? "prerelease" : "stable",
     cfg.schemeEdition,
     cfg.proSchemeKey,
+    cfg.inputMethod,
+    cfg.useBuiltinScriptingPath ? "builtin" : "manual",
     cfg.hamsterRootPath,
     cfg.hamsterBookmarkName,
   ].join("|")

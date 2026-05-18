@@ -262,7 +262,7 @@ function inferReleaseSource(rec?: RecordData): ReleaseSource | undefined {
 
 function normalizeInputMethod(v?: string): InputMethod | undefined {
   const x = String(v ?? "").trim().toLowerCase()
-  if (x === "hamster" || x === "hamster3") return x
+  if (x === "hamster" || x === "hamster3" || x === "scripting") return x
   if (x === "cang") return "hamster"
   if (x === "yushu" || x === "yuanshu") return "hamster3"
   return undefined

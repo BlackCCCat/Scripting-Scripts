@@ -77,7 +77,9 @@ function releaseSourceLabel(source: AppConfig["releaseSource"]) {
 }
 
 function inputMethodLabel(method: AppConfig["inputMethod"]) {
-  return method === "hamster3" ? "元书输入法" : "仓输入法"
+  if (method === "hamster3") return "元书输入法"
+  if (method === "scripting") return "Scripting"
+  return "仓输入法"
 }
 
 function countUpdates(decision: UpdateDecision | null) {

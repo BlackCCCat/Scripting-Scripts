@@ -3,6 +3,15 @@ import { Runtime } from "./runtime";
 import type { InputMethod } from "./config";
 
 export async function deployHamster(method: InputMethod) {
+  if (method === "scripting") {
+    const RimeApi: any = (globalThis as any).Rime
+    if (!RimeApi?.setup || !RimeApi?.deploy) {
+      throw new Error("当前不支持自动部署，请手动部署")
+    }
+    await RimeApi.setup({ appName: "万象方案助手" })
+    await RimeApi.deploy({ fullCheck: false })
+    return true
+  }
   const url =
     method === "hamster3"
       ? "hamster3://dev.fuxiao.app.hamster3/rime?action=deploy"

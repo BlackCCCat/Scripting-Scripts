@@ -4,6 +4,7 @@ import {
   Form,
   Navigation,
   Section,
+  Spacer,
   Text,
   TextField,
   VStack,
@@ -28,7 +29,7 @@ import {
   HOME_SECTION_LABELS,
 } from "../utils/config"
 import { callMaybeAsync, normalizePath, storage } from "../utils/common"
-import { detectRimeDir, collectRimeCandidates } from "../utils/hamster"
+import { detectRimeDir, collectRimeCandidates, getScriptingRimePaths } from "../utils/hamster"
 import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
@@ -45,6 +46,7 @@ type AlertState = {
 const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "仓输入法", value: "hamster" },
   { label: "元书输入法", value: "hamster3" },
+  { label: "Scripting", value: "scripting" },
 ]
 
 const PRO_KEY_LABELS: Record<ProSchemeKey, string> = {
@@ -99,9 +101,10 @@ function normalizeInputMethodFromMeta(meta: any, detectedEngine: string): InputM
   )
     .trim()
     .toLowerCase()
-  if (input === "hamster" || input === "hamster3") return input
+  if (input === "hamster" || input === "hamster3" || input === "scripting") return input
   if (detectedEngine === "元书输入法") return "hamster3"
   if (detectedEngine === "仓输入法") return "hamster"
+  if (detectedEngine === "Scripting") return "scripting"
   return undefined
 }
 
@@ -162,12 +165,14 @@ export function SettingsView(props: {
 
   // 当 picker 变化时，同步回 cfg（保持 cfg 是最终保存对象）
   useEffect(() => {
+    const inputMethod = INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value
     setCfg((c) => ({
       ...c,
       releaseSource: releaseIdx === 1 ? "github" : "cnb",
       schemeEdition: schemeIdx === 1 ? "pro" : "base",
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      inputMethod: INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
+      inputMethod,
+      useBuiltinScriptingPath: inputMethod === "scripting" ? c.useBuiltinScriptingPath : false,
     }))
   }, [releaseIdx, schemeIdx, proKeyIdx, inputIdx])
 
@@ -193,6 +198,14 @@ export function SettingsView(props: {
     setInputIdx(im >= 0 ? im : 0)
       ; (async () => {
         await refreshBookmarks(latest)
+        if (latest.inputMethod === "scripting" && latest.useBuiltinScriptingPath) {
+          try {
+            const scriptingPaths = await getScriptingRimePaths()
+            if (scriptingPaths?.rootDir) {
+              setCfg((c) => ({ ...c, hamsterRootPath: scriptingPaths.rootDir, hamsterBookmarkName: "" }))
+            }
+          } catch { }
+        }
       })()
   }, [])
 
@@ -326,7 +339,7 @@ export function SettingsView(props: {
     if (cleaned.length) {
       let idx = -1
       if (targetName) idx = cleaned.findIndex((b) => b.name === targetName)
-      if (idx < 0 && targetPath) idx = cleaned.findIndex((b) => b.path === targetPath)
+      if (idx < 0 && targetPath) idx = cleaned.findIndex((b) => normalizePath(b.path) === normalizePath(targetPath))
       setBookmarkIdx(idx >= 0 ? idx : 0)
       if (idx >= 0) {
         const matched = cleaned[idx]
@@ -335,7 +348,7 @@ export function SettingsView(props: {
           : true
         const resolved = fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? "")
-          : (matched.name ? "" : matched.path)
+          : matched.path
         const selectedPath = normalizePath(resolved || matched.path)
         const pathChanged = selectedPath !== normalizePath(targetPath) || matched.name !== targetName
         if (pathChanged) {
@@ -374,6 +387,17 @@ export function SettingsView(props: {
     }
 
     try {
+      if (fixed.inputMethod === "scripting" && fixed.useBuiltinScriptingPath) {
+        const scriptingPaths = await getScriptingRimePaths()
+        if (!scriptingPaths?.rootDir) {
+          throw new Error("无法获取 Scripting 内置 Rime 路径")
+        }
+        fixed = {
+          ...fixed,
+          hamsterRootPath: scriptingPaths.rootDir,
+          hamsterBookmarkName: "",
+        }
+      }
       const pathChanged =
         fixed.hamsterRootPath !== initialHamsterRootPath ||
         fixed.hamsterBookmarkName !== initialHamsterBookmarkName
@@ -441,6 +465,7 @@ export function SettingsView(props: {
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
   const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
+  const useBuiltinScriptingPath = cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath
 
   useEffect(() => {
     props.registerSaveAction?.(() => {
@@ -453,56 +478,65 @@ export function SettingsView(props: {
 
   const formContent = (
     <Form formStyle="grouped">
-      <Section header={<Text>Hamster 路径</Text>}>
+      <Section header={<Text>Rime 路径</Text>}>
         <TextField
           label={<Text>路径</Text>}
           value={cfg.hamsterRootPath}
-          onChanged={(v: string) => setCfg((c) => ({ ...c, hamsterRootPath: v, hamsterBookmarkName: "" }))}
-          prompt="粘贴或选择 Hamster 根目录"
+          onChanged={(v: string) => {
+            if (useBuiltinScriptingPath) return
+            setCfg((c) => ({ ...c, hamsterRootPath: v, hamsterBookmarkName: "" }))
+          }}
+          prompt="粘贴或选择 Rime 根目录"
           textFieldStyle="roundedBorder"
         />
         <Text font="caption" foregroundStyle="secondaryLabel">
-          请在 工具-文件书签 中添加相应文件夹，并在此选择该文件夹
+          请在 工具-文件书签 中添加相应文件夹，并在此选择
         </Text>
-        {bookmarks.length ? (
-          <Picker
-            title={"书签文件夹"}
-            pickerStyle="menu"
-            value={bookmarkIdx}
-            onChanged={(idx: number) => {
-              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-              setBookmarkIdx(idx)
-              const b = bookmarks[idx]
-              if (b?.path) {
-                ; (async () => {
-                  const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
-                  const canUseByName = fm?.bookmarkExists
-                    ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
-                    : true
-                  const resolved = fm?.bookmarkedPath && canUseByName
-                    ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
-                    : (b.name ? "" : b.path)
-                  const selectedPath = normalizePath(resolved || b.path)
-                  let next: AppConfig = {
-                    ...cfg,
-                    hamsterRootPath: selectedPath,
-                    hamsterBookmarkName: b.name,
-                  }
-                  try {
-                    next = await syncSchemeFromLocal(next)
-                    setCfg(next)
-                  } catch { }
-                })()
-              }
-            }}
-          >
-            {bookmarks.map((b, index) => (
-              <Text key={b.name} tag={index}>
-                {b.name}
-              </Text>
-            ))}
-          </Picker>
-        ) : null}
+        {useBuiltinScriptingPath ? (
+            <HStack frame={{ width: "100%" as any }} padding={{ top: 8, bottom: 8 }}>
+              <Text foregroundStyle="secondaryLabel">书签文件夹</Text>
+              <Spacer />
+              <Text foregroundStyle="tertiaryLabel">已使用内置路径</Text>
+            </HStack>
+          ) : bookmarks.length ? (
+            <Picker
+              title={"书签文件夹"}
+              pickerStyle="menu"
+              value={bookmarkIdx}
+              onChanged={(idx: number) => {
+                try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+                setBookmarkIdx(idx)
+                const b = bookmarks[idx]
+                if (b?.path) {
+                  ; (async () => {
+                    const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
+                    const canUseByName = fm?.bookmarkExists
+                      ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [b.name]))
+                      : true
+                    const resolved = fm?.bookmarkedPath && canUseByName
+                      ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? "")
+                      : b.path
+                    const selectedPath = normalizePath(resolved || b.path)
+                    let next: AppConfig = {
+                      ...cfg,
+                      hamsterRootPath: selectedPath,
+                      hamsterBookmarkName: b.name,
+                    }
+                    try {
+                      next = await syncSchemeFromLocal(next)
+                      setCfg(next)
+                    } catch { }
+                  })()
+                }
+              }}
+            >
+              {bookmarks.map((b, index) => (
+                <Text key={b.name} tag={index}>
+                  {b.name}
+                </Text>
+              ))}
+            </Picker>
+          ) : null}
       </Section>
 
       <Section header={<Text>发布源</Text>}>
@@ -595,6 +629,36 @@ export function SettingsView(props: {
             </Text>
           ))}
         </Picker>
+        {cfg.inputMethod === "scripting" ? (
+          <Toggle
+            title={"使用内置路径"}
+            value={cfg.useBuiltinScriptingPath}
+            onChanged={(v: boolean) => {
+              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+              setCfg((c) => ({
+                ...c,
+                useBuiltinScriptingPath: v,
+                hamsterBookmarkName: v ? "" : c.hamsterBookmarkName,
+              }))
+              void (async () => {
+                if (v) {
+                  try {
+                    const scriptingPaths = await getScriptingRimePaths()
+                    setCfg((c) => ({
+                      ...c,
+                      useBuiltinScriptingPath: true,
+                      hamsterRootPath: scriptingPaths?.rootDir ?? c.hamsterRootPath,
+                      hamsterBookmarkName: "",
+                    }))
+                  } catch {
+                    setCfg((c) => ({ ...c, useBuiltinScriptingPath: true, hamsterBookmarkName: "" }))
+                  }
+                }
+              })()
+            }}
+            toggleStyle="switch"
+          />
+        ) : null}
       </Section>
 
       <Section header={<Text>更新设置</Text>}>

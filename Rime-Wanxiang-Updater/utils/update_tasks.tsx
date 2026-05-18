@@ -371,8 +371,12 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
 // ===== 部署（删 build 再 URL scheme）=====
 async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
   if (cfg.autoDeployAfterDownload === false) return
+  const detected = await detectRimeDir(cfg)
   const installRoot = await resolveRimeDir(cfg)
-  const buildDir = Path.join(installRoot, "build")
+  const buildBase = cfg.inputMethod === "scripting"
+    ? String(detected.userDataDir ?? installRoot)
+    : installRoot
+  const buildDir = Path.join(buildBase, "build")
   if (cfg.skipBuildCleanup) {
     onLog?.(`跳过清理 build 目录：${buildDir}`)
   } else {
@@ -389,8 +393,12 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, on
 }
 
 export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) => void, onLog?: (s: string) => void) {
+  const detected = await detectRimeDir(cfg)
   const installRoot = await resolveRimeDir(cfg)
-  const buildDir = Path.join(installRoot, "build")
+  const buildBase = cfg.inputMethod === "scripting"
+    ? String(detected.userDataDir ?? installRoot)
+    : installRoot
+  const buildDir = Path.join(buildBase, "build")
   if (cfg.skipBuildCleanup) {
     onLog?.(`跳过清理 build 目录：${buildDir}`)
   } else {

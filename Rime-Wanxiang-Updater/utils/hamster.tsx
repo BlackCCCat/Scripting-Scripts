@@ -7,6 +7,24 @@ import { callMaybeAsync } from "./common"
 // Base RIME suffixes (without RimeUserData children, those are detected dynamically)
 export const RIME_SUFFIXES_BASE = ["/RIME/Rime", "/Rime"]
 
+export type RimeEngineLabel = "仓输入法" | "元书输入法" | "Scripting"
+
+export async function getScriptingRimePaths(): Promise<{
+  rootDir: string
+  sharedDataDir: string
+  userDataDir: string
+} | null> {
+  const fm: any = Runtime.FileManager
+  const appGroupDocumentsDirectory = String(fm?.appGroupDocumentsDirectory ?? "").trim()
+  if (!appGroupDocumentsDirectory) return null
+  const appGroupRoot = String(Path.dirname(appGroupDocumentsDirectory)).trim()
+  // Scripting Rime uses the shared App Group container's `Rime` directory.
+  const rootDir = String(Path.join(appGroupRoot, "Rime")).trim()
+  const sharedDataDir = String(Path.join(rootDir, "shared")).trim()
+  const userDataDir = String(Path.join(rootDir, "user")).trim()
+  return { rootDir, sharedDataDir, userDataDir }
+}
+
 /**
  * Scan RimeUserData directory for all subdirectories.
  * Returns full paths like ["/root/RimeUserData/wanxiang", "/root/RimeUserData/other"]
@@ -132,35 +150,69 @@ async function resolveBookmarkPath(rawPath: string, bookmarkName?: string): Prom
 }
 
 // 从 hamsterRootPath 推断实际 rime 目录
-export async function detectRimeDir(cfg: AppConfig): Promise<{ engine: "仓输入法" | "元书输入法"; rimeDir: string }> {
+export async function detectRimeDir(cfg: AppConfig): Promise<{
+  engine: RimeEngineLabel
+  rimeDir: string
+  rootDir?: string
+  userDataDir?: string
+}> {
+  if (cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath) {
+    const scriptingPaths = await getScriptingRimePaths()
+    if (scriptingPaths) {
+      return {
+        engine: "Scripting",
+        rimeDir: scriptingPaths.sharedDataDir,
+        rootDir: scriptingPaths.rootDir,
+        userDataDir: scriptingPaths.userDataDir,
+      }
+    }
+  }
   const fm = Runtime.FileManager
   const rawRoot = cfg.hamsterRootPath?.trim()
   const bookmarkName = cfg.hamsterBookmarkName?.trim()
   const root = await resolveBookmarkPath(rawRoot, bookmarkName)
-  if (!root) return { engine: "仓输入法", rimeDir: "" }
-  if (!fm?.exists) return { engine: "仓输入法", rimeDir: root }
+  if (!root) return { engine: cfg.inputMethod === "scripting" ? "Scripting" : "仓输入法", rimeDir: "" }
+  if (cfg.inputMethod === "scripting") {
+    const normalizedRoot = root.replace(/\/+$/, "")
+    const baseRoot = normalizedRoot.endsWith("/shared") || normalizedRoot.endsWith("/user")
+      ? String(Path.dirname(normalizedRoot)).trim()
+      : normalizedRoot
+    const sharedDir = normalizedRoot.endsWith("/shared")
+      ? normalizedRoot
+      : normalizedRoot.endsWith("/user")
+        ? `${baseRoot}/shared`
+        : `${baseRoot}/shared`
+    const userDataDir = `${baseRoot}/user`
+    return {
+      engine: "Scripting",
+      rimeDir: sharedDir,
+      rootDir: baseRoot,
+      userDataDir,
+    }
+  }
+  if (!fm?.exists) return { engine: "仓输入法", rimeDir: root, rootDir: root }
 
   // 元书输入法：动态扫描 RimeUserData 下的所有子目录
   const subdirs = await scanRimeUserDataSubdirs(root)
   if (subdirs.length > 0) {
     // 优先使用 wanxiang 子目录（如果存在）
     const wanxiang = subdirs.find((d) => d.endsWith("/wanxiang"))
-    return { engine: "元书输入法", rimeDir: wanxiang ?? subdirs[0] }
+    return { engine: "元书输入法", rimeDir: wanxiang ?? subdirs[0], rootDir: root }
   }
   // 检查 RimeUserData 目录本身是否存在（没有子目录的情况）
   const rimeUserData = `${root}/RimeUserData`
   if (await fm.exists(rimeUserData)) {
-    return { engine: "元书输入法", rimeDir: rimeUserData }
+    return { engine: "元书输入法", rimeDir: rimeUserData, rootDir: root }
   }
 
   // 仓输入法
   const cang1 = `${root}/RIME/Rime`
-  if (await fm.exists(cang1)) return { engine: "仓输入法", rimeDir: cang1 }
+  if (await fm.exists(cang1)) return { engine: "仓输入法", rimeDir: cang1, rootDir: root }
 
   const cang2 = `${root}/Rime`
-  if (await fm.exists(cang2)) return { engine: "仓输入法", rimeDir: cang2 }
+  if (await fm.exists(cang2)) return { engine: "仓输入法", rimeDir: cang2, rootDir: root }
 
-  return { engine: "仓输入法", rimeDir: root }
+  return { engine: "仓输入法", rimeDir: root, rootDir: root }
 }
 
 async function pathExists(path: string): Promise<boolean | undefined> {
@@ -231,6 +283,28 @@ export async function resolveInstallRoot(cfg: AppConfig): Promise<string> {
 }
 
 export async function verifyInstallPathAccess(cfg: AppConfig): Promise<{ ok: boolean; installRoot: string; reason?: string }> {
+  if (cfg.inputMethod === "scripting") {
+    const paths = await getScriptingRimePaths()
+    if (!paths) {
+      return { ok: false, installRoot: "", reason: "无法获取 Scripting App Group Rime 路径" }
+    }
+    const sharedCreated = await mkdir(paths.sharedDataDir)
+    const userCreated = await mkdir(paths.userDataDir)
+    if (!sharedCreated || !userCreated) {
+      return { ok: false, installRoot: paths.sharedDataDir, reason: "无法创建或访问 Scripting Rime 目录" }
+    }
+    const marker = `${paths.sharedDataDir}/.wanxiang_perm_check_${Date.now()}`
+    const created = await mkdir(marker)
+    if (!created) {
+      return { ok: false, installRoot: paths.sharedDataDir, reason: "无法写入 Scripting Rime 共享目录" }
+    }
+    const removed = await removePath(marker)
+    if (!removed) {
+      return { ok: false, installRoot: paths.sharedDataDir, reason: "无法删除 Scripting Rime 测试目录" }
+    }
+    return { ok: true, installRoot: paths.sharedDataDir }
+  }
+
   const installRoot = await resolveInstallRoot(cfg)
   if (!installRoot) {
     return { ok: false, installRoot: "", reason: "未选择路径或书签不可用" }
@@ -255,7 +329,7 @@ export async function verifyInstallPathAccess(cfg: AppConfig): Promise<{ ok: boo
 export async function assertInstallPathAccess(cfg: AppConfig): Promise<string> {
   const result = await verifyInstallPathAccess(cfg)
   if (!result.ok) {
-    throw new Error("书签路径不可用，请在设置中添加或重新添加书签文件夹。")
+    throw new Error(result.reason || "书签路径不可用，请在设置中添加或重新添加书签文件夹。")
   }
   return result.installRoot
 }

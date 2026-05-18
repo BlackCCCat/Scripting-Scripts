@@ -4,7 +4,7 @@ import { Runtime } from "./runtime"
 export type ReleaseSource = "cnb" | "github"
 export type SchemeEdition = "base" | "pro"
 export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou" | "shyplus" | "wx"
-export type InputMethod = "hamster" | "hamster3"
+export type InputMethod = "hamster" | "hamster3" | "scripting"
 export type HomeSectionKey = "local" | "remote" | "notes" | "actions" | "status"
 
 export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou", "shyplus", "wx"]
@@ -31,6 +31,7 @@ export type AppConfig = {
   autoDeployAfterDownload: boolean
   skipBuildCleanup: boolean
   inputMethod: InputMethod
+  useBuiltinScriptingPath: boolean
   autoCheckOnLaunch: boolean
   showVerboseLog: boolean
   homeSectionOrder: HomeSectionKey[]
@@ -56,6 +57,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   autoDeployAfterDownload: true,
   skipBuildCleanup: false,
   inputMethod: "hamster",
+  useBuiltinScriptingPath: false,
   autoCheckOnLaunch: false,
   showVerboseLog: true,
   homeSectionOrder: ["local", "actions", "status", "remote", "notes"],
