@@ -79,6 +79,188 @@ export function dragDirection(
   return dx < 0 ? "left" : "right";
 }
 
+export type TouchIntentState =
+  | "idle"
+  | "pending"
+  | "longpress_locked"
+  | "swipe_locked"
+  | "tap_locked"
+  | "cancelled";
+
+export function createTouchIntentMachine(options: {
+  longPressDuration?: number | (() => number);
+  swipeTriggerDistance?: number | (() => number);
+  safetyReleaseDelay?: number | (() => number);
+  longPressSafetyReleaseDelay?: number | (() => number);
+  isLongPressEnabled?: () => boolean;
+  shouldCancelLongPress?: (details: any) => boolean;
+  onTouchStart?: () => void;
+  onTouchEnd?: () => void;
+  onLongPress?: () => void;
+  onLongPressEnd?: () => void;
+  onLongPressMove?: (details: any) => void;
+  onSwipeStart?: () => void;
+  onResolveSwipe?: (
+    direction: "up" | "down" | "left" | "right",
+    details: any,
+  ) => boolean;
+  onPress?: () => void;
+}) {
+  let state: TouchIntentState = "idle";
+  let latestDetails: any = null;
+  let longPressTimer: any = null;
+  let safetyTimer: any = null;
+
+  function clearLongPressTimer() {
+    if (longPressTimer != null) clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+
+  function clearSafetyTimer() {
+    if (safetyTimer != null) clearTimeout(safetyTimer);
+    safetyTimer = null;
+  }
+
+  function reset() {
+    clearLongPressTimer();
+    clearSafetyTimer();
+    latestDetails = null;
+    state = "idle";
+  }
+
+  function isLongPressEnabled() {
+    return options.isLongPressEnabled ? options.isLongPressEnabled() : true;
+  }
+
+  function shouldCancelLongPress(details: any) {
+    return options.shouldCancelLongPress
+      ? options.shouldCancelLongPress(details)
+      : false;
+  }
+
+  function scheduleSafetyRelease(delay: number) {
+    clearSafetyTimer();
+    safetyTimer = setTimeout(() => {
+      if (state !== "pending" && state !== "longpress_locked") return;
+      const wasLongPress = state === "longpress_locked";
+      if (wasLongPress) options.onLongPressEnd?.();
+      options.onTouchEnd?.();
+      state = "cancelled";
+      reset();
+    }, delay);
+  }
+
+  function scheduleLongPress() {
+    clearLongPressTimer();
+    if (!options.onLongPress || isLongPressEnabled() === false) return;
+    const duration =
+      typeof options.longPressDuration === "function"
+        ? options.longPressDuration()
+        : options.longPressDuration;
+    longPressTimer = setTimeout(() => {
+      if (state !== "pending") return;
+      if (isLongPressEnabled() === false) {
+        clearLongPressTimer();
+        return;
+      }
+      if (latestDetails && shouldCancelLongPress(latestDetails)) {
+        clearLongPressTimer();
+        return;
+      }
+      state = "longpress_locked";
+      options.onLongPress?.();
+      const longPressSafetyDelay =
+        typeof options.longPressSafetyReleaseDelay === "function"
+          ? options.longPressSafetyReleaseDelay()
+          : options.longPressSafetyReleaseDelay;
+      scheduleSafetyRelease(longPressSafetyDelay ?? 2600);
+    }, duration ?? 360);
+  }
+
+  return {
+    getState() {
+      return state;
+    },
+    start() {
+      if (state !== "idle") return;
+      state = "pending";
+      options.onTouchStart?.();
+      const safetyDelay =
+        typeof options.safetyReleaseDelay === "function"
+          ? options.safetyReleaseDelay()
+          : options.safetyReleaseDelay;
+      scheduleSafetyRelease(safetyDelay ?? 1500);
+      scheduleLongPress();
+    },
+    update(details: any) {
+      if (state !== "pending" && state !== "longpress_locked") return;
+      latestDetails = details;
+      if (state === "longpress_locked") {
+        options.onLongPressMove?.(details);
+        return;
+      }
+      if (shouldCancelLongPress(details)) {
+        clearLongPressTimer();
+      }
+    },
+    end(details: any) {
+      latestDetails = details;
+      clearLongPressTimer();
+      clearSafetyTimer();
+      if (state === "longpress_locked") {
+        options.onLongPressEnd?.();
+        options.onTouchEnd?.();
+        state = "cancelled";
+        reset();
+        return;
+      }
+      if (state !== "pending") {
+        reset();
+        return;
+      }
+      const swipeTriggerDistance =
+        typeof options.swipeTriggerDistance === "function"
+          ? options.swipeTriggerDistance()
+          : options.swipeTriggerDistance;
+      const direction = dragDirection(details, swipeTriggerDistance);
+      if (direction) {
+        state = "swipe_locked";
+        options.onSwipeStart?.();
+        if (options.onResolveSwipe?.(direction, details)) {
+          options.onTouchEnd?.();
+          state = "cancelled";
+          reset();
+          return;
+        }
+      }
+      state = "tap_locked";
+      options.onPress?.();
+      options.onTouchEnd?.();
+      state = "cancelled";
+      reset();
+    },
+    cancel(opts?: { invokeTouchEnd?: boolean; invokeLongPressEnd?: boolean }) {
+      const wasPending = state === "pending";
+      const wasLongPress = state === "longpress_locked";
+      clearLongPressTimer();
+      clearSafetyTimer();
+      if ((wasPending || wasLongPress) && opts?.invokeTouchEnd) {
+        if (wasLongPress && opts?.invokeLongPressEnd) {
+          options.onLongPressEnd?.();
+        }
+        options.onTouchEnd?.();
+      } else if (wasLongPress && opts?.invokeLongPressEnd) {
+        options.onLongPressEnd?.();
+      }
+      state = "cancelled";
+      reset();
+    },
+    dispose() {
+      this.cancel({ invokeTouchEnd: true, invokeLongPressEnd: true });
+    },
+  };
+}
+
 export function nearestHitTarget(
   x: number,
   y: number,

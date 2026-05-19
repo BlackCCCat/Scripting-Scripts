@@ -49,7 +49,7 @@ import { keyboardMetrics } from "./metrics";
 import { type KeyboardAppearance, paletteFor } from "./palette";
 import type { KeyHitTarget } from "./types";
 import {
-  dragDirection,
+  createTouchIntentMachine,
   hapticInterval,
   inputClickInterval,
   nearestHitTarget,
@@ -71,7 +71,6 @@ const DELETE_LONG_PRESS_DURATION = 920;
 const DELETE_REPEAT_SAFETY_DURATION = 4200;
 const CURSOR_REPEAT_DURATION = 420;
 const PRESSED_RELEASE_DELAY = 260;
-const GESTURE_PRESSED_SAFETY_RELEASE_DELAY = 1500;
 const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
 const LETTER_LONG_PRESS_LAYER_GRACE_MS = 900;
@@ -170,14 +169,8 @@ function KeyboardContent(props: {
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
-  const rowLongPressHandledRef = useRef(new Map<string, boolean>());
-  const rowLongPressTimerRef = useRef(new Map<string, number | null>());
-  const rowGestureSafetyTimerRef = useRef(new Map<string, any>());
-  const rowLongPressCancelledRef = useRef(new Map<string, boolean>());
-  const rowLongPressLatestGestureRef = useRef(new Map<string, any>());
+  const rowGestureMachineRef = useRef(new Map<string, any>());
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
-  const rowGestureTokenRef = useRef(new Map<string, number>());
-  const nextGestureTokenRef = useRef(0);
   const spaceCursorDragXRef = useRef<number | null>(null);
   const lastPressFeedbackAtRef = useRef(0);
   const lastPressRequestAtRef = useRef(0);
@@ -227,14 +220,10 @@ function KeyboardContent(props: {
       try {
         CustomKeyboard.unmarkText();
       } catch {}
-      for (const timer of rowLongPressTimerRef.current.values()) {
-        if (timer != null) clearTimeout(timer);
+      for (const machine of rowGestureMachineRef.current.values()) {
+        machine?.dispose?.();
       }
-      rowLongPressTimerRef.current.clear();
-      for (const timer of rowGestureSafetyTimerRef.current.values()) {
-        if (timer != null) clearTimeout(timer);
-      }
-      rowGestureSafetyTimerRef.current.clear();
+      rowGestureMachineRef.current.clear();
       rowSpaceDragConsumedRef.current.clear();
       stopRepeatingCursorMove();
       for (const timer of pressedReleaseTimersRef.current.values()) {
@@ -593,47 +582,99 @@ function KeyboardContent(props: {
     };
   }
 
-  function clearRowLongPressTimer(rowId: string) {
-    const timer = rowLongPressTimerRef.current.get(rowId);
-    if (timer != null) clearTimeout(timer);
-    rowLongPressTimerRef.current.delete(rowId);
-  }
-
-  function clearRowGestureSafetyTimer(rowId: string) {
-    const timer = rowGestureSafetyTimerRef.current.get(rowId);
-    if (timer != null) clearTimeout(timer);
-    rowGestureSafetyTimerRef.current.delete(rowId);
+  function getRowGestureMachine(rowId: string) {
+    let machine = rowGestureMachineRef.current.get(rowId);
+    if (machine) return machine;
+    machine = createTouchIntentMachine({
+      longPressDuration: () =>
+        activeHitTargetRef.current.get(rowId)?.longPressDuration ?? 360,
+      swipeTriggerDistance: () => currentSwipeTriggerDistance(),
+      safetyReleaseDelay: () =>
+        activeHitTargetRef.current.get(rowId)?.onLongPress ? 1500 : 520,
+      longPressSafetyReleaseDelay: () => LONG_PRESS_PRESSED_RELEASE_DELAY,
+      shouldCancelLongPress: (details: any) => {
+        const target = activeHitTargetRef.current.get(rowId);
+        const isSpace = isSpaceCursorKey(target?.id);
+        return isSpace
+          ? isVerticalDragIntent(details)
+          : isLongPressDragIntent(details);
+      },
+      onTouchEnd: () => {
+        clearRowTracking(rowId);
+      },
+      onLongPress: () => {
+        const target = activeHitTargetRef.current.get(rowId);
+        if (!target?.onLongPress) return;
+        if (target.onLongPressEnd) {
+          holdKeyPressedUntilRelease(target.id);
+        }
+        target.onLongPress();
+      },
+      onLongPressEnd: () => {
+        const target = activeHitTargetRef.current.get(rowId);
+        if (!target) return;
+        target.onLongPressEnd?.();
+      },
+      onLongPressMove: (details: any) => {
+        const activeId = activeHitTargetRef.current.get(rowId)?.id;
+        if (isSpaceCursorKey(activeId)) {
+          void updateSpaceLongPressDrag(details);
+        } else if (activeId === "backspace" || activeId === "numeric-backspace") {
+          backspaceLongPressMove(details);
+        }
+      },
+      onSwipeStart: () => {
+        cancelPendingPressFeedback();
+      },
+      onResolveSwipe: (
+        direction: "up" | "down" | "left" | "right",
+      ) => {
+        const target = activeHitTargetRef.current.get(rowId);
+        if (!target) return false;
+        const action = direction === "up" && target.onSwipeUp
+          ? target.onSwipeUp
+          : direction === "down" && target.onSwipeDown
+          ? target.onSwipeDown
+          : direction === "left" && target.onSwipeLeft
+          ? target.onSwipeLeft
+          : direction === "right" && target.onSwipeRight
+          ? target.onSwipeRight
+          : null;
+        if (!action) return false;
+        playReleaseFeedback();
+        setKeyPressed(target.id, false);
+        clearRowTracking(rowId, true);
+        action();
+        return true;
+      },
+      onPress: () => {
+        const target = activeHitTargetRef.current.get(rowId);
+        if (!target) return;
+        playReleaseFeedback();
+        setKeyPressed(target.id, false);
+        clearRowTracking(rowId, true);
+        target.onPress();
+      },
+    });
+    rowGestureMachineRef.current.set(rowId, machine);
+    return machine;
   }
 
   function clearAllRowGestureState() {
-    for (const timer of rowLongPressTimerRef.current.values()) {
-      if (timer != null) clearTimeout(timer);
+    for (const machine of rowGestureMachineRef.current.values()) {
+      machine?.cancel?.();
     }
-    for (const timer of rowGestureSafetyTimerRef.current.values()) {
-      if (timer != null) clearTimeout(timer);
-    }
-    rowLongPressTimerRef.current.clear();
-    rowGestureSafetyTimerRef.current.clear();
-    rowLongPressHandledRef.current.clear();
-    rowLongPressCancelledRef.current.clear();
-    rowLongPressLatestGestureRef.current.clear();
+    rowGestureMachineRef.current.clear();
     rowSpaceDragConsumedRef.current.clear();
     activeHitTargetRef.current.clear();
-    rowGestureTokenRef.current.clear();
     spaceCursorDragXRef.current = null;
   }
 
-  function cancelRowGesture(rowId: string, keepVisual = false) {
+  function clearRowTracking(rowId: string, keepVisual = false) {
     const target = activeHitTargetRef.current.get(rowId);
     if (target && !keepVisual) setKeyPressed(target.id, false);
-    clearRowLongPressTimer(rowId);
-    clearRowGestureSafetyTimer(rowId);
-    rowLongPressCancelledRef.current.set(rowId, true);
-    rowLongPressHandledRef.current.delete(rowId);
-    rowLongPressLatestGestureRef.current.delete(rowId);
     rowSpaceDragConsumedRef.current.delete(rowId);
     activeHitTargetRef.current.delete(rowId);
-    rowGestureTokenRef.current.delete(rowId);
     if (target?.id === "backspace" || target?.id === "numeric-backspace") {
       stopRepeatingBackspace();
     }
@@ -646,62 +687,10 @@ function KeyboardContent(props: {
     if (isSpaceCursorKey(target?.id)) spaceCursorDragXRef.current = null;
   }
 
-  function scheduleRowLongPress(rowId: string, target: KeyHitTarget | null) {
-    clearRowLongPressTimer(rowId);
-    rowLongPressHandledRef.current.set(rowId, false);
-    rowLongPressCancelledRef.current.set(rowId, false);
-    rowLongPressLatestGestureRef.current.delete(rowId);
-    rowSpaceDragConsumedRef.current.set(rowId, false);
-    spaceCursorDragXRef.current = null;
-    if (!target?.onLongPress) return;
-    const gestureToken = rowGestureTokenRef.current.get(rowId);
-    const isSpaceKey = isSpaceCursorKey(target.id);
-    const timer = setTimeout(() => {
-      if (gestureToken == null) return;
-      if (rowGestureTokenRef.current.get(rowId) !== gestureToken) return;
-      if (activeHitTargetRef.current.get(rowId)?.id !== target.id) return;
-      if (rowLongPressCancelledRef.current.get(rowId)) return;
-      const latest = rowLongPressLatestGestureRef.current.get(rowId);
-      if (
-        latest &&
-        (isSpaceKey
-          ? isVerticalDragIntent(latest)
-          : isLongPressDragIntent(latest))
-      ) {
-        return;
-      }
-      rowLongPressHandledRef.current.set(rowId, true);
-      holdKeyPressedUntilRelease(target.id);
-      target.onLongPress?.();
-      scheduleRowGestureSafetyRelease(
-        rowId,
-        target,
-        LONG_PRESS_PRESSED_RELEASE_DELAY,
-      );
-    }, target.longPressDuration ?? 360);
-    rowLongPressTimerRef.current.set(rowId, timer as any);
-  }
-
-  function scheduleRowGestureSafetyRelease(
-    rowId: string,
-    target: KeyHitTarget | null,
-    delay = GESTURE_PRESSED_SAFETY_RELEASE_DELAY,
-  ) {
-    clearRowGestureSafetyTimer(rowId);
-    if (!target) return;
-    const gestureToken = rowGestureTokenRef.current.get(rowId);
-    rowGestureSafetyTimerRef.current.set(
-      rowId,
-      setTimeout(() => {
-        if (gestureToken == null) return;
-        if (rowGestureTokenRef.current.get(rowId) !== gestureToken) return;
-        if (activeHitTargetRef.current.get(rowId)?.id !== target.id) return;
-        if (rowLongPressHandledRef.current.get(rowId)) {
-          target.onLongPressEnd?.();
-        }
-        cancelRowGesture(rowId);
-      }, delay),
-    );
+  function cancelRowGesture(rowId: string, keepVisual = false) {
+    const machine = rowGestureMachineRef.current.get(rowId);
+    machine?.cancel?.();
+    clearRowTracking(rowId, keepVisual);
   }
 
   function isLongPressDragIntent(details: any) {
@@ -735,10 +724,8 @@ function KeyboardContent(props: {
   }
 
   function cancelRowLongPressIfDragging(rowId: string, details: any) {
-    if (
-      rowLongPressHandledRef.current.get(rowId) ||
-      rowLongPressCancelledRef.current.get(rowId)
-    ) {
+    const machine = getRowGestureMachine(rowId);
+    if (machine.getState() !== "pending") {
       return;
     }
     const target = activeHitTargetRef.current.get(rowId);
@@ -749,8 +736,7 @@ function KeyboardContent(props: {
       return;
     }
     cancelPendingPressFeedback();
-    rowLongPressCancelledRef.current.set(rowId, true);
-    clearRowLongPressTimer(rowId);
+    machine.update(details);
   }
 
   function moveHighlightedCandidateBySpaceDrag(steps: number) {
@@ -793,8 +779,7 @@ function KeyboardContent(props: {
     if (dx < SPACE_CURSOR_DRAG_STEP || dx < dy) return;
     if (updateSpaceLongPressDrag(details)) {
       cancelPendingPressFeedback();
-      clearRowLongPressTimer(rowId);
-      rowLongPressCancelledRef.current.set(rowId, true);
+      getRowGestureMachine(rowId).update(details);
       rowSpaceDragConsumedRef.current.set(rowId, true);
     }
   }
@@ -804,18 +789,14 @@ function KeyboardContent(props: {
     details: any,
     targets: KeyHitTarget[],
   ) {
-    rowLongPressLatestGestureRef.current.set(rowId, details);
-    if (rowLongPressHandledRef.current.get(rowId)) {
-      const activeId = activeHitTargetRef.current.get(rowId)?.id;
-      if (isSpaceCursorKey(activeId)) {
-        void updateSpaceLongPressDrag(details);
-      } else if (activeId === "backspace" || activeId === "numeric-backspace") {
-        backspaceLongPressMove(details);
-      }
+    const machine = getRowGestureMachine(rowId);
+    if (machine.getState() === "longpress_locked") {
+      machine.update(details);
       return;
     }
     const activeTarget = activeHitTargetRef.current.get(rowId);
     if (activeTarget) {
+      machine.update(details);
       if (isSpaceCursorKey(activeTarget.id)) {
         trackImmediateSpaceDrag(rowId, details);
         if (rowSpaceDragConsumedRef.current.get(rowId)) return;
@@ -826,13 +807,14 @@ function KeyboardContent(props: {
     const target = hitTargetFromGesture(details, targets);
     if (target) activeHitTargetRef.current.set(rowId, target);
     else activeHitTargetRef.current.delete(rowId);
-    rowGestureTokenRef.current.set(rowId, ++nextGestureTokenRef.current);
     if (target) {
       setKeyPressed(target.id, true, false);
       playPressFeedback();
+      rowSpaceDragConsumedRef.current.set(rowId, false);
+      spaceCursorDragXRef.current = null;
+      machine.start();
+      machine.update(details);
     }
-    scheduleRowLongPress(rowId, target);
-    scheduleRowGestureSafetyRelease(rowId, target);
   }
 
   function handleHitRowGestureEnded(
@@ -840,24 +822,12 @@ function KeyboardContent(props: {
     details: any,
     targets: KeyHitTarget[],
   ) {
+    const machine = getRowGestureMachine(rowId);
     const target = activeHitTargetRef.current.get(rowId) ??
       hitTargetFromGesture(details, targets);
-    clearRowLongPressTimer(rowId);
-    clearRowGestureSafetyTimer(rowId);
-    rowLongPressCancelledRef.current.set(rowId, true);
-    rowLongPressLatestGestureRef.current.delete(rowId);
-    rowGestureTokenRef.current.delete(rowId);
-
     if (!target) {
-      rowGestureTokenRef.current.delete(rowId);
-      return;
-    }
-    if (rowLongPressHandledRef.current.get(rowId)) {
-      rowLongPressHandledRef.current.delete(rowId);
-      spaceCursorDragXRef.current = null;
-      target.onLongPressEnd?.();
-      setKeyPressed(target.id, false);
-      cancelRowGesture(rowId);
+      machine.cancel();
+      clearRowTracking(rowId);
       return;
     }
     if (
@@ -865,28 +835,11 @@ function KeyboardContent(props: {
     ) {
       cancelPendingPressFeedback();
       setKeyPressed(target.id, false);
-      cancelRowGesture(rowId);
+      machine.cancel();
+      clearRowTracking(rowId, true);
       return;
     }
-    const direction = dragDirection(details, currentSwipeTriggerDistance());
-    const hasSwipeAction = (direction === "up" && target.onSwipeUp) ||
-      (direction === "down" && target.onSwipeDown) ||
-      (direction === "left" && target.onSwipeLeft) ||
-      (direction === "right" && target.onSwipeRight);
-    if (hasSwipeAction) cancelPendingPressFeedback();
-    const action = direction === "up" && target.onSwipeUp
-      ? target.onSwipeUp
-      : direction === "down" && target.onSwipeDown
-      ? target.onSwipeDown
-      : direction === "left" && target.onSwipeLeft
-      ? target.onSwipeLeft
-      : direction === "right" && target.onSwipeRight
-      ? target.onSwipeRight
-      : target.onPress;
-    playReleaseFeedback();
-    setKeyPressed(target.id, false);
-    cancelRowGesture(rowId);
-    action();
+    machine.end(details);
   }
 
   function hitRowGesture(rowId: string, targets: KeyHitTarget[]) {
@@ -1965,38 +1918,6 @@ function KeyboardContent(props: {
       onSwipeRight: () => moveCursorSafely(1),
     });
     x += metrics.bottom.space + KEY_SPACING;
-    targets.push({
-      id: "mode",
-      x,
-      width: metrics.bottom.mode,
-      onPress: () => {
-        if (composing && settings.modeComposingEnabled) {
-          runConfiguredAction(
-            settings.modeComposingAction,
-            settings.modeComposingActionMode,
-          );
-        } else {
-          toggleAscii();
-        }
-      },
-      onSwipeUp: () => {
-        if (composing && settings.modeComposingEnabled) {
-          runConfiguredAction(
-            settings.modeComposingSwipeUp,
-            settings.modeComposingSwipeUpMode,
-          );
-        }
-      },
-      onSwipeDown: () => {
-        if (composing && settings.modeComposingEnabled) {
-          runConfiguredAction(
-            settings.modeComposingSwipeDown,
-            settings.modeComposingSwipeDownMode,
-          );
-        }
-      },
-      onLongPress: () => runWithFeedback(commitComposition),
-    });
     x += metrics.bottom.mode + KEY_SPACING;
     targets.push({
       id: "enter",
@@ -3338,7 +3259,8 @@ function KeyboardContent(props: {
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}
                 system
-                passive
+                onTouchStart={() => beginKeyTouch("mode")}
+                onTouchEnd={() => endKeyTouch("mode")}
                 active={isPressed("mode")}
                 labelFontSize={18}
                 onPress={() =>

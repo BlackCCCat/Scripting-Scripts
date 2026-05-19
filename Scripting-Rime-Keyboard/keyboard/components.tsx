@@ -12,10 +12,7 @@ import {
 } from "scripting";
 import { BASE_KEY_HEIGHT } from "./constants";
 import type { Palette } from "./types";
-import { dragDirection, estimatedTextWidth } from "./utils";
-
-const GESTURE_SAFETY_RELEASE_DELAY = 1500;
-const LONG_PRESS_GESTURE_SAFETY_RELEASE_DELAY = 2600;
+import { createTouchIntentMachine, estimatedTextWidth } from "./utils";
 
 export function candidateButtonNaturalWidth(params: {
   text: string;
@@ -92,13 +89,9 @@ export function KeyFace(props: {
   swipeTriggerDistance?: number | (() => number);
   contextMenu?: any;
 }) {
-  const gestureStartedRef = useRef(false);
-  const longPressHandledRef = useRef(false);
-  const longPressCancelledRef = useRef(false);
-  const longPressTimerRef = useRef<any>(null);
-  const gestureSafetyTimerRef = useRef<any>(null);
-  const gestureSafetyEndedRef = useRef(false);
-  const latestGestureRef = useRef<any>(null);
+  const propsRef = useRef(props);
+  propsRef.current = props;
+  const gestureMachineRef = useRef<any>(null);
   const usesEnterColor = props.id === "enter" || props.id === "numeric-enter";
   const baseBg = props.palette.keyOverrides[props.id] ??
     (props.accent || usesEnterColor
@@ -136,20 +129,6 @@ export function KeyFace(props: {
   const needsManualGesture = !props.passive &&
     (hasSwipe || props.onLongPress || props.onTouchStart || props.onTouchEnd);
 
-  function clearLongPressTimer() {
-    if (longPressTimerRef.current != null) {
-      clearTimeout(longPressTimerRef.current);
-    }
-    longPressTimerRef.current = null;
-  }
-
-  function clearGestureSafetyTimer() {
-    if (gestureSafetyTimerRef.current != null) {
-      clearTimeout(gestureSafetyTimerRef.current);
-    }
-    gestureSafetyTimerRef.current = null;
-  }
-
   function dragIntent(details: any) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
@@ -158,131 +137,71 @@ export function KeyFace(props: {
     return dx >= 4 || dy >= 4 || vx >= 8 || vy >= 8;
   }
 
-  function resetGesture() {
-    clearLongPressTimer();
-    clearGestureSafetyTimer();
-    latestGestureRef.current = null;
-    gestureStartedRef.current = false;
-    longPressHandledRef.current = false;
-    longPressCancelledRef.current = false;
+  function isLongPressEnabled() {
+    const value = propsRef.current.longPressEnabled;
+    return typeof value === "function" ? value() : value;
   }
 
-  function isLongPressEnabled() {
-    return typeof props.longPressEnabled === "function"
-      ? props.longPressEnabled()
-      : props.longPressEnabled;
+  if (!gestureMachineRef.current) {
+    gestureMachineRef.current = createTouchIntentMachine({
+      longPressDuration: () => propsRef.current.longPressDuration,
+      swipeTriggerDistance: () =>
+        typeof propsRef.current.swipeTriggerDistance === "function"
+          ? propsRef.current.swipeTriggerDistance()
+          : propsRef.current.swipeTriggerDistance,
+      safetyReleaseDelay: () =>
+        propsRef.current.contextMenu && !propsRef.current.onLongPress
+          ? 180
+          : 1500,
+      isLongPressEnabled,
+      shouldCancelLongPress: (details: any) =>
+        !!propsRef.current.onLongPress && dragIntent(details),
+      onTouchStart: () => propsRef.current.onTouchStart?.(),
+      onTouchEnd: () => propsRef.current.onTouchEnd?.(),
+      onLongPress: () => propsRef.current.onLongPress?.(),
+      onLongPressEnd: () => propsRef.current.onLongPressEnd?.(),
+      onLongPressMove: (details: any) => propsRef.current.onLongPressMove?.(details),
+      onSwipeStart: () => propsRef.current.onSwipeStart?.(),
+      onResolveSwipe: (
+        direction: "up" | "down" | "left" | "right",
+      ) => {
+        if (direction === "up" && propsRef.current.onSwipeUp) {
+          propsRef.current.onSwipeUp();
+          return true;
+        }
+        if (direction === "down" && propsRef.current.onSwipeDown) {
+          propsRef.current.onSwipeDown();
+          return true;
+        }
+        if (direction === "left" && propsRef.current.onSwipeLeft) {
+          propsRef.current.onSwipeLeft();
+          return true;
+        }
+        if (direction === "right" && propsRef.current.onSwipeRight) {
+          propsRef.current.onSwipeRight();
+          return true;
+        }
+        return false;
+      },
+      onPress: () => propsRef.current.onPress(),
+    });
   }
 
   useEffect(() => {
     return () => {
-      const wasStarted = gestureStartedRef.current;
-      const wasLongPress = longPressHandledRef.current;
-      clearLongPressTimer();
-      clearGestureSafetyTimer();
-      latestGestureRef.current = null;
-      gestureStartedRef.current = false;
-      longPressHandledRef.current = false;
-      longPressCancelledRef.current = true;
-      gestureSafetyEndedRef.current = false;
-      if (wasStarted) props.onTouchEnd?.();
-      if (wasLongPress) props.onLongPressEnd?.();
+      gestureMachineRef.current?.dispose?.();
     };
   }, []);
-
-  function scheduleGestureSafetyRelease(
-    delay = GESTURE_SAFETY_RELEASE_DELAY,
-  ) {
-    clearGestureSafetyTimer();
-    gestureSafetyTimerRef.current = setTimeout(() => {
-      if (!gestureStartedRef.current) return;
-      const wasLongPress = longPressHandledRef.current;
-      gestureSafetyEndedRef.current = true;
-      props.onTouchEnd?.();
-      if (wasLongPress) props.onLongPressEnd?.();
-      resetGesture();
-    }, delay);
-  }
-
-  function startGesture() {
-    if (gestureStartedRef.current) return;
-    gestureStartedRef.current = true;
-    longPressHandledRef.current = false;
-    longPressCancelledRef.current = false;
-    gestureSafetyEndedRef.current = false;
-    props.onTouchStart?.();
-    scheduleGestureSafetyRelease();
-    if (!props.onLongPress) return;
-    if (isLongPressEnabled() === false) {
-      longPressCancelledRef.current = true;
-      return;
-    }
-    longPressTimerRef.current = setTimeout(() => {
-      if (!gestureStartedRef.current || longPressCancelledRef.current) return;
-      if (isLongPressEnabled() === false) {
-        longPressCancelledRef.current = true;
-        return;
-      }
-      if (latestGestureRef.current && dragIntent(latestGestureRef.current)) {
-        longPressCancelledRef.current = true;
-        return;
-      }
-      longPressHandledRef.current = true;
-      props.onLongPress?.();
-      scheduleGestureSafetyRelease(LONG_PRESS_GESTURE_SAFETY_RELEASE_DELAY);
-    }, props.longPressDuration ?? 360);
-  }
 
   const manualGesture = needsManualGesture
     ? {
       gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
         .onChanged((details: any) => {
-          if (gestureSafetyEndedRef.current) return;
-          latestGestureRef.current = details;
-          startGesture();
-          if (longPressHandledRef.current) {
-            props.onLongPressMove?.(details);
-            return;
-          }
-          if (props.onLongPress && dragIntent(details)) {
-            longPressCancelledRef.current = true;
-            clearLongPressTimer();
-          }
+          gestureMachineRef.current?.start();
+          gestureMachineRef.current?.update(details);
         })
         .onEnded((details: any) => {
-          if (gestureSafetyEndedRef.current) {
-            gestureSafetyEndedRef.current = false;
-            resetGesture();
-            return;
-          }
-          latestGestureRef.current = details;
-          const wasLongPress = longPressHandledRef.current;
-          clearLongPressTimer();
-          if (wasLongPress) {
-            props.onTouchEnd?.();
-            props.onLongPressEnd?.();
-            resetGesture();
-            return;
-          }
-          const swipeTriggerDistance =
-            typeof props.swipeTriggerDistance === "function"
-              ? props.swipeTriggerDistance()
-              : props.swipeTriggerDistance;
-          const direction = dragDirection(details, swipeTriggerDistance);
-          const hasSwipeAction = (direction === "up" && props.onSwipeUp) ||
-            (direction === "down" && props.onSwipeDown) ||
-            (direction === "left" && props.onSwipeLeft) ||
-            (direction === "right" && props.onSwipeRight);
-          if (hasSwipeAction) props.onSwipeStart?.();
-          props.onTouchEnd?.();
-          if (direction === "up" && props.onSwipeUp) props.onSwipeUp();
-          else if (direction === "down" && props.onSwipeDown) {
-            props.onSwipeDown();
-          } else if (direction === "left" && props.onSwipeLeft) {
-            props.onSwipeLeft();
-          } else if (direction === "right" && props.onSwipeRight) {
-            props.onSwipeRight();
-          } else props.onPress();
-          resetGesture();
+          gestureMachineRef.current?.end(details);
         }),
       mask: "gesture" as any,
     }
