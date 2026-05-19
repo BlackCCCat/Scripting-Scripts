@@ -111,7 +111,6 @@ const COMMAND_REFERENCE_GROUPS: Array<{
       { command: "{rimeDown}", description: "发送 Rime 下方向键" },
       { command: "{rimePageUp}", description: "发送 Rime 上翻页" },
       { command: "{rimePageDown}", description: "发送 Rime 下翻页" },
-      { command: "{clearComposition}", description: "清空当前预编辑" },
       { command: "{commitComposition}", description: "提交当前预编辑" },
     ],
   },
@@ -120,6 +119,7 @@ const COMMAND_REFERENCE_GROUPS: Array<{
     items: [
       { command: "{deleteAll}", description: "删除当前可删除文本" },
       { command: "{restoreDeleted}", description: "恢复最近删除内容" },
+      { command: "{clearComposition}", description: "清空/删除当前预编辑拼音" },
     ],
   },
   {
@@ -1586,6 +1586,48 @@ function SettingsView() {
     );
   }
 
+  function renderBackspacePage() {
+    return (
+      <List navigationTitle="删除键行为" navigationBarTitleDisplayMode="inline">
+        <Section
+          footer={
+            <SettingHint>
+              默认：左划删除预编辑拼音，上划删除当前可删除文本，下划恢复最近删除内容。
+            </SettingHint>
+          }
+        >
+          <ActionConfigRow
+            title="左划动作"
+            action={settings.backspaceSwipeLeft}
+            mode={settings.backspaceSwipeLeftMode}
+            onActionChanged={(value) =>
+              patchSettings({ backspaceSwipeLeft: value })}
+            onModeChanged={(value) =>
+              patchSettings({ backspaceSwipeLeftMode: value })}
+          />
+          <ActionConfigRow
+            title="上划动作"
+            action={settings.backspaceSwipeUp}
+            mode={settings.backspaceSwipeUpMode}
+            onActionChanged={(value) =>
+              patchSettings({ backspaceSwipeUp: value })}
+            onModeChanged={(value) =>
+              patchSettings({ backspaceSwipeUpMode: value })}
+          />
+          <ActionConfigRow
+            title="下划动作"
+            action={settings.backspaceSwipeDown}
+            mode={settings.backspaceSwipeDownMode}
+            onActionChanged={(value) =>
+              patchSettings({ backspaceSwipeDown: value })}
+            onModeChanged={(value) =>
+              patchSettings({ backspaceSwipeDownMode: value })}
+          />
+        </Section>
+      </List>
+    );
+  }
+
   function renderNumericPage() {
     return (
       <List navigationTitle="数字键盘" navigationBarTitleDisplayMode="inline">
@@ -1696,7 +1738,7 @@ function SettingsView() {
           footer={!composing
             ? (
               <SettingHint>
-                可用特殊值：{"{left}"}、{"{right}"}、{"{home}"}、{"{end}"}、{"{selectAll}"}、{"{toggleSelectAll}"}、{"{cut}"}、{"{copy}"}、{"{paste}"}、{"{rimeUp}"}、{"{rimeDown}"}、{"{rimePageUp}"}、{"{rimePageDown}"}、{"{deleteAll}"}、{"{restoreDeleted}"}。
+                可用特殊值：{"{left}"}、{"{right}"}、{"{home}"}、{"{end}"}、{"{selectAll}"}、{"{toggleSelectAll}"}、{"{cut}"}、{"{copy}"}、{"{paste}"}、{"{rimeUp}"}、{"{rimeDown}"}、{"{rimePageUp}"}、{"{rimePageDown}"}、{"{clearComposition}"}、{"{deleteAll}"}、{"{restoreDeleted}"}。
                 也可直接填写 Rime 按键名，例如
                 Break、Page_Up、Page_Down、backslash，或组合键 Control+grave。
               </SettingHint>
@@ -1813,6 +1855,10 @@ function SettingsView() {
           <NavigationLink
             title="中英键预编辑行为"
             destination={renderModeKeyPage()}
+          />
+          <NavigationLink
+            title="删除键行为"
+            destination={renderBackspacePage()}
           />
           <NavigationLink title="数字键盘" destination={renderNumericPage()} />
         </Section>

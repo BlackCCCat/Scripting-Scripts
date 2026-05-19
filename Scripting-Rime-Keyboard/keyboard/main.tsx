@@ -1097,19 +1097,28 @@ function KeyboardContent(props: {
   function backspaceSwipeLeft() {
     cancelPendingPressFeedback();
     stopRepeatingBackspace();
-    clearComposition();
+    runConfiguredAction(
+      settings.backspaceSwipeLeft,
+      settings.backspaceSwipeLeftMode,
+    );
   }
 
   function backspaceSwipeUp() {
     cancelPendingPressFeedback();
     stopRepeatingBackspace();
-    deleteAllText();
+    runConfiguredAction(
+      settings.backspaceSwipeUp,
+      settings.backspaceSwipeUpMode,
+    );
   }
 
   function backspaceSwipeDown() {
     cancelPendingPressFeedback();
     stopRepeatingBackspace();
-    restoreDeletedText();
+    runConfiguredAction(
+      settings.backspaceSwipeDown,
+      settings.backspaceSwipeDownMode,
+    );
   }
 
   function cancelBackspaceSwipeStart() {
@@ -2306,6 +2315,7 @@ function KeyboardContent(props: {
                   index={idx}
                   candidate={candidate}
                   comment={candidateComment(candidate)}
+                  showIndex={settings.showCandidateComment}
                   selected={idx === highlightedIdx}
                   palette={palette}
                   height={metrics.candidateButtonHeight}
@@ -3394,6 +3404,7 @@ function KeyboardContent(props: {
                           text: candidate.text,
                           comment,
                           index: absoluteIndex,
+                          showIndex: settings.showCandidateComment,
                           candidateFontSize: metrics.candidateFontSize,
                           commentFontSize: metrics.candidateCommentFontSize,
                           expanded: true,
@@ -3407,6 +3418,7 @@ function KeyboardContent(props: {
                             index={absoluteIndex}
                             candidate={candidate}
                             comment={comment}
+                            showIndex={settings.showCandidateComment}
                             selected={absoluteIndex ===
                               highlightedAbsoluteIndex}
                             palette={palette}

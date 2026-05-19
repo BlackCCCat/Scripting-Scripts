@@ -18,25 +18,34 @@ export function candidateButtonNaturalWidth(params: {
   text: string;
   comment: string;
   index: number;
+  showIndex?: boolean;
   candidateFontSize: number;
   commentFontSize: number;
   expanded?: boolean;
 }) {
   const horizontalPadding = 7;
+  const textFontSize = params.candidateFontSize * (params.expanded ? 1.08 : 1);
   const textWidth = estimatedTextWidth(
     params.text,
-    params.candidateFontSize * (params.expanded ? 1.08 : 1),
+    textFontSize,
     params.candidateFontSize * (params.expanded ? 0.68 : 0.54),
   );
   const commentLine = params.comment.length > 0
     ? `${params.index + 1} ${params.comment}`
+    : params.showIndex === false
+    ? ""
     : `${params.index + 1}`;
-  const commentWidth = estimatedTextWidth(
-    commentLine,
-    params.commentFontSize * (params.expanded ? 1.12 : 1),
-    params.commentFontSize * (params.expanded ? 0.54 : 0.54),
-  );
-  const minWidth = params.expanded ? 54 : 42;
+  const commentFontSize = params.commentFontSize *
+    (params.expanded ? 1.12 : 1);
+  const commentWidth = commentLine
+    ? estimatedTextWidth(
+      commentLine,
+      commentFontSize,
+      params.commentFontSize * (params.expanded ? 0.54 : 0.54),
+    )
+    : 0;
+  const hasMetaLine = commentLine.length > 0;
+  const minWidth = params.expanded ? 54 : hasMetaLine ? 42 : 12;
   return Math.ceil(
     Math.max(minWidth, textWidth, commentWidth) + horizontalPadding * 2,
   );
@@ -160,7 +169,8 @@ export function KeyFace(props: {
       onTouchEnd: () => propsRef.current.onTouchEnd?.(),
       onLongPress: () => propsRef.current.onLongPress?.(),
       onLongPressEnd: () => propsRef.current.onLongPressEnd?.(),
-      onLongPressMove: (details: any) => propsRef.current.onLongPressMove?.(details),
+      onLongPressMove: (details: any) =>
+        propsRef.current.onLongPressMove?.(details),
       onSwipeStart: () => propsRef.current.onSwipeStart?.(),
       onResolveSwipe: (
         direction: "up" | "down" | "left" | "right",
@@ -437,6 +447,7 @@ export function CandidateButton(props: {
   index: number;
   candidate: Rime.Candidate;
   comment?: string;
+  showIndex?: boolean;
   selected: boolean;
   palette: Palette;
   width?: number;
@@ -449,18 +460,22 @@ export function CandidateButton(props: {
   onPress: () => void;
 }) {
   const comment = props.comment ?? "";
+  const showIndex = props.showIndex ?? true;
   const showComment = comment.length > 0;
   const candidateFontSize = props.candidateFontSize ?? 19;
   const commentFontSize = props.commentFontSize ?? 10;
   const horizontalPadding = 7;
   const commentLine = showComment
     ? `${props.index + 1} ${comment}`
-    : `${props.index + 1}`;
+    : showIndex
+    ? `${props.index + 1}`
+    : "";
   const naturalWidth = props.naturalWidth ??
     candidateButtonNaturalWidth({
       text: props.candidate.text,
       comment,
       index: props.index,
+      showIndex,
       candidateFontSize,
       commentFontSize,
       expanded: props.expanded,
@@ -484,46 +499,81 @@ export function CandidateButton(props: {
         alignment: "leading" as any,
       }}
     >
-      <VStack
-        alignment="leading"
-        spacing={0}
-        padding={{ horizontal: horizontalPadding, vertical: 3 }}
-        frame={{
-          width: frameWidth,
-          height: frameHeight,
-          alignment: "leading" as any,
-        }}
-      >
-        <Text
-          font={candidateFontSize}
-          lineLimit={1}
-          truncationMode="tail"
-          fixedSize={props.width ? false : { horizontal: true, vertical: true }}
-          foregroundStyle={props.palette.primary as any}
-          frame={{
-            width: props.width ? undefined : contentWidth,
-            maxWidth: props.width ? "infinity" as any : undefined,
-            alignment: "leading" as any,
-          }}
-        >
-          {props.candidate.text}
-        </Text>
-        <Text
-          font={commentFontSize}
-          lineLimit={1}
-          truncationMode="tail"
-          fixedSize={props.width ? false : { horizontal: true, vertical: true }}
-          allowsTightening
-          foregroundStyle={props.palette.secondary as any}
-          frame={{
-            width: props.width ? undefined : contentWidth,
-            maxWidth: props.width ? "infinity" as any : undefined,
-            alignment: "leading" as any,
-          }}
-        >
-          {commentLine}
-        </Text>
-      </VStack>
+      {commentLine
+        ? (
+          <VStack
+            alignment="leading"
+            spacing={0}
+            padding={{ horizontal: horizontalPadding, vertical: 3 }}
+            frame={{
+              width: frameWidth,
+              height: frameHeight,
+              alignment: "leading" as any,
+            }}
+          >
+            <Text
+              font={candidateFontSize}
+              lineLimit={1}
+              truncationMode="tail"
+              fixedSize={props.width
+                ? false
+                : { horizontal: true, vertical: true }}
+              foregroundStyle={props.palette.primary as any}
+              frame={{
+                width: props.width ? undefined : contentWidth,
+                maxWidth: props.width ? "infinity" as any : undefined,
+                alignment: "leading" as any,
+              }}
+            >
+              {props.candidate.text}
+            </Text>
+            <Text
+              font={commentFontSize}
+              lineLimit={1}
+              truncationMode="tail"
+              fixedSize={props.width
+                ? false
+                : { horizontal: true, vertical: true }}
+              allowsTightening
+              foregroundStyle={props.palette.secondary as any}
+              frame={{
+                width: props.width ? undefined : contentWidth,
+                maxWidth: props.width ? "infinity" as any : undefined,
+                alignment: "leading" as any,
+              }}
+            >
+              {commentLine}
+            </Text>
+          </VStack>
+        )
+        : (
+          <HStack
+            spacing={0}
+            padding={{ horizontal: horizontalPadding }}
+            frame={{
+              width: frameWidth,
+              height: frameHeight,
+              alignment: "leading" as any,
+            }}
+          >
+            <Text
+              font={candidateFontSize}
+              lineLimit={1}
+              truncationMode="tail"
+              fixedSize={props.width
+                ? false
+                : { horizontal: true, vertical: true }}
+              foregroundStyle={props.palette.primary as any}
+              frame={{
+                width: props.width ? undefined : contentWidth,
+                maxWidth: props.width ? "infinity" as any : undefined,
+                alignment: "leading" as any,
+              }}
+            >
+              {props.candidate.text}
+            </Text>
+          </HStack>
+        )}
     </ZStack>
   );
 }

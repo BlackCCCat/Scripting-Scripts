@@ -153,10 +153,9 @@ export function createTouchIntentMachine(options: {
   function scheduleLongPress() {
     clearLongPressTimer();
     if (!options.onLongPress || isLongPressEnabled() === false) return;
-    const duration =
-      typeof options.longPressDuration === "function"
-        ? options.longPressDuration()
-        : options.longPressDuration;
+    const duration = typeof options.longPressDuration === "function"
+      ? options.longPressDuration()
+      : options.longPressDuration;
     longPressTimer = setTimeout(() => {
       if (state !== "pending") return;
       if (isLongPressEnabled() === false) {
@@ -185,10 +184,9 @@ export function createTouchIntentMachine(options: {
       if (state !== "idle") return;
       state = "pending";
       options.onTouchStart?.();
-      const safetyDelay =
-        typeof options.safetyReleaseDelay === "function"
-          ? options.safetyReleaseDelay()
-          : options.safetyReleaseDelay;
+      const safetyDelay = typeof options.safetyReleaseDelay === "function"
+        ? options.safetyReleaseDelay()
+        : options.safetyReleaseDelay;
       scheduleSafetyRelease(safetyDelay ?? 1500);
       scheduleLongPress();
     },
@@ -318,7 +316,9 @@ export function estimatedTextWidth(
       /\p{Extended_Pictographic}|\p{Emoji_Presentation}|\p{Regional_Indicator}/u
         .test(segment)
     ) {
-      total += fontSize * 1.8;
+      total += fontSize * 2.12;
+    } else if (/[\u3000-\u303f\uff01-\uff60\uffe0-\uffe6]/.test(segment)) {
+      total += fontSize * 0.96;
     } else if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(segment)) {
       total += fontSize * 0.94;
     } else if (/[A-Z]/.test(segment)) total += fontSize * 0.64;
@@ -326,7 +326,9 @@ export function estimatedTextWidth(
     else if (/[mwMW]/.test(segment)) total += fontSize * 0.78;
     else if (/[a-z]/.test(segment)) total += fontSize * 0.56;
     else if (/\p{Script=Latin}/u.test(segment)) total += fontSize * 0.58;
-    else if (/\s/.test(segment)) total += fontSize * 0.36;
+    else if (/[,.;:!'"`|/\\()[\]{}<>~@#$%^&*_+=?-]/.test(segment)) {
+      total += fontSize * 0.42;
+    } else if (/\s/.test(segment)) total += fontSize * 0.36;
     else total += Math.max(fallbackCharWidth, fontSize * 0.58);
   }
   return total;

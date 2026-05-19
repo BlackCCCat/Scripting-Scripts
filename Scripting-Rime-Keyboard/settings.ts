@@ -80,6 +80,12 @@ export type RimeKeyboardSettings = {
   modeComposingSwipeDown: string;
   modeComposingSwipeDownMode: ActionSendMode;
   modeComposingIcon: string;
+  backspaceSwipeLeft: string;
+  backspaceSwipeLeftMode: ActionSendMode;
+  backspaceSwipeUp: string;
+  backspaceSwipeUpMode: ActionSendMode;
+  backspaceSwipeDown: string;
+  backspaceSwipeDownMode: ActionSendMode;
   numericEqualsSwipeUp: string;
   letterLongPressDuration: number;
   swipeTriggerDistance: number;
@@ -440,6 +446,12 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   modeComposingSwipeDown: "",
   modeComposingSwipeDownMode: "auto",
   modeComposingIcon: "lightbulb",
+  backspaceSwipeLeft: "{clearComposition}",
+  backspaceSwipeLeftMode: "auto",
+  backspaceSwipeUp: "{deleteAll}",
+  backspaceSwipeUpMode: "auto",
+  backspaceSwipeDown: "{restoreDeleted}",
+  backspaceSwipeDownMode: "auto",
   numericEqualsSwipeUp: "V",
   letterLongPressDuration: 520,
   swipeTriggerDistance: 80,
@@ -848,6 +860,22 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     modeComposingIcon: typeof raw?.modeComposingIcon === "string"
       ? raw.modeComposingIcon
       : "lightbulb",
+    backspaceSwipeLeft: typeof raw?.backspaceSwipeLeft === "string"
+      ? raw.backspaceSwipeLeft
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.backspaceSwipeLeft,
+    backspaceSwipeLeftMode: normalizeActionSendMode(
+      raw?.backspaceSwipeLeftMode,
+    ),
+    backspaceSwipeUp: typeof raw?.backspaceSwipeUp === "string"
+      ? raw.backspaceSwipeUp
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.backspaceSwipeUp,
+    backspaceSwipeUpMode: normalizeActionSendMode(raw?.backspaceSwipeUpMode),
+    backspaceSwipeDown: typeof raw?.backspaceSwipeDown === "string"
+      ? raw.backspaceSwipeDown
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.backspaceSwipeDown,
+    backspaceSwipeDownMode: normalizeActionSendMode(
+      raw?.backspaceSwipeDownMode,
+    ),
     numericEqualsSwipeUp: typeof raw?.numericEqualsSwipeUp === "string"
       ? raw.numericEqualsSwipeUp
       : "V",
