@@ -375,7 +375,6 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, on
   if (cfg.autoDeployAfterDownload === false) return
   if (cfg.inputMethod === "scripting") {
     onStage?.(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
-    onLog?.(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
     return
   }
   const detected = await detectRimeDir(cfg)
@@ -908,7 +907,9 @@ export async function autoUpdateAll(
   // 统一部署（你指定：安装目录/build）
   await deployIfEnabled(cfg, params.onStage, params.onLog)
 
-  params.onStage?.("自动更新：完成")
+  if (cfg.inputMethod !== "scripting") {
+    params.onStage?.("自动更新：完成")
+  }
   return {
     remote: r,
     updated: { scheme: needScheme, dict: needDict, model: needModel },

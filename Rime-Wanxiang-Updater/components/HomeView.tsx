@@ -1729,14 +1729,14 @@ export function HomeView() {
         setStageAndMaybeLog("自动更新完成（已部署）", "AUTO", "SUCCESS", true);
       } else {
         const currentNow = loadConfig();
-        setStageAndMaybeLog(
-          currentNow.inputMethod === "scripting"
-            ? "请到工具(Tools)-Rime输入法(Rime Input Method)手动部署"
-            : "自动更新完成（未自动部署）",
-          "AUTO",
-          currentNow.inputMethod === "scripting" ? "INFO" : "SUCCESS",
-          true,
-        );
+        if (currentNow.inputMethod !== "scripting") {
+          setStageAndMaybeLog(
+            "自动更新完成（未自动部署）",
+            "AUTO",
+            "SUCCESS",
+            true,
+          );
+        }
       }
     } catch (e: any) {
       setStageAndMaybeLog(
