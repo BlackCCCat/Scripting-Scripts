@@ -48,7 +48,9 @@ import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { SettingsView } from "./SettingsView"
+import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, writePipControlState } from "../services/pip_control"
+import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -185,6 +187,46 @@ function ClipContentEditorView(props: {
           controller={controller}
           scriptName="CAIS"
           showAccessoryView
+        />
+      </VStack>
+    </NavigationStack>
+  )
+}
+
+function AppTokenResultView(props: {
+  tokens: CaisToken[]
+}) {
+  const dismiss = Navigation.useDismiss()
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const selectedText = selectedTokenText(props.tokens, selectedIds)
+
+  function selectToken(token: CaisToken) {
+    setSelectedIds((ids) => ids.includes(token.id) ? ids : [...ids, token.id])
+  }
+
+  function toggleToken(token: CaisToken) {
+    setSelectedIds((ids) => ids.includes(token.id)
+      ? ids.filter((id) => id !== token.id)
+      : [...ids, token.id])
+  }
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle="分词结果"
+        navigationBarTitleDisplayMode="inline"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        padding={16}
+        toolbar={{
+          topBarTrailing: <Button title="复制" systemImage="doc.on.doc" disabled={!selectedText} action={() => dismiss(selectedText)} />,
+        }}
+      >
+        <TokenSelectionPanel
+          tokens={props.tokens}
+          selectedIds={selectedIds}
+          selectedText={selectedText}
+          onToggle={toggleToken}
+          onSelect={selectToken}
         />
       </VStack>
     </NavigationStack>
@@ -600,6 +642,35 @@ export function AppRoot() {
     return renderClipOutput(item, await getFullClipContent(item.id))
   }
 
+  async function openTokenResultForItem(item: ClipItem) {
+    if (item.kind === "image") {
+      showToast("图片条目不支持分词")
+      return
+    }
+    try {
+      const source = await itemSource(item)
+      const tokens = tokenizeWords(source)
+      if (!tokens.length) {
+        showToast("没有可用的分词结果")
+        return
+      }
+      const result = await Navigation.present<string | null>({
+        element: <AppTokenResultView tokens={tokens} />,
+        modalPresentationStyle: "pageSheet",
+      })
+      if (!result) return
+      await writeTextToPasteboard(result)
+      await addClipFromPayload(
+        { kind: "text", text: result },
+        { ...settingsRef.current, captureText: true },
+      )
+      showToast("已复制")
+      await refresh()
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "分词失败") })
+    }
+  }
+
   async function saveTransformedResult(result: MenuActionResult, source: string): Promise<number> {
     const saveSettings = { ...settingsRef.current, captureText: true, captureImages: true }
     if (result.kind === "text") {
@@ -799,11 +870,15 @@ export function AppRoot() {
               ) : (
                 <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
               )}
+              {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
+                <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
+              ) : null}
               {getOrderedMenuBuiltins(settings).map((action) => {
                 const enabled = settings.keyboardMenu.builtins[action]
-                const supported =
+                const supported = action !== "tokenize" && (
                   action === "base64Encode" ||
                   (action === "openUrl" ? item.kind === "url" : item.kind !== "image")
+                )
                 return enabled && supported ? (
                   <Button
                     key={action}

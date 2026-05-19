@@ -61,6 +61,7 @@ const BUILTIN_ACTIONS: Array<{
 }> = [
   { key: "pin", title: "置顶" },
   { key: "favorite", title: "收藏" },
+  { key: "tokenize", title: "分词" },
   { key: "base64Encode", title: "Base64 编码" },
   { key: "base64Decode", title: "Base64 解码" },
   { key: "cleanWhitespace", title: "移除空格" },
@@ -330,6 +331,12 @@ export function SettingsView(props: {
     const sorted = order
       .map((key) => CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === key))
       .filter(Boolean) as typeof BUILTIN_ACTIONS;
+    const tokenize = CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === "tokenize");
+    if (tokenize) {
+      const index = sorted.findIndex((item) => item.key === "tokenize");
+      if (index >= 0) sorted.splice(index, 1);
+      sorted.unshift(tokenize);
+    }
     const insertAfter = (
       anchor: KeyboardMenuBuiltinAction,
       action: typeof CONFIGURABLE_BUILTIN_ACTIONS[number],
@@ -360,7 +367,10 @@ export function SettingsView(props: {
     update({
       keyboardMenu: {
         ...settings.keyboardMenu,
-        builtinOrder: rest.map((a) => a.key),
+        builtinOrder: [
+          "tokenize",
+          ...rest.map((a) => a.key).filter((key) => key !== "tokenize"),
+        ],
       },
     });
   }

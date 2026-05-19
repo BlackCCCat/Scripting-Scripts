@@ -48,7 +48,9 @@ import { imagePreviewPath } from "../storage/image_store"
 import { summarizeContent } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { PipStatusView } from "./PipStatusView"
+import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
+import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -87,6 +89,11 @@ export type KeyboardInitialState = {
 }
 
 type KeyboardLayoutMode = "twoByTwo" | "oneByTwo" | "twoByThree"
+type KeyboardTokenPage = {
+  title: string
+  tokens: CaisToken[]
+  selectedIds: string[]
+}
 
 function keyboard(): any {
   return (globalThis as any).CustomKeyboard
@@ -351,6 +358,7 @@ function ClipTile(props: {
   tileWidth: number
   hideTitle?: boolean
   onInsert: (item: ClipItem) => void | Promise<void>
+  onTokenize: (item: ClipItem) => void | Promise<void>
   onStatus: (message: string) => void
   onRefresh: () => void | Promise<void>
 }) {
@@ -372,6 +380,7 @@ function ClipTile(props: {
             settings={props.settings}
             onRefresh={props.onRefresh}
             onStatus={props.onStatus}
+            onTokenize={props.onTokenize}
           />
         ),
       }}
@@ -458,6 +467,7 @@ function ClipTileMenu(props: {
   settings: CaisSettings
   onStatus: (message: string) => void
   onRefresh: () => void | Promise<void>
+  onTokenize: (item: ClipItem) => void | Promise<void>
 }) {
   const item = props.item
   const isImage = item.kind === "image"
@@ -589,6 +599,10 @@ function ClipTileMenu(props: {
 
   function renderBuiltinAction(action: KeyboardMenuBuiltinAction) {
     switch (action) {
+      case "tokenize":
+        return !isImage && builtins.tokenize ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void props.onTokenize(item)} />
+        ) : null
       case "base64Encode":
         return builtins.base64Encode ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
@@ -675,6 +689,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const [items, setItems] = useState<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const [keyboardLayout, setKeyboardLayout] = useState<KeyboardLayoutMode>(() => readKeyboardLayout())
+  const [tokenPage, setTokenPage] = useState<KeyboardTokenPage | null>(null)
   const [cursorMode, setCursorMode] = useState(false)
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
@@ -830,6 +845,45 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     insertKeyboardText(fullContent)
   }
 
+  async function openTokenPage(item: ClipItem) {
+    if (item.kind === "image") return
+    const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
+    const tokens = tokenizeWords(fullContent)
+    if (!tokens.length) return
+    setTokenPage({
+      title: item.title,
+      tokens,
+      selectedIds: [],
+    })
+  }
+
+  function selectToken(token: CaisToken) {
+    setTokenPage((page) => {
+      if (!page || page.selectedIds.includes(token.id)) return page
+      return { ...page, selectedIds: [...page.selectedIds, token.id] }
+    })
+  }
+
+  function toggleToken(token: CaisToken) {
+    setTokenPage((page) => {
+      if (!page) return page
+      return {
+        ...page,
+        selectedIds: page.selectedIds.includes(token.id)
+          ? page.selectedIds.filter((id) => id !== token.id)
+          : [...page.selectedIds, token.id],
+      }
+    })
+  }
+
+  function insertSelectedTokens() {
+    if (!tokenPage) return
+    const text = selectedTokenText(tokenPage.tokens, tokenPage.selectedIds)
+    if (!text) return
+    insertKeyboardText(text)
+    lastPastedText = text
+  }
+
   function deleteBackward() {
     keyboard()?.deleteBackward?.()
   }
@@ -954,16 +1008,38 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           onPress={() => keyboard()?.dismissToHome?.()}
           onLongPress={openCaisApp}
         />
-        <Picker
-          title=""
-          pickerStyle="segmented"
-          value={activeTab}
-          onChanged={(index: number) => setActiveTab(index)}
-          frame={{ minWidth: 112, maxWidth: "infinity", height: 36 }}
-        >
-          <Text tag={TAB_FAVORITE}>Favorite</Text>
-          <Text tag={TAB_CLIPS}>Clips</Text>
-        </Picker>
+        {tokenPage ? (
+          <RoundedRectangle
+            cornerRadius={8}
+            fill="rgba(0,0,0,0.001)"
+            frame={{ minWidth: 112, maxWidth: "infinity", height: 36 }}
+            overlay={
+              <HStack spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "trailing" as any }}>
+                <IconButton
+                  systemImage="chevron.left"
+                  onPress={() => setTokenPage(null)}
+                />
+                <IconButton
+                  systemImage="text.cursor"
+                  tint={selectedTokenText(tokenPage.tokens, tokenPage.selectedIds) ? "label" : "secondaryLabel"}
+                  disabled={!selectedTokenText(tokenPage.tokens, tokenPage.selectedIds)}
+                  onPress={insertSelectedTokens}
+                />
+              </HStack>
+            }
+          />
+        ) : (
+          <Picker
+            title=""
+            pickerStyle="segmented"
+            value={activeTab}
+            onChanged={(index: number) => setActiveTab(index)}
+            frame={{ minWidth: 112, maxWidth: "infinity", height: 36 }}
+          >
+            <Text tag={TAB_FAVORITE}>Favorite</Text>
+            <Text tag={TAB_CLIPS}>Clips</Text>
+          </Picker>
+        )}
         <ScrollView
           axes="horizontal"
           scrollIndicator="hidden"
@@ -988,56 +1064,73 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
         </ScrollView>
       </HStack>
 
-      <ScrollView
-        axes="horizontal"
-        scrollIndicator="hidden"
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
-      >
-        {visibleItems.length ? (
-          <LazyHGrid
-            rows={clipGridRows}
-            spacing={CLIP_GRID_SPACING}
-            frame={{ maxHeight: "infinity" }}
-          >
-            <ForEach
-              count={visibleItems.length}
-              itemBuilder={(index) => {
-                const item = visibleItems[index]
-                return item ? (
-                  <ClipTile
-                    key={item.id}
-                    item={item}
-                    settings={settings}
-                    tileWidth={clipTileCardWidth}
-                    hideTitle={hideClipTitle}
-                    onInsert={insertClip}
-                    onRefresh={refresh}
-                    onStatus={() => {}}
-                  />
-                ) : (null as any)
-              }}
-            />
-          </LazyHGrid>
-        ) : loading ? (
-          <VStack
-            frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
-            spacing={8}
-          >
-            <ProgressView />
-          </VStack>
-        ) : (
-          <VStack
-            frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
-            spacing={8}
-          >
-            <Image systemName={activeTab === TAB_FAVORITE ? "star" : "doc.on.clipboard"} font="largeTitle" foregroundStyle="secondaryLabel" />
-            <Text foregroundStyle="secondaryLabel">
-              {activeTab === TAB_FAVORITE ? "暂无收藏" : "暂无剪贴板记录"}
-            </Text>
-          </VStack>
-        )}
-      </ScrollView>
+      {tokenPage ? (
+        <VStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+          padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
+        >
+          <TokenSelectionPanel
+            tokens={tokenPage.tokens}
+            selectedIds={tokenPage.selectedIds}
+            selectedText={selectedTokenText(tokenPage.tokens, tokenPage.selectedIds)}
+            compact
+            onToggle={toggleToken}
+            onSelect={selectToken}
+          />
+        </VStack>
+      ) : (
+        <ScrollView
+          axes="horizontal"
+          scrollIndicator="hidden"
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
+        >
+          {visibleItems.length ? (
+            <LazyHGrid
+              rows={clipGridRows}
+              spacing={CLIP_GRID_SPACING}
+              frame={{ maxHeight: "infinity" }}
+            >
+              <ForEach
+                count={visibleItems.length}
+                itemBuilder={(index) => {
+                  const item = visibleItems[index]
+                  return item ? (
+                    <ClipTile
+                      key={item.id}
+                      item={item}
+                      settings={settings}
+                      tileWidth={clipTileCardWidth}
+                      hideTitle={hideClipTitle}
+                      onInsert={insertClip}
+                      onTokenize={openTokenPage}
+                      onRefresh={refresh}
+                      onStatus={() => {}}
+                    />
+                  ) : (null as any)
+                }}
+              />
+            </LazyHGrid>
+          ) : loading ? (
+            <VStack
+              frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
+              spacing={8}
+            >
+              <ProgressView />
+            </VStack>
+          ) : (
+            <VStack
+              frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
+              spacing={8}
+            >
+              <Image systemName={activeTab === TAB_FAVORITE ? "star" : "doc.on.clipboard"} font="largeTitle" foregroundStyle="secondaryLabel" />
+              <Text foregroundStyle="secondaryLabel">
+                {activeTab === TAB_FAVORITE ? "暂无收藏" : "暂无剪贴板记录"}
+              </Text>
+            </VStack>
+          )}
+        </ScrollView>
+      )}
 
       <HStack spacing={6} frame={{ maxWidth: "infinity", height: 42 }}>
         <BottomKey systemImage="globe" width={46} onPress={() => keyboard()?.nextKeyboard?.()} />

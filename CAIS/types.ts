@@ -56,6 +56,7 @@ export type CaisSettings = {
 export type KeyboardMenuBuiltinAction =
   | "pin"
   | "favorite"
+  | "tokenize"
   | "base64Encode"
   | "base64Decode"
   | "cleanWhitespace"
@@ -106,6 +107,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
     builtins: {
       pin: true,
       favorite: true,
+      tokenize: true,
       base64Encode: true,
       base64Decode: true,
       cleanWhitespace: true,

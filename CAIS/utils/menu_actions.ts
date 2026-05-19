@@ -7,6 +7,7 @@ import { arabicNumberToChineseAmount, makeRegex, runJavaScriptTransform } from "
 import { renderRuntimeTemplate } from "./template"
 
 export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
+  "tokenize",
   "base64Encode",
   "base64Decode",
   "cleanWhitespace",
@@ -29,7 +30,8 @@ export function getOrderedMenuBuiltins(settings: CaisSettings): KeyboardMenuBuil
     (key) => CONFIGURABLE_MENU_BUILTIN_ACTIONS.includes(key),
   )
   if (!order?.length) return CONFIGURABLE_MENU_BUILTIN_ACTIONS
-  const result = [...order]
+  const result = order.filter((key) => key !== "tokenize")
+  result.unshift("tokenize")
   const insertAfter = (anchor: KeyboardMenuBuiltinAction, action: KeyboardMenuBuiltinAction) => {
     if (result.includes(action)) return
     const index = result.indexOf(anchor)
@@ -49,6 +51,7 @@ export function getOrderedMenuBuiltins(settings: CaisSettings): KeyboardMenuBuil
 
 export function menuBuiltinTitle(action: KeyboardMenuBuiltinAction): string {
   switch (action) {
+    case "tokenize": return "分词"
     case "base64Encode": return "Base64 编码"
     case "base64Decode": return "Base64 解码"
     case "cleanWhitespace": return "移除空格"
@@ -65,6 +68,7 @@ export function menuBuiltinTitle(action: KeyboardMenuBuiltinAction): string {
 
 export function menuBuiltinSystemImage(action: KeyboardMenuBuiltinAction): string {
   switch (action) {
+    case "tokenize": return "text.magnifyingglass"
     case "base64Encode": return "curlybraces.square"
     case "base64Decode": return "arrow.down.doc"
     case "cleanWhitespace": return "text.badge.checkmark"
@@ -144,6 +148,8 @@ export function applyBuiltinMenuAction(options: {
     case "openUrl":
       if (isImage) return null
       return { kind: "openUrl", url: source }
+    case "tokenize":
+      return null
     default:
       return null
   }
