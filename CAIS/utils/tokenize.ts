@@ -68,17 +68,59 @@ function pushSegmentedPart(result: CaisToken[], part: string, location: number) 
 }
 
 function pushMixedRun(result: CaisToken[], text: string, location: number) {
-  const matcher = /[\u3400-\u9fff]+|[A-Za-z0-9]+|[^\s]/g
-  let match: RegExpExecArray | null
-  while ((match = matcher.exec(text))) {
-    const segment = match[0]
-    const start = location + match.index
-    if (/^[\u3400-\u9fff]+$/.test(segment) && Array.from(segment).length > 4) {
-      pushCjkChunks(result, segment, start)
+  let buffer = ""
+  let bufferKind: "cjk" | "alnum" | null = null
+  let bufferOffset = 0
+  let offset = 0
+  const flush = () => {
+    if (!buffer || !bufferKind) return
+    if (bufferKind === "cjk" && Array.from(buffer).length > 4) {
+      pushCjkChunks(result, buffer, location + bufferOffset)
     } else {
-      pushRawToken(result, segment, start)
+      pushRawToken(result, buffer, location + bufferOffset)
+    }
+    buffer = ""
+    bufferKind = null
+  }
+  for (const part of splitGraphemes(text)) {
+    if (/^\s+$/.test(part)) {
+      flush()
+      offset += part.length
+      continue
+    }
+    const kind = /^[\u3400-\u9fff]+$/.test(part)
+      ? "cjk"
+      : /^[A-Za-z0-9]+$/.test(part)
+        ? "alnum"
+        : null
+    if (!kind) {
+      flush()
+      pushRawToken(result, part, location + offset)
+    } else if (bufferKind === kind) {
+      buffer += part
+    } else {
+      flush()
+      buffer = part
+      bufferKind = kind
+      bufferOffset = offset
+    }
+    offset += part.length
+  }
+  flush()
+}
+
+function splitGraphemes(text: string): string[] {
+  const Segmenter = (globalThis as any).Intl?.Segmenter
+  if (Segmenter) {
+    try {
+      const segmenter = new Segmenter(undefined, { granularity: "grapheme" })
+      return Array.from(segmenter.segment(text) as Iterable<any>)
+        .map((item: any) => String(item?.segment ?? ""))
+        .filter(Boolean)
+    } catch {
     }
   }
+  return Array.from(text)
 }
 
 function pushCjkChunks(result: CaisToken[], text: string, location: number) {

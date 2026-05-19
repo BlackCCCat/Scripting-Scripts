@@ -1019,7 +1019,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                   onPress={() => setTokenPage(null)}
                 />
                 <IconButton
-                  systemImage="xmark.circle"
+                  systemImage="arrow.counterclockwise.circle"
                   tint={tokenSelectedText ? "label" : "secondaryLabel"}
                   disabled={!tokenSelectedText}
                   onPress={clearSelectedTokens}

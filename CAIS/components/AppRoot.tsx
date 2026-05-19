@@ -214,7 +214,7 @@ function AppTokenResultView(props: {
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         padding={16}
         toolbar={{
-          topBarLeading: <Button title="清空" systemImage="xmark.circle" disabled={!selectedText} action={() => setSelectedIds([])} />,
+          topBarLeading: <Button title="清空" systemImage="arrow.counterclockwise.circle" disabled={!selectedText} action={() => setSelectedIds([])} />,
           topBarTrailing: <Button title="复制" systemImage="doc.on.doc" disabled={!selectedText} action={() => dismiss(selectedText)} />,
         }}
       >
