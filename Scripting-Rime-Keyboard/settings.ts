@@ -84,6 +84,8 @@ export type RimeKeyboardSettings = {
   backspaceSwipeLeftMode: ActionSendMode;
   backspaceSwipeUp: string;
   backspaceSwipeUpMode: ActionSendMode;
+  backspaceComposingSwipeUp: string;
+  backspaceComposingSwipeUpMode: ActionSendMode;
   backspaceSwipeDown: string;
   backspaceSwipeDownMode: ActionSendMode;
   numericEqualsSwipeUp: string;
@@ -450,6 +452,8 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   backspaceSwipeLeftMode: "auto",
   backspaceSwipeUp: "{deleteAll}",
   backspaceSwipeUpMode: "auto",
+  backspaceComposingSwipeUp: "{clearComposition}",
+  backspaceComposingSwipeUpMode: "auto",
   backspaceSwipeDown: "{restoreDeleted}",
   backspaceSwipeDownMode: "auto",
   numericEqualsSwipeUp: "V",
@@ -870,6 +874,13 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       ? raw.backspaceSwipeUp
       : DEFAULT_RIME_KEYBOARD_SETTINGS.backspaceSwipeUp,
     backspaceSwipeUpMode: normalizeActionSendMode(raw?.backspaceSwipeUpMode),
+    backspaceComposingSwipeUp:
+      typeof raw?.backspaceComposingSwipeUp === "string"
+        ? raw.backspaceComposingSwipeUp
+        : DEFAULT_RIME_KEYBOARD_SETTINGS.backspaceComposingSwipeUp,
+    backspaceComposingSwipeUpMode: normalizeActionSendMode(
+      raw?.backspaceComposingSwipeUpMode,
+    ),
     backspaceSwipeDown: typeof raw?.backspaceSwipeDown === "string"
       ? raw.backspaceSwipeDown
       : DEFAULT_RIME_KEYBOARD_SETTINGS.backspaceSwipeDown,

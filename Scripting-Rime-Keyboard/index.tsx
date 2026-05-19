@@ -1592,7 +1592,7 @@ function SettingsView() {
         <Section
           footer={
             <SettingHint>
-              默认：左划删除预编辑拼音，上划删除当前可删除文本，下划恢复最近删除内容。
+              默认：左划删除预编辑拼音，上划删除当前可删除文本，预编辑上划清空预编辑拼音，下划恢复最近删除内容。
             </SettingHint>
           }
         >
@@ -1613,6 +1613,15 @@ function SettingsView() {
               patchSettings({ backspaceSwipeUp: value })}
             onModeChanged={(value) =>
               patchSettings({ backspaceSwipeUpMode: value })}
+          />
+          <ActionConfigRow
+            title="预编辑上划"
+            action={settings.backspaceComposingSwipeUp}
+            mode={settings.backspaceComposingSwipeUpMode}
+            onActionChanged={(value) =>
+              patchSettings({ backspaceComposingSwipeUp: value })}
+            onModeChanged={(value) =>
+              patchSettings({ backspaceComposingSwipeUpMode: value })}
           />
           <ActionConfigRow
             title="下划动作"

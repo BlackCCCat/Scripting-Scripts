@@ -1106,6 +1106,13 @@ function KeyboardContent(props: {
   function backspaceSwipeUp() {
     cancelPendingPressFeedback();
     stopRepeatingBackspace();
+    if (preedit.length > 0) {
+      runConfiguredAction(
+        settings.backspaceComposingSwipeUp,
+        settings.backspaceComposingSwipeUpMode,
+      );
+      return;
+    }
     runConfiguredAction(
       settings.backspaceSwipeUp,
       settings.backspaceSwipeUpMode,
@@ -1329,6 +1336,15 @@ function KeyboardContent(props: {
 
   function consumeSelectAllForDeletion() {
     if (!selectAllActive && !selectAllSnapshotRef.current) return false;
+    const selected = CustomKeyboard.selectedText;
+    if (selected) {
+      deletedTextRef.current = selected;
+      try {
+        CustomKeyboard.deleteBackward();
+      } catch {}
+      clearSelectAllState();
+      return true;
+    }
     const deleted = deleteDeletableTextAroundCursor() ||
       selectAllSnapshotRef.current?.text ||
       "";
@@ -1445,6 +1461,16 @@ function KeyboardContent(props: {
   function deleteAllText() {
     stopRepeatingBackspace();
     try {
+      if (selectAllActive || selectAllSnapshotRef.current) {
+        consumeSelectAllForDeletion();
+        return;
+      }
+      if (CustomKeyboard.selectedText) {
+        deletedTextRef.current = CustomKeyboard.selectedText;
+        CustomKeyboard.deleteBackward();
+        clearSelectAllState();
+        return;
+      }
       const text = selectedTextSnapshot();
       if (!text) {
         clearSelectAllStateForExternalAction();
