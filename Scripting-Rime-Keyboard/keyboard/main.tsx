@@ -589,8 +589,11 @@ function KeyboardContent(props: {
       longPressDuration: () =>
         activeHitTargetRef.current.get(rowId)?.longPressDuration ?? 360,
       swipeTriggerDistance: () => currentSwipeTriggerDistance(),
-      safetyReleaseDelay: () =>
-        activeHitTargetRef.current.get(rowId)?.onLongPress ? 1500 : 520,
+      safetyReleaseDelay: () => {
+        const target = activeHitTargetRef.current.get(rowId);
+        return target?.safetyReleaseDelay ??
+          (target?.onLongPress ? 1500 : 520);
+      },
       longPressSafetyReleaseDelay: () => LONG_PRESS_PRESSED_RELEASE_DELAY,
       shouldCancelLongPress: (details: any) => {
         const target = activeHitTargetRef.current.get(rowId);
@@ -619,7 +622,9 @@ function KeyboardContent(props: {
         const activeId = activeHitTargetRef.current.get(rowId)?.id;
         if (isSpaceCursorKey(activeId)) {
           void updateSpaceLongPressDrag(details);
-        } else if (activeId === "backspace" || activeId === "numeric-backspace") {
+        } else if (
+          activeId === "backspace" || activeId === "numeric-backspace"
+        ) {
           backspaceLongPressMove(details);
         }
       },
@@ -1918,6 +1923,36 @@ function KeyboardContent(props: {
       onSwipeRight: () => moveCursorSafely(1),
     });
     x += metrics.bottom.space + KEY_SPACING;
+    targets.push({
+      id: "mode",
+      x,
+      width: metrics.bottom.mode,
+      safetyReleaseDelay: 180,
+      onPress: () => {
+        if (composing && settings.modeComposingEnabled) {
+          runConfiguredAction(
+            settings.modeComposingAction,
+            settings.modeComposingActionMode,
+          );
+        } else {
+          toggleAscii();
+        }
+      },
+      onSwipeUp: composing && settings.modeComposingEnabled
+        ? () =>
+          runConfiguredAction(
+            settings.modeComposingSwipeUp,
+            settings.modeComposingSwipeUpMode,
+          )
+        : undefined,
+      onSwipeDown: composing && settings.modeComposingEnabled
+        ? () =>
+          runConfiguredAction(
+            settings.modeComposingSwipeDown,
+            settings.modeComposingSwipeDownMode,
+          )
+        : undefined,
+    });
     x += metrics.bottom.mode + KEY_SPACING;
     targets.push({
       id: "enter",
@@ -3259,8 +3294,7 @@ function KeyboardContent(props: {
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}
                 system
-                onTouchStart={() => beginKeyTouch("mode")}
-                onTouchEnd={() => endKeyTouch("mode")}
+                passive
                 active={isPressed("mode")}
                 labelFontSize={18}
                 onPress={() =>

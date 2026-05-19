@@ -44,6 +44,7 @@ export type KeyHitTarget = {
   onLongPress?: () => void;
   onLongPressEnd?: () => void;
   longPressDuration?: number;
+  safetyReleaseDelay?: number;
   onSwipeUp?: () => void;
   onSwipeDown?: () => void;
   onSwipeLeft?: () => void;
