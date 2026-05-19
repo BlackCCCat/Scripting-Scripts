@@ -14,6 +14,9 @@ import { BASE_KEY_HEIGHT } from "./constants";
 import type { Palette } from "./types";
 import { createTouchIntentMachine, estimatedTextWidth } from "./utils";
 
+const CANDIDATE_LEADING_PADDING = 7;
+const CANDIDATE_TRAILING_PADDING = CANDIDATE_LEADING_PADDING;
+
 export function candidateButtonNaturalWidth(params: {
   text: string;
   comment: string;
@@ -23,7 +26,6 @@ export function candidateButtonNaturalWidth(params: {
   commentFontSize: number;
   expanded?: boolean;
 }) {
-  const horizontalPadding = 7;
   const textFontSize = params.candidateFontSize * (params.expanded ? 1.08 : 1);
   const textWidth = estimatedTextWidth(
     params.text,
@@ -47,7 +49,8 @@ export function candidateButtonNaturalWidth(params: {
   const hasMetaLine = commentLine.length > 0;
   const minWidth = params.expanded ? 54 : hasMetaLine ? 42 : 12;
   return Math.ceil(
-    Math.max(minWidth, textWidth, commentWidth) + horizontalPadding * 2,
+    Math.max(minWidth, textWidth, commentWidth) +
+      CANDIDATE_LEADING_PADDING + CANDIDATE_TRAILING_PADDING,
   );
 }
 
@@ -464,25 +467,31 @@ export function CandidateButton(props: {
   const showComment = comment.length > 0;
   const candidateFontSize = props.candidateFontSize ?? 19;
   const commentFontSize = props.commentFontSize ?? 10;
-  const horizontalPadding = 7;
   const commentLine = showComment
     ? `${props.index + 1} ${comment}`
     : showIndex
     ? `${props.index + 1}`
     : "";
-  const naturalWidth = props.naturalWidth ??
-    candidateButtonNaturalWidth({
-      text: props.candidate.text,
-      comment,
-      index: props.index,
-      showIndex,
-      candidateFontSize,
-      commentFontSize,
-      expanded: props.expanded,
-    });
-  const frameWidth = props.width ?? naturalWidth;
+  const frameWidth = props.width;
   const frameHeight = props.height ?? (props.expanded ? 56 : 40);
-  const contentWidth = Math.max(1, naturalWidth - horizontalPadding * 2);
+  const rootFrame = {
+    ...(frameWidth ? { width: frameWidth } : {}),
+    height: frameHeight,
+    alignment: "leading" as any,
+  };
+  const contentFrame = {
+    ...(frameWidth ? { width: frameWidth } : {}),
+    height: frameHeight,
+    alignment: "leading" as any,
+  };
+  const textFrame = frameWidth
+    ? {
+      maxWidth: "infinity" as any,
+      alignment: "leading" as any,
+    }
+    : {
+      alignment: "leading" as any,
+    };
   return (
     <ZStack
       background={(props.selected
@@ -493,23 +502,19 @@ export function CandidateButton(props: {
         : "clear") as any}
       onTapGesture={props.onPress}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
-      frame={{
-        width: frameWidth,
-        height: frameHeight,
-        alignment: "leading" as any,
-      }}
+      frame={rootFrame}
     >
       {commentLine
         ? (
           <VStack
             alignment="leading"
             spacing={0}
-            padding={{ horizontal: horizontalPadding, vertical: 3 }}
-            frame={{
-              width: frameWidth,
-              height: frameHeight,
-              alignment: "leading" as any,
+            padding={{
+              leading: CANDIDATE_LEADING_PADDING,
+              trailing: CANDIDATE_TRAILING_PADDING,
+              vertical: 3,
             }}
+            frame={contentFrame}
           >
             <Text
               font={candidateFontSize}
@@ -519,11 +524,7 @@ export function CandidateButton(props: {
                 ? false
                 : { horizontal: true, vertical: true }}
               foregroundStyle={props.palette.primary as any}
-              frame={{
-                width: props.width ? undefined : contentWidth,
-                maxWidth: props.width ? "infinity" as any : undefined,
-                alignment: "leading" as any,
-              }}
+              frame={textFrame}
             >
               {props.candidate.text}
             </Text>
@@ -536,11 +537,7 @@ export function CandidateButton(props: {
                 : { horizontal: true, vertical: true }}
               allowsTightening
               foregroundStyle={props.palette.secondary as any}
-              frame={{
-                width: props.width ? undefined : contentWidth,
-                maxWidth: props.width ? "infinity" as any : undefined,
-                alignment: "leading" as any,
-              }}
+              frame={textFrame}
             >
               {commentLine}
             </Text>
@@ -549,12 +546,11 @@ export function CandidateButton(props: {
         : (
           <HStack
             spacing={0}
-            padding={{ horizontal: horizontalPadding }}
-            frame={{
-              width: frameWidth,
-              height: frameHeight,
-              alignment: "leading" as any,
+            padding={{
+              leading: CANDIDATE_LEADING_PADDING,
+              trailing: CANDIDATE_TRAILING_PADDING,
             }}
+            frame={contentFrame}
           >
             <Text
               font={candidateFontSize}
@@ -564,11 +560,7 @@ export function CandidateButton(props: {
                 ? false
                 : { horizontal: true, vertical: true }}
               foregroundStyle={props.palette.primary as any}
-              frame={{
-                width: props.width ? undefined : contentWidth,
-                maxWidth: props.width ? "infinity" as any : undefined,
-                alignment: "leading" as any,
-              }}
+              frame={textFrame}
             >
               {props.candidate.text}
             </Text>
