@@ -5,29 +5,99 @@ export type CaisToken = {
 }
 
 function languageHint(text: string): NaturalLanguage.Language | undefined {
+  if (/[\u3400-\u9fff]/.test(text)) {
+    return /[繫臺後萬與專業開關]/.test(text) ? "zh-Hant" : "zh-Hans"
+  }
   try {
     const detected = NaturalLanguage.dominantLanguage(text)
     if (detected) return detected
   } catch {
   }
-  return /[\u3400-\u9fff]/.test(text) ? "zh-Hans" : undefined
+  return undefined
 }
 
 function fallbackTokenize(text: string): CaisToken[] {
-  return text
-    .match(/\S+/g)
-    ?.map((part) => part.trim())
-    .filter(Boolean)
-    .map((part, index) => ({ id: `fallback-${index}-${part}`, text: part, index })) ?? []
+  const result: CaisToken[] = []
+  pushTextParts(result, text, 0)
+  return result
 }
 
-function pushToken(result: CaisToken[], text: string, location: number, length: number) {
-  if (!text.trim()) return
+function pushTextParts(result: CaisToken[], text: string, location: number) {
+  const matcher = /\S+/g
+  let match: RegExpExecArray | null
+  while ((match = matcher.exec(text))) {
+    const part = match[0]
+    const start = location + match.index
+    pushSegmentedPart(result, part, start)
+  }
+}
+
+function pushRawToken(result: CaisToken[], text: string, location: number) {
+  if (!text) return
   result.push({
-    id: `${result.length}-${location}-${length}`,
+    id: `${result.length}-${location}-${text.length}`,
     text,
     index: result.length,
   })
+}
+
+function pushSegmentedPart(result: CaisToken[], part: string, location: number) {
+  if (!/[\u3400-\u9fff]/.test(part) || Array.from(part).length <= 4) {
+    pushMixedRun(result, part, location)
+    return
+  }
+  const Segmenter = (globalThis as any).Intl?.Segmenter
+  if (Segmenter) {
+    try {
+      const segmenter = new Segmenter("zh-Hans", { granularity: "word" })
+      const pieces = Array.from(segmenter.segment(part) as Iterable<any>)
+        .map((item: any) => String(item?.segment ?? ""))
+        .filter(Boolean)
+      if (pieces.length > 1) {
+        let offset = 0
+        for (const piece of pieces) {
+          pushMixedRun(result, piece, location + offset)
+          offset += piece.length
+        }
+        return
+      }
+    } catch {
+    }
+  }
+  pushMixedRun(result, part, location)
+}
+
+function pushMixedRun(result: CaisToken[], text: string, location: number) {
+  const matcher = /[\u3400-\u9fff]+|[A-Za-z0-9]+|[^\s]/g
+  let match: RegExpExecArray | null
+  while ((match = matcher.exec(text))) {
+    const segment = match[0]
+    const start = location + match.index
+    if (/^[\u3400-\u9fff]+$/.test(segment) && Array.from(segment).length > 4) {
+      pushCjkChunks(result, segment, start)
+    } else {
+      pushRawToken(result, segment, start)
+    }
+  }
+}
+
+function pushCjkChunks(result: CaisToken[], text: string, location: number) {
+  let buffer = ""
+  let bufferOffset = 0
+  let offset = 0
+  const flush = () => {
+    if (buffer) {
+      pushRawToken(result, buffer, location + bufferOffset)
+      buffer = ""
+    }
+  }
+  for (const char of Array.from(text)) {
+    if (!buffer) bufferOffset = offset
+    buffer += char
+    if (Array.from(buffer).length >= 2) flush()
+    offset += char.length
+  }
+  flush()
 }
 
 export function tokenizeWords(text: string): CaisToken[] {
@@ -46,13 +116,13 @@ export function tokenizeWords(text: string): CaisToken[] {
       const end = start + token.range.length
       if (start > cursor) {
         const gap = source.substring(cursor, start)
-        pushToken(result, gap, cursor, start - cursor)
+        pushTextParts(result, gap, cursor)
       }
-      pushToken(result, token.text, start, token.range.length)
+      pushTextParts(result, token.text, start)
       cursor = Math.max(cursor, end)
     }
     if (cursor < source.length) {
-      pushToken(result, source.substring(cursor), cursor, source.length - cursor)
+      pushTextParts(result, source.substring(cursor), cursor)
     }
     return result
   } catch {

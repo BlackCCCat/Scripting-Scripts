@@ -857,13 +857,6 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     })
   }
 
-  function selectToken(token: CaisToken) {
-    setTokenPage((page) => {
-      if (!page || page.selectedIds.includes(token.id)) return page
-      return { ...page, selectedIds: [...page.selectedIds, token.id] }
-    })
-  }
-
   function toggleToken(token: CaisToken) {
     setTokenPage((page) => {
       if (!page) return page
@@ -874,6 +867,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           : [...page.selectedIds, token.id],
       }
     })
+  }
+
+  function clearSelectedTokens() {
+    setTokenPage((page) => page ? { ...page, selectedIds: [] } : page)
   }
 
   function insertSelectedTokens() {
@@ -984,6 +981,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     )
   }
 
+  const tokenSelectedText = tokenPage ? selectedTokenText(tokenPage.tokens, tokenPage.selectedIds) : ""
+
   return (
     <VStack
       spacing={7}
@@ -1020,9 +1019,15 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                   onPress={() => setTokenPage(null)}
                 />
                 <IconButton
+                  systemImage="xmark.circle"
+                  tint={tokenSelectedText ? "label" : "secondaryLabel"}
+                  disabled={!tokenSelectedText}
+                  onPress={clearSelectedTokens}
+                />
+                <IconButton
                   systemImage="text.cursor"
-                  tint={selectedTokenText(tokenPage.tokens, tokenPage.selectedIds) ? "label" : "secondaryLabel"}
-                  disabled={!selectedTokenText(tokenPage.tokens, tokenPage.selectedIds)}
+                  tint={tokenSelectedText ? "label" : "secondaryLabel"}
+                  disabled={!tokenSelectedText}
                   onPress={insertSelectedTokens}
                 />
               </HStack>
@@ -1046,7 +1051,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           scrollTargetBehavior="viewAlignedLimitAlwaysByOne"
           frame={{ width: 154, height: 36 }}
         >
-          <LazyHStack spacing={6} frame={{ height: 36 }} scrollTargetlayout>
+          <LazyHStack spacing={6} frame={{ height: 36 }} scrollTargetLayout>
             <IconButton systemImage="doc.on.clipboard" onPress={pasteLastContent} />
             <IconButton systemImage="xmark.circle" onPress={clearInput} />
             <IconButton systemImage="square.and.arrow.down.on.square" disabled={loading} onPress={captureNow} />
@@ -1072,10 +1077,9 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           <TokenSelectionPanel
             tokens={tokenPage.tokens}
             selectedIds={tokenPage.selectedIds}
-            selectedText={selectedTokenText(tokenPage.tokens, tokenPage.selectedIds)}
+            selectedText={tokenSelectedText}
             compact
             onToggle={toggleToken}
-            onSelect={selectToken}
           />
         </VStack>
       ) : (
