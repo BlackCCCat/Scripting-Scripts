@@ -1238,6 +1238,10 @@ function SettingsView() {
                     )}
                   />
                 ))}
+                <NavigationLink
+                  title="工具栏"
+                  destination={renderToolbarFontColorPage()}
+                />
               </Section>
             </>
           )
@@ -1329,6 +1333,21 @@ function SettingsView() {
           )
           : null}
       </List>
+    );
+  }
+
+  function renderToolbarFontColorPage() {
+    const toolbarKeys = [
+      ...settings.toolbarLeftButtons.map((item, index) => ({
+        id: `toolbar-left-${item.id}`,
+        label: `左侧按钮 ${index + 1}`,
+      })),
+      { id: "candidate-right", label: "右侧按钮" },
+    ];
+    return renderKeyColorPage(
+      "keyFontColors",
+      { title: "工具栏", keys: toolbarKeys },
+      "工具栏图标颜色",
     );
   }
 

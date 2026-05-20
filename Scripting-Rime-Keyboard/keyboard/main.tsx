@@ -2327,17 +2327,19 @@ function KeyboardContent(props: {
           spacing={KEY_SPACING}
           frame={{ width: metrics.width, height: metrics.candidateBarHeight }}
         >
-          {toolbarLeftButtons.map((item, index) => (
+          {toolbarLeftButtons.map((item) => (
             <KeyFace
               key={`toolbar-left-${item.id}`}
-              id={`toolbar-left-${index}`}
+              id={`toolbar-left-${item.id}`}
               image={item.symbol}
               palette={palette}
               width={toolbarButtonWidth}
               height={metrics.candidateButtonHeight}
               system
               plain
-              foregroundStyle={palette.primary}
+              foregroundStyle={palette.primaryOverrides?.[
+                `toolbar-left-${item.id}`
+              ] ?? palette.primary}
               onPress={() =>
                 runWithFeedback(() => runToolbarAction(item.action))}
               contextMenu={toolbarContextMenuProps(item)}
@@ -2385,7 +2387,9 @@ function KeyboardContent(props: {
                 height={metrics.candidateButtonHeight}
                 system
                 plain
-                foregroundStyle={palette.primary}
+                foregroundStyle={palette.primaryOverrides
+                  ?.["candidate-right"] ??
+                  palette.primary}
                 onPress={() => runWithFeedback(pressCandidateRightButton)}
               />
             )
