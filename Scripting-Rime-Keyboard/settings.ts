@@ -12,6 +12,11 @@ export type CandidateMenuAction = {
   name: string;
   action: string;
 };
+export type ToolbarButtonConfig = {
+  id: string;
+  symbol: string;
+  action: string;
+};
 
 export type SwipeSettings = Record<string, string>;
 export type ActionModeSettings = Record<string, ActionSendMode>;
@@ -66,6 +71,11 @@ export type RimeKeyboardSettings = {
   composingFunctionPressModes: ActionModeSettings;
   composingFunctionSwipeUpModes: ActionModeSettings;
   composingFunctionSwipeDownModes: ActionModeSettings;
+  idleFunctionOrder: string[];
+  composingFunctionOrder: string[];
+  toolbarLeftButtons: ToolbarButtonConfig[];
+  toolbarDismissSymbol: string;
+  toolbarExpandSymbol: string;
   shiftComposingEnabled: boolean;
   shiftComposingKey: string;
   shiftComposingKeyMode: ActionSendMode;
@@ -242,6 +252,12 @@ export const COMPOSING_FUNCTION_KEYS = [
   "filter",
   "right",
 ];
+export const DEFAULT_TOOLBAR_LEFT_BUTTONS: ToolbarButtonConfig[] = [
+  { id: "home", symbol: "house", action: "{keyboardHome}" },
+  { id: "settings", symbol: "gearshape", action: "{keyboardSettings}" },
+  { id: "schema", symbol: "list.bullet.rectangle", action: "{schemaMenu}" },
+];
+export const TOOLBAR_LEFT_BUTTON_MAX = 6;
 
 export const DEFAULT_IDLE_FUNCTION_SWIPE_UP: SwipeSettings = {
   left: "{home}",
@@ -434,6 +450,11 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   composingFunctionPressModes: DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
   composingFunctionSwipeUpModes: DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
   composingFunctionSwipeDownModes: DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
+  idleFunctionOrder: FUNCTION_KEYS,
+  composingFunctionOrder: COMPOSING_FUNCTION_KEYS,
+  toolbarLeftButtons: DEFAULT_TOOLBAR_LEFT_BUTTONS,
+  toolbarDismissSymbol: "keyboard.chevron.compact.down",
+  toolbarExpandSymbol: "chevron.down.circle",
   shiftComposingEnabled: true,
   shiftComposingKey: "/",
   shiftComposingKeyMode: "auto",
@@ -564,6 +585,62 @@ function normalizeCandidateMenuActions(raw: unknown): CandidateMenuAction[] {
     const action = typeof source.action === "string" ? source.action : "";
     if (!name && !action) continue;
     result.push({ name, action });
+  }
+  return result;
+}
+
+function fallbackToolbarButtonId(
+  index: number,
+  symbol: string,
+  action: string,
+) {
+  const seed = `${index}-${symbol}-${action}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+  }
+  return `toolbar-${index}-${Math.abs(hash)}`;
+}
+
+function normalizeToolbarButtons(raw: unknown): ToolbarButtonConfig[] {
+  const source = Array.isArray(raw) ? raw : DEFAULT_TOOLBAR_LEFT_BUTTONS;
+  const result: ToolbarButtonConfig[] = [];
+  for (
+    const [index, item] of source.slice(0, TOOLBAR_LEFT_BUTTON_MAX)
+      .entries()
+  ) {
+    const data = item && typeof item === "object"
+      ? (item as Record<string, unknown>)
+      : {};
+    const id = typeof data.id === "string" && data.id.trim()
+      ? data.id.trim()
+      : "";
+    const symbol = typeof data.symbol === "string" ? data.symbol.trim() : "";
+    const action = typeof data.action === "string" ? data.action.trim() : "";
+    if (!symbol && !action) continue;
+    result.push({
+      id: id || fallbackToolbarButtonId(index, symbol, action),
+      symbol,
+      action,
+    });
+  }
+  return result;
+}
+
+function normalizeOrder(raw: unknown, defaults: string[]) {
+  const result: string[] = [];
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      if (
+        typeof value === "string" && defaults.includes(value) &&
+        !result.includes(value)
+      ) {
+        result.push(value);
+      }
+    }
+  }
+  for (const key of defaults) {
+    if (!result.includes(key)) result.push(key);
   }
   return result;
 }
@@ -822,6 +899,18 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       DEFAULT_COMPOSING_FUNCTION_ACTION_MODES,
       COMPOSING_FUNCTION_KEYS,
     ),
+    idleFunctionOrder: normalizeOrder(raw?.idleFunctionOrder, FUNCTION_KEYS),
+    composingFunctionOrder: normalizeOrder(
+      raw?.composingFunctionOrder,
+      COMPOSING_FUNCTION_KEYS,
+    ),
+    toolbarLeftButtons: normalizeToolbarButtons(raw?.toolbarLeftButtons),
+    toolbarDismissSymbol: typeof raw?.toolbarDismissSymbol === "string"
+      ? raw.toolbarDismissSymbol
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.toolbarDismissSymbol,
+    toolbarExpandSymbol: typeof raw?.toolbarExpandSymbol === "string"
+      ? raw.toolbarExpandSymbol
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.toolbarExpandSymbol,
     shiftComposingEnabled: typeof raw?.shiftComposingEnabled === "boolean"
       ? raw.shiftComposingEnabled
       : true,

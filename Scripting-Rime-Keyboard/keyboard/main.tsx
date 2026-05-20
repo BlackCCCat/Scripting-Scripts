@@ -20,6 +20,8 @@ import {
   DEFAULT_CANDIDATE_MENU_ACTIONS,
   loadRimeKeyboardSettings,
   type RimeKeyboardSettings,
+  TOOLBAR_LEFT_BUTTON_MAX,
+  type ToolbarButtonConfig,
 } from "../settings";
 import {
   KEY_BACKSPACE,
@@ -1488,11 +1490,6 @@ function KeyboardContent(props: {
     insertTextReplacingSelectAll(deletedTextRef.current);
   }
 
-  function activateWrapDisplayMode() {
-    if (!settings.composingFunctionWrapDisplayEnabled) return;
-    setBackslashWrapMode(true);
-  }
-
   function runConfiguredAction(action: string, mode: ActionSendMode = "auto") {
     if (!action) return;
     if (mode === "direct") {
@@ -1560,10 +1557,6 @@ function KeyboardContent(props: {
         return;
       case "{commitComposition}":
         commitComposition();
-        return;
-      case "{backslashWrap}":
-        processText("\\");
-        activateWrapDisplayMode();
         return;
       case "{backslash}":
       case "backslash":
@@ -1714,28 +1707,29 @@ function KeyboardContent(props: {
       ? "dismiss"
       : settings.candidateRightButtonMode;
   const candidateHomeButtonVisible = !composing;
-  const candidateHomeButtonWidth = 42;
-  const candidateSettingsButtonWidth = candidateHomeButtonVisible ? 42 : 0;
-  const candidateSchemaButtonWidth = candidateHomeButtonVisible ? 42 : 0;
+  const toolbarLeftButtons = candidateHomeButtonVisible
+    ? settings.toolbarLeftButtons.filter((item) => item.symbol && item.action)
+      .slice(0, TOOLBAR_LEFT_BUTTON_MAX)
+    : [];
+  const toolbarButtonWidth = 42;
+  const candidateToolbarLeftWidth = toolbarLeftButtons.length *
+    toolbarButtonWidth;
   const candidateRightButtonVisible =
     effectiveCandidateRightButtonMode !== "hidden";
   const candidateRightButtonWidth = candidateRightButtonVisible ? 42 : 0;
-  const candidateFixedButtonWidth =
-    (candidateHomeButtonVisible ? candidateHomeButtonWidth : 0) +
-    candidateSettingsButtonWidth +
-    candidateSchemaButtonWidth +
+  const candidateFixedButtonWidth = candidateToolbarLeftWidth +
     candidateRightButtonWidth;
-  const candidateFixedButtonCount = (candidateHomeButtonVisible ? 1 : 0) +
-    (candidateSettingsButtonWidth > 0 ? 1 : 0) +
-    (candidateSchemaButtonWidth > 0 ? 1 : 0) +
+  const candidateFixedButtonCount = toolbarLeftButtons.length +
     (candidateRightButtonVisible ? 1 : 0);
   const candidateFixedButtonGaps = KEY_SPACING * candidateFixedButtonCount;
-  const candidateBarWidth = metrics.width - candidateFixedButtonWidth -
-    candidateFixedButtonGaps;
+  const candidateBarWidth = Math.max(
+    0,
+    metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
+  );
   const candidateRightButtonImage =
     effectiveCandidateRightButtonMode === "expand"
-      ? candidateExpanded ? "chevron.up.circle" : "chevron.down.circle"
-      : "keyboard.chevron.compact.down";
+      ? candidateExpanded ? "chevron.up.circle" : settings.toolbarExpandSymbol
+      : settings.toolbarDismissSymbol;
   const highlightedAbsoluteIndex = pageNo * rimePageSize + highlightedIdx;
   const expandedPagerWidth = 42;
   const expandedCandidateWidth = metrics.width - expandedPagerWidth -
@@ -1766,138 +1760,130 @@ function KeyboardContent(props: {
     }
   }
 
+  function composingFunctionViewId(key: string) {
+    switch (key) {
+      case "page":
+        return "func-page-down";
+      case "tone1":
+        return "tone-1";
+      case "tone2":
+        return "tone-2";
+      case "tone3":
+        return "tone-3";
+      case "tone4":
+        return "tone-4";
+      case "filter":
+        return "func-backslash";
+      default:
+        return `func-${key}`;
+    }
+  }
+
+  function idleFunctionViewId(key: string) {
+    return key === "select" ? "idle-schema" : `idle-${key}`;
+  }
+
   function composingFunctionHitTargets(): KeyHitTarget[] {
     const step = metrics.functionWidth8 + KEY_SPACING;
     const frame = (index: number) =>
       horizontalHitFrame(step * index, metrics.functionWidth8, index, 8);
-    return [
-      {
-        id: "func-left",
-        ...frame(0),
-        onPress: () => runComposingFunctionPress("left"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "left"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "left"),
-      },
-      {
-        id: "func-page-down",
-        ...frame(1),
-        onPress: () => runComposingFunctionPress("page"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "page"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "page"),
-      },
-      {
-        id: "tone-1",
-        ...frame(2),
-        onPress: () => runComposingFunctionPress("tone1"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "tone1"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "tone1"),
-      },
-      {
-        id: "tone-2",
-        ...frame(3),
-        onPress: () => runComposingFunctionPress("tone2"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "tone2"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "tone2"),
-      },
-      {
-        id: "tone-3",
-        ...frame(4),
-        onPress: () => runComposingFunctionPress("tone3"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "tone3"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "tone3"),
-      },
-      {
-        id: "tone-4",
-        ...frame(5),
-        onPress: () => runComposingFunctionPress("tone4"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "tone4"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "tone4"),
-      },
-      {
-        id: "func-backslash",
-        ...frame(6),
-        onPress: () => runComposingFunctionPress("filter"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "filter"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "filter"),
-      },
-      {
-        id: "func-right",
-        ...frame(7),
-        onPress: () => runComposingFunctionPress("right"),
-        onSwipeUp: () => runComposingFunctionSwipe("up", "right"),
-        onSwipeDown: () => runComposingFunctionSwipe("down", "right"),
-      },
-    ];
+    return settings.composingFunctionOrder.map((key, index) => ({
+      id: composingFunctionViewId(key),
+      ...frame(index),
+      onPress: () => runComposingFunctionPress(key),
+      onSwipeUp: () => runComposingFunctionSwipe("up", key),
+      onSwipeDown: () => runComposingFunctionSwipe("down", key),
+    }));
   }
 
   function idleFunctionHitTargets(): KeyHitTarget[] {
     const step = metrics.functionWidth8 + KEY_SPACING;
     const frame = (index: number) =>
       horizontalHitFrame(step * index, metrics.functionWidth8, index, 8);
-    return [
-      {
-        id: "idle-left",
-        ...frame(0),
-        onPress: () => runIdleFunctionPress("left"),
-        onLongPress: () => startRepeatingCursorMove(-1),
-        onLongPressEnd: stopRepeatingCursorMove,
-        longPressDuration: CURSOR_REPEAT_DURATION,
-        onSwipeUp: () => runIdleFunctionSwipe("up", "left"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "left"),
-      },
-      {
-        id: "idle-head",
-        ...frame(1),
-        onPress: () => runIdleFunctionPress("head"),
-        onSwipeUp: () => runIdleFunctionSwipe("up", "head"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "head"),
-      },
-      {
-        id: "idle-schema",
-        ...frame(2),
-        onPress: () => runIdleFunctionPress("select"),
-        onSwipeUp: () => runIdleFunctionSwipe("up", "select"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "select"),
-      },
-      {
-        id: "idle-cut",
-        ...frame(3),
-        onPress: () => runIdleFunctionPress("cut"),
-        onSwipeUp: () => runIdleFunctionSwipe("up", "cut"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "cut"),
-      },
-      {
-        id: "idle-copy",
-        ...frame(4),
-        onPress: () => runIdleFunctionPress("copy"),
-        onSwipeUp: () => runIdleFunctionSwipe("up", "copy"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "copy"),
-      },
-      {
-        id: "idle-paste",
-        ...frame(5),
-        onPress: () => runIdleFunctionPress("paste"),
-        onSwipeUp: () => runIdleFunctionSwipe("up", "paste"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "paste"),
-      },
-      {
-        id: "idle-tail",
-        ...frame(6),
-        onPress: () => runIdleFunctionPress("tail"),
-        onSwipeUp: () => runIdleFunctionSwipe("up", "tail"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "tail"),
-      },
-      {
-        id: "idle-right",
-        ...frame(7),
-        onPress: () => runIdleFunctionPress("right"),
-        onLongPress: () => startRepeatingCursorMove(1),
-        onLongPressEnd: stopRepeatingCursorMove,
-        longPressDuration: CURSOR_REPEAT_DURATION,
-        onSwipeUp: () => runIdleFunctionSwipe("up", "right"),
-        onSwipeDown: () => runIdleFunctionSwipe("down", "right"),
-      },
-    ];
+    return settings.idleFunctionOrder.map((key, index) => ({
+      id: idleFunctionViewId(key),
+      ...frame(index),
+      onPress: () => runIdleFunctionPress(key),
+      onLongPress: key === "left"
+        ? () => startRepeatingCursorMove(-1)
+        : key === "right"
+        ? () => startRepeatingCursorMove(1)
+        : undefined,
+      onLongPressEnd: key === "left" || key === "right"
+        ? stopRepeatingCursorMove
+        : undefined,
+      longPressDuration: key === "left" || key === "right"
+        ? CURSOR_REPEAT_DURATION
+        : undefined,
+      onSwipeUp: () => runIdleFunctionSwipe("up", key),
+      onSwipeDown: () => runIdleFunctionSwipe("down", key),
+    }));
+  }
+
+  function renderComposingFunctionKey(key: string) {
+    const id = composingFunctionViewId(key);
+    const isTone = key === "tone1" || key === "tone2" || key === "tone3" ||
+      key === "tone4";
+    return (
+      <KeyFace
+        key={`comp-func-${key}`}
+        id={id}
+        image={settings.composingFunctionSymbols[key]}
+        imageScale={isTone ? "medium" : undefined}
+        palette={palette}
+        width={metrics.functionWidth8}
+        height={metrics.functionKeyHeight}
+        touchHeight={functionRowTouch.touchHeight}
+        visualOffsetY={functionRowTouch.visualOffsetY}
+        system
+        passive
+        active={isPressed(id)}
+        onPress={() => runWithFeedback(() => runComposingFunctionPress(key))}
+        onSwipeUp={() =>
+          runWithFeedback(() => runComposingFunctionSwipe("up", key))}
+        onSwipeDown={() =>
+          runWithFeedback(() => runComposingFunctionSwipe("down", key))}
+      />
+    );
+  }
+
+  function renderIdleFunctionKey(key: string) {
+    const id = idleFunctionViewId(key);
+    const symbol = key === "select" && selectAllActive &&
+        settings.idleFunctionSymbols.select === "selection.pin.in.out"
+      ? "xmark.circle"
+      : settings.idleFunctionSymbols[key];
+    return (
+      <KeyFace
+        key={`idle-func-${key}`}
+        id={id}
+        image={symbol}
+        palette={palette}
+        width={metrics.functionWidth8}
+        height={metrics.functionKeyHeight}
+        touchHeight={functionRowTouch.touchHeight}
+        visualOffsetY={functionRowTouch.visualOffsetY}
+        system
+        passive
+        active={isPressed(id)}
+        selected={key === "select" && selectAllActive}
+        onPress={() => runWithFeedback(() => runIdleFunctionPress(key))}
+        onLongPress={key === "left"
+          ? () => startRepeatingCursorMove(-1)
+          : key === "right"
+          ? () => startRepeatingCursorMove(1)
+          : undefined}
+        onLongPressEnd={key === "left" || key === "right"
+          ? stopRepeatingCursorMove
+          : undefined}
+        longPressDuration={key === "left" || key === "right"
+          ? CURSOR_REPEAT_DURATION
+          : undefined}
+        onSwipeUp={() => runWithFeedback(() => runIdleFunctionSwipe("up", key))}
+        onSwipeDown={() =>
+          runWithFeedback(() => runIdleFunctionSwipe("down", key))}
+      />
+    );
   }
 
   function bottomRowHitTargets(): KeyHitTarget[] {
@@ -2187,6 +2173,69 @@ function KeyboardContent(props: {
     }, 80);
   }
 
+  function runToolbarScript(scriptName: string) {
+    const targetName = scriptName.trim() || Script.name;
+    const url = Script.createRunSingleURLScheme(targetName, {
+      source: "keyboard-toolbar",
+    });
+    try {
+      CustomKeyboard.dismiss();
+    } catch {}
+    setTimeout(() => {
+      void Safari.openURL(url);
+    }, 80);
+  }
+
+  function openToolbarURL(value: string) {
+    const url = value.trim();
+    if (!url) return;
+    try {
+      CustomKeyboard.dismiss();
+    } catch {}
+    setTimeout(() => {
+      void Safari.openURL(url);
+    }, 80);
+  }
+
+  function runToolbarAction(action: string) {
+    const value = action.trim();
+    if (!value) return;
+    if (value === "{keyboardHome}") {
+      pressCandidateHomeButton();
+      return;
+    }
+    if (value === "{keyboardSettings}") {
+      pressCandidateSettingsButton();
+      return;
+    }
+    if (value === "{schemaMenu}") {
+      openRimeSchemaMenu();
+      return;
+    }
+    if (value === "{dismissKeyboard}") {
+      CustomKeyboard.dismiss();
+      return;
+    }
+    if (value.startsWith("script:")) {
+      runToolbarScript(value.slice("script:".length));
+      return;
+    }
+    if (value.startsWith("url:")) {
+      openToolbarURL(value.slice("url:".length));
+      return;
+    }
+    if (/^https?:\/\//i.test(value)) {
+      openToolbarURL(value);
+    }
+  }
+
+  function toolbarContextMenuProps(item: ToolbarButtonConfig) {
+    if (item.action.trim() !== "{schemaMenu}" || schemaMenu == null) {
+      return undefined;
+    }
+    return { menuItems: schemaMenu };
+  }
+
   const numericRowSpacing = 6;
   const numericPanelHeight = metrics.keyHeight * 4 + numericRowSpacing * 3;
   const numericLeftWidth = Math.max(40, Math.min(56, metrics.width * 0.14));
@@ -2278,54 +2327,22 @@ function KeyboardContent(props: {
           spacing={KEY_SPACING}
           frame={{ width: metrics.width, height: metrics.candidateBarHeight }}
         >
-          {candidateHomeButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-home"
-                image="house"
-                palette={palette}
-                width={candidateHomeButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primary}
-                onPress={() => runWithFeedback(pressCandidateHomeButton)}
-              />
-            )
-            : null}
-          {candidateHomeButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-settings"
-                image="gearshape"
-                palette={palette}
-                width={candidateSettingsButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primary}
-                onPress={() => runWithFeedback(pressCandidateSettingsButton)}
-              />
-            )
-            : null}
-          {candidateHomeButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-schema"
-                image="list.bullet.rectangle"
-                palette={palette}
-                width={candidateSchemaButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primary}
-                onPress={() => runWithFeedback(openRimeSchemaMenu)}
-                contextMenu={schemaMenu != null
-                  ? { menuItems: schemaMenu }
-                  : undefined}
-              />
-            )
-            : null}
+          {toolbarLeftButtons.map((item, index) => (
+            <KeyFace
+              key={`toolbar-left-${item.id}`}
+              id={`toolbar-left-${index}`}
+              image={item.symbol}
+              palette={palette}
+              width={toolbarButtonWidth}
+              height={metrics.candidateButtonHeight}
+              system
+              plain
+              foregroundStyle={palette.primary}
+              onPress={() =>
+                runWithFeedback(() => runToolbarAction(item.action))}
+              contextMenu={toolbarContextMenuProps(item)}
+            />
+          ))}
           <ScrollView
             axes="horizontal"
             scrollIndicator="hidden"
@@ -2403,202 +2420,9 @@ function KeyboardContent(props: {
                         composingFunctionHitTargets(),
                       )}
                     >
-                      <KeyFace
-                        id="func-left"
-                        image={settings.composingFunctionSymbols.left}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("func-left")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("left")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "left")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "left")
-                          )}
-                      />
-                      <KeyFace
-                        id="func-page-down"
-                        image={settings.composingFunctionSymbols.page}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("func-page-down")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("page")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "page")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "page")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-1"
-                        image={settings.composingFunctionSymbols.tone1}
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("tone-1")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("tone1")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone1")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone1")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-2"
-                        image={settings.composingFunctionSymbols.tone2}
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("tone-2")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("tone2")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone2")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone2")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-3"
-                        image={settings.composingFunctionSymbols.tone3}
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("tone-3")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("tone3")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone3")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone3")
-                          )}
-                      />
-                      <KeyFace
-                        id="tone-4"
-                        image={settings.composingFunctionSymbols.tone4}
-                        imageScale="medium"
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("tone-4")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("tone4")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "tone4")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "tone4")
-                          )}
-                      />
-                      <KeyFace
-                        id="func-backslash"
-                        image={settings.composingFunctionSymbols.filter}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("func-backslash")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("filter")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "filter")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "filter")
-                          )}
-                      />
-                      <KeyFace
-                        id="func-right"
-                        image={settings.composingFunctionSymbols.right}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("func-right")}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionPress("right")
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("up", "right")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runComposingFunctionSwipe("down", "right")
-                          )}
-                      />
+                      {settings.composingFunctionOrder.map(
+                        renderComposingFunctionKey,
+                      )}
                     </HStack>
                   )
                   : (
@@ -2614,187 +2438,7 @@ function KeyboardContent(props: {
                         idleFunctionHitTargets(),
                       )}
                     >
-                      <KeyFace
-                        id="idle-left"
-                        image={settings.idleFunctionSymbols.left}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-left")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("left"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "left")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "left")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-head"
-                        image={settings.idleFunctionSymbols.head}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-head")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("head"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "head")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "head")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-schema"
-                        image={selectAllActive &&
-                            settings.idleFunctionSymbols.select ===
-                              "selection.pin.in.out"
-                          ? "xmark.circle"
-                          : settings.idleFunctionSymbols.select}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-schema")}
-                        selected={selectAllActive}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("select"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "select")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "select")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-cut"
-                        image={settings.idleFunctionSymbols.cut}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-cut")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("cut"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "cut")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "cut")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-copy"
-                        image={settings.idleFunctionSymbols.copy}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-copy")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("copy"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "copy")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "copy")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-paste"
-                        image={settings.idleFunctionSymbols.paste}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-paste")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("paste"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "paste")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "paste")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-tail"
-                        image={settings.idleFunctionSymbols.tail}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-tail")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("tail"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "tail")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "tail")
-                          )}
-                      />
-                      <KeyFace
-                        id="idle-right"
-                        image={settings.idleFunctionSymbols.right}
-                        palette={palette}
-                        width={metrics.functionWidth8}
-                        height={metrics.functionKeyHeight}
-                        touchHeight={functionRowTouch.touchHeight}
-                        visualOffsetY={functionRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("idle-right")}
-                        onPress={() =>
-                          runWithFeedback(() => runIdleFunctionPress("right"))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("up", "right")
-                          )}
-                        onSwipeDown={() =>
-                          runWithFeedback(() =>
-                            runIdleFunctionSwipe("down", "right")
-                          )}
-                      />
+                      {settings.idleFunctionOrder.map(renderIdleFunctionKey)}
                     </HStack>
                   )
               )

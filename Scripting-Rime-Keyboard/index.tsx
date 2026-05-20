@@ -1,7 +1,10 @@
 import {
   Button,
   ColorPicker,
+  EditButton,
+  ForEach,
   HStack,
+  Image,
   List,
   Navigation,
   NavigationLink,
@@ -44,6 +47,8 @@ import {
   saveRimeKeyboardSettings,
   SWIPE_TRIGGER_DISTANCE_MAX,
   SWIPE_TRIGGER_DISTANCE_MIN,
+  TOOLBAR_LEFT_BUTTON_MAX,
+  type ToolbarButtonConfig,
 } from "./settings";
 
 const THEME_OPTIONS: Array<{ value: RimeKeyboardTheme; label: string }> = [
@@ -83,6 +88,24 @@ const FUNCTION_KEY_LABELS: Record<string, string> = {
   filter: "包裹",
 };
 
+function moveItems<T>(items: T[], indices: number[], newOffset: number) {
+  const result = items.slice();
+  const moving = indices
+    .slice()
+    .sort((a, b) => b - a)
+    .map((index) => result.splice(index, 1)[0])
+    .reverse()
+    .filter((item): item is T => item != null);
+  const removedBeforeOffset = indices.filter((index) => index < newOffset)
+    .length;
+  const insertAt = Math.max(
+    0,
+    Math.min(result.length, newOffset - removedBeforeOffset),
+  );
+  result.splice(insertAt, 0, ...moving);
+  return result;
+}
+
 const COMMAND_REFERENCE_GROUPS: Array<{
   title: string;
   items: Array<{ command: string; description: string }>;
@@ -120,6 +143,18 @@ const COMMAND_REFERENCE_GROUPS: Array<{
       { command: "{deleteAll}", description: "删除当前可删除文本" },
       { command: "{restoreDeleted}", description: "恢复最近删除内容" },
       { command: "{clearComposition}", description: "清空/删除当前预编辑拼音" },
+    ],
+  },
+  {
+    title: "工具栏动作",
+    items: [
+      { command: "{keyboardHome}", description: "返回 Scripting 键盘主界面" },
+      { command: "{keyboardSettings}", description: "运行当前设置脚本" },
+      { command: "{schemaMenu}", description: "打开 Rime 方案选单" },
+      { command: "{dismissKeyboard}", description: "收起键盘" },
+      { command: "https://example.com", description: "用 Safari 打开网页" },
+      { command: "url:https://example.com", description: "用 Safari 打开网页" },
+      { command: "script:脚本名", description: "运行指定 Scripting 脚本" },
     ],
   },
   {
@@ -243,6 +278,7 @@ function LabeledTextField(props: {
   value: string;
   prompt?: string;
   titleWidth?: number;
+  titleSymbol?: string;
   onChanged: (value: string) => void;
 }) {
   return (
@@ -250,12 +286,20 @@ function LabeledTextField(props: {
       spacing={10}
       frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
     >
-      <Text
-        font="body"
-        frame={{ width: props.titleWidth ?? 76, alignment: "leading" as any }}
+      <HStack
+        spacing={6}
+        frame={{
+          width: props.titleSymbol
+            ? Math.max(props.titleWidth ?? 76, 116)
+            : props.titleWidth ?? 76,
+          alignment: "leading" as any,
+        }}
       >
-        {props.title}
-      </Text>
+        <Text font="body" lineLimit={1}>{props.title}</Text>
+        {props.titleSymbol
+          ? <Image systemName={props.titleSymbol} font="body" />
+          : null}
+      </HStack>
       <TextField
         title=""
         value={props.value}
@@ -361,13 +405,14 @@ function SwipeConfigRow(props: {
         ))}
       </Picker>
       <HStack spacing={10}>
-        <Text
-          font="caption"
-          foregroundStyle="secondaryLabel"
-          frame={{ width: 38, alignment: "leading" as any }}
-        >
-          图标
-        </Text>
+        <HStack spacing={5} frame={{ width: 54, alignment: "leading" as any }}>
+          <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
+            图标
+          </Text>
+          {props.symbol
+            ? <Image systemName={props.symbol} font="caption" />
+            : null}
+        </HStack>
         <TextField
           title=""
           value={props.symbol}
@@ -520,6 +565,99 @@ function CandidateMenuActionRow(props: {
   );
 }
 
+function SFSymbolPreviewRow(props: { symbol: string }) {
+  return (
+    <HStack>
+      <Text frame={{ width: 86, alignment: "leading" as any }}>
+        图标预览
+      </Text>
+      {props.symbol
+        ? <Image systemName={props.symbol} font="title2" />
+        : <Text foregroundStyle="secondaryLabel">未设置</Text>}
+      <Spacer />
+    </HStack>
+  );
+}
+
+function SFSymbolInputRow(props: {
+  title: string;
+  value: string;
+  onChanged: (value: string) => void;
+}) {
+  return (
+    <HStack
+      spacing={10}
+      frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+    >
+      <HStack spacing={6} frame={{ width: 116, alignment: "leading" as any }}>
+        <Text lineLimit={1}>{props.title}</Text>
+        {props.value ? <Image systemName={props.value} font="body" /> : null}
+      </HStack>
+      <TextField
+        title=""
+        value={props.value}
+        prompt=""
+        onChanged={props.onChanged}
+        frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+      />
+    </HStack>
+  );
+}
+
+function FullRowButton(props: {
+  title: string;
+  systemImage?: string;
+  role?: "destructive" | "cancel";
+  action: () => void;
+}) {
+  return (
+    <Button
+      buttonStyle="plain"
+      role={props.role}
+      frame={{ maxWidth: "infinity" as any }}
+      action={props.action}
+    >
+      <HStack
+        spacing={8}
+        frame={{ width: "100%" as any }}
+        padding={{ top: 12, bottom: 12 }}
+        background={"rgba(0,0,0,0.001)" as any}
+      >
+        <Spacer />
+        {props.systemImage
+          ? <Image systemName={props.systemImage} font="body" />
+          : null}
+        <Text
+          font="headline"
+          foregroundStyle={props.role === "destructive"
+            ? "systemRed"
+            : undefined}
+        >
+          {props.title}
+        </Text>
+        <Spacer />
+      </HStack>
+    </Button>
+  );
+}
+
+function IconOnlyOrderRow(props: { symbol: string; index: number }) {
+  return (
+    <HStack
+      frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+    >
+      {props.symbol
+        ? <Image systemName={props.symbol} font="title3" />
+        : <Text foregroundStyle="secondaryLabel">未设置</Text>}
+      <Text opacity={0} frame={{ width: 1 }}>
+        .
+      </Text>
+      <Spacer />
+      <Text foregroundStyle="secondaryLabel">{props.index + 1}</Text>
+    </HStack>
+  );
+}
+
 function FunctionSwipeConfigRow(props: {
   title: string;
   pressAction?: string;
@@ -582,6 +720,7 @@ function FunctionSwipeConfigRow(props: {
             title="显示图标"
             value={props.symbol}
             titleWidth={78}
+            titleSymbol={props.symbol}
             onChanged={(value) => props.onSymbolChanged?.(value)}
           />
         )
@@ -628,6 +767,23 @@ function SettingsView() {
   const [settings, setSettings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
   );
+
+  function customThemeFlag(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
+    scheme: KeyColorScheme,
+  ) {
+    if (settingKey === "keyFontColors") {
+      return scheme === "light"
+        ? "customKeyFontColorLight"
+        : "customKeyFontColorDark";
+    }
+    if (settingKey === "keyHintColors") {
+      return scheme === "light"
+        ? "customKeyHintColorLight"
+        : "customKeyHintColorDark";
+    }
+    return scheme === "light" ? "customKeyColorLight" : "customKeyColorDark";
+  }
 
   function updateSettings(next: RimeKeyboardSettings) {
     const saved = saveRimeKeyboardSettings(next);
@@ -694,7 +850,7 @@ function SettingsView() {
           [scheme]: value,
         },
       },
-      [scheme === "light" ? "customKeyColorLight" : "customKeyColorDark"]: true,
+      [customThemeFlag(settingKey, scheme)]: true,
     });
   }
 
@@ -717,7 +873,7 @@ function SettingsView() {
           },
         },
       },
-      [scheme === "light" ? "customKeyColorLight" : "customKeyColorDark"]: true,
+      [customThemeFlag(settingKey, scheme)]: true,
     });
   }
 
@@ -789,6 +945,34 @@ function SettingsView() {
     const actions = settings.candidateMenuActions.slice();
     actions[index] = { name: "", action: "" };
     updateSettings({ ...settings, candidateMenuActions: actions });
+  }
+
+  function patchToolbarButton(id: string, patch: Partial<ToolbarButtonConfig>) {
+    const buttons = settings.toolbarLeftButtons.slice();
+    const index = buttons.findIndex((item) => item.id === id);
+    if (!buttons[index]) return;
+    buttons[index] = { ...buttons[index], ...patch };
+    updateSettings({ ...settings, toolbarLeftButtons: buttons });
+  }
+
+  function removeToolbarButton(id: string) {
+    updateSettings({
+      ...settings,
+      toolbarLeftButtons: settings.toolbarLeftButtons.filter((item) =>
+        item.id !== id
+      ),
+    });
+  }
+
+  function addToolbarButton() {
+    if (settings.toolbarLeftButtons.length >= TOOLBAR_LEFT_BUTTON_MAX) return;
+    updateSettings({
+      ...settings,
+      toolbarLeftButtons: [
+        ...settings.toolbarLeftButtons,
+        { id: `custom-${Date.now()}`, symbol: "star", action: "" },
+      ],
+    });
   }
 
   function resetSettings() {
@@ -1526,6 +1710,7 @@ function SettingsView() {
             title="预编辑图标"
             value={settings.shiftComposingIcon}
             prompt="SF Symbol"
+            titleSymbol={settings.shiftComposingIcon}
             onChanged={(value) =>
               patchSettings({ shiftComposingIcon: value })}
           />
@@ -1579,6 +1764,7 @@ function SettingsView() {
             title="显示图标"
             value={settings.modeComposingIcon}
             prompt="lightbulb"
+            titleSymbol={settings.modeComposingIcon}
             onChanged={(value) => patchSettings({ modeComposingIcon: value })}
           />
         </Section>
@@ -1830,6 +2016,194 @@ function SettingsView() {
     );
   }
 
+  function renderFunctionOrderPage() {
+    return (
+      <List
+        navigationTitle="功能行排序"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{ topBarTrailing: <EditButton /> }}
+      >
+        <Section
+          header={<Text>无预编辑</Text>}
+          footer={<SettingHint>点右上角编辑后拖动排序。</SettingHint>}
+        >
+          <ForEach
+            count={settings.idleFunctionOrder.length}
+            onMove={(indices: number[], newOffset: number) =>
+              patchSettings({
+                idleFunctionOrder: moveItems(
+                  settings.idleFunctionOrder,
+                  indices,
+                  newOffset,
+                ),
+              })}
+            itemBuilder={(index: number) => {
+              const key = settings.idleFunctionOrder[index];
+              return (
+                <IconOnlyOrderRow
+                  symbol={settings.idleFunctionSymbols[key]}
+                  index={index}
+                />
+              );
+            }}
+          />
+        </Section>
+        <Section
+          header={<Text>预编辑</Text>}
+          footer={<SettingHint>预编辑功能行会使用这一组顺序。</SettingHint>}
+        >
+          <ForEach
+            count={settings.composingFunctionOrder.length}
+            onMove={(indices: number[], newOffset: number) =>
+              patchSettings({
+                composingFunctionOrder: moveItems(
+                  settings.composingFunctionOrder,
+                  indices,
+                  newOffset,
+                ),
+              })}
+            itemBuilder={(index: number) => {
+              const key = settings.composingFunctionOrder[index];
+              return (
+                <IconOnlyOrderRow
+                  symbol={settings.composingFunctionSymbols[key]}
+                  index={index}
+                />
+              );
+            }}
+          />
+        </Section>
+      </List>
+    );
+  }
+
+  function ToolbarButtonEditor(props: { id: string }) {
+    const dismiss = Navigation.useDismiss();
+    const index = settings.toolbarLeftButtons.findIndex((item) =>
+      item.id === props.id
+    );
+    const item = settings.toolbarLeftButtons[index] ?? {
+      id: props.id,
+      symbol: "",
+      action: "",
+    };
+    return (
+      <List
+        navigationTitle={`左侧按钮 ${index + 1}`}
+        navigationBarTitleDisplayMode="inline"
+      >
+        <Section
+          footer={
+            <SettingHint>
+              动作支持{" "}
+              {"{keyboardHome}"}、{"{keyboardSettings}"}、{"{schemaMenu}"}、{"{dismissKeyboard}"}，
+              也支持 https:// 链接、url:https:// 链接，以及 script:脚本名。
+            </SettingHint>
+          }
+        >
+          <LabeledTextField
+            title="SF Symbol"
+            value={item.symbol}
+            titleWidth={86}
+            onChanged={(value) =>
+              patchToolbarButton(props.id, { symbol: value })}
+          />
+          <SFSymbolPreviewRow symbol={item.symbol} />
+          <LabeledTextField
+            title="点击动作"
+            value={item.action}
+            titleWidth={86}
+            onChanged={(value) =>
+              patchToolbarButton(props.id, { action: value })}
+          />
+        </Section>
+        <Section>
+          <FullRowButton
+            title="删除按钮"
+            systemImage="trash"
+            role="destructive"
+            action={() => {
+              removeToolbarButton(props.id);
+              dismiss();
+            }}
+          />
+        </Section>
+      </List>
+    );
+  }
+
+  function renderToolbarPage() {
+    return (
+      <List
+        navigationTitle="工具栏"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{ topBarTrailing: <EditButton /> }}
+      >
+        <Section
+          header={<Text>左侧按钮</Text>}
+          footer={
+            <SettingHint>
+              点右上角编辑后拖动排序；最多显示 6 个左侧按钮。SF Symbol
+              或动作为空的按钮不会显示在键盘工具栏中。
+            </SettingHint>
+          }
+        >
+          <ForEach
+            count={settings.toolbarLeftButtons.length}
+            onMove={(indices: number[], newOffset: number) =>
+              patchSettings({
+                toolbarLeftButtons: moveItems(
+                  settings.toolbarLeftButtons,
+                  indices,
+                  newOffset,
+                ),
+              })}
+            itemBuilder={(index: number) => {
+              const item = settings.toolbarLeftButtons[index];
+              return (
+                <NavigationLink
+                  key={`toolbar-left-setting-${item?.id ?? index}`}
+                  destination={<ToolbarButtonEditor id={item?.id ?? ""} />}
+                >
+                  <IconOnlyOrderRow symbol={item?.symbol ?? ""} index={index} />
+                </NavigationLink>
+              );
+            }}
+          />
+          {settings.toolbarLeftButtons.length < TOOLBAR_LEFT_BUTTON_MAX
+            ? (
+              <Button
+                title="添加按钮"
+                systemImage="plus.circle"
+                action={addToolbarButton}
+              />
+            )
+            : null}
+        </Section>
+        <Section
+          header={<Text>右侧按钮</Text>}
+          footer={
+            <SettingHint>
+              右侧按钮位置固定。选择“收起键盘”时可自定义收起图标；选择“展开候选”时使用展开图标。
+            </SettingHint>
+          }
+        >
+          <SFSymbolInputRow
+            title="收起图标"
+            value={settings.toolbarDismissSymbol}
+            onChanged={(value) =>
+              patchSettings({ toolbarDismissSymbol: value })}
+          />
+          <SFSymbolInputRow
+            title="展开图标"
+            value={settings.toolbarExpandSymbol}
+            onChanged={(value) => patchSettings({ toolbarExpandSymbol: value })}
+          />
+        </Section>
+      </List>
+    );
+  }
+
   return (
     <NavigationStack>
       <List
@@ -1885,6 +2259,10 @@ function SettingsView() {
           ? (
             <Section header={<Text>功能行</Text>}>
               <NavigationLink
+                title="排序"
+                destination={renderFunctionOrderPage()}
+              />
+              <NavigationLink
                 title="无预编辑"
                 destination={renderFunctionSwipePage(false)}
               />
@@ -1899,6 +2277,12 @@ function SettingsView() {
             </Section>
           )
           : null}
+        <Section header={<Text>工具栏</Text>}>
+          <NavigationLink
+            title="工具栏按钮"
+            destination={renderToolbarPage()}
+          />
+        </Section>
         <Section
           footer={
             <VStack alignment="leading" spacing={4}>
