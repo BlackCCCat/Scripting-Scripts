@@ -68,6 +68,7 @@ const CLIP_SCROLL_SIDE_PADDING = 8
 const CLIP_GRID_SPACING = 10
 const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_LAYOUT_KEY = "cais_keyboard_row_count_v1"
+const RIME_KEYBOARD_SCRIPT_NAME = "Scripting Rime Keyboard"
 const SHARED_STORAGE_OPTIONS = { shared: true }
 let deleteRepeatTimer: any = null
 let lastPastedText = ""
@@ -97,6 +98,15 @@ type KeyboardTokenPage = {
 
 function keyboard(): any {
   return (globalThis as any).CustomKeyboard
+}
+
+function rimeKeyboardScript(): any {
+  const scripts = keyboard()?.allScripts
+  if (!Array.isArray(scripts)) return null
+  return scripts.find((script: any) =>
+    script?.name === RIME_KEYBOARD_SCRIPT_NAME ||
+    script?.localizedName === RIME_KEYBOARD_SCRIPT_NAME
+  ) ?? null
 }
 
 function storage(): any {
@@ -969,6 +979,12 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     kb?.insertText?.("\n")
   }
 
+  async function switchToRimeKeyboard() {
+    const kb = keyboard()
+    const target = rimeKeyboardScript()
+    await kb?.switchToScript?.(target?.name ?? RIME_KEYBOARD_SCRIPT_NAME)
+  }
+
   function spaceOrCursorKeys() {
     if (!cursorMode) {
       return <BottomKey systemImage="space" onPress={() => keyboard()?.insertText?.(" ")} />
@@ -982,6 +998,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   const tokenSelectedText = tokenPage ? selectedTokenText(tokenPage.tokens, tokenPage.selectedIds) : ""
+  const showRimeKeyboardSwitch = Boolean(settings.showRimeKeyboardSwitch)
+  const rimeScript = showRimeKeyboardSwitch ? rimeKeyboardScript() : null
 
   return (
     <VStack
@@ -1039,12 +1057,19 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             pickerStyle="segmented"
             value={activeTab}
             onChanged={(index: number) => setActiveTab(index)}
-            frame={{ minWidth: 112, maxWidth: "infinity", height: 36 }}
+            frame={{ minWidth: showRimeKeyboardSwitch ? 96 : 112, maxWidth: "infinity", height: 36 }}
           >
             <Text tag={TAB_FAVORITE}>Favorite</Text>
             <Text tag={TAB_CLIPS}>Clips</Text>
           </Picker>
         )}
+        {!tokenPage && showRimeKeyboardSwitch ? (
+          <IconButton
+            systemImage={rimeScript?.icon ?? "keyboard.fill"}
+            frame={{ width: 34, height: 36 }}
+            onPress={switchToRimeKeyboard}
+          />
+        ) : null}
         <ScrollView
           axes="horizontal"
           scrollIndicator="hidden"

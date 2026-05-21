@@ -58,6 +58,7 @@ function sanitizeSettings(raw: any): CaisSettings {
     maxItems: Math.max(50, Math.min(800, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
     appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
+    showRimeKeyboardSwitch: Boolean(raw?.showRimeKeyboardSwitch ?? DEFAULT_CAIS_SETTINGS.showRimeKeyboardSwitch),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
       builtins,

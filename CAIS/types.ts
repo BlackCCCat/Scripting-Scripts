@@ -49,6 +49,7 @@ export type CaisSettings = {
   maxItems: number
   appContentLineLimit: number
   keyboardShowTitle: boolean
+  showRimeKeyboardSwitch: boolean
   keyboardMaxItems: number
   keyboardMenu: KeyboardMenuSettings
 }
@@ -102,6 +103,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   maxItems: 800,
   appContentLineLimit: 3,
   keyboardShowTitle: true,
+  showRimeKeyboardSwitch: false,
   keyboardMaxItems: 30,
   keyboardMenu: {
     builtins: {

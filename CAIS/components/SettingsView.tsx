@@ -596,6 +596,13 @@ export function SettingsView(props: {
         >
           <Text>键盘显示标题</Text>
         </Toggle>
+        <Toggle
+          value={settings.showRimeKeyboardSwitch}
+          onChanged={(showRimeKeyboardSwitch: boolean) => update({ showRimeKeyboardSwitch })}
+          toggleStyle="switch"
+        >
+          <Text>显示 Rime 键盘切换按钮</Text>
+        </Toggle>
       </Section>
 
       <Section header={<Text>长按菜单</Text>}>
