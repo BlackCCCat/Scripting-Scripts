@@ -52,11 +52,13 @@ import { type KeyboardAppearance, paletteFor } from "./palette";
 import type { KeyHitTarget } from "./types";
 import {
   createTouchIntentMachine,
+  disposeConfiguredHaptics,
   hapticInterval,
-  inputClickInterval,
   nearestHitTarget,
   playConfiguredClick,
   playConfiguredHaptic,
+  playPreparedConfiguredHaptic,
+  prepareConfiguredHaptics,
 } from "./utils";
 
 function currentKeyboardAppearance(): KeyboardAppearance {
@@ -175,13 +177,8 @@ function KeyboardContent(props: {
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
   const spaceCursorDragXRef = useRef<number | null>(null);
   const lastPressFeedbackAtRef = useRef(0);
-  const lastPressRequestAtRef = useRef(0);
-  const pressBurstCountRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
-  const lastDeleteClickAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
-  const hapticQueueTimerRef = useRef<any>(null);
-  const pendingPressHapticRef = useRef(false);
   const swipeTriggerDistanceRef = useRef(settings.swipeTriggerDistance);
   const lastSwipeSettingsReloadAtRef = useRef(0);
   const suppressLetterLongPressUntilRef = useRef(
@@ -210,10 +207,15 @@ function KeyboardContent(props: {
     syncKeyboardAppearance();
     CustomKeyboard.addListener("textDidChange", syncKeyboardAppearance);
     CustomKeyboard.addListener("selectionDidChange", syncKeyboardAppearance);
+    const hapticPrepareTimer = setTimeout(
+      () => prepareConfiguredHaptics(settings),
+      0,
+    );
     void setupRimeSession();
 
     return () => {
       disposedRef.current = true;
+      clearTimeout(hapticPrepareTimer);
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
       CustomKeyboard.removeListener(
         "selectionDidChange",
@@ -235,12 +237,7 @@ function KeyboardContent(props: {
       pressedKeyIdsRef.current = new Set();
       setPressedKeyIds(new Set());
       stopRepeatingBackspace();
-      if (hapticQueueTimerRef.current) {
-        clearTimeout(hapticQueueTimerRef.current);
-      }
-      hapticQueueTimerRef.current = null;
-      pendingPressHapticRef.current = false;
-      pressBurstCountRef.current = 0;
+      disposeConfiguredHaptics();
       sessionRef.current?.close();
       sessionRef.current = null;
       setRimeReady(false);
@@ -344,54 +341,14 @@ function KeyboardContent(props: {
     playPressFeedback();
   }
 
-  function cancelPendingPressFeedback() {
-    if (hapticQueueTimerRef.current) {
-      clearTimeout(hapticQueueTimerRef.current);
-      hapticQueueTimerRef.current = null;
-    }
-    pendingPressHapticRef.current = false;
-  }
-
   function playPressFeedback() {
     if (!settings.haptics) return;
     const now = Date.now();
-    const elapsed = now - lastPressRequestAtRef.current;
-    pressBurstCountRef.current = elapsed > 110
-      ? 0
-      : Math.min(10, pressBurstCountRef.current + 1);
-    lastPressRequestAtRef.current = now;
-    pendingPressHapticRef.current = true;
-    if (hapticQueueTimerRef.current) return;
-    hapticQueueTimerRef.current = setTimeout(
-      flushPressHaptic,
-      pressBurstCountRef.current >= 4 ? 32 : 18,
-    );
-  }
-
-  function flushPressHaptic() {
-    hapticQueueTimerRef.current = null;
-    if (!pendingPressHapticRef.current || !settings.haptics) return;
-    const now = Date.now();
-    const burst = pressBurstCountRef.current;
-    const minInterval = burst >= 7
-      ? 220
-      : burst >= 4
-      ? 160
-      : burst >= 2
-      ? 115
-      : Math.max(75, hapticInterval(settings));
-    const remaining = minInterval - (now - lastPressFeedbackAtRef.current);
-    if (remaining > 0) {
-      hapticQueueTimerRef.current = setTimeout(
-        flushPressHaptic,
-        Math.min(remaining, 64),
-      );
+    if (now - lastPressFeedbackAtRef.current < hapticInterval(settings)) {
       return;
     }
-    pendingPressHapticRef.current = false;
     lastPressFeedbackAtRef.current = now;
-    const level = burst >= 4 ? 1 : Math.min(settings.hapticLevel, 2);
-    playConfiguredHaptic(settings, level);
+    playPreparedConfiguredHaptic(settings);
   }
 
   function playReleaseFeedback() {
@@ -413,10 +370,7 @@ function KeyboardContent(props: {
       lastDeleteHapticAtRef.current = now;
       playConfiguredHaptic(settings);
     }
-    if (now - lastDeleteClickAtRef.current >= inputClickInterval(settings)) {
-      lastDeleteClickAtRef.current = now;
-      playConfiguredClick(settings);
-    }
+    playConfiguredClick(settings);
   }
 
   function clearPressedReleaseTimer(id: string) {
@@ -630,9 +584,6 @@ function KeyboardContent(props: {
           backspaceLongPressMove(details);
         }
       },
-      onSwipeStart: () => {
-        cancelPendingPressFeedback();
-      },
       onResolveSwipe: (
         direction: "up" | "down" | "left" | "right",
       ) => {
@@ -742,7 +693,6 @@ function KeyboardContent(props: {
     ) {
       return;
     }
-    cancelPendingPressFeedback();
     machine.update(details);
   }
 
@@ -785,7 +735,6 @@ function KeyboardContent(props: {
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
     if (dx < SPACE_CURSOR_DRAG_STEP || dx < dy) return;
     if (updateSpaceLongPressDrag(details)) {
-      cancelPendingPressFeedback();
       getRowGestureMachine(rowId).update(details);
       rowSpaceDragConsumedRef.current.set(rowId, true);
     }
@@ -840,7 +789,6 @@ function KeyboardContent(props: {
     if (
       isSpaceCursorKey(target.id) && rowSpaceDragConsumedRef.current.get(rowId)
     ) {
-      cancelPendingPressFeedback();
       setKeyPressed(target.id, false);
       machine.cancel();
       clearRowTracking(rowId, true);
@@ -990,9 +938,7 @@ function KeyboardContent(props: {
   ) {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
-    cancelPendingPressFeedback();
     const repeatToken = ++globalRepeatingDeleteToken;
-    lastDeleteClickAtRef.current = 0;
     lastDeleteHapticAtRef.current = 0;
     pressBackspace();
     playRepeatingDeleteFeedback();
@@ -1014,7 +960,6 @@ function KeyboardContent(props: {
   function startRepeatingCursorMove(offset: number) {
     stopRepeatingCursorMove();
     stopRepeatingBackspace();
-    cancelPendingPressFeedback();
     const repeatToken = ++cursorRepeatTokenRef.current;
     const repeat = () => {
       if (repeatToken !== cursorRepeatTokenRef.current) return;
@@ -1091,13 +1036,11 @@ function KeyboardContent(props: {
       dx >= 5 || dy >= 5 || vx >= 8 || vy >= 8 || predictedDx >= 8 ||
       predictedDy >= 8
     ) {
-      cancelPendingPressFeedback();
       stopRepeatingBackspace();
     }
   }
 
   function backspaceSwipeLeft() {
-    cancelPendingPressFeedback();
     stopRepeatingBackspace();
     runConfiguredAction(
       settings.backspaceSwipeLeft,
@@ -1106,7 +1049,6 @@ function KeyboardContent(props: {
   }
 
   function backspaceSwipeUp() {
-    cancelPendingPressFeedback();
     stopRepeatingBackspace();
     if (preedit.length > 0) {
       runConfiguredAction(
@@ -1122,17 +1064,11 @@ function KeyboardContent(props: {
   }
 
   function backspaceSwipeDown() {
-    cancelPendingPressFeedback();
     stopRepeatingBackspace();
     runConfiguredAction(
       settings.backspaceSwipeDown,
       settings.backspaceSwipeDownMode,
     );
-  }
-
-  function cancelBackspaceSwipeStart() {
-    cancelPendingPressFeedback();
-    stopRepeatingBackspace();
   }
 
   function toggleAscii() {
@@ -2197,6 +2133,19 @@ function KeyboardContent(props: {
     }, 80);
   }
 
+  function switchKeyboardScript(scriptName: string) {
+    const targetName = scriptName.trim();
+    if (!targetName) return;
+    const target = CustomKeyboard.allScripts?.find((script) =>
+      script.name === targetName || script.localizedName === targetName
+    );
+    void CustomKeyboard.switchToScript(target?.name ?? targetName).catch(() => {
+      try {
+        CustomKeyboard.dismissToHome();
+      } catch {}
+    });
+  }
+
   function runToolbarAction(action: string) {
     const value = action.trim();
     if (!value) return;
@@ -2218,6 +2167,10 @@ function KeyboardContent(props: {
     }
     if (value.startsWith("script:")) {
       runToolbarScript(value.slice("script:".length));
+      return;
+    }
+    if (value.startsWith("keyboard:")) {
+      switchKeyboardScript(value.slice("keyboard:".length));
       return;
     }
     if (value.startsWith("url:")) {
@@ -2771,7 +2724,7 @@ function KeyboardContent(props: {
                             onTouchStart={() => beginKeyTouch("shift")}
                             onTouchEnd={() => endKeyTouch("shift")}
                             onSwipeUp={shiftSwipeUp}
-                            onSwipeStart={cancelBackspaceSwipeStart}
+                            onSwipeStart={stopRepeatingBackspace}
                             swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )
@@ -2827,7 +2780,6 @@ function KeyboardContent(props: {
                           longPressDuration={settings.letterLongPressDuration}
                           onSwipeUp={() => runLetterSwipe("up", ch)}
                           onSwipeDown={() => runLetterSwipe("down", ch)}
-                          onSwipeStart={cancelPendingPressFeedback}
                           swipeTriggerDistance={currentSwipeTriggerDistance}
                         />
                       ))}
@@ -2858,7 +2810,7 @@ function KeyboardContent(props: {
                             onSwipeLeft={backspaceSwipeLeft}
                             onSwipeUp={backspaceSwipeUp}
                             onSwipeDown={backspaceSwipeDown}
-                            onSwipeStart={cancelPendingPressFeedback}
+                            onSwipeStart={stopRepeatingBackspace}
                             swipeTriggerDistance={currentSwipeTriggerDistance}
                           />
                         )

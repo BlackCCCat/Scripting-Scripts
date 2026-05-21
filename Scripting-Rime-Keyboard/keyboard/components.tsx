@@ -151,16 +151,16 @@ export function KeyFace(props: {
 
   function isLongPressEnabled() {
     const value = propsRef.current.longPressEnabled;
-    return typeof value === "function" ? value() : value;
+    return typeof value === "function" ? value() : value ?? true;
   }
 
   if (!gestureMachineRef.current) {
     gestureMachineRef.current = createTouchIntentMachine({
-      longPressDuration: () => propsRef.current.longPressDuration,
+      longPressDuration: () => propsRef.current.longPressDuration ?? 360,
       swipeTriggerDistance: () =>
         typeof propsRef.current.swipeTriggerDistance === "function"
           ? propsRef.current.swipeTriggerDistance()
-          : propsRef.current.swipeTriggerDistance,
+          : propsRef.current.swipeTriggerDistance ?? 16,
       safetyReleaseDelay: () =>
         propsRef.current.contextMenu && !propsRef.current.onLongPress
           ? 180

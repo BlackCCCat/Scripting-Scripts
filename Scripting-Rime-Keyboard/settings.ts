@@ -102,7 +102,7 @@ export type RimeKeyboardSettings = {
   letterLongPressDuration: number;
   swipeTriggerDistance: number;
   inputClicks: boolean;
-  inputClickLevel: number;
+  hapticEngineClicks: boolean;
   haptics: boolean;
   hapticLevel: number;
   autoDeployOnLaunch: boolean;
@@ -232,6 +232,11 @@ export const FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS: SwipeSettings = {
 export const DEFAULT_LETTER_ACTION_MODES: ActionModeSettings = Object
   .fromEntries(LETTER_KEYS.map((key) => [key, "auto" as ActionSendMode]));
 
+export const DEFAULT_LETTER_SWIPE_DOWN_MODES: ActionModeSettings = {
+  ...DEFAULT_LETTER_ACTION_MODES,
+  j: "direct",
+};
+
 export const FUNCTION_KEYS = [
   "left",
   "head",
@@ -255,6 +260,7 @@ export const COMPOSING_FUNCTION_KEYS = [
 export const DEFAULT_TOOLBAR_LEFT_BUTTONS: ToolbarButtonConfig[] = [
   { id: "home", symbol: "house", action: "{keyboardHome}" },
   { id: "settings", symbol: "gearshape", action: "{keyboardSettings}" },
+  { id: "cais", symbol: "clipboard", action: "keyboard:CAIS" },
   { id: "schema", symbol: "list.bullet.rectangle", action: "{schemaMenu}" },
 ];
 export const TOOLBAR_LEFT_BUTTON_MAX = 6;
@@ -435,7 +441,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   letterSwipeUpSymbols: DEFAULT_LETTER_SWIPE_SYMBOLS,
   letterSwipeDownSymbols: DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS,
   letterSwipeUpModes: DEFAULT_LETTER_ACTION_MODES,
-  letterSwipeDownModes: DEFAULT_LETTER_ACTION_MODES,
+  letterSwipeDownModes: DEFAULT_LETTER_SWIPE_DOWN_MODES,
   idleFunctionSwipeUp: DEFAULT_IDLE_FUNCTION_SWIPE_UP,
   idleFunctionSwipeDown: DEFAULT_IDLE_FUNCTION_SWIPE_DOWN,
   composingFunctionSwipeUp: DEFAULT_COMPOSING_FUNCTION_SWIPE_UP,
@@ -480,10 +486,10 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   numericEqualsSwipeUp: "V",
   letterLongPressDuration: 520,
   swipeTriggerDistance: 80,
-  inputClicks: true,
-  inputClickLevel: 3,
+  inputClicks: false,
+  hapticEngineClicks: true,
   haptics: true,
-  hapticLevel: 1,
+  hapticLevel: 7,
   autoDeployOnLaunch: false,
 };
 
@@ -495,6 +501,8 @@ export const LETTER_LONG_PRESS_DURATION_MIN = 360;
 export const LETTER_LONG_PRESS_DURATION_MAX = 900;
 export const SWIPE_TRIGGER_DISTANCE_MIN = 40;
 export const SWIPE_TRIGGER_DISTANCE_MAX = 120;
+export const HAPTIC_LEVEL_MIN = 1;
+export const HAPTIC_LEVEL_MAX = 10;
 
 function clampNumber(
   value: unknown,
@@ -505,6 +513,20 @@ function clampNumber(
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   const rounded = Math.round(n);
+  return Math.min(max, Math.max(min, rounded));
+}
+
+function clampDecimalNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+  digits = 1,
+): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const scale = Math.pow(10, digits);
+  const rounded = Math.round(n * scale) / scale;
   return Math.min(max, Math.max(min, rounded));
 }
 
@@ -623,6 +645,19 @@ function normalizeToolbarButtons(raw: unknown): ToolbarButtonConfig[] {
       symbol,
       action,
     });
+  }
+  const caisButton = DEFAULT_TOOLBAR_LEFT_BUTTONS.find((item) =>
+    item.id === "cais"
+  );
+  if (
+    caisButton &&
+    result.length < TOOLBAR_LEFT_BUTTON_MAX &&
+    !result.some((item) =>
+      item.id === caisButton.id || item.action === caisButton.action
+    )
+  ) {
+    const insertAt = Math.min(2, result.length);
+    result.splice(insertAt, 0, caisButton);
   }
   return result;
 }
@@ -826,7 +861,7 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     ),
     letterSwipeDownModes: normalizeActionModeSettings(
       raw?.letterSwipeDownModes,
-      DEFAULT_LETTER_ACTION_MODES,
+      DEFAULT_LETTER_SWIPE_DOWN_MODES,
       LETTER_KEYS,
     ),
     idleFunctionSwipeUp: normalizeSwipeSettings(
@@ -991,10 +1026,21 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       SWIPE_TRIGGER_DISTANCE_MIN,
       SWIPE_TRIGGER_DISTANCE_MAX,
     ),
-    inputClicks: typeof raw?.inputClicks === "boolean" ? raw.inputClicks : true,
-    inputClickLevel: clampNumber(raw?.inputClickLevel, 3, 1, 5),
+    inputClicks: typeof raw?.hapticEngineClicks === "boolean" &&
+        typeof raw?.inputClicks === "boolean"
+      ? raw.inputClicks
+      : false,
+    hapticEngineClicks: typeof raw?.hapticEngineClicks === "boolean"
+      ? raw.hapticEngineClicks
+      : true,
     haptics: typeof raw?.haptics === "boolean" ? raw.haptics : true,
-    hapticLevel: clampNumber(raw?.hapticLevel, 1, 1, 5),
+    hapticLevel: clampDecimalNumber(
+      raw?.hapticLevel,
+      DEFAULT_RIME_KEYBOARD_SETTINGS.hapticLevel,
+      HAPTIC_LEVEL_MIN,
+      HAPTIC_LEVEL_MAX,
+      1,
+    ),
     autoDeployOnLaunch: typeof raw?.autoDeployOnLaunch === "boolean"
       ? raw.autoDeployOnLaunch
       : false,
@@ -1002,6 +1048,16 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
   if (normalized.composingFunctionPress.filter === "{backslashWrap}") {
     normalized.composingFunctionPress.filter =
       DEFAULT_COMPOSING_FUNCTION_PRESS.filter;
+  }
+  if (normalized.hapticEngineClicks && normalized.inputClicks) {
+    normalized.inputClicks = false;
+  }
+  if (
+    normalized.letterSwipeDown.j === DEFAULT_LETTER_SWIPE_DOWN.j &&
+    (raw?.letterSwipeDownModes?.j == null ||
+      raw.letterSwipeDownModes.j === "auto")
+  ) {
+    normalized.letterSwipeDownModes.j = "direct";
   }
   if (normalized.idleFunctionSwipeUp.select === "") {
     normalized.idleFunctionSwipeUp.select =

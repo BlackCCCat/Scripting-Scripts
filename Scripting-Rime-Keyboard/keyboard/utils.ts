@@ -1,15 +1,247 @@
-import type { RimeKeyboardSettings } from "../settings";
+import {
+  HAPTIC_LEVEL_MAX,
+  HAPTIC_LEVEL_MIN,
+  type RimeKeyboardSettings,
+} from "../settings";
 import type { KeyHitTarget } from "./types";
+
+type CoreHapticsGlobals = {
+  HapticEngine?: any;
+  HapticPattern?: any;
+  HapticEvent?: any;
+  HapticEventParameter?: any;
+};
+
+type HapticPlayerPool = {
+  players: any[];
+  nextIndex: number;
+};
+
+const HAPTIC_PLAYER_POOL_SIZE = 3;
+const SYSTEM_CLICK_MIN_INTERVAL_MS = 32;
+let reusableHapticEngine: any = null;
+let hapticEngineStartPromise: Promise<void> | null = null;
+let hapticEngineReady = false;
+let coreHapticsUnavailable = false;
+let coreHapticsClickUnavailable = false;
+const reusableHapticPlayers = new Map<string, HapticPlayerPool>();
+let reusableClickPlayers: HapticPlayerPool | null = null;
+let lastSystemClickAt = 0;
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
 export function playConfiguredClick(settings: RimeKeyboardSettings) {
+  if (settings.hapticEngineClicks) {
+    if (!hapticEngineReady || !reusableHapticEngine) return;
+    if (coreHapticsClickUnavailable) return;
+    try {
+      const player = makeClickPlayer();
+      player?.start?.(0);
+    } catch {
+      coreHapticsClickUnavailable = true;
+    }
+    return;
+  }
   if (!settings.inputClicks) return;
+  const now = Date.now();
+  if (now - lastSystemClickAt < SYSTEM_CLICK_MIN_INTERVAL_MS) return;
+  lastSystemClickAt = now;
   try {
     CustomKeyboard.playInputClick();
   } catch {}
+}
+
+function coreHaptics(): CoreHapticsGlobals {
+  const scope = globalThis as any;
+  return {
+    HapticEngine: scope.HapticEngine,
+    HapticPattern: scope.HapticPattern,
+    HapticEvent: scope.HapticEvent,
+    HapticEventParameter: scope.HapticEventParameter,
+  };
+}
+
+function hapticProfile(level: number) {
+  const normalized = (clamp(level, HAPTIC_LEVEL_MIN, HAPTIC_LEVEL_MAX) -
+    HAPTIC_LEVEL_MIN) /
+    (HAPTIC_LEVEL_MAX - HAPTIC_LEVEL_MIN);
+  return {
+    intensity: 0.32 + normalized * 0.58,
+    sharpness: 0.34 + normalized * 0.46,
+  };
+}
+
+function hapticPlayerKey(level: number) {
+  const profile = hapticProfile(level);
+  const intensity = Math.round(profile.intensity * 20) / 20;
+  const sharpness = Math.round(profile.sharpness * 20) / 20;
+  return `${intensity}:${sharpness}`;
+}
+
+function makeTransientPlayer(level: number) {
+  if (!reusableHapticEngine) return null;
+  const constructors = coreHaptics();
+  const {
+    HapticPattern,
+    HapticEvent,
+    HapticEventParameter,
+  } = constructors;
+  if (!HapticPattern || !HapticEvent || !HapticEventParameter) return null;
+  const key = hapticPlayerKey(level);
+  const cached = reusableHapticPlayers.get(key);
+  if (cached) {
+    const player = cached.players[cached.nextIndex];
+    cached.nextIndex = (cached.nextIndex + 1) % cached.players.length;
+    return player;
+  }
+  const profile = hapticProfile(level);
+  const pattern = new HapticPattern([
+    new HapticEvent("hapticTransient", [
+      new HapticEventParameter("hapticIntensity", profile.intensity),
+      new HapticEventParameter("hapticSharpness", profile.sharpness),
+    ], 0),
+  ]);
+  const players = Array.from(
+    { length: HAPTIC_PLAYER_POOL_SIZE },
+    () => reusableHapticEngine.makePlayer(pattern),
+  );
+  reusableHapticPlayers.set(key, { players, nextIndex: 1 });
+  return players[0];
+}
+
+function makeClickPlayer() {
+  if (!reusableHapticEngine || coreHapticsClickUnavailable) return null;
+  const constructors = coreHaptics();
+  const {
+    HapticPattern,
+    HapticEvent,
+    HapticEventParameter,
+    HapticEngine,
+  } = constructors as CoreHapticsGlobals & { HapticEngine?: any };
+  if (
+    !HapticPattern || !HapticEvent || !HapticEventParameter ||
+    HapticEngine?.supportsAudio === false
+  ) {
+    coreHapticsClickUnavailable = true;
+    return null;
+  }
+  if (reusableClickPlayers) {
+    const player = reusableClickPlayers.players[reusableClickPlayers.nextIndex];
+    reusableClickPlayers.nextIndex = (reusableClickPlayers.nextIndex + 1) %
+      reusableClickPlayers.players.length;
+    return player;
+  }
+  try {
+    const pattern = new HapticPattern([
+      new HapticEvent(
+        "audioContinuous",
+        [
+          new HapticEventParameter("audioVolume", 0.28),
+          new HapticEventParameter("audioPitch", 0.18),
+          new HapticEventParameter("attackTime", 0),
+          new HapticEventParameter("decayTime", 0.012),
+          new HapticEventParameter("releaseTime", 0.008),
+        ],
+        0,
+        0.018,
+      ),
+    ]);
+    const players = Array.from(
+      { length: HAPTIC_PLAYER_POOL_SIZE },
+      () => reusableHapticEngine.makePlayer(pattern),
+    );
+    reusableClickPlayers = { players, nextIndex: 1 };
+    return players[0];
+  } catch {
+    coreHapticsClickUnavailable = true;
+    return null;
+  }
+}
+
+function resetCoreHaptics() {
+  reusableHapticPlayers.clear();
+  reusableClickPlayers = null;
+  hapticEngineReady = false;
+  hapticEngineStartPromise = null;
+}
+
+export function disposeConfiguredHaptics() {
+  const engine = reusableHapticEngine;
+  reusableHapticEngine = null;
+  resetCoreHaptics();
+  if (!engine) return;
+  try {
+    void engine.stop?.();
+  } catch {}
+  try {
+    engine.dispose?.();
+  } catch {}
+}
+
+export function prepareConfiguredHaptics(settings: RimeKeyboardSettings) {
+  if (
+    (!settings.haptics && !settings.hapticEngineClicks) ||
+    coreHapticsUnavailable
+  ) {
+    return;
+  }
+  if (hapticEngineReady || hapticEngineStartPromise) return;
+  const { HapticEngine } = coreHaptics();
+  if (!HapticEngine) {
+    return;
+  }
+  try {
+    if (
+      settings.haptics && HapticEngine.supportsHaptics === false &&
+      (!settings.hapticEngineClicks || HapticEngine.supportsAudio === false)
+    ) {
+      coreHapticsUnavailable = true;
+      return;
+    }
+    if (!reusableHapticEngine) {
+      reusableHapticEngine = new HapticEngine();
+      try {
+        reusableHapticEngine.autoShutdownEnabled = false;
+      } catch {}
+      try {
+        reusableHapticEngine.playsHapticsOnly = false;
+      } catch {}
+      try {
+        reusableHapticEngine.playsAudioOnly = false;
+      } catch {}
+      try {
+        reusableHapticEngine.isMutedForAudio = !settings.hapticEngineClicks;
+      } catch {}
+      reusableHapticEngine.onStopped = () => {
+        resetCoreHaptics();
+      };
+      reusableHapticEngine.onReset = () => {
+        resetCoreHaptics();
+        prepareConfiguredHaptics(settings);
+      };
+    }
+    const startResult = reusableHapticEngine.startAsync
+      ? reusableHapticEngine.startAsync()
+      : reusableHapticEngine.start();
+    hapticEngineStartPromise = Promise.resolve(startResult)
+      .then(() => {
+        hapticEngineReady = true;
+        hapticEngineStartPromise = null;
+        if (settings.haptics) {
+          makeTransientPlayer(settings.hapticLevel);
+        }
+        if (settings.hapticEngineClicks) makeClickPlayer();
+      })
+      .catch(() => {
+        disposeConfiguredHaptics();
+        coreHapticsUnavailable = true;
+      });
+  } catch {
+    disposeConfiguredHaptics();
+    coreHapticsUnavailable = true;
+  }
 }
 
 export function playConfiguredHaptic(
@@ -17,55 +249,51 @@ export function playConfiguredHaptic(
   level = settings.hapticLevel,
 ) {
   if (!settings.haptics) return;
+  const { HapticEngine } = coreHaptics();
+  if (coreHapticsUnavailable) return;
+  if (HapticEngine) {
+    prepareConfiguredHaptics(settings);
+    if (coreHapticsUnavailable) return;
+    if (!hapticEngineReady || !reusableHapticEngine) return;
+    try {
+      const player = makeTransientPlayer(level);
+      player?.start?.(0);
+      return;
+    } catch {
+      disposeConfiguredHaptics();
+      return;
+    }
+  }
   try {
-    switch (level) {
-      case 1:
-        HapticFeedback.selection();
-        break;
-      case 2:
-        HapticFeedback.lightImpact();
-        break;
-      case 4:
-        HapticFeedback.heavyImpact();
-        break;
-      case 5:
-        HapticFeedback.rigidImpact();
-        break;
-      default:
-        HapticFeedback.mediumImpact();
-        break;
+    const Haptics = (globalThis as any).Haptics;
+    if (Haptics?.transient && Haptics.supportsHaptics !== false) {
+      const profile = hapticProfile(level);
+      void Haptics.transient(profile.intensity, profile.sharpness);
+      return;
     }
   } catch {}
 }
 
-export function inputClickInterval(settings: RimeKeyboardSettings) {
-  switch (settings.inputClickLevel) {
-    case 1:
-      return 220;
-    case 2:
-      return 160;
-    case 4:
-      return 82;
-    case 5:
-      return 55;
-    default:
-      return 110;
+export function playPreparedConfiguredHaptic(
+  settings: RimeKeyboardSettings,
+  level = settings.hapticLevel,
+) {
+  if (!settings.haptics || coreHapticsUnavailable) return;
+  if (!hapticEngineReady || !reusableHapticEngine) return;
+  try {
+    const player = makeTransientPlayer(level);
+    player?.start?.(0);
+  } catch {
+    disposeConfiguredHaptics();
   }
 }
 
 export function hapticInterval(settings: RimeKeyboardSettings) {
-  switch (settings.hapticLevel) {
-    case 1:
-      return 130;
-    case 2:
-      return 95;
-    case 4:
-      return 45;
-    case 5:
-      return 30;
-    default:
-      return 65;
-  }
+  const normalized =
+    (clamp(settings.hapticLevel, HAPTIC_LEVEL_MIN, HAPTIC_LEVEL_MAX) -
+      HAPTIC_LEVEL_MIN) /
+    (HAPTIC_LEVEL_MAX - HAPTIC_LEVEL_MIN);
+  return Math.round(130 - normalized * 100);
 }
 
 export function dragDirection(

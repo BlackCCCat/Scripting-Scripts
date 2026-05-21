@@ -34,6 +34,8 @@ import {
   FUNCTION_KEYS,
   FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN,
   FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS,
+  HAPTIC_LEVEL_MAX,
+  HAPTIC_LEVEL_MIN,
   KEYBOARD_HEIGHT_MAX,
   KEYBOARD_HEIGHT_MIN,
   type KeyColorPair,
@@ -152,6 +154,7 @@ const COMMAND_REFERENCE_GROUPS: Array<{
       { command: "{keyboardSettings}", description: "运行当前设置脚本" },
       { command: "{schemaMenu}", description: "打开 Rime 方案选单" },
       { command: "{dismissKeyboard}", description: "收起键盘" },
+      { command: "keyboard:CAIS", description: "切换到指定键盘脚本" },
       { command: "https://example.com", description: "用 Safari 打开网页" },
       { command: "url:https://example.com", description: "用 Safari 打开网页" },
       { command: "script:脚本名", description: "运行指定 Scripting 脚本" },
@@ -1039,8 +1042,7 @@ function SettingsView() {
                   maxValueLabel={<Text>{KEYBOARD_HEIGHT_MAX}</Text>}
                 />
                 <SettingHint>
-                  Scripting
-                  当前只提供系统键盘点击音，滑块用于控制连续删除时的按键音反馈密度。
+                  开启后键盘高度不再跟随 Scripting 键盘主界面的默认高度。
                 </SettingHint>
               </VStack>
             )
@@ -1612,42 +1614,29 @@ function SettingsView() {
             />
           </VStack>
           <Toggle
-            title="按键音"
+            title="系统按键音"
             systemImage="speaker.wave.2"
             value={settings.inputClicks}
             onChanged={(value) =>
-              patchSettings({ inputClicks: value })}
+              patchSettings({
+                inputClicks: value,
+                hapticEngineClicks: value ? false : settings.hapticEngineClicks,
+              })}
           />
-          {settings.inputClicks
-            ? (
-              <VStack alignment="leading" spacing={8}>
-                <HStack>
-                  <Text>按键音反馈强度</Text>
-                  <Text
-                    font="subheadline"
-                    foregroundStyle="secondaryLabel"
-                    frame={{
-                      maxWidth: "infinity" as any,
-                      alignment: "trailing" as any,
-                    }}
-                  >
-                    {settings.inputClickLevel}
-                  </Text>
-                </HStack>
-                <Slider
-                  min={1}
-                  max={5}
-                  step={1}
-                  value={settings.inputClickLevel}
-                  onChanged={(value) =>
-                    patchSettings({ inputClickLevel: Math.round(value) })}
-                  label={<Text>按键音反馈强度</Text>}
-                  minValueLabel={<Text>弱</Text>}
-                  maxValueLabel={<Text>强</Text>}
-                />
-              </VStack>
-            )
-            : null}
+          <Toggle
+            title="震动引擎按键音"
+            systemImage="waveform"
+            value={settings.hapticEngineClicks}
+            onChanged={(value) =>
+              patchSettings({
+                hapticEngineClicks: value,
+                inputClicks: value ? false : settings.inputClicks,
+              })}
+          />
+          <SettingHint>
+            两种按键音互斥。系统按键音会进行轻量节流，避免快速输入时与触感反馈叠加造成爆音；震动引擎按键音使用
+            Core Haptics 音频反馈。
+          </SettingHint>
           <Toggle
             title="触感反馈"
             systemImage="iphone.radiowaves.left.and.right"
@@ -1668,16 +1657,18 @@ function SettingsView() {
                       alignment: "trailing" as any,
                     }}
                   >
-                    {settings.hapticLevel}
+                    {settings.hapticLevel.toFixed(1)}
                   </Text>
                 </HStack>
                 <Slider
-                  min={1}
-                  max={5}
-                  step={1}
+                  min={HAPTIC_LEVEL_MIN}
+                  max={HAPTIC_LEVEL_MAX}
+                  step={0.1}
                   value={settings.hapticLevel}
                   onChanged={(value) =>
-                    patchSettings({ hapticLevel: Math.round(value) })}
+                    patchSettings({
+                      hapticLevel: Math.round(value * 10) / 10,
+                    })}
                   label={<Text>震动反馈强度</Text>}
                   minValueLabel={<Text>弱</Text>}
                   maxValueLabel={<Text>强</Text>}
@@ -1689,7 +1680,8 @@ function SettingsView() {
             title="键盘启动时轻量部署"
             systemImage="checkmark.seal"
             value={settings.autoDeployOnLaunch}
-            onChanged={(value) => patchSettings({ autoDeployOnLaunch: value })}
+            onChanged={(value) =>
+              patchSettings({ autoDeployOnLaunch: value })}
           />
         </Section>
       </List>
@@ -2116,7 +2108,8 @@ function SettingsView() {
             <SettingHint>
               动作支持{" "}
               {"{keyboardHome}"}、{"{keyboardSettings}"}、{"{schemaMenu}"}、{"{dismissKeyboard}"}，
-              也支持 https:// 链接、url:https:// 链接，以及 script:脚本名。
+              也支持 keyboard:脚本名、https:// 链接、url:https:// 链接，以及
+              script:脚本名。
             </SettingHint>
           }
         >
