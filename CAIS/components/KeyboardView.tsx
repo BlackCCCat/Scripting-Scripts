@@ -46,6 +46,7 @@ import { readClipDataVersion } from "../storage/change_signal"
 import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
 import { summarizeContent } from "../utils/common"
+import { disposeCaisFeedback, playCaisFeedback, prepareCaisFeedback } from "../utils/feedback"
 import { renderRuntimeTemplate } from "../utils/template"
 import { PipStatusView } from "./PipStatusView"
 import { TokenSelectionPanel } from "./TokenSelectionPanel"
@@ -69,6 +70,7 @@ const CLIP_GRID_SPACING = 10
 const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_LAYOUT_KEY = "cais_keyboard_row_count_v1"
 const RIME_KEYBOARD_SCRIPT_NAME = "Scripting Rime Keyboard"
+const KEYBOARD_EXIT_FEEDBACK_DELAY_MS = 90
 const SHARED_STORAGE_OPTIONS = { shared: true }
 let deleteRepeatTimer: any = null
 let lastPastedText = ""
@@ -80,6 +82,7 @@ let lastKeyboardItemsKeyByScope: Record<ClipListScope, string> = { favorites: ""
 let lastKeyboardItemsVersionByScope: Record<ClipListScope, number> = { favorites: 0, clipboard: 0 }
 let keyboardMonitorStopper: (() => void) | null = null
 let keyboardMonitorStartTimer: any = null
+let currentFeedbackSettings: CaisSettings | null = null
 
 export type KeyboardInitialState = {
   items: ClipItem[]
@@ -149,12 +152,15 @@ function writeKeyboardLayout(value: KeyboardLayoutMode) {
 }
 
 function playClick() {
-  try { keyboard()?.playInputClick?.() } catch {}
-  try { 
-    const haptic = (globalThis as any).HapticFeedback
-    if (haptic?.lightImpact) haptic.lightImpact()
-    else haptic?.mediumImpact?.()
-  } catch {}
+  playCaisFeedback(currentFeedbackSettings ?? undefined)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const setTimeoutFn = (globalThis as any).setTimeout
+    if (typeof setTimeoutFn === "function") setTimeoutFn(resolve, ms)
+    else resolve()
+  })
 }
 
 function insertKeyboardText(text: string) {
@@ -708,6 +714,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   })
   const didHandleInitialTabEffect = useRef(false)
   const [loading, setLoading] = useState(() => !initialLoaded)
+  currentFeedbackSettings = settings
   const visibleItems = useMemo(() => {
     return items.slice(0, settings.keyboardMaxItems)
   }, [items, settings.keyboardMaxItems])
@@ -719,6 +726,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const hideClipTitle = keyboardLayout === "twoByThree"
 
   useEffect(() => {
+    currentFeedbackSettings = settings
+    prepareCaisFeedback(settings)
     const lifecycle = ++keyboardLifecycleGeneration
     void boot(lifecycle)
     let lastSeenClipDataVersion = props.initialState?.version ?? readClipDataVersion()
@@ -739,6 +748,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       }
       stopContinuousDelete()
       stopKeyboardMonitor()
+      currentFeedbackSettings = null
+      disposeCaisFeedback()
     }
   }, [])
 
@@ -979,7 +990,13 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     kb?.insertText?.("\n")
   }
 
+  async function dismissToKeyboardHome() {
+    await delay(KEYBOARD_EXIT_FEEDBACK_DELAY_MS)
+    keyboard()?.dismissToHome?.()
+  }
+
   async function switchToRimeKeyboard() {
+    await delay(KEYBOARD_EXIT_FEEDBACK_DELAY_MS)
     const kb = keyboard()
     const target = rimeKeyboardScript()
     await kb?.switchToScript?.(target?.name ?? RIME_KEYBOARD_SCRIPT_NAME)
@@ -1022,7 +1039,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
         <IconButton
           systemImage="house.fill"
           frame={{ width: 32, height: 36 }}
-          onPress={() => keyboard()?.dismissToHome?.()}
+          onPress={dismissToKeyboardHome}
           onLongPress={openCaisApp}
         />
         {tokenPage ? (

@@ -605,6 +605,31 @@ export function SettingsView(props: {
         </Toggle>
       </Section>
 
+      <Section header={<Text>反馈</Text>}>
+        <Toggle
+          value={settings.inputClicks}
+          onChanged={(inputClicks: boolean) =>
+            update({
+              inputClicks,
+              hapticEngineClicks: inputClicks ? false : settings.hapticEngineClicks,
+            })}
+          toggleStyle="switch"
+        >
+          <Text>系统按键音</Text>
+        </Toggle>
+        <Toggle
+          value={settings.hapticEngineClicks}
+          onChanged={(hapticEngineClicks: boolean) =>
+            update({
+              hapticEngineClicks,
+              inputClicks: hapticEngineClicks ? false : settings.inputClicks,
+            })}
+          toggleStyle="switch"
+        >
+          <Text>Core Haptics 按键音</Text>
+        </Toggle>
+      </Section>
+
       <Section header={<Text>长按菜单</Text>}>
         <ForEach
           count={getOrderedBuiltinActions().length}

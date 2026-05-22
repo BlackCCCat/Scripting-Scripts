@@ -1,3 +1,5 @@
+import { playCaisHaptic } from "./feedback"
+
 export function makeId(prefix = "clip"): string {
   const random = Math.random().toString(36).slice(2, 10)
   return `${prefix}_${Date.now().toString(36)}_${random}`
@@ -58,7 +60,7 @@ export function summarizeContent(content: string, limit = 140): string {
 
 export function withHaptic(action: () => void | Promise<void>) {
   return () => {
-    try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
+    playCaisHaptic()
     void action()
   }
 }
