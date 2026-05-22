@@ -111,6 +111,12 @@ export function KeyFace(props: {
       ? props.palette.enterBg
       : props.palette.keyBg);
   const useNativeKeyStyle = props.palette.nativeKeyStyle && !props.plain;
+  const useNativeToolbarStyle = props.palette.nativeToolbarStyle &&
+    props.plain;
+  const useNativeVisualStyle = useNativeKeyStyle || useNativeToolbarStyle;
+  const nativeGlassShape = useNativeToolbarStyle
+    ? "circle"
+    : { type: "rect", cornerRadius: 8 };
   const bg = props.active && !props.plain ? "tertiarySystemFill" : baseBg;
   const baseFg = props.palette.primaryOverrides?.[props.id] ??
     props.palette.primary;
@@ -264,19 +270,21 @@ export function KeyFace(props: {
           <ZStack
             alignment="center"
             frame={{ width, height }}
-            background={(useNativeKeyStyle
+            background={(useNativeVisualStyle
               ? "clear"
               : props.plain
               ? "rgba(0,0,0,0.001)"
               : bg) as any}
             foregroundStyle={fg as any}
-            glassEffect={(useNativeKeyStyle
-              ? { type: "rect", cornerRadius: 8 }
+            glassEffect={(useNativeVisualStyle
+              ? nativeGlassShape
               : undefined) as any}
-            clipShape={props.plain
+            clipShape={useNativeToolbarStyle
+              ? "circle" as any
+              : props.plain
               ? undefined
               : { type: "rect", cornerRadius: 8 }}
-            shadow={useNativeKeyStyle || props.plain
+            shadow={useNativeVisualStyle || props.plain
               ? undefined
               : { color: props.palette.shadow as any, radius: 1, y: 1 }}
           >

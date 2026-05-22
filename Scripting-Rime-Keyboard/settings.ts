@@ -28,6 +28,7 @@ export type RimeKeyboardSettings = {
   candidateBarHeight: number;
   candidateRightButtonMode: CandidateRightButtonMode;
   useNativeKeyStyle: boolean;
+  useNativeToolbarStyle: boolean;
   customKeyColors: boolean;
   customKeyColorLight: boolean;
   customKeyColorDark: boolean;
@@ -415,6 +416,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   candidateBarHeight: 45,
   candidateRightButtonMode: "dismiss",
   useNativeKeyStyle: true,
+  useNativeToolbarStyle: true,
   customKeyColors: false,
   customKeyColorLight: false,
   customKeyColorDark: false,
@@ -770,7 +772,10 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     ),
     useNativeKeyStyle: typeof raw?.useNativeKeyStyle === "boolean"
       ? raw.useNativeKeyStyle
-      : false,
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.useNativeKeyStyle,
+    useNativeToolbarStyle: typeof raw?.useNativeToolbarStyle === "boolean"
+      ? raw.useNativeToolbarStyle
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.useNativeToolbarStyle,
     customKeyColors: typeof raw?.customKeyColors === "boolean"
       ? raw.customKeyColors
       : false,

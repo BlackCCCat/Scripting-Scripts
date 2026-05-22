@@ -1088,6 +1088,17 @@ function SettingsView() {
             value={settings.useNativeKeyStyle}
             onChanged={(value) => patchSettings({ useNativeKeyStyle: value })}
           />
+          {settings.useNativeKeyStyle
+            ? (
+              <Toggle
+                title="工具栏按钮原生样式"
+                systemImage="circle.grid.2x2"
+                value={settings.useNativeToolbarStyle}
+                onChanged={(value) =>
+                  patchSettings({ useNativeToolbarStyle: value })}
+              />
+            )
+            : null}
         </Section>
 
         <Section
