@@ -212,6 +212,7 @@ function IconButton(props: {
         disabled={props.disabled}
         frame={visualFrame}
         background="clear"
+        glassEffect={{ type: "rect", cornerRadius: 8 } as any}
         clipShape={{ type: "rect", cornerRadius: 8 }}
       >
         <Button
@@ -258,6 +259,7 @@ function BottomKey(props: {
         alignment="center"
         frame={visualFrame}
         background="clear"
+        glassEffect={{ type: "rect", cornerRadius: 8 } as any}
         clipShape={{ type: "rect", cornerRadius: 8 }}
       >
         <Button
@@ -456,6 +458,7 @@ function ClipTile(props: {
     >
       <ZStack
         frame={tileFrame}
+        glassEffect={{ type: "rect", cornerRadius: 10 } as any}
         clipShape={{ type: "rect", cornerRadius: 10 } as any}
         clipped
       >

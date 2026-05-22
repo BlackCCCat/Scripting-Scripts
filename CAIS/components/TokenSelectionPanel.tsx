@@ -102,6 +102,7 @@ export function TokenSelectionPanel(props: {
       }}
       padding={12}
       background={{ style: cardFill, shape: { type: "rect", cornerRadius: 12 } }}
+      glassEffect={{ type: "rect", cornerRadius: 12 } as any}
     >
       <VStack spacing={4} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
         <Text font="caption" foregroundStyle="secondaryLabel">已选择</Text>

@@ -100,6 +100,7 @@ function EmptyState(props: {
         padding={{ top: 40, bottom: 40, leading: 16, trailing: 16 }}
         spacing={12}
         background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
+        glassEffect={{ type: "rect", cornerRadius: 18 } as any}
         shadow={{
           color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
           radius: 10,
@@ -1064,6 +1065,7 @@ export function AppRoot() {
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
           padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
           background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
+          glassEffect={{ type: "rect", cornerRadius: 18 } as any}
         >
           <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
             <Image systemName="magnifyingglass" foregroundStyle="secondaryLabel" frame={{ width: 18 }} />
@@ -1089,6 +1091,7 @@ export function AppRoot() {
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
           padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
           background={{ style: "systemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+          glassEffect={{ type: "rect", cornerRadius: 18 } as any}
         >
           <Text
             font="headline"
