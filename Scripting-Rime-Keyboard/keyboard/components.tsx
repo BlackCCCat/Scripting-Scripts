@@ -270,6 +270,9 @@ export function KeyFace(props: {
               ? "rgba(0,0,0,0.001)"
               : bg) as any}
             foregroundStyle={fg as any}
+            glassEffect={(useNativeKeyStyle
+              ? { type: "rect", cornerRadius: 8 }
+              : undefined) as any}
             clipShape={props.plain
               ? undefined
               : { type: "rect", cornerRadius: 8 }}
