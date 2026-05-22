@@ -78,6 +78,7 @@ const PRESSED_RELEASE_DELAY = 260;
 const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
 const LETTER_LONG_PRESS_LAYER_GRACE_MS = 900;
+const EXIT_ACTION_FEEDBACK_DELAY = 90;
 
 type ExpandedCandidateItem = {
   candidate: Rime.Candidate;
@@ -341,10 +342,25 @@ function KeyboardContent(props: {
     playPressFeedback();
   }
 
-  function playPressFeedback() {
+  function runWithFeedbackBeforeAction(
+    action: () => void,
+    delayMs = 0,
+  ) {
+    stopRepeatingBackspace();
+    stopRepeatingCursorMove();
+    playReleaseFeedback();
+    playPressFeedback(true);
+    if (delayMs > 0) setTimeout(action, delayMs);
+    else action();
+  }
+
+  function playPressFeedback(force = false) {
     if (!settings.haptics) return;
     const now = Date.now();
-    if (now - lastPressFeedbackAtRef.current < hapticInterval(settings)) {
+    if (
+      !force &&
+      now - lastPressFeedbackAtRef.current < hapticInterval(settings)
+    ) {
       return;
     }
     lastPressFeedbackAtRef.current = now;
@@ -2294,7 +2310,10 @@ function KeyboardContent(props: {
                 `toolbar-left-${item.id}`
               ] ?? palette.primary}
               onPress={() =>
-                runWithFeedback(() => runToolbarAction(item.action))}
+                runWithFeedbackBeforeAction(
+                  () => runToolbarAction(item.action),
+                  EXIT_ACTION_FEEDBACK_DELAY,
+                )}
               contextMenu={toolbarContextMenuProps(item)}
             />
           ))}
@@ -2343,7 +2362,13 @@ function KeyboardContent(props: {
                 foregroundStyle={palette.primaryOverrides
                   ?.["candidate-right"] ??
                   palette.primary}
-                onPress={() => runWithFeedback(pressCandidateRightButton)}
+                onPress={() =>
+                  runWithFeedbackBeforeAction(
+                    pressCandidateRightButton,
+                    effectiveCandidateRightButtonMode === "dismiss"
+                      ? EXIT_ACTION_FEEDBACK_DELAY
+                      : 0,
+                  )}
               />
             )
             : null}
