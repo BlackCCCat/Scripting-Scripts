@@ -479,7 +479,6 @@ export function CandidateButton(props: {
   selected: boolean;
   palette: Palette;
   width?: number;
-  naturalWidth?: number;
   height?: number;
   candidateFontSize?: number;
   commentFontSize?: number;

@@ -3097,7 +3097,6 @@ function KeyboardContent(props: {
                               highlightedAbsoluteIndex}
                             palette={palette}
                             width={width}
-                            naturalWidth={naturalWidth}
                             height={Math.max(
                               52,
                               metrics.candidateButtonHeight + 12,
