@@ -1124,16 +1124,22 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             </HStack>
           </ZStack>
         ) : (
-          <Picker
-            title=""
-            pickerStyle="segmented"
-            value={activeTab}
-            onChanged={(index: number) => setActiveTab(index)}
+          <ZStack
             frame={{ minWidth: showRimeKeyboardSwitch ? 96 : 112, maxWidth: "infinity", height: 36 }}
+            glassEffect="capsule"
+            clipShape="capsule"
           >
-            <Text tag={TAB_FAVORITE}>Favorite</Text>
-            <Text tag={TAB_CLIPS}>Clips</Text>
-          </Picker>
+            <Picker
+              title=""
+              pickerStyle="segmented"
+              value={activeTab}
+              onChanged={(index: number) => setActiveTab(index)}
+              frame={{ maxWidth: "infinity", height: 36 }}
+            >
+              <Text tag={TAB_FAVORITE}>Favorite</Text>
+              <Text tag={TAB_CLIPS}>Clips</Text>
+            </Picker>
+          </ZStack>
         )}
         {!tokenPage && showRimeKeyboardSwitch ? (
           <IconButton
