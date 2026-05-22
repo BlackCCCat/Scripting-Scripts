@@ -518,22 +518,6 @@ export function CandidateButton(props: {
       alignment: "leading" as any,
     };
   const useNativeKeyStyle = props.palette.nativeKeyStyle;
-  const nativeSelectedFrame = useNativeKeyStyle && props.selected
-    ? {
-      width: frameWidth ??
-        candidateButtonNaturalWidth({
-          text: props.candidate.text,
-          comment,
-          index: props.index,
-          showIndex,
-          candidateFontSize,
-          commentFontSize,
-          expanded: props.expanded,
-        }),
-      height: frameHeight,
-      alignment: "leading" as any,
-    }
-    : null;
   return (
     <ZStack
       background={(useNativeKeyStyle ? "clear" : props.selected
@@ -542,26 +526,16 @@ export function CandidateButton(props: {
           shape: { type: "rect", cornerRadius: 6 },
         }
         : "clear") as any}
-      {...(!nativeSelectedFrame ? { onTapGesture: props.onPress } : {})}
+      glassEffect={(useNativeKeyStyle && props.selected
+        ? { type: "rect", cornerRadius: 6 }
+        : undefined) as any}
+      onTapGesture={props.onPress}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
-      frame={nativeSelectedFrame ?? rootFrame}
-      clipShape={useNativeKeyStyle
+      frame={rootFrame}
+      clipShape={useNativeKeyStyle && props.selected
         ? { type: "rect", cornerRadius: 6 }
         : undefined}
     >
-      {nativeSelectedFrame
-        ? (
-          <Button
-            action={props.onPress}
-            buttonStyle="glass"
-            buttonBorderShape={{ roundedRectangleRadius: 6 }}
-            controlSize="mini"
-            frame={nativeSelectedFrame}
-          >
-            <VStack frame={nativeSelectedFrame} />
-          </Button>
-        )
-        : null}
       {commentLine
         ? (
           <VStack
