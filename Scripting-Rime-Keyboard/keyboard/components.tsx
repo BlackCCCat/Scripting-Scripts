@@ -1,4 +1,5 @@
 import {
+  Button,
   DragGesture,
   Group,
   HStack,
@@ -109,6 +110,7 @@ export function KeyFace(props: {
     (props.accent || usesEnterColor
       ? props.palette.enterBg
       : props.palette.keyBg);
+  const useNativeKeyStyle = props.palette.nativeKeyStyle && !props.plain;
   const bg = props.active && !props.plain ? "tertiarySystemFill" : baseBg;
   const baseFg = props.palette.primaryOverrides?.[props.id] ??
     props.palette.primary;
@@ -219,7 +221,10 @@ export function KeyFace(props: {
       mask: "gesture" as any,
     }
     : undefined;
-  const tapGesture = !props.passive && !needsManualGesture
+  const nativeButtonHandlesTap = useNativeKeyStyle && !props.passive &&
+    !needsManualGesture;
+  const tapGesture = !props.passive && !needsManualGesture &&
+      !nativeButtonHandlesTap
     ? { onTapGesture: () => props.onPress() }
     : {};
 
@@ -259,15 +264,35 @@ export function KeyFace(props: {
           <ZStack
             alignment="center"
             frame={{ width, height }}
-            background={(props.plain ? "rgba(0,0,0,0.001)" : bg) as any}
+            background={(useNativeKeyStyle
+              ? "clear"
+              : props.plain
+              ? "rgba(0,0,0,0.001)"
+              : bg) as any}
             foregroundStyle={fg as any}
             clipShape={props.plain
               ? undefined
               : { type: "rect", cornerRadius: 8 }}
-            shadow={props.plain
+            shadow={useNativeKeyStyle || props.plain
               ? undefined
               : { color: props.palette.shadow as any, radius: 1, y: 1 }}
           >
+            {useNativeKeyStyle
+              ? (
+                <Button
+                  action={nativeButtonHandlesTap
+                    ? () => propsRef.current.onPress()
+                    : () => {}}
+                  buttonStyle="glass"
+                  buttonBorderShape={{ roundedRectangleRadius: 8 }}
+                  controlSize="mini"
+                  frame={{ width, height }}
+                  opacity={props.active ? 0.72 : 1}
+                >
+                  <VStack frame={{ width, height }} />
+                </Button>
+              )
+              : null}
             {props.topCenter
               ? (
                 <Text
@@ -492,18 +517,51 @@ export function CandidateButton(props: {
     : {
       alignment: "leading" as any,
     };
+  const useNativeKeyStyle = props.palette.nativeKeyStyle;
+  const nativeSelectedFrame = useNativeKeyStyle && props.selected
+    ? {
+      width: frameWidth ??
+        candidateButtonNaturalWidth({
+          text: props.candidate.text,
+          comment,
+          index: props.index,
+          showIndex,
+          candidateFontSize,
+          commentFontSize,
+          expanded: props.expanded,
+        }),
+      height: frameHeight,
+      alignment: "leading" as any,
+    }
+    : null;
   return (
     <ZStack
-      background={(props.selected
+      background={(useNativeKeyStyle ? "clear" : props.selected
         ? {
           style: props.palette.keyBg as any,
           shape: { type: "rect", cornerRadius: 6 },
         }
         : "clear") as any}
-      onTapGesture={props.onPress}
+      {...(!nativeSelectedFrame ? { onTapGesture: props.onPress } : {})}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
-      frame={rootFrame}
+      frame={nativeSelectedFrame ?? rootFrame}
+      clipShape={useNativeKeyStyle
+        ? { type: "rect", cornerRadius: 6 }
+        : undefined}
     >
+      {nativeSelectedFrame
+        ? (
+          <Button
+            action={props.onPress}
+            buttonStyle="glass"
+            buttonBorderShape={{ roundedRectangleRadius: 6 }}
+            controlSize="mini"
+            frame={nativeSelectedFrame}
+          >
+            <VStack frame={nativeSelectedFrame} />
+          </Button>
+        )
+        : null}
       {commentLine
         ? (
           <VStack

@@ -2450,20 +2450,43 @@ function KeyboardContent(props: {
                     spacing={KEY_SPACING}
                     frame={{ width: metrics.width, height: numericPanelHeight }}
                   >
-                    <VStack
+                    <ZStack
                       frame={{
                         width: numericLeftWidth,
                         height: numericPanelHeight,
                       }}
-                      background={palette.keyBg as any}
+                      background={palette.nativeKeyStyle
+                        ? "clear" as any
+                        : palette.keyBg as any}
                       foregroundStyle={palette.primary as any}
                       clipShape={{ type: "rect", cornerRadius: 8 }}
-                      shadow={{
+                      shadow={palette.nativeKeyStyle ? undefined : {
                         color: palette.shadow as any,
                         radius: 1,
                         y: 1,
                       }}
                     >
+                      {palette.nativeKeyStyle
+                        ? (
+                          <Button
+                            action={() => {}}
+                            buttonStyle="glass"
+                            buttonBorderShape={{ roundedRectangleRadius: 8 }}
+                            controlSize="mini"
+                            frame={{
+                              width: numericLeftWidth,
+                              height: numericPanelHeight,
+                            }}
+                          >
+                            <VStack
+                              frame={{
+                                width: numericLeftWidth,
+                                height: numericPanelHeight,
+                              }}
+                            />
+                          </Button>
+                        )
+                        : null}
                       <ScrollView
                         axes="vertical"
                         scrollIndicator="hidden"
@@ -2497,7 +2520,7 @@ function KeyboardContent(props: {
                           ))}
                         </VStack>
                       </ScrollView>
-                    </VStack>
+                    </ZStack>
 
                     <VStack
                       spacing={0}

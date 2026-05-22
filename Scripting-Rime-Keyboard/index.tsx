@@ -1074,6 +1074,23 @@ function SettingsView() {
         </Section>
 
         <Section
+          header={<Text>按键样式</Text>}
+          footer={
+            <SettingHint>
+              开启后普通按键使用 Scripting
+              原生按钮样式，不再使用自定义按键颜色。工具栏图标按钮保持当前样式。
+            </SettingHint>
+          }
+        >
+          <Toggle
+            title="使用原生按键样式"
+            systemImage="button.programmable"
+            value={settings.useNativeKeyStyle}
+            onChanged={(value) => patchSettings({ useNativeKeyStyle: value })}
+          />
+        </Section>
+
+        <Section
           header={<Text>按键背景色</Text>}
           footer={
             <SettingHint>
@@ -1084,12 +1101,13 @@ function SettingsView() {
           <Toggle
             title="启用自定义按键颜色"
             systemImage="paintpalette"
-            value={settings.customKeyColors}
+            value={!settings.useNativeKeyStyle && settings.customKeyColors}
+            disabled={settings.useNativeKeyStyle}
             onChanged={(value) => patchSettings({ customKeyColors: value })}
           />
         </Section>
 
-        {settings.customKeyColors
+        {settings.customKeyColors && !settings.useNativeKeyStyle
           ? (
             <>
               <Section
@@ -1164,6 +1182,7 @@ function SettingsView() {
           footer={
             <SettingHint>
               关闭时使用键盘原始配色，并跟随上方主题；开启后才使用下面的浅色/深色颜色选择。
+              原生按键样式开启时，字体颜色仍可自定义，按键背景色不生效。
             </SettingHint>
           }
         >
