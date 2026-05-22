@@ -10,7 +10,6 @@ import {
   LazyHStack,
   Picker,
   ProgressView,
-  RoundedRectangle,
   Script,
   ScrollView,
   Text,
@@ -190,16 +189,16 @@ function IconButton(props: {
   onLongPress?: () => void | Promise<void>
 }) {
   const tint: any = props.disabled ? "secondaryLabel" : props.tint ?? "label"
+  const touchFrame = props.frame ?? { width: 34, height: 36 }
+  const width = Number(touchFrame.width ?? 34)
+  const height = Number(touchFrame.height ?? 36)
+  const visualFrame = { width, height }
   return (
-    <RoundedRectangle
-      cornerRadius={8}
-      fill={props.disabled ? "tertiarySystemFill" : "secondarySystemFill"}
-      frame={props.frame ?? { width: 34, height: 36 }}
-      onTapGesture={() => {
-        if (props.disabled) return
-        playClick()
-        void props.onPress()
-      }}
+    <ZStack
+      alignment="center"
+      frame={touchFrame}
+      background={"rgba(0,0,0,0.001)" as any}
+      contentShape="rect"
       onLongPressGesture={props.onLongPress && !props.disabled ? {
         minDuration: 450,
         perform: () => {
@@ -207,15 +206,36 @@ function IconButton(props: {
           void props.onLongPress?.()
         },
       } : undefined}
-      overlay={
+    >
+      <ZStack
+        alignment="center"
+        disabled={props.disabled}
+        frame={visualFrame}
+        background="clear"
+        clipShape={{ type: "rect", cornerRadius: 8 }}
+      >
+        <Button
+          action={() => {
+            if (props.disabled) return
+            playClick()
+            void props.onPress()
+          }}
+          buttonStyle="glass"
+          buttonBorderShape={{ roundedRectangleRadius: 8 }}
+          controlSize="mini"
+          disabled={props.disabled}
+          frame={visualFrame}
+        >
+          <VStack frame={visualFrame} />
+        </Button>
         <Image
           systemName={props.systemImage}
           font="title3"
           foregroundStyle={tint}
-          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+          allowsHitTesting={false}
         />
-      }
-    />
+      </ZStack>
+    </ZStack>
   )
 }
 
@@ -228,19 +248,49 @@ function BottomKey(props: {
   onLongPress?: () => void
   onLongPressEnd?: () => void
 }) {
-  const frame = props.width
+  const touchFrame = props.width
     ? { width: props.width, height: 42 }
     : { maxWidth: "infinity" as any, height: 42 }
-  const fill: any = "secondarySystemFill"
+  function keyContent(width: number) {
+    const visualFrame = { width, height: 42 }
+    return (
+      <ZStack
+        alignment="center"
+        frame={visualFrame}
+        background="clear"
+        clipShape={{ type: "rect", cornerRadius: 8 }}
+      >
+        <Button
+          action={() => {
+            playClick()
+            void props.onPress()
+          }}
+          buttonStyle="glass"
+          buttonBorderShape={{ roundedRectangleRadius: 8 }}
+          controlSize="mini"
+          frame={visualFrame}
+        >
+          <VStack frame={visualFrame} />
+        </Button>
+        <HStack
+          frame={visualFrame}
+          allowsHitTesting={false}
+        >
+          {props.systemImage ? (
+            <Image systemName={props.systemImage} font="title3" foregroundStyle={props.tint as any} />
+          ) : (
+            <Text font="title3" lineLimit={1} foregroundStyle={props.tint as any}>{props.title ?? ""}</Text>
+          )}
+        </HStack>
+      </ZStack>
+    )
+  }
   return (
-    <RoundedRectangle
-      cornerRadius={8}
-      fill={fill}
-      frame={frame}
-      onTapGesture={() => {
-        playClick()
-        void props.onPress()
-      }}
+    <ZStack
+      alignment="center"
+      frame={touchFrame}
+      background={"rgba(0,0,0,0.001)" as any}
+      contentShape="rect"
       onLongPressGesture={props.onLongPress ? {
         minDuration: 350,
         perform: props.onLongPress,
@@ -248,16 +298,13 @@ function BottomKey(props: {
           if (!pressing) props.onLongPressEnd?.()
         },
       } : undefined}
-      overlay={
-        <HStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}>
-          {props.systemImage ? (
-            <Image systemName={props.systemImage} font="title3" foregroundStyle={props.tint as any} />
-          ) : (
-            <Text font="title3" lineLimit={1} foregroundStyle={props.tint as any}>{props.title ?? ""}</Text>
-          )}
-        </HStack>
-      }
-    />
+    >
+      {props.width ? keyContent(props.width) : (
+        <GeometryReader>
+          {(proxy) => keyContent(Math.max(1, proxy.size.width))}
+        </GeometryReader>
+      )}
+    </ZStack>
   )
 }
 
@@ -289,6 +336,10 @@ function clipTileWidth(columns: number): number {
   const availableWidth = Device.screen.width - KEYBOARD_ROOT_SIDE_PADDING * 2 - CLIP_SCROLL_SIDE_PADDING * 2
   const minWidth = columns >= 3 ? 80 : 132
   return Math.max(minWidth, Math.floor((availableWidth - CLIP_GRID_SPACING * (columns - 1)) / columns))
+}
+
+function clipTileHeight(availableHeight: number, rows: number): number {
+  return Math.max(1, Math.floor((Math.max(1, availableHeight) - CLIP_GRID_SPACING * (rows - 1)) / rows))
 }
 
 function keyboardLayoutRows(layout: KeyboardLayoutMode): 1 | 2 {
@@ -372,6 +423,7 @@ function ClipTile(props: {
   item: ClipItem
   settings: CaisSettings
   tileWidth: number
+  tileHeight: number
   hideTitle?: boolean
   onInsert: (item: ClipItem) => void | Promise<void>
   onTokenize: (item: ClipItem) => void | Promise<void>
@@ -381,14 +433,15 @@ function ClipTile(props: {
   const item = props.item
   const isImage = item.kind === "image"
   const previewPath = isImage ? imagePreviewPath(item.imagePath) : undefined
+  const tileFrame = { width: props.tileWidth, height: props.tileHeight }
+  const metrics = clipTileMetrics(props.tileHeight, props.settings.keyboardShowTitle && !props.hideTitle)
+  const showTitle = metrics.showTitle
   return (
-    <Button
-      buttonStyle="plain"
-      frame={{ width: props.tileWidth, maxHeight: "infinity" as any }}
-      action={() => {
-        playClick()
-        void props.onInsert(item)
-      }}
+    <ZStack
+      alignment="center"
+      frame={tileFrame}
+      background={"rgba(0,0,0,0.001)" as any}
+      contentShape="rect"
       contextMenu={{
         menuItems: (
           <ClipTileMenu
@@ -401,80 +454,84 @@ function ClipTile(props: {
         ),
       }}
     >
-      <RoundedRectangle
-        cornerRadius={10}
-        fill="systemBackground"
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      <ZStack
+        frame={tileFrame}
         clipShape={{ type: "rect", cornerRadius: 10 } as any}
         clipped
-        overlay={
-          <GeometryReader>
-            {(proxy) => {
-              const metrics = clipTileMetrics(proxy.size.height, props.settings.keyboardShowTitle && !props.hideTitle)
-              const showTitle = metrics.showTitle
-              return (
-                <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
-                  <VStack
-                    frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
-                    padding={metrics.padding}
-                    spacing={metrics.spacing}
-                    clipped
+      >
+        <Button
+          action={() => {
+            playClick()
+            void props.onInsert(item)
+          }}
+          buttonStyle="glass"
+          buttonBorderShape={{ roundedRectangleRadius: 10 }}
+          controlSize="mini"
+          frame={tileFrame}
+        >
+          <VStack frame={tileFrame} />
+        </Button>
+        <ZStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+          allowsHitTesting={false}
+        >
+          <VStack
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+            padding={metrics.padding}
+            spacing={metrics.spacing}
+            clipped
+          >
+            {isImage && previewPath ? (
+              <Image
+                filePath={previewPath}
+                resizable
+                scaleToFit
+                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+              />
+            ) : isImage ? (
+              <Image
+                systemName="photo"
+                font={props.tileHeight < 76 ? "title2" : "largeTitle"}
+                foregroundStyle="secondaryLabel"
+                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
+              />
+            ) : (
+              <>
+                {showTitle ? (
+                  <Text
+                    font="headline"
+                    lineLimit={1}
+                    frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                    multilineTextAlignment="leading"
                   >
-                    {isImage && previewPath ? (
-                      <Image
-                        filePath={previewPath}
-                        resizable
-                        scaleToFit
-                        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-                      />
-                    ) : isImage ? (
-                      <Image
-                        systemName="photo"
-                        font={proxy.size.height < 76 ? "title2" : "largeTitle"}
-                        foregroundStyle="secondaryLabel"
-                        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-                      />
-                    ) : (
-                      <>
-                        {showTitle ? (
-                          <Text
-                            font="headline"
-                            lineLimit={1}
-                            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                            multilineTextAlignment="leading"
-                          >
-                            {item.title}
-                          </Text>
-                        ) : null}
-                        <Text
-                          font="caption"
-                          foregroundStyle={showTitle ? "secondaryLabel" : "label"}
-                          lineLimit={metrics.contentLineLimit}
-                          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                          multilineTextAlignment="leading"
-                        >
-                          {summarizeContent(item.content, KEYBOARD_TILE_PREVIEW_LIMIT)}
-                        </Text>
-                      </>
-                    )}
-                  </VStack>
-                  {item.pinned || item.favorite ? (
-                    <HStack
-                      spacing={4}
-                      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
-                      padding={{ bottom: metrics.padding, trailing: metrics.padding }}
-                    >
-                      {item.pinned ? <Image systemName="pin.fill" font={metrics.iconFont} foregroundStyle="systemOrange" /> : null}
-                      {item.favorite ? <Image systemName="star.fill" font={metrics.iconFont} foregroundStyle="systemYellow" /> : null}
-                    </HStack>
-                  ) : null}
-                </ZStack>
-              )
-            }}
-          </GeometryReader>
-        }
-      />
-    </Button>
+                    {item.title}
+                  </Text>
+                ) : null}
+                <Text
+                  font="caption"
+                  foregroundStyle={showTitle ? "secondaryLabel" : "label"}
+                  lineLimit={metrics.contentLineLimit}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                  multilineTextAlignment="leading"
+                >
+                  {summarizeContent(item.content, KEYBOARD_TILE_PREVIEW_LIMIT)}
+                </Text>
+              </>
+            )}
+          </VStack>
+          {item.pinned || item.favorite ? (
+            <HStack
+              spacing={4}
+              frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+              padding={{ bottom: metrics.padding, trailing: metrics.padding }}
+            >
+              {item.pinned ? <Image systemName="pin.fill" font={metrics.iconFont} foregroundStyle="systemOrange" /> : null}
+              {item.favorite ? <Image systemName="star.fill" font={metrics.iconFont} foregroundStyle="systemYellow" /> : null}
+            </HStack>
+          ) : null}
+        </ZStack>
+      </ZStack>
+    </ZStack>
   )
 }
 
@@ -705,6 +762,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const [items, setItems] = useState<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const [keyboardLayout, setKeyboardLayout] = useState<KeyboardLayoutMode>(() => readKeyboardLayout())
+  const [layoutRevision, setLayoutRevision] = useState(0)
   const [tokenPage, setTokenPage] = useState<KeyboardTokenPage | null>(null)
   const [cursorMode, setCursorMode] = useState(false)
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
@@ -718,12 +776,6 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const visibleItems = useMemo(() => {
     return items.slice(0, settings.keyboardMaxItems)
   }, [items, settings.keyboardMaxItems])
-  const clipGridRows = useMemo(() => {
-    return Array.from({ length: keyboardLayoutRows(keyboardLayout) }, () => ({ size: { type: "flexible" as const } }))
-  }, [keyboardLayout])
-  const clipGridColumns = keyboardLayoutColumns(keyboardLayout)
-  const clipTileCardWidth = clipTileWidth(clipGridColumns)
-  const hideClipTitle = keyboardLayout === "twoByThree"
 
   useEffect(() => {
     currentFeedbackSettings = settings
@@ -935,6 +987,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   function toggleClipLayout() {
+    setLayoutRevision((value) => value + 1)
     setKeyboardLayout((value) => {
       const next = nextKeyboardLayout(value)
       writeKeyboardLayout(next)
@@ -1043,31 +1096,30 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           onLongPress={openCaisApp}
         />
         {tokenPage ? (
-          <RoundedRectangle
-            cornerRadius={8}
-            fill="rgba(0,0,0,0.001)"
+          <ZStack
             frame={{ minWidth: 112, maxWidth: "infinity", height: 36 }}
-            overlay={
-              <HStack spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "trailing" as any }}>
-                <IconButton
-                  systemImage="chevron.left"
-                  onPress={() => setTokenPage(null)}
-                />
-                <IconButton
-                  systemImage="arrow.counterclockwise.circle"
-                  tint={tokenSelectedText ? "label" : "secondaryLabel"}
-                  disabled={!tokenSelectedText}
-                  onPress={clearSelectedTokens}
-                />
-                <IconButton
-                  systemImage="text.cursor"
-                  tint={tokenSelectedText ? "label" : "secondaryLabel"}
-                  disabled={!tokenSelectedText}
-                  onPress={insertSelectedTokens}
-                />
-              </HStack>
-            }
-          />
+            background={"rgba(0,0,0,0.001)" as any}
+            contentShape="rect"
+          >
+            <HStack spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "trailing" as any }}>
+              <IconButton
+                systemImage="chevron.left"
+                onPress={() => setTokenPage(null)}
+              />
+              <IconButton
+                systemImage="arrow.counterclockwise.circle"
+                tint={tokenSelectedText ? "label" : "secondaryLabel"}
+                disabled={!tokenSelectedText}
+                onPress={clearSelectedTokens}
+              />
+              <IconButton
+                systemImage="text.cursor"
+                tint={tokenSelectedText ? "label" : "secondaryLabel"}
+                disabled={!tokenSelectedText}
+                onPress={insertSelectedTokens}
+              />
+            </HStack>
+          </ZStack>
         ) : (
           <Picker
             title=""
@@ -1125,57 +1177,72 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           />
         </VStack>
       ) : (
-        <ScrollView
-          axes="horizontal"
-          scrollIndicator="hidden"
-          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-          padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
-        >
-          {visibleItems.length ? (
-            <LazyHGrid
-              rows={clipGridRows}
-              spacing={CLIP_GRID_SPACING}
-              frame={{ maxHeight: "infinity" }}
-            >
-              <ForEach
-                count={visibleItems.length}
-                itemBuilder={(index) => {
-                  const item = visibleItems[index]
-                  return item ? (
-                    <ClipTile
-                      key={item.id}
-                      item={item}
-                      settings={settings}
-                      tileWidth={clipTileCardWidth}
-                      hideTitle={hideClipTitle}
-                      onInsert={insertClip}
-                      onTokenize={openTokenPage}
-                      onRefresh={refresh}
-                      onStatus={() => {}}
+        <GeometryReader>
+          {(proxy) => {
+            const rowCount = keyboardLayoutRows(keyboardLayout)
+            const columnCount = keyboardLayoutColumns(keyboardLayout)
+            const gridHeight = Math.max(1, proxy.size.height)
+            const tileHeight = clipTileHeight(gridHeight, rowCount)
+            const tileWidth = clipTileWidth(columnCount)
+            const clipRows = Array.from({ length: rowCount }, () => ({ size: tileHeight, spacing: CLIP_GRID_SPACING }))
+            const hideTitle = keyboardLayout === "twoByThree"
+            return (
+              <ScrollView
+                key={`clip-scroll-${keyboardLayout}-${layoutRevision}-${activeTab}`}
+                axes="horizontal"
+                scrollIndicator="hidden"
+                frame={{ width: proxy.size.width, height: gridHeight }}
+                padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
+              >
+                {visibleItems.length ? (
+                  <LazyHGrid
+                    rows={clipRows}
+                    spacing={CLIP_GRID_SPACING}
+                    frame={{ height: gridHeight }}
+                  >
+                    <ForEach
+                      count={visibleItems.length}
+                      itemBuilder={(index) => {
+                        const item = visibleItems[index]
+                        return item ? (
+                          <ClipTile
+                            key={item.id}
+                            item={item}
+                            settings={settings}
+                            tileWidth={tileWidth}
+                            tileHeight={tileHeight}
+                            hideTitle={hideTitle}
+                            onInsert={insertClip}
+                            onTokenize={openTokenPage}
+                            onRefresh={refresh}
+                            onStatus={() => {}}
+                          />
+                        ) : (null as any)
+                      }}
                     />
-                  ) : (null as any)
-                }}
-              />
-            </LazyHGrid>
-          ) : loading ? (
-            <VStack
-              frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
-              spacing={8}
-            >
-              <ProgressView />
-            </VStack>
-          ) : (
-            <VStack
-              frame={{ width: Math.max(300, Device.screen.width - 28), maxHeight: "infinity" as any, alignment: "center" as any }}
-              spacing={8}
-            >
-              <Image systemName={activeTab === TAB_FAVORITE ? "star" : "doc.on.clipboard"} font="largeTitle" foregroundStyle="secondaryLabel" />
-              <Text foregroundStyle="secondaryLabel">
-                {activeTab === TAB_FAVORITE ? "暂无收藏" : "暂无剪贴板记录"}
-              </Text>
-            </VStack>
-          )}
-        </ScrollView>
+                  </LazyHGrid>
+                ) : loading ? (
+                  <VStack
+                    frame={{ width: Math.max(300, Device.screen.width - 28), height: gridHeight, alignment: "center" as any }}
+                    spacing={8}
+                  >
+                    <ProgressView />
+                  </VStack>
+                ) : (
+                  <VStack
+                    frame={{ width: Math.max(300, Device.screen.width - 28), height: gridHeight, alignment: "center" as any }}
+                    spacing={8}
+                  >
+                    <Image systemName={activeTab === TAB_FAVORITE ? "star" : "doc.on.clipboard"} font="largeTitle" foregroundStyle="secondaryLabel" />
+                    <Text foregroundStyle="secondaryLabel">
+                      {activeTab === TAB_FAVORITE ? "暂无收藏" : "暂无剪贴板记录"}
+                    </Text>
+                  </VStack>
+                )}
+              </ScrollView>
+            )
+          }}
+        </GeometryReader>
       )}
 
       <HStack spacing={6} frame={{ maxWidth: "infinity", height: 42 }}>
