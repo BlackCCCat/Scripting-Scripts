@@ -69,7 +69,7 @@ function currentKeyboardAppearance(): KeyboardAppearance {
 let globalRepeatingDeleteTimer: any = null;
 let globalRepeatingDeleteSafetyTimer: any = null;
 let globalRepeatingDeleteToken = 0;
-const SPACE_CURSOR_DRAG_STEP = 12;
+const SPACE_CURSOR_DRAG_STEP = 18;
 const SPACE_CANDIDATE_DRAG_STEP = 24;
 const DELETE_LONG_PRESS_DURATION = 920;
 const DELETE_REPEAT_SAFETY_DURATION = 4200;
@@ -736,24 +736,22 @@ function KeyboardContent(props: {
     const dx = x - spaceCursorDragXRef.current;
     const steps = Math.trunc(dx / stepSize);
     if (steps === 0) return false;
+    const direction = steps < 0 ? -1 : 1;
     if (hasCandidateNavigation) {
-      moveHighlightedCandidateBySpaceDrag(steps);
+      moveHighlightedCandidateBySpaceDrag(direction);
     } else {
-      moveCursorSafely(steps);
+      if (!moveCursorSafely(direction)) return false;
       playCursorMoveFeedback();
     }
-    spaceCursorDragXRef.current += steps * stepSize;
+    spaceCursorDragXRef.current += direction * stepSize;
     return true;
   }
 
-  function trackImmediateSpaceDrag(rowId: string, details: any) {
+  function trackImmediateSpaceDrag(details: any, consumed = false) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
-    if (dx < SPACE_CURSOR_DRAG_STEP || dx < dy) return;
-    if (updateSpaceLongPressDrag(details)) {
-      getRowGestureMachine(rowId).update(details);
-      rowSpaceDragConsumedRef.current.set(rowId, true);
-    }
+    if (!consumed && (dx < SPACE_CURSOR_DRAG_STEP || dx < dy)) return false;
+    return updateSpaceLongPressDrag(details) || consumed;
   }
 
   function handleHitRowGestureChanged(
@@ -770,8 +768,12 @@ function KeyboardContent(props: {
     if (activeTarget) {
       machine.update(details);
       if (isSpaceCursorKey(activeTarget.id)) {
-        trackImmediateSpaceDrag(rowId, details);
-        if (rowSpaceDragConsumedRef.current.get(rowId)) return;
+        const consumed = rowSpaceDragConsumedRef.current.get(rowId) ?? false;
+        if (trackImmediateSpaceDrag(details, consumed)) {
+          rowSpaceDragConsumedRef.current.set(rowId, true);
+          machine.cancel();
+          return;
+        }
       }
       cancelRowLongPressIfDragging(rowId, details);
       return;

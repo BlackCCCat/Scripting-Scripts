@@ -91,6 +91,7 @@ export function KeyFace(props: {
   longPressEnabled?: boolean | (() => boolean);
   onTouchStart?: () => void;
   onTouchEnd?: () => void;
+  onImmediateDrag?: (details: any) => boolean;
   onLongPressMove?: (details: any) => void;
   longPressDuration?: number;
   onSwipeUp?: () => void;
@@ -104,6 +105,7 @@ export function KeyFace(props: {
   const propsRef = useRef(props);
   propsRef.current = props;
   const gestureMachineRef = useRef<any>(null);
+  const immediateDragConsumedRef = useRef(false);
   const usesEnterColor = props.id === "enter" || props.id === "numeric-enter";
   const baseBg = props.palette.keyOverrides[props.id] ??
     (props.accent || usesEnterColor
@@ -146,7 +148,8 @@ export function KeyFace(props: {
     props.onSwipeRight
   );
   const needsManualGesture = !props.passive &&
-    (hasSwipe || props.onLongPress || props.onTouchStart || props.onTouchEnd);
+    (hasSwipe || props.onLongPress || props.onTouchStart || props.onTouchEnd ||
+      props.onImmediateDrag);
 
   function dragIntent(details: any) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
@@ -218,9 +221,24 @@ export function KeyFace(props: {
       gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
         .onChanged((details: any) => {
           gestureMachineRef.current?.start();
+          if (immediateDragConsumedRef.current) {
+            propsRef.current.onImmediateDrag?.(details);
+            gestureMachineRef.current?.cancel?.();
+            return;
+          }
+          if (propsRef.current.onImmediateDrag?.(details)) {
+            immediateDragConsumedRef.current = true;
+            gestureMachineRef.current?.cancel?.();
+            return;
+          }
           gestureMachineRef.current?.update(details);
         })
         .onEnded((details: any) => {
+          if (immediateDragConsumedRef.current) {
+            immediateDragConsumedRef.current = false;
+            propsRef.current.onTouchEnd?.();
+            return;
+          }
           gestureMachineRef.current?.end(details);
         }),
       mask: "gesture" as any,
