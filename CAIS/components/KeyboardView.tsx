@@ -82,6 +82,7 @@ let lastKeyboardItemsVersionByScope: Record<ClipListScope, number> = { favorites
 let keyboardMonitorStopper: (() => void) | null = null
 let keyboardMonitorStartTimer: any = null
 let currentFeedbackSettings: CaisSettings | null = null
+let currentKeyboardNativeGlassEffect = true
 
 export type KeyboardInitialState = {
   items: ClipItem[]
@@ -154,6 +155,10 @@ function playClick() {
   playCaisFeedback(currentFeedbackSettings ?? undefined)
 }
 
+function useNativeKeyboardGlassEffect(): boolean {
+  return currentKeyboardNativeGlassEffect
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const setTimeoutFn = (globalThis as any).setTimeout
@@ -193,6 +198,7 @@ function IconButton(props: {
   const width = Number(touchFrame.width ?? 34)
   const height = Number(touchFrame.height ?? 36)
   const visualFrame = { width, height }
+  const nativeGlass = useNativeKeyboardGlassEffect()
   return (
     <ZStack
       alignment="center"
@@ -211,22 +217,28 @@ function IconButton(props: {
         alignment="center"
         disabled={props.disabled}
         frame={visualFrame}
-        background="clear"
-        glassEffect={{ type: "rect", cornerRadius: 8 } as any}
+        background={nativeGlass ? "clear" : { style: "secondarySystemFill", shape: { type: "rect", cornerRadius: 8 } } as any}
+        glassEffect={nativeGlass ? { type: "rect", cornerRadius: 8 } as any : undefined}
         clipShape={{ type: "rect", cornerRadius: 8 }}
+        onTapGesture={!nativeGlass && !props.disabled ? () => {
+          playClick()
+          void props.onPress()
+        } : undefined}
       >
-        <Button
-          action={() => {
-            if (props.disabled) return
-            playClick()
-            void props.onPress()
-          }}
-          controlSize="mini"
-          disabled={props.disabled}
-          frame={visualFrame}
-        >
-          <VStack frame={visualFrame} />
-        </Button>
+        {nativeGlass ? (
+          <Button
+            action={() => {
+              if (props.disabled) return
+              playClick()
+              void props.onPress()
+            }}
+            controlSize="mini"
+            disabled={props.disabled}
+            frame={visualFrame}
+          >
+            <VStack frame={visualFrame} />
+          </Button>
+        ) : null}
         <Image
           systemName={props.systemImage}
           font="title3"
@@ -252,24 +264,31 @@ function BottomKey(props: {
     : { maxWidth: "infinity" as any, height: 42 }
   function keyContent(width: number) {
     const visualFrame = { width, height: 42 }
+    const nativeGlass = useNativeKeyboardGlassEffect()
     return (
       <ZStack
         alignment="center"
         frame={visualFrame}
-        background="clear"
-        glassEffect={{ type: "rect", cornerRadius: 8 } as any}
+        background={nativeGlass ? "clear" : { style: "secondarySystemFill", shape: { type: "rect", cornerRadius: 8 } } as any}
+        glassEffect={nativeGlass ? { type: "rect", cornerRadius: 8 } as any : undefined}
         clipShape={{ type: "rect", cornerRadius: 8 }}
+        onTapGesture={!nativeGlass ? () => {
+          playClick()
+          void props.onPress()
+        } : undefined}
       >
-        <Button
-          action={() => {
-            playClick()
-            void props.onPress()
-          }}
-          controlSize="mini"
-          frame={visualFrame}
-        >
-          <VStack frame={visualFrame} />
-        </Button>
+        {nativeGlass ? (
+          <Button
+            action={() => {
+              playClick()
+              void props.onPress()
+            }}
+            controlSize="mini"
+            frame={visualFrame}
+          >
+            <VStack frame={visualFrame} />
+          </Button>
+        ) : null}
         <HStack
           frame={visualFrame}
           allowsHitTesting={false}
@@ -434,6 +453,7 @@ function ClipTile(props: {
   const tileFrame = { width: props.tileWidth, height: props.tileHeight }
   const metrics = clipTileMetrics(props.tileHeight, props.settings.keyboardShowTitle && !props.hideTitle)
   const showTitle = metrics.showTitle
+  const nativeGlass = useNativeKeyboardGlassEffect()
   return (
     <ZStack
       alignment="center"
@@ -454,20 +474,27 @@ function ClipTile(props: {
     >
       <ZStack
         frame={tileFrame}
-        glassEffect={{ type: "rect", cornerRadius: 10 } as any}
+        background={nativeGlass ? "clear" as any : { style: "systemBackground", shape: { type: "rect", cornerRadius: 10 } }}
+        glassEffect={nativeGlass ? { type: "rect", cornerRadius: 10 } as any : undefined}
         clipShape={{ type: "rect", cornerRadius: 10 } as any}
         clipped
+        onTapGesture={!nativeGlass ? () => {
+          playClick()
+          void props.onInsert(item)
+        } : undefined}
       >
-        <Button
-          action={() => {
-            playClick()
-            void props.onInsert(item)
-          }}
-          controlSize="mini"
-          frame={tileFrame}
-        >
-          <VStack frame={tileFrame} />
-        </Button>
+        {nativeGlass ? (
+          <Button
+            action={() => {
+              playClick()
+              void props.onInsert(item)
+            }}
+            controlSize="mini"
+            frame={tileFrame}
+          >
+            <VStack frame={tileFrame} />
+          </Button>
+        ) : null}
         <ZStack
           frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
           allowsHitTesting={false}
@@ -770,6 +797,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const didHandleInitialTabEffect = useRef(false)
   const [loading, setLoading] = useState(() => !initialLoaded)
   currentFeedbackSettings = settings
+  currentKeyboardNativeGlassEffect = settings.keyboardNativeGlassEffect !== false
   const visibleItems = useMemo(() => {
     return items.slice(0, settings.keyboardMaxItems)
   }, [items, settings.keyboardMaxItems])
@@ -1065,6 +1093,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   const tokenSelectedText = tokenPage ? selectedTokenText(tokenPage.tokens, tokenPage.selectedIds) : ""
+  const useNativeGlassEffect = settings.keyboardNativeGlassEffect !== false
   const showRimeKeyboardSwitch = Boolean(settings.showRimeKeyboardSwitch)
   const rimeScript = showRimeKeyboardSwitch ? rimeKeyboardScript() : null
 
@@ -1118,22 +1147,35 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             </HStack>
           </ZStack>
         ) : (
-          <ZStack
-            frame={{ minWidth: showRimeKeyboardSwitch ? 96 : 112, maxWidth: "infinity", height: 36 }}
-            glassEffect="capsule"
-            clipShape="capsule"
-          >
+          useNativeGlassEffect ? (
+            <ZStack
+              frame={{ minWidth: showRimeKeyboardSwitch ? 96 : 112, maxWidth: "infinity", height: 36 }}
+              glassEffect="capsule"
+              clipShape="capsule"
+            >
+              <Picker
+                title=""
+                pickerStyle="segmented"
+                value={activeTab}
+                onChanged={(index: number) => setActiveTab(index)}
+                frame={{ maxWidth: "infinity", height: 36 }}
+              >
+                <Text tag={TAB_FAVORITE}>Favorite</Text>
+                <Text tag={TAB_CLIPS}>Clips</Text>
+              </Picker>
+            </ZStack>
+          ) : (
             <Picker
               title=""
               pickerStyle="segmented"
               value={activeTab}
               onChanged={(index: number) => setActiveTab(index)}
-              frame={{ maxWidth: "infinity", height: 36 }}
+              frame={{ minWidth: showRimeKeyboardSwitch ? 96 : 112, maxWidth: "infinity", height: 36 }}
             >
               <Text tag={TAB_FAVORITE}>Favorite</Text>
               <Text tag={TAB_CLIPS}>Clips</Text>
             </Picker>
-          </ZStack>
+          )
         )}
         {!tokenPage && showRimeKeyboardSwitch ? (
           <IconButton
@@ -1176,6 +1218,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             selectedIds={tokenPage.selectedIds}
             selectedText={tokenSelectedText}
             compact
+            nativeGlassEffect={useNativeGlassEffect}
             onToggle={toggleToken}
           />
         </VStack>

@@ -1,4 +1,4 @@
-import { Button, Device, DragGesture, GeometryReader, HStack, ScrollView, Text, useRef, VStack, ZStack } from "scripting"
+import { Button, Device, DragGesture, GeometryReader, HStack, ScrollView, Text, useColorScheme, useRef, VStack, ZStack } from "scripting"
 import type { CaisToken } from "../utils/tokenize"
 
 type TokenHitTarget = {
@@ -81,10 +81,14 @@ export function TokenSelectionPanel(props: {
   emptyText?: string
   compact?: boolean
   minHeight?: number
+  nativeGlassEffect?: boolean
   onToggle: (token: CaisToken) => void
 }) {
+  const colorScheme = useColorScheme()
   const suppressTapAfterDragRef = useRef(false)
   const draggedTokenIdsRef = useRef<Set<string>>(new Set())
+  const nativeGlass = props.nativeGlassEffect !== false
+  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   const tokenFont = props.compact ? "subheadline" : "body"
   const tokenPadding = props.compact
     ? { top: 6, bottom: 6, leading: 10, trailing: 10 }
@@ -99,7 +103,8 @@ export function TokenSelectionPanel(props: {
     <ZStack
       alignment="topLeading"
       frame={panelFrame}
-      glassEffect={{ type: "rect", cornerRadius: 12 } as any}
+      background={nativeGlass ? "clear" as any : { style: cardFill, shape: { type: "rect", cornerRadius: 12 } }}
+      glassEffect={nativeGlass ? { type: "rect", cornerRadius: 12 } as any : undefined}
       clipShape={{ type: "rect", cornerRadius: 12 } as any}
     >
       <VStack
@@ -167,20 +172,32 @@ export function TokenSelectionPanel(props: {
                               <ZStack
                                 key={token.id}
                                 frame={chipFrame}
-                                background={selected ? { style: "systemBlue", shape: { type: "rect", cornerRadius: 8 } } : "clear"}
-                                glassEffect={{ type: "rect", cornerRadius: 8 } as any}
+                                background={
+                                  selected
+                                    ? { style: "systemBlue", shape: { type: "rect", cornerRadius: 8 } }
+                                    : nativeGlass
+                                    ? "clear"
+                                    : { style: "tertiarySystemFill", shape: { type: "rect", cornerRadius: 8 } }
+                                }
+                                glassEffect={nativeGlass ? { type: "rect", cornerRadius: 8 } as any : undefined}
                                 clipShape={{ type: "rect", cornerRadius: 8 } as any}
+                                onTapGesture={!nativeGlass ? () => {
+                                  if (suppressTapAfterDragRef.current) return
+                                  props.onToggle(token)
+                                } : undefined}
                               >
-                                <Button
-                                  controlSize="mini"
-                                  frame={chipFrame}
-                                  action={() => {
-                                    if (suppressTapAfterDragRef.current) return
-                                    props.onToggle(token)
-                                  }}
-                                >
-                                  <VStack frame={chipFrame} />
-                                </Button>
+                                {nativeGlass ? (
+                                  <Button
+                                    controlSize="mini"
+                                    frame={chipFrame}
+                                    action={() => {
+                                      if (suppressTapAfterDragRef.current) return
+                                      props.onToggle(token)
+                                    }}
+                                  >
+                                    <VStack frame={chipFrame} />
+                                  </Button>
+                                ) : null}
                                 <Text
                                   font={tokenFont as any}
                                   foregroundStyle={selected ? "white" : "label"}
