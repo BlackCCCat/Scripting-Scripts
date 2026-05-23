@@ -1,5 +1,4 @@
 import {
-  Button,
   DragGesture,
   Group,
   HStack,
@@ -227,10 +226,7 @@ export function KeyFace(props: {
       mask: "gesture" as any,
     }
     : undefined;
-  const nativeButtonHandlesTap = useNativeKeyStyle && !props.passive &&
-    !needsManualGesture;
-  const tapGesture = !props.passive && !needsManualGesture &&
-      !nativeButtonHandlesTap
+  const tapGesture = !props.passive && !needsManualGesture
     ? { onTapGesture: () => props.onPress() }
     : {};
 
@@ -288,22 +284,6 @@ export function KeyFace(props: {
               ? undefined
               : { color: props.palette.shadow as any, radius: 1, y: 1 }}
           >
-            {useNativeKeyStyle
-              ? (
-                <Button
-                  action={nativeButtonHandlesTap
-                    ? () => propsRef.current.onPress()
-                    : () => {}}
-                  buttonStyle="glass"
-                  buttonBorderShape={{ roundedRectangleRadius: 8 }}
-                  controlSize="mini"
-                  frame={{ width, height }}
-                  opacity={props.active ? 0.72 : 1}
-                >
-                  <VStack frame={{ width, height }} />
-                </Button>
-              )
-              : null}
             {props.topCenter
               ? (
                 <Text

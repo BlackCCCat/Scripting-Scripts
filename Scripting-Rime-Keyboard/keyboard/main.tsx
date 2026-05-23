@@ -2459,6 +2459,9 @@ function KeyboardContent(props: {
                         ? "clear" as any
                         : palette.keyBg as any}
                       foregroundStyle={palette.primary as any}
+                      glassEffect={(palette.nativeKeyStyle
+                        ? { type: "rect", cornerRadius: 8 }
+                        : undefined) as any}
                       clipShape={{ type: "rect", cornerRadius: 8 }}
                       shadow={palette.nativeKeyStyle ? undefined : {
                         color: palette.shadow as any,
@@ -2466,27 +2469,6 @@ function KeyboardContent(props: {
                         y: 1,
                       }}
                     >
-                      {palette.nativeKeyStyle
-                        ? (
-                          <Button
-                            action={() => {}}
-                            buttonStyle="glass"
-                            buttonBorderShape={{ roundedRectangleRadius: 8 }}
-                            controlSize="mini"
-                            frame={{
-                              width: numericLeftWidth,
-                              height: numericPanelHeight,
-                            }}
-                          >
-                            <VStack
-                              frame={{
-                                width: numericLeftWidth,
-                                height: numericPanelHeight,
-                              }}
-                            />
-                          </Button>
-                        )
-                        : null}
                       <ScrollView
                         axes="vertical"
                         scrollIndicator="hidden"
