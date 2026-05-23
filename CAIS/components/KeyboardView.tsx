@@ -221,8 +221,6 @@ function IconButton(props: {
             playClick()
             void props.onPress()
           }}
-          buttonStyle="glass"
-          buttonBorderShape={{ roundedRectangleRadius: 8 }}
           controlSize="mini"
           disabled={props.disabled}
           frame={visualFrame}
@@ -267,8 +265,6 @@ function BottomKey(props: {
             playClick()
             void props.onPress()
           }}
-          buttonStyle="glass"
-          buttonBorderShape={{ roundedRectangleRadius: 8 }}
           controlSize="mini"
           frame={visualFrame}
         >
@@ -467,8 +463,6 @@ function ClipTile(props: {
             playClick()
             void props.onInsert(item)
           }}
-          buttonStyle="glass"
-          buttonBorderShape={{ roundedRectangleRadius: 10 }}
           controlSize="mini"
           frame={tileFrame}
         >

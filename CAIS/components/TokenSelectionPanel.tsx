@@ -102,16 +102,6 @@ export function TokenSelectionPanel(props: {
       glassEffect={{ type: "rect", cornerRadius: 12 } as any}
       clipShape={{ type: "rect", cornerRadius: 12 } as any}
     >
-      <Button
-        action={() => {}}
-        buttonStyle="glass"
-        buttonBorderShape={{ roundedRectangleRadius: 12 }}
-        controlSize="mini"
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        allowsHitTesting={false}
-      >
-        <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }} />
-      </Button>
       <VStack
         spacing={10}
         frame={panelFrame}
@@ -182,8 +172,6 @@ export function TokenSelectionPanel(props: {
                                 clipShape={{ type: "rect", cornerRadius: 8 } as any}
                               >
                                 <Button
-                                  buttonStyle="glass"
-                                  buttonBorderShape={{ roundedRectangleRadius: 8 }}
                                   controlSize="mini"
                                   frame={chipFrame}
                                   action={() => {
