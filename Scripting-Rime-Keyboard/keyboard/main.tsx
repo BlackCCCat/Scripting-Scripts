@@ -714,14 +714,34 @@ function KeyboardContent(props: {
 
   function moveHighlightedCandidateBySpaceDrag(steps: number) {
     const s = sessionRef.current;
-    if (!s) return;
+    const menu = s?.context?.menu;
+    if (!s || !menu) return false;
+    const beforePage = menu.pageNo ?? 0;
+    const beforeIndex = menu.highlightedIndex ?? 0;
     const count = Math.min(8, Math.abs(steps));
     const key = steps > 0 ? KEY_DOWN : KEY_UP;
     for (let i = 0; i < count; i += 1) {
       s.processKey(key);
     }
+    const nextMenu = s.context?.menu;
+    const moved = !!nextMenu &&
+      ((nextMenu.pageNo ?? 0) !== beforePage ||
+        (nextMenu.highlightedIndex ?? 0) !== beforeIndex);
     refresh(s);
+    if (moved) playCursorMoveFeedback();
+    return moved;
+  }
+
+  function moveHostCursorByDrag(direction: number) {
+    if (direction < 0 && !(CustomKeyboard.textBeforeCursor ?? "")) {
+      return false;
+    }
+    if (direction > 0 && !(CustomKeyboard.textAfterCursor ?? "")) {
+      return false;
+    }
+    if (!moveCursorSafely(direction)) return false;
     playCursorMoveFeedback();
+    return true;
   }
 
   function updateSpaceLongPressDrag(details: any) {
@@ -729,7 +749,8 @@ function KeyboardContent(props: {
     if (spaceCursorDragXRef.current == null) {
       spaceCursorDragXRef.current = Number(details?.startLocation?.x ?? x);
     }
-    const hasCandidateNavigation = preedit.length > 0 && candidates.length > 0;
+    const hasCandidateNavigation = preedit.length > 0 &&
+      candidates.length > 0;
     const stepSize = hasCandidateNavigation
       ? SPACE_CANDIDATE_DRAG_STEP
       : SPACE_CURSOR_DRAG_STEP;
@@ -737,21 +758,20 @@ function KeyboardContent(props: {
     const steps = Math.trunc(dx / stepSize);
     if (steps === 0) return false;
     const direction = steps < 0 ? -1 : 1;
-    if (hasCandidateNavigation) {
-      moveHighlightedCandidateBySpaceDrag(direction);
-    } else {
-      if (!moveCursorSafely(direction)) return false;
-      playCursorMoveFeedback();
-    }
+    const moved = hasCandidateNavigation
+      ? moveHighlightedCandidateBySpaceDrag(direction)
+      : moveHostCursorByDrag(direction);
     spaceCursorDragXRef.current += direction * stepSize;
-    return true;
+    return moved;
   }
 
   function trackImmediateSpaceDrag(details: any, consumed = false) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
-    if (!consumed && (dx < SPACE_CURSOR_DRAG_STEP || dx < dy)) return false;
-    return updateSpaceLongPressDrag(details) || consumed;
+    const hasHorizontalDragIntent = dx >= SPACE_CURSOR_DRAG_STEP && dx >= dy;
+    if (!consumed && !hasHorizontalDragIntent) return false;
+    return updateSpaceLongPressDrag(details) || consumed ||
+      hasHorizontalDragIntent;
   }
 
   function handleHitRowGestureChanged(
