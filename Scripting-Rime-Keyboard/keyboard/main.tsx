@@ -1698,21 +1698,27 @@ function KeyboardContent(props: {
     0,
     metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
   );
-  const longCandidateIndex = candidateBarWidth > 0
-    ? candidates.findIndex((candidate, index) =>
-      candidateButtonNaturalWidth({
-        text: candidate.text,
-        comment: candidateComment(candidate),
-        index,
+  const highlightedCandidate = candidates[highlightedIdx];
+  const highlightedCandidateWidth =
+    highlightedCandidate && candidateBarWidth > 0
+      ? candidateButtonNaturalWidth({
+        text: highlightedCandidate.text,
+        comment: candidateComment(highlightedCandidate),
+        index: highlightedIdx,
         showIndex: settings.showCandidateComment,
         candidateFontSize: metrics.candidateFontSize,
         commentFontSize: metrics.candidateCommentFontSize,
-      }) > candidateBarWidth
-    )
-    : -1;
-  const candidateAutoScrollKey = longCandidateIndex >= 0
-    ? `${pageNo}-${longCandidateIndex}-${candidates[longCandidateIndex].text}`
+      })
+      : 0;
+  const candidateAutoScrollKey = highlightedCandidate
+    ? `${pageNo}-${highlightedIdx}-${highlightedCandidate.text}`
     : null;
+  const candidateAutoScrollAnchor = highlightedCandidateWidth >
+      candidateBarWidth
+    ? "trailing"
+    : highlightedIdx === 0
+    ? "leading"
+    : "center";
   const candidateScrollSignature = candidates.map((candidate, index) =>
     `${index}:${candidate.text}:${candidateComment(candidate)}`
   ).join("|");
@@ -1758,10 +1764,11 @@ function KeyboardContent(props: {
     setTimeout(() => {
       candidateScrollProxyRef.current?.scrollTo(
         candidateAutoScrollKey,
-        "trailing",
+        candidateAutoScrollAnchor,
       );
     }, 20);
   }, [
+    candidateAutoScrollAnchor,
     candidateAutoScrollKey,
     candidateScrollSignature,
     candidateBarWidth,

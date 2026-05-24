@@ -28,6 +28,9 @@ import {
   type CandidateRightButtonMode,
   COMPOSING_FUNCTION_KEYS,
   DEFAULT_CANDIDATE_MENU_ACTIONS,
+  DEFAULT_KEY_COLORS,
+  DEFAULT_KEY_FONT_COLORS,
+  DEFAULT_KEY_HINT_COLORS,
   DEFAULT_LETTER_SWIPE_DOWN,
   DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS,
   DEFAULT_RIME_KEYBOARD_SETTINGS,
@@ -40,6 +43,7 @@ import {
   KEYBOARD_HEIGHT_MIN,
   type KeyColorPair,
   type KeyColorScheme,
+  type KeyColorSettings,
   LETTER_KEYS,
   LETTER_LONG_PRESS_DURATION_MAX,
   LETTER_LONG_PRESS_DURATION_MIN,
@@ -318,6 +322,7 @@ function ColorPairConfigRow(props: {
   title: string;
   value: KeyColorPair;
   overridden?: boolean;
+  resetVisible?: boolean;
   onLightChanged: (value: string) => void;
   onDarkChanged: (value: string) => void;
   onReset?: () => void;
@@ -352,7 +357,7 @@ function ColorPairConfigRow(props: {
           onChanged={(value) => props.onDarkChanged(String(value))}
         />
       </HStack>
-      {props.overridden && props.onReset
+      {(props.resetVisible || props.overridden) && props.onReset
         ? (
           <Button
             title="恢复默认颜色"
@@ -857,6 +862,62 @@ function SettingsView() {
     });
   }
 
+  function cloneKeyColorSettings(defaults: KeyColorSettings): KeyColorSettings {
+    return {
+      normal: { ...defaults.normal },
+      enter: { ...defaults.enter },
+      overrides: {},
+    };
+  }
+
+  function resetKeyBackgroundColors() {
+    updateSettings({
+      ...settings,
+      customKeyColors: false,
+      customKeyColorLight: false,
+      customKeyColorDark: false,
+      keyColors: cloneKeyColorSettings(DEFAULT_KEY_COLORS),
+    });
+  }
+
+  function resetKeyFontColors() {
+    updateSettings({
+      ...settings,
+      customKeyFontColors: false,
+      customKeyFontColorLight: false,
+      customKeyFontColorDark: false,
+      keyFontColors: cloneKeyColorSettings(DEFAULT_KEY_FONT_COLORS),
+    });
+  }
+
+  function resetKeyHintColors() {
+    updateSettings({
+      ...settings,
+      customKeyHintColors: false,
+      customKeyHintColorLight: false,
+      customKeyHintColorDark: false,
+      keyHintColors: cloneKeyColorSettings(DEFAULT_KEY_HINT_COLORS),
+    });
+  }
+
+  function colorPairChanged(value: KeyColorPair, defaults: KeyColorPair) {
+    return value.light !== defaults.light || value.dark !== defaults.dark;
+  }
+
+  function resetKeyBaseColor(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
+    kind: "normal" | "enter",
+    defaults: KeyColorSettings,
+  ) {
+    updateSettings({
+      ...settings,
+      [settingKey]: {
+        ...settings[settingKey],
+        [kind]: { ...defaults[kind] },
+      },
+    });
+  }
+
   function patchKeyOverrideColor(
     settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
     key: string,
@@ -1115,6 +1176,11 @@ function SettingsView() {
             value={settings.customKeyColors}
             onChanged={(value) => patchSettings({ customKeyColors: value })}
           />
+          <Button
+            title="重置按键背景色"
+            systemImage="arrow.counterclockwise"
+            action={resetKeyBackgroundColors}
+          />
         </Section>
 
         {settings.customKeyColors
@@ -1155,18 +1221,38 @@ function SettingsView() {
                 <ColorPairConfigRow
                   title="普通按键"
                   value={settings.keyColors.normal}
+                  resetVisible={colorPairChanged(
+                    settings.keyColors.normal,
+                    DEFAULT_KEY_COLORS.normal,
+                  )}
                   onLightChanged={(value) =>
                     patchKeyBaseColor("keyColors", "normal", "light", value)}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyColors", "normal", "dark", value)}
+                  onReset={() =>
+                    resetKeyBaseColor(
+                      "keyColors",
+                      "normal",
+                      DEFAULT_KEY_COLORS,
+                    )}
                 />
                 <ColorPairConfigRow
                   title="回车按键"
                   value={settings.keyColors.enter}
+                  resetVisible={colorPairChanged(
+                    settings.keyColors.enter,
+                    DEFAULT_KEY_COLORS.enter,
+                  )}
                   onLightChanged={(value) =>
                     patchKeyBaseColor("keyColors", "enter", "light", value)}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyColors", "enter", "dark", value)}
+                  onReset={() =>
+                    resetKeyBaseColor(
+                      "keyColors",
+                      "enter",
+                      DEFAULT_KEY_COLORS,
+                    )}
                 />
               </Section>
 
@@ -1209,6 +1295,11 @@ function SettingsView() {
             value={settings.customKeyFontColors}
             onChanged={(value) => patchSettings({ customKeyFontColors: value })}
           />
+          <Button
+            title="重置按键字体颜色"
+            systemImage="arrow.counterclockwise"
+            action={resetKeyFontColors}
+          />
         </Section>
 
         {settings.customKeyFontColors
@@ -1244,6 +1335,10 @@ function SettingsView() {
                 <ColorPairConfigRow
                   title="普通按键"
                   value={settings.keyFontColors.normal}
+                  resetVisible={colorPairChanged(
+                    settings.keyFontColors.normal,
+                    DEFAULT_KEY_FONT_COLORS.normal,
+                  )}
                   onLightChanged={(value) =>
                     patchKeyBaseColor(
                       "keyFontColors",
@@ -1253,14 +1348,30 @@ function SettingsView() {
                     )}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyFontColors", "normal", "dark", value)}
+                  onReset={() =>
+                    resetKeyBaseColor(
+                      "keyFontColors",
+                      "normal",
+                      DEFAULT_KEY_FONT_COLORS,
+                    )}
                 />
                 <ColorPairConfigRow
                   title="回车按键"
                   value={settings.keyFontColors.enter}
+                  resetVisible={colorPairChanged(
+                    settings.keyFontColors.enter,
+                    DEFAULT_KEY_FONT_COLORS.enter,
+                  )}
                   onLightChanged={(value) =>
                     patchKeyBaseColor("keyFontColors", "enter", "light", value)}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyFontColors", "enter", "dark", value)}
+                  onReset={() =>
+                    resetKeyBaseColor(
+                      "keyFontColors",
+                      "enter",
+                      DEFAULT_KEY_FONT_COLORS,
+                    )}
                 />
               </Section>
 
@@ -1299,6 +1410,11 @@ function SettingsView() {
             value={settings.customKeyHintColors}
             onChanged={(value) => patchSettings({ customKeyHintColors: value })}
           />
+          <Button
+            title="重置角标颜色"
+            systemImage="arrow.counterclockwise"
+            action={resetKeyHintColors}
+          />
         </Section>
 
         {settings.customKeyHintColors
@@ -1334,6 +1450,10 @@ function SettingsView() {
                 <ColorPairConfigRow
                   title="普通按键"
                   value={settings.keyHintColors.normal}
+                  resetVisible={colorPairChanged(
+                    settings.keyHintColors.normal,
+                    DEFAULT_KEY_HINT_COLORS.normal,
+                  )}
                   onLightChanged={(value) =>
                     patchKeyBaseColor(
                       "keyHintColors",
@@ -1343,14 +1463,30 @@ function SettingsView() {
                     )}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyHintColors", "normal", "dark", value)}
+                  onReset={() =>
+                    resetKeyBaseColor(
+                      "keyHintColors",
+                      "normal",
+                      DEFAULT_KEY_HINT_COLORS,
+                    )}
                 />
                 <ColorPairConfigRow
                   title="回车按键"
                   value={settings.keyHintColors.enter}
+                  resetVisible={colorPairChanged(
+                    settings.keyHintColors.enter,
+                    DEFAULT_KEY_HINT_COLORS.enter,
+                  )}
                   onLightChanged={(value) =>
                     patchKeyBaseColor("keyHintColors", "enter", "light", value)}
                   onDarkChanged={(value) =>
                     patchKeyBaseColor("keyHintColors", "enter", "dark", value)}
+                  onReset={() =>
+                    resetKeyBaseColor(
+                      "keyHintColors",
+                      "enter",
+                      DEFAULT_KEY_HINT_COLORS,
+                    )}
                 />
               </Section>
 

@@ -1,3 +1,5 @@
+import { Device } from "scripting";
+
 export type RimeKeyboardTheme = "system" | "light" | "dark";
 export type CandidateRightButtonMode = "dismiss" | "expand" | "hidden";
 export type ActionSendMode = "auto" | "rime" | "direct";
@@ -409,14 +411,26 @@ export const DEFAULT_CANDIDATE_MENU_ACTIONS: CandidateMenuAction[] = [
   { name: "移除", action: "Control+Delete" },
 ];
 
+function systemMajorVersion() {
+  const version = String(Device.systemVersion ?? "");
+  const match = version.match(/\d+/);
+  return match ? Number(match[0]) : 0;
+}
+
+function defaultNativeKeyStyle() {
+  return systemMajorVersion() >= 26;
+}
+
+const DEFAULT_NATIVE_KEY_STYLE = defaultNativeKeyStyle();
+
 export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   theme: "system",
   useCustomKeyboardHeight: false,
   keyboardHeight: 326,
   candidateBarHeight: 45,
   candidateRightButtonMode: "dismiss",
-  useNativeKeyStyle: true,
-  useNativeToolbarStyle: true,
+  useNativeKeyStyle: DEFAULT_NATIVE_KEY_STYLE,
+  useNativeToolbarStyle: DEFAULT_NATIVE_KEY_STYLE,
   customKeyColors: false,
   customKeyColorLight: false,
   customKeyColorDark: false,
