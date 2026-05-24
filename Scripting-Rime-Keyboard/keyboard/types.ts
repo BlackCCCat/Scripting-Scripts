@@ -23,6 +23,7 @@ export type KeyboardMetrics = {
 export type Palette = {
   nativeKeyStyle: boolean;
   nativeToolbarStyle: boolean;
+  usesCustomColors: boolean;
   keyBg: string;
   enterBg: string;
   keyOverrides: Record<string, string>;

@@ -8,6 +8,7 @@ import {
   HStack,
   Script,
   ScrollView,
+  ScrollViewReader,
   Text,
   useEffect,
   useRef,
@@ -136,7 +137,6 @@ function KeyboardContent(props: {
     highlightedIdx: 0,
     pageNo: 0,
     rimePageSize: 5,
-    isLastPage: true,
     ascii: false,
     currentSchemaId: null as string | null,
   });
@@ -147,7 +147,6 @@ function KeyboardContent(props: {
     highlightedIdx,
     pageNo,
     rimePageSize,
-    isLastPage,
     ascii,
     currentSchemaId,
   } = rimeState;
@@ -177,6 +176,8 @@ function KeyboardContent(props: {
   const rowGestureMachineRef = useRef(new Map<string, any>());
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
   const spaceCursorDragXRef = useRef<number | null>(null);
+  const preeditScrollProxyRef = useRef<any>(null);
+  const candidateScrollProxyRef = useRef<any>(null);
   const lastPressFeedbackAtRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
@@ -322,7 +323,6 @@ function KeyboardContent(props: {
       highlightedIdx: menu?.highlightedIndex ?? 0,
       pageNo: menu?.pageNo ?? 0,
       rimePageSize: menu?.pageSize ?? 5,
-      isLastPage: menu?.isLastPage ?? true,
       currentSchemaId: session.currentSchema?.id ?? null,
       ascii: session.getOption("ascii_mode"),
     });
@@ -659,12 +659,6 @@ function KeyboardContent(props: {
       stopRepeatingCursorMove();
     }
     if (isSpaceCursorKey(target?.id)) spaceCursorDragXRef.current = null;
-  }
-
-  function cancelRowGesture(rowId: string, keepVisual = false) {
-    const machine = rowGestureMachineRef.current.get(rowId);
-    machine?.cancel?.();
-    clearRowTracking(rowId, keepVisual);
   }
 
   function isLongPressDragIntent(details: any) {
@@ -1025,7 +1019,6 @@ function KeyboardContent(props: {
       candidates: [],
       highlightedIdx: 0,
       pageNo: 0,
-      isLastPage: true,
     }));
     setCandidateExpanded(false);
     setExpandedCandidates([]);
@@ -1339,7 +1332,7 @@ function KeyboardContent(props: {
     return CustomKeyboard.allText || selectedTextSnapshot();
   }
 
-  async function selectAllBestEffort() {
+  function selectAllBestEffort() {
     try {
       const text = textSnapshot();
       if (!text) {
@@ -1405,7 +1398,7 @@ function KeyboardContent(props: {
     if (selectAllActive) {
       cancelSelectAllBestEffort();
     } else {
-      void selectAllBestEffort();
+      selectAllBestEffort();
     }
   }
 
@@ -1494,7 +1487,7 @@ function KeyboardContent(props: {
         CustomKeyboard.moveCursor(CustomKeyboard.textAfterCursor?.length ?? 0);
         return;
       case "{selectAll}":
-        void selectAllBestEffort();
+        selectAllBestEffort();
         return;
       case "{toggleSelectAll}":
         toggleSelectAll();
@@ -1673,6 +1666,11 @@ function KeyboardContent(props: {
     ? preedit.slice(safePreeditCursor)
     : "";
   const showsPreeditRow = !settings.inlinePreedit;
+  const preeditCaretScrollKey = "preedit-caret-anchor";
+  const preeditTailScrollKey = "preedit-tail-anchor";
+  const preeditScrollTargetKey = showsPreeditCaret
+    ? preeditCaretScrollKey
+    : preeditTailScrollKey;
   const candidateHeaderHeight = settings.inlinePreedit
     ? metrics.candidateBarHeight
     : metrics.candidateBarHeight + metrics.preeditRowHeight + 2;
@@ -1700,6 +1698,24 @@ function KeyboardContent(props: {
     0,
     metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
   );
+  const longCandidateIndex = candidateBarWidth > 0
+    ? candidates.findIndex((candidate, index) =>
+      candidateButtonNaturalWidth({
+        text: candidate.text,
+        comment: candidateComment(candidate),
+        index,
+        showIndex: settings.showCandidateComment,
+        candidateFontSize: metrics.candidateFontSize,
+        commentFontSize: metrics.candidateCommentFontSize,
+      }) > candidateBarWidth
+    )
+    : -1;
+  const candidateAutoScrollKey = longCandidateIndex >= 0
+    ? `${pageNo}-${longCandidateIndex}-${candidates[longCandidateIndex].text}`
+    : null;
+  const candidateScrollSignature = candidates.map((candidate, index) =>
+    `${index}:${candidate.text}:${candidateComment(candidate)}`
+  ).join("|");
   const candidateRightButtonImage =
     effectiveCandidateRightButtonMode === "expand"
       ? candidateExpanded ? "chevron.up.circle" : settings.toolbarExpandSymbol
@@ -1721,6 +1737,35 @@ function KeyboardContent(props: {
       : 0) +
     metrics.keyHeight * 4 +
     bodyRowSpacing * 3;
+
+  useEffect(() => {
+    if (!showsPreeditRow || preedit.length === 0) return;
+    setTimeout(() => {
+      preeditScrollProxyRef.current?.scrollTo(
+        preeditScrollTargetKey,
+        "trailing",
+      );
+    }, 20);
+  }, [
+    metrics.width,
+    preedit,
+    preeditScrollTargetKey,
+    showsPreeditRow,
+  ]);
+
+  useEffect(() => {
+    if (!candidateAutoScrollKey) return;
+    setTimeout(() => {
+      candidateScrollProxyRef.current?.scrollTo(
+        candidateAutoScrollKey,
+        "trailing",
+      );
+    }, 20);
+  }, [
+    candidateAutoScrollKey,
+    candidateScrollSignature,
+    candidateBarWidth,
+  ]);
   const expandedPanelHeight = normalKeyboardBodyHeight;
 
   function shiftSwipeUp() {
@@ -2272,46 +2317,81 @@ function KeyboardContent(props: {
       >
         {showsPreeditRow
           ? (
-            <HStack
-              spacing={1}
-              padding={{ leading: 8 }}
-              frame={{
-                width: metrics.width,
-                height: metrics.preeditRowHeight,
-                alignment: "bottomLeading" as any,
+            <ScrollViewReader>
+              {(proxy) => {
+                preeditScrollProxyRef.current = proxy;
+                return (
+                  <ScrollView
+                    axes="horizontal"
+                    scrollIndicator="hidden"
+                    frame={{
+                      width: metrics.width,
+                      height: metrics.preeditRowHeight,
+                    }}
+                  >
+                    <HStack
+                      spacing={1}
+                      padding={{ leading: 8, trailing: 8 }}
+                      frame={{
+                        height: metrics.preeditRowHeight,
+                        alignment: "bottomLeading" as any,
+                      }}
+                    >
+                      <Text
+                        font="caption"
+                        lineLimit={1}
+                        fixedSize={{ horizontal: true, vertical: true }}
+                        foregroundStyle={palette.primary as any}
+                      >
+                        {preeditBeforeCaret}
+                      </Text>
+                      {showsPreeditCaret
+                        ? (
+                          <Text
+                            font="caption2"
+                            baselineOffset={-7}
+                            foregroundStyle={palette.primary as any}
+                            padding={{ bottom: -2 }}
+                          >
+                            ^
+                          </Text>
+                        )
+                        : null}
+                      {showsPreeditCaret
+                        ? (
+                          <VStack
+                            key={preeditCaretScrollKey}
+                            frame={{
+                              width: 1,
+                              height: metrics.preeditRowHeight,
+                            }}
+                          />
+                        )
+                        : null}
+                      {preeditAfterCaret
+                        ? (
+                          <Text
+                            font="caption"
+                            lineLimit={1}
+                            fixedSize={{ horizontal: true, vertical: true }}
+                            foregroundStyle={palette.primary as any}
+                          >
+                            {preeditAfterCaret}
+                          </Text>
+                        )
+                        : null}
+                      <VStack
+                        key={preeditTailScrollKey}
+                        frame={{
+                          width: 1,
+                          height: metrics.preeditRowHeight,
+                        }}
+                      />
+                    </HStack>
+                  </ScrollView>
+                );
               }}
-            >
-              <Text
-                font="caption"
-                lineLimit={1}
-                foregroundStyle={palette.primary as any}
-              >
-                {preeditBeforeCaret}
-              </Text>
-              {showsPreeditCaret
-                ? (
-                  <Text
-                    font="caption2"
-                    baselineOffset={-7}
-                    foregroundStyle={palette.primary as any}
-                    padding={{ bottom: -2 }}
-                  >
-                    ^
-                  </Text>
-                )
-                : null}
-              {preeditAfterCaret
-                ? (
-                  <Text
-                    font="caption"
-                    lineLimit={1}
-                    foregroundStyle={palette.primary as any}
-                  >
-                    {preeditAfterCaret}
-                  </Text>
-                )
-                : null}
-            </HStack>
+            </ScrollViewReader>
           )
           : null}
         <HStack
@@ -2339,38 +2419,45 @@ function KeyboardContent(props: {
               contextMenu={toolbarContextMenuProps(item)}
             />
           ))}
-          <ScrollView
-            axes="horizontal"
-            scrollIndicator="hidden"
-            frame={{
-              width: candidateBarWidth,
-              height: metrics.candidateBarHeight,
+          <ScrollViewReader>
+            {(proxy) => {
+              candidateScrollProxyRef.current = proxy;
+              return (
+                <ScrollView
+                  axes="horizontal"
+                  scrollIndicator="hidden"
+                  frame={{
+                    width: candidateBarWidth,
+                    height: metrics.candidateBarHeight,
+                  }}
+                >
+                  <HStack spacing={5} buttonStyle="plain">
+                    {candidates.map((candidate, idx) => (
+                      <CandidateButton
+                        key={`${pageNo}-${idx}-${candidate.text}`}
+                        index={idx}
+                        candidate={candidate}
+                        comment={candidateComment(candidate)}
+                        showIndex={settings.showCandidateComment}
+                        selected={idx === highlightedIdx}
+                        palette={palette}
+                        height={metrics.candidateButtonHeight}
+                        candidateFontSize={metrics.candidateFontSize}
+                        commentFontSize={metrics.candidateCommentFontSize}
+                        contextMenu={candidateContextMenuProps(
+                          pageNo * rimePageSize + idx,
+                        )}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            selectCandidateAbsolute(pageNo * rimePageSize + idx)
+                          )}
+                      />
+                    ))}
+                  </HStack>
+                </ScrollView>
+              );
             }}
-          >
-            <HStack spacing={5} buttonStyle="plain">
-              {candidates.map((candidate, idx) => (
-                <CandidateButton
-                  key={`${pageNo}-${idx}-${candidate.text}`}
-                  index={idx}
-                  candidate={candidate}
-                  comment={candidateComment(candidate)}
-                  showIndex={settings.showCandidateComment}
-                  selected={idx === highlightedIdx}
-                  palette={palette}
-                  height={metrics.candidateButtonHeight}
-                  candidateFontSize={metrics.candidateFontSize}
-                  commentFontSize={metrics.candidateCommentFontSize}
-                  contextMenu={candidateContextMenuProps(
-                    pageNo * rimePageSize + idx,
-                  )}
-                  onPress={() =>
-                    runWithFeedback(() =>
-                      selectCandidateAbsolute(pageNo * rimePageSize + idx)
-                    )}
-                />
-              ))}
-            </HStack>
-          </ScrollView>
+          </ScrollViewReader>
           {candidateRightButtonVisible
             ? (
               <KeyFace

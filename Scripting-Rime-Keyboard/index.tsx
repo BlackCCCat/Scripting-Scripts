@@ -1077,8 +1077,8 @@ function SettingsView() {
           header={<Text>按键样式</Text>}
           footer={
             <SettingHint>
-              开启后普通按键使用 Scripting
-              原生按钮样式，不再使用自定义按键颜色。工具栏图标按钮保持当前样式。
+              开启后普通按键使用 Scripting 原生按钮样式；自定义按键颜色会覆盖在
+              glassEffect 上，工具栏按钮可单独控制。
             </SettingHint>
           }
         >
@@ -1112,13 +1112,12 @@ function SettingsView() {
           <Toggle
             title="启用自定义按键颜色"
             systemImage="paintpalette"
-            value={!settings.useNativeKeyStyle && settings.customKeyColors}
-            disabled={settings.useNativeKeyStyle}
+            value={settings.customKeyColors}
             onChanged={(value) => patchSettings({ customKeyColors: value })}
           />
         </Section>
 
-        {settings.customKeyColors && !settings.useNativeKeyStyle
+        {settings.customKeyColors
           ? (
             <>
               <Section
@@ -1183,6 +1182,13 @@ function SettingsView() {
                     )}
                   />
                 ))}
+                <NavigationLink
+                  title="工具栏"
+                  destination={renderToolbarColorPage(
+                    "keyColors",
+                    "工具栏按钮背景色",
+                  )}
+                />
               </Section>
             </>
           )
@@ -1193,7 +1199,7 @@ function SettingsView() {
           footer={
             <SettingHint>
               关闭时使用键盘原始配色，并跟随上方主题；开启后才使用下面的浅色/深色颜色选择。
-              原生按键样式开启时，字体颜色仍可自定义，按键背景色不生效。
+              原生按键样式开启时，字体颜色仍可自定义。
             </SettingHint>
           }
         >
@@ -1368,7 +1374,10 @@ function SettingsView() {
     );
   }
 
-  function renderToolbarFontColorPage() {
+  function renderToolbarColorPage(
+    settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
+    pageTitle: string,
+  ) {
     const toolbarKeys = [
       ...settings.toolbarLeftButtons.map((item, index) => ({
         id: `toolbar-left-${item.id}`,
@@ -1377,10 +1386,14 @@ function SettingsView() {
       { id: "candidate-right", label: "右侧按钮" },
     ];
     return renderKeyColorPage(
-      "keyFontColors",
+      settingKey,
       { title: "工具栏", keys: toolbarKeys },
-      "工具栏图标颜色",
+      pageTitle,
     );
+  }
+
+  function renderToolbarFontColorPage() {
+    return renderToolbarColorPage("keyFontColors", "工具栏图标颜色");
   }
 
   function renderKeyColorPage(

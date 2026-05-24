@@ -25,8 +25,7 @@ export function paletteFor(
     settings,
     keyboardAppearance,
   );
-  const usesCustomColors = !nativeKeyStyle &&
-    settings.customKeyColors &&
+  const usesCustomColors = settings.customKeyColors &&
     customColorScheme != null &&
     (customColorScheme === "light"
       ? settings.customKeyColorLight
@@ -69,6 +68,7 @@ export function paletteFor(
     return {
       nativeKeyStyle,
       nativeToolbarStyle: nativeKeyStyle && settings.useNativeToolbarStyle,
+      usesCustomColors,
       keyBg: usesCustomColors ? settings.keyColors.normal.dark : "#5f6064",
       enterBg: usesCustomColors ? settings.keyColors.enter.dark : "#5f6064",
       keyOverrides,
@@ -90,6 +90,7 @@ export function paletteFor(
     return {
       nativeKeyStyle,
       nativeToolbarStyle: nativeKeyStyle && settings.useNativeToolbarStyle,
+      usesCustomColors,
       keyBg: usesCustomColors ? settings.keyColors.normal.light : "#ffffff",
       enterBg: usesCustomColors ? settings.keyColors.enter.light : "#ffffff",
       keyOverrides,
@@ -110,6 +111,7 @@ export function paletteFor(
   return {
     nativeKeyStyle,
     nativeToolbarStyle: nativeKeyStyle && settings.useNativeToolbarStyle,
+    usesCustomColors,
     keyBg: usesCustomColors
       ? settings.keyColors.normal[customColorScheme]
       : "systemBackground",

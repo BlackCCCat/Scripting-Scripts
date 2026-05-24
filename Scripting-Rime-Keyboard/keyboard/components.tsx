@@ -285,7 +285,7 @@ export function KeyFace(props: {
             alignment="center"
             frame={{ width, height }}
             background={(useNativeVisualStyle
-              ? "clear"
+              ? props.palette.usesCustomColors ? bg : "clear"
               : props.plain
               ? "rgba(0,0,0,0.001)"
               : bg) as any}
@@ -528,7 +528,8 @@ export function CandidateButton(props: {
   const useNativeKeyStyle = props.palette.nativeKeyStyle;
   return (
     <ZStack
-      background={(useNativeKeyStyle ? "clear" : props.selected
+      background={((props.selected &&
+          (!useNativeKeyStyle || props.palette.usesCustomColors))
         ? {
           style: props.palette.keyBg as any,
           shape: { type: "rect", cornerRadius: 6 },
@@ -559,7 +560,7 @@ export function CandidateButton(props: {
             <Text
               font={candidateFontSize}
               lineLimit={1}
-              truncationMode="tail"
+              truncationMode="head"
               fixedSize={props.width
                 ? false
                 : { horizontal: true, vertical: true }}
@@ -571,7 +572,7 @@ export function CandidateButton(props: {
             <Text
               font={commentFontSize}
               lineLimit={1}
-              truncationMode="tail"
+              truncationMode="head"
               fixedSize={props.width
                 ? false
                 : { horizontal: true, vertical: true }}
@@ -595,7 +596,7 @@ export function CandidateButton(props: {
             <Text
               font={candidateFontSize}
               lineLimit={1}
-              truncationMode="tail"
+              truncationMode="head"
               fixedSize={props.width
                 ? false
                 : { horizontal: true, vertical: true }}
