@@ -1,3 +1,4 @@
+import { Device } from "scripting"
 import { DEFAULT_CAIS_SETTINGS, type CaisSettings, type KeyboardCustomAction, type KeyboardMenuBuiltinAction } from "../types"
 
 const SETTINGS_KEY = "cais_settings_v1"
@@ -12,6 +13,16 @@ function sanitizeCustomActionMode(value: any): KeyboardCustomAction["mode"] {
   if (value === "regexRemove") return "regexRemove"
   if (value === "javascript") return "javascript"
   return "template"
+}
+
+function systemMajorVersion(): number {
+  const version = String(Device.systemVersion ?? "")
+  const match = version.match(/\d+/)
+  return match ? Number(match[0]) : 0
+}
+
+function defaultKeyboardNativeGlassEffect(): boolean {
+  return systemMajorVersion() >= 26
 }
 
 function sanitizeSettings(raw: any): CaisSettings {
@@ -58,7 +69,7 @@ function sanitizeSettings(raw: any): CaisSettings {
     maxItems: Math.max(50, Math.min(800, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
     appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
-    keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? DEFAULT_CAIS_SETTINGS.keyboardNativeGlassEffect),
+    keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? defaultKeyboardNativeGlassEffect()),
     showRimeKeyboardSwitch: Boolean(raw?.showRimeKeyboardSwitch ?? DEFAULT_CAIS_SETTINGS.showRimeKeyboardSwitch),
     inputClicks: Boolean(raw?.hapticEngineClicks ?? DEFAULT_CAIS_SETTINGS.hapticEngineClicks)
       ? false
@@ -85,7 +96,7 @@ export function loadSettings(): CaisSettings {
     if (raw != null) return sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
   } catch {
   }
-  return { ...DEFAULT_CAIS_SETTINGS }
+  return sanitizeSettings({})
 }
 
 export function saveSettings(settings: CaisSettings): CaisSettings {
