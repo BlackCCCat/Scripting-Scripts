@@ -91,6 +91,21 @@ type SelectAllSnapshot = {
   cursorBefore: number;
 };
 
+type RimeNotificationToast = {
+  id: number;
+  text: string;
+};
+
+type RimeSwitchStateMap = {
+  named: Record<string, [string, string]>;
+  options: Record<string, string>;
+};
+
+const EMPTY_SWITCH_STATE_MAP: RimeSwitchStateMap = {
+  named: {},
+  options: {},
+};
+
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
   if (globalRepeatingDeleteTimer != null) {
@@ -101,6 +116,117 @@ function stopGlobalRepeatingDelete() {
   }
   globalRepeatingDeleteTimer = null;
   globalRepeatingDeleteSafetyTimer = null;
+}
+
+function unquoteYamlValue(value: string) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function stripYamlComment(value: string) {
+  const index = value.indexOf(" #");
+  return index >= 0 ? value.slice(0, index).trim() : value.trim();
+}
+
+function splitYamlInlineList(value: string) {
+  const trimmed = stripYamlComment(value);
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return [];
+  return trimmed.slice(1, -1).split(",").map((item) =>
+    unquoteYamlValue(item.trim())
+  ).filter(Boolean);
+}
+
+function yamlValue(line: string, key: string) {
+  const match = line.match(new RegExp(`^\\s*${key}:\\s*(.*)$`));
+  return match ? stripYamlComment(match[1]) : null;
+}
+
+function collectYamlList(lines: string[], startIndex: number) {
+  const result: string[] = [];
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (!trimmed) continue;
+    if (!trimmed.startsWith("- ")) break;
+    result.push(unquoteYamlValue(trimmed.slice(2).trim()));
+  }
+  return result;
+}
+
+function parseRimeSwitchStates(schemaYaml: string): RimeSwitchStateMap {
+  const lines = schemaYaml.split(/\r?\n/);
+  const named: Record<string, [string, string]> = {};
+  const options: Record<string, string> = {};
+  const switchesIndex = lines.findIndex((line) =>
+    /^\s*switches\s*:/.test(line)
+  );
+  if (switchesIndex < 0) return { named, options };
+
+  let currentName = "";
+  let currentOptions: string[] = [];
+  let currentStates: string[] = [];
+  function flush() {
+    if (currentStates.length >= 2 && currentName) {
+      named[currentName] = [currentStates[0], currentStates[1]];
+    }
+    if (currentStates.length > 0 && currentOptions.length > 0) {
+      currentOptions.forEach((option, index) => {
+        const state = currentStates[index];
+        if (option && state) options[option] = state;
+      });
+    }
+    currentName = "";
+    currentOptions = [];
+    currentStates = [];
+  }
+
+  for (let index = switchesIndex + 1; index < lines.length; index += 1) {
+    const raw = lines[index];
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (/^\S/.test(raw)) break;
+    if (trimmed.startsWith("- ")) {
+      flush();
+      const rest = trimmed.slice(2).trim();
+      const nameValue = yamlValue(rest, "name");
+      const optionsValue = yamlValue(rest, "options");
+      const statesValue = yamlValue(rest, "states");
+      if (nameValue != null) currentName = unquoteYamlValue(nameValue);
+      if (optionsValue != null) {
+        currentOptions = splitYamlInlineList(optionsValue);
+      }
+      if (statesValue != null) currentStates = splitYamlInlineList(statesValue);
+      continue;
+    }
+
+    const nameValue = yamlValue(raw, "name");
+    if (nameValue != null) {
+      currentName = unquoteYamlValue(nameValue);
+      continue;
+    }
+    const optionsValue = yamlValue(raw, "options");
+    if (optionsValue != null) {
+      currentOptions = splitYamlInlineList(optionsValue);
+      if (currentOptions.length === 0) {
+        currentOptions = collectYamlList(lines, index);
+      }
+      continue;
+    }
+    const statesValue = yamlValue(raw, "states");
+    if (statesValue != null) {
+      currentStates = splitYamlInlineList(statesValue);
+      if (currentStates.length === 0) {
+        currentStates = collectYamlList(lines, index);
+      }
+    }
+  }
+  flush();
+  return { named, options };
 }
 
 export function KeyboardView() {
@@ -161,6 +287,9 @@ function KeyboardContent(props: {
   >([]);
   const [expandedBatchHasMore, setExpandedBatchHasMore] = useState(false);
   const [selectAllActive, setSelectAllActive] = useState(false);
+  const [rimeNotificationToast, setRimeNotificationToast] = useState<
+    RimeNotificationToast | null
+  >(null);
   const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -170,6 +299,12 @@ function KeyboardContent(props: {
   const selectAllSnapshotRef = useRef<SelectAllSnapshot | null>(null);
   const cursorRepeatTimerRef = useRef<any>(null);
   const cursorRepeatTokenRef = useRef(0);
+  const rimeNotificationTimerRef = useRef<any>(null);
+  const schemasRef = useRef<Rime.Schema[]>([]);
+  const switchStateMapRef = useRef<RimeSwitchStateMap>(
+    EMPTY_SWITCH_STATE_MAP,
+  );
+  const rimeOptionStateRef = useRef<Record<string, boolean>>({});
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
@@ -197,6 +332,13 @@ function KeyboardContent(props: {
 
   useEffect(() => {
     stopRepeatingBackspace();
+    const previousRimeNotification = Rime.onNotification;
+    const rimeNotificationHandler = (event: Rime.Event) => {
+      try {
+        handleRimeNotification(event);
+      } catch {}
+    };
+    Rime.onNotification = rimeNotificationHandler;
     const syncKeyboardAppearance = (
       traits?: CustomKeyboard.TextInputTraits,
     ) => {
@@ -218,6 +360,12 @@ function KeyboardContent(props: {
     return () => {
       disposedRef.current = true;
       clearTimeout(hapticPrepareTimer);
+      if (Rime.onNotification === rimeNotificationHandler) {
+        Rime.onNotification = previousRimeNotification;
+      }
+      if (rimeNotificationTimerRef.current != null) {
+        clearTimeout(rimeNotificationTimerRef.current);
+      }
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
       CustomKeyboard.removeListener(
         "selectionDidChange",
@@ -246,6 +394,10 @@ function KeyboardContent(props: {
     };
   }, []);
 
+  useEffect(() => {
+    schemasRef.current = schemas;
+  }, [schemas]);
+
   async function setupRimeSession() {
     if (
       disposedRef.current || rimeSetupStartedRef.current || sessionRef.current
@@ -265,12 +417,14 @@ function KeyboardContent(props: {
       });
       if (disposedRef.current) return;
       setSchemas(result.list);
+      schemasRef.current = result.list;
       const s = result.session;
       if (disposedRef.current) {
         s.close();
         return;
       }
       sessionRef.current = s;
+      updateSwitchStateMap(s.currentSchema?.id ?? null);
       refresh(s);
       setRimeReady(true);
     } catch (e) {
@@ -331,6 +485,124 @@ function KeyboardContent(props: {
       setCandidateExpanded(false);
       setExpandedCandidates([]);
       setExpandedBatchHasMore(false);
+    }
+  }
+
+  function readTextFile(path: string) {
+    try {
+      if (!FileManager.existsSync(path)) return null;
+      return Data.fromFile(path)?.toDecodedString() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function joinPath(...parts: string[]) {
+    return parts
+      .map((part, index) =>
+        index === 0 ? part.replace(/\/+$/, "") : part.replace(/^\/+|\/+$/g, "")
+      )
+      .filter(Boolean)
+      .join("/");
+  }
+
+  function loadSwitchStateMap(schemaId: string | null) {
+    if (!schemaId) return EMPTY_SWITCH_STATE_MAP;
+    const paths = [
+      joinPath(Rime.userDataDir, "build", `${schemaId}.schema.yaml`),
+      joinPath(Rime.userDataDir, `${schemaId}.schema.yaml`),
+      joinPath(Rime.sharedDataDir, `${schemaId}.schema.yaml`),
+    ];
+    for (const path of paths) {
+      const text = readTextFile(path);
+      if (text) return parseRimeSwitchStates(text);
+    }
+    return EMPTY_SWITCH_STATE_MAP;
+  }
+
+  function trackedRimeOptions(stateMap = switchStateMapRef.current) {
+    return new Set([
+      "ascii_mode",
+      "full_shape",
+      "simplification",
+      "ascii_punct",
+      ...Object.keys(stateMap.named),
+      ...Object.keys(stateMap.options),
+    ]);
+  }
+
+  function refreshKnownRimeOptionStates(
+    session = sessionRef.current,
+    stateMap = switchStateMapRef.current,
+  ) {
+    if (!session) return;
+    const nextStates: Record<string, boolean> = {};
+    for (const option of trackedRimeOptions(stateMap)) {
+      try {
+        nextStates[option] = session.getOption(option);
+      } catch {}
+    }
+    rimeOptionStateRef.current = nextStates;
+  }
+
+  function updateSwitchStateMap(schemaId: string | null) {
+    const stateMap = loadSwitchStateMap(schemaId);
+    switchStateMapRef.current = stateMap;
+    refreshKnownRimeOptionStates(sessionRef.current, stateMap);
+  }
+
+  function optionNotificationText(option: string, enabled: boolean) {
+    const stateMap = switchStateMapRef.current;
+    const namedStates = stateMap.named[option];
+    if (namedStates) return namedStates[enabled ? 1 : 0];
+    const optionState = stateMap.options[option];
+    if (optionState) return enabled ? optionState : "";
+    switch (option) {
+      case "ascii_mode":
+        return enabled ? "英文模式" : "中文模式";
+      case "full_shape":
+        return enabled ? "全角" : "半角";
+      case "simplification":
+        return enabled ? "简体" : "繁体";
+      case "ascii_punct":
+        return enabled ? "英文标点" : "中文标点";
+      default:
+        return `${option} ${enabled ? "开启" : "关闭"}`;
+    }
+  }
+
+  function shouldShowOptionNotification(option: string, enabled: boolean) {
+    if (!trackedRimeOptions().has(option)) return false;
+    const previous = rimeOptionStateRef.current[option];
+    rimeOptionStateRef.current[option] = enabled;
+    return previous !== undefined && previous !== enabled;
+  }
+
+  function showRimeNotificationToast(text: string) {
+    if (disposedRef.current || !text.trim()) return;
+    if (rimeNotificationTimerRef.current != null) {
+      clearTimeout(rimeNotificationTimerRef.current);
+    }
+    setRimeNotificationToast({ id: Date.now(), text });
+    rimeNotificationTimerRef.current = setTimeout(() => {
+      rimeNotificationTimerRef.current = null;
+      setRimeNotificationToast(null);
+    }, 1400);
+  }
+
+  function handleRimeNotification(event: Rime.Event) {
+    if (event.type === "schemaChanged") {
+      updateSwitchStateMap(event.schemaId);
+      const schemaName = event.schemaName ||
+        schemasRef.current.find((schema) => schema.id === event.schemaId)
+          ?.name ||
+        event.schemaId;
+      showRimeNotificationToast(schemaName);
+    } else if (event.type === "optionChanged") {
+      if (!shouldShowOptionNotification(event.option, event.enabled)) return;
+      showRimeNotificationToast(
+        optionNotificationText(event.option, event.enabled),
+      );
     }
   }
 
@@ -1139,6 +1411,7 @@ function KeyboardContent(props: {
     if (!s) return;
     s.clearComposition();
     s.selectSchema(id);
+    updateSwitchStateMap(id);
     refresh(s);
   }
 
@@ -2279,6 +2552,50 @@ function KeyboardContent(props: {
     return { menuItems: schemaMenu };
   }
 
+  function renderRimeNotificationToast() {
+    if (!rimeNotificationToast) return null;
+    const cornerRadius = 8;
+    return (
+      <HStack
+        key={rimeNotificationToast.id}
+        spacing={0}
+        allowsHitTesting={false}
+        padding={{ horizontal: 12 }}
+        frame={{
+          maxWidth: Math.min(180, metrics.width - 16),
+          height: metrics.candidateButtonHeight,
+        }}
+        background={(palette.nativeKeyStyle
+          ? palette.usesCustomColors
+            ? {
+              style: palette.keyBg as any,
+              shape: { type: "rect", cornerRadius },
+            }
+            : "clear"
+          : {
+            style: palette.keyBg as any,
+            shape: { type: "rect", cornerRadius },
+          }) as any}
+        glassEffect={(palette.nativeKeyStyle
+          ? { type: "rect", cornerRadius }
+          : undefined) as any}
+        clipShape={{ type: "rect", cornerRadius }}
+        shadow={palette.nativeKeyStyle
+          ? undefined
+          : { color: palette.shadow as any, radius: 1, y: 1 }}
+      >
+        <Text
+          font={Math.max(13, metrics.candidateFontSize - 2)}
+          lineLimit={1}
+          minScaleFactor={0.75}
+          foregroundStyle={palette.primary as any}
+        >
+          {rimeNotificationToast.text}
+        </Text>
+      </HStack>
+    );
+  }
+
   const numericRowSpacing = 6;
   const numericPanelHeight = metrics.keyHeight * 4 + numericRowSpacing * 3;
   const numericLeftWidth = Math.max(40, Math.min(56, metrics.width * 0.14));
@@ -2314,182 +2631,206 @@ function KeyboardContent(props: {
         maxHeight: "infinity" as any,
       }}
     >
-      <VStack
-        spacing={showsPreeditRow ? 2 : 0}
+      <ZStack
         frame={{
           width: metrics.width,
           height: candidateHeaderHeight,
-          alignment: "leading" as any,
+          alignment: "bottomTrailing" as any,
         }}
       >
-        {showsPreeditRow
-          ? (
+        <VStack
+          spacing={showsPreeditRow ? 2 : 0}
+          frame={{
+            width: metrics.width,
+            height: candidateHeaderHeight,
+            alignment: "leading" as any,
+          }}
+        >
+          {showsPreeditRow
+            ? (
+              <ScrollViewReader>
+                {(proxy) => {
+                  preeditScrollProxyRef.current = proxy;
+                  return (
+                    <ScrollView
+                      axes="horizontal"
+                      scrollIndicator="hidden"
+                      frame={{
+                        width: metrics.width,
+                        height: metrics.preeditRowHeight,
+                      }}
+                    >
+                      <HStack
+                        spacing={1}
+                        padding={{ leading: 8, trailing: 8 }}
+                        frame={{
+                          height: metrics.preeditRowHeight,
+                          alignment: "bottomLeading" as any,
+                        }}
+                      >
+                        <Text
+                          font="caption"
+                          lineLimit={1}
+                          fixedSize={{ horizontal: true, vertical: true }}
+                          foregroundStyle={palette.primary as any}
+                        >
+                          {preeditBeforeCaret}
+                        </Text>
+                        {showsPreeditCaret
+                          ? (
+                            <Text
+                              font="caption2"
+                              baselineOffset={-7}
+                              foregroundStyle={palette.primary as any}
+                              padding={{ bottom: -2 }}
+                            >
+                              ^
+                            </Text>
+                          )
+                          : null}
+                        {showsPreeditCaret
+                          ? (
+                            <VStack
+                              key={preeditCaretScrollKey}
+                              frame={{
+                                width: 1,
+                                height: metrics.preeditRowHeight,
+                              }}
+                            />
+                          )
+                          : null}
+                        {preeditAfterCaret
+                          ? (
+                            <Text
+                              font="caption"
+                              lineLimit={1}
+                              fixedSize={{ horizontal: true, vertical: true }}
+                              foregroundStyle={palette.primary as any}
+                            >
+                              {preeditAfterCaret}
+                            </Text>
+                          )
+                          : null}
+                        <VStack
+                          key={preeditTailScrollKey}
+                          frame={{
+                            width: 1,
+                            height: metrics.preeditRowHeight,
+                          }}
+                        />
+                      </HStack>
+                    </ScrollView>
+                  );
+                }}
+              </ScrollViewReader>
+            )
+            : null}
+          <HStack
+            spacing={KEY_SPACING}
+            frame={{ width: metrics.width, height: metrics.candidateBarHeight }}
+          >
+            {toolbarLeftButtons.map((item) => (
+              <KeyFace
+                key={`toolbar-left-${item.id}`}
+                id={`toolbar-left-${item.id}`}
+                image={item.symbol}
+                palette={palette}
+                width={toolbarButtonWidth}
+                height={metrics.candidateButtonHeight}
+                system
+                plain
+                foregroundStyle={palette.primaryOverrides?.[
+                  `toolbar-left-${item.id}`
+                ] ?? palette.primary}
+                onPress={() =>
+                  runWithFeedbackBeforeAction(
+                    () => runToolbarAction(item.action),
+                    EXIT_ACTION_FEEDBACK_DELAY,
+                  )}
+                contextMenu={toolbarContextMenuProps(item)}
+              />
+            ))}
             <ScrollViewReader>
               {(proxy) => {
-                preeditScrollProxyRef.current = proxy;
+                candidateScrollProxyRef.current = proxy;
                 return (
                   <ScrollView
                     axes="horizontal"
                     scrollIndicator="hidden"
                     frame={{
-                      width: metrics.width,
-                      height: metrics.preeditRowHeight,
+                      width: candidateBarWidth,
+                      height: metrics.candidateBarHeight,
                     }}
                   >
-                    <HStack
-                      spacing={1}
-                      padding={{ leading: 8, trailing: 8 }}
-                      frame={{
-                        height: metrics.preeditRowHeight,
-                        alignment: "bottomLeading" as any,
-                      }}
-                    >
-                      <Text
-                        font="caption"
-                        lineLimit={1}
-                        fixedSize={{ horizontal: true, vertical: true }}
-                        foregroundStyle={palette.primary as any}
-                      >
-                        {preeditBeforeCaret}
-                      </Text>
-                      {showsPreeditCaret
-                        ? (
-                          <Text
-                            font="caption2"
-                            baselineOffset={-7}
-                            foregroundStyle={palette.primary as any}
-                            padding={{ bottom: -2 }}
-                          >
-                            ^
-                          </Text>
-                        )
-                        : null}
-                      {showsPreeditCaret
-                        ? (
-                          <VStack
-                            key={preeditCaretScrollKey}
-                            frame={{
-                              width: 1,
-                              height: metrics.preeditRowHeight,
-                            }}
-                          />
-                        )
-                        : null}
-                      {preeditAfterCaret
-                        ? (
-                          <Text
-                            font="caption"
-                            lineLimit={1}
-                            fixedSize={{ horizontal: true, vertical: true }}
-                            foregroundStyle={palette.primary as any}
-                          >
-                            {preeditAfterCaret}
-                          </Text>
-                        )
-                        : null}
-                      <VStack
-                        key={preeditTailScrollKey}
-                        frame={{
-                          width: 1,
-                          height: metrics.preeditRowHeight,
-                        }}
-                      />
+                    <HStack spacing={5} buttonStyle="plain">
+                      {candidates.map((candidate, idx) => (
+                        <CandidateButton
+                          key={`${pageNo}-${idx}-${candidate.text}`}
+                          index={idx}
+                          candidate={candidate}
+                          comment={candidateComment(candidate)}
+                          showIndex={settings.showCandidateComment}
+                          selected={idx === highlightedIdx}
+                          palette={palette}
+                          height={metrics.candidateButtonHeight}
+                          candidateFontSize={metrics.candidateFontSize}
+                          commentFontSize={metrics.candidateCommentFontSize}
+                          contextMenu={candidateContextMenuProps(
+                            pageNo * rimePageSize + idx,
+                          )}
+                          onPress={() =>
+                            runWithFeedback(() =>
+                              selectCandidateAbsolute(
+                                pageNo * rimePageSize + idx,
+                              )
+                            )}
+                        />
+                      ))}
                     </HStack>
                   </ScrollView>
                 );
               }}
             </ScrollViewReader>
+            {candidateRightButtonVisible
+              ? (
+                <KeyFace
+                  id="candidate-right"
+                  image={candidateRightButtonImage}
+                  palette={palette}
+                  width={candidateRightButtonWidth}
+                  height={metrics.candidateButtonHeight}
+                  system
+                  plain
+                  foregroundStyle={palette.primaryOverrides
+                    ?.["candidate-right"] ??
+                    palette.primary}
+                  onPress={() =>
+                    runWithFeedbackBeforeAction(
+                      pressCandidateRightButton,
+                      effectiveCandidateRightButtonMode === "dismiss"
+                        ? EXIT_ACTION_FEEDBACK_DELAY
+                        : 0,
+                    )}
+                />
+              )
+              : null}
+          </HStack>
+        </VStack>
+        {rimeNotificationToast
+          ? (
+            <HStack
+              allowsHitTesting={false}
+              frame={{
+                width: metrics.width,
+                height: candidateHeaderHeight,
+                alignment: "bottomTrailing" as any,
+              }}
+            >
+              {renderRimeNotificationToast()}
+            </HStack>
           )
           : null}
-        <HStack
-          spacing={KEY_SPACING}
-          frame={{ width: metrics.width, height: metrics.candidateBarHeight }}
-        >
-          {toolbarLeftButtons.map((item) => (
-            <KeyFace
-              key={`toolbar-left-${item.id}`}
-              id={`toolbar-left-${item.id}`}
-              image={item.symbol}
-              palette={palette}
-              width={toolbarButtonWidth}
-              height={metrics.candidateButtonHeight}
-              system
-              plain
-              foregroundStyle={palette.primaryOverrides?.[
-                `toolbar-left-${item.id}`
-              ] ?? palette.primary}
-              onPress={() =>
-                runWithFeedbackBeforeAction(
-                  () => runToolbarAction(item.action),
-                  EXIT_ACTION_FEEDBACK_DELAY,
-                )}
-              contextMenu={toolbarContextMenuProps(item)}
-            />
-          ))}
-          <ScrollViewReader>
-            {(proxy) => {
-              candidateScrollProxyRef.current = proxy;
-              return (
-                <ScrollView
-                  axes="horizontal"
-                  scrollIndicator="hidden"
-                  frame={{
-                    width: candidateBarWidth,
-                    height: metrics.candidateBarHeight,
-                  }}
-                >
-                  <HStack spacing={5} buttonStyle="plain">
-                    {candidates.map((candidate, idx) => (
-                      <CandidateButton
-                        key={`${pageNo}-${idx}-${candidate.text}`}
-                        index={idx}
-                        candidate={candidate}
-                        comment={candidateComment(candidate)}
-                        showIndex={settings.showCandidateComment}
-                        selected={idx === highlightedIdx}
-                        palette={palette}
-                        height={metrics.candidateButtonHeight}
-                        candidateFontSize={metrics.candidateFontSize}
-                        commentFontSize={metrics.candidateCommentFontSize}
-                        contextMenu={candidateContextMenuProps(
-                          pageNo * rimePageSize + idx,
-                        )}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            selectCandidateAbsolute(pageNo * rimePageSize + idx)
-                          )}
-                      />
-                    ))}
-                  </HStack>
-                </ScrollView>
-              );
-            }}
-          </ScrollViewReader>
-          {candidateRightButtonVisible
-            ? (
-              <KeyFace
-                id="candidate-right"
-                image={candidateRightButtonImage}
-                palette={palette}
-                width={candidateRightButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primaryOverrides
-                  ?.["candidate-right"] ??
-                  palette.primary}
-                onPress={() =>
-                  runWithFeedbackBeforeAction(
-                    pressCandidateRightButton,
-                    effectiveCandidateRightButtonMode === "dismiss"
-                      ? EXIT_ACTION_FEEDBACK_DELAY
-                      : 0,
-                  )}
-              />
-            )
-            : null}
-        </HStack>
-      </VStack>
+      </ZStack>
 
       <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
         <VStack
