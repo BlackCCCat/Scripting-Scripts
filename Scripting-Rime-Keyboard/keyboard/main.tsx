@@ -96,15 +96,14 @@ type RimeNotificationToast = {
   text: string;
 };
 
-type RimeSwitchStateMap = {
-  named: Record<string, [string, string]>;
-  options: Record<string, string>;
-};
-
-const EMPTY_SWITCH_STATE_MAP: RimeSwitchStateMap = {
-  named: {},
-  options: {},
-};
+const NOTIFIED_RIME_OPTIONS = new Set([
+  "ascii_mode",
+  "full_shape",
+  "simplification",
+  "ascii_punct",
+]);
+const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
+const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
 
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
@@ -116,117 +115,6 @@ function stopGlobalRepeatingDelete() {
   }
   globalRepeatingDeleteTimer = null;
   globalRepeatingDeleteSafetyTimer = null;
-}
-
-function unquoteYamlValue(value: string) {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function stripYamlComment(value: string) {
-  const index = value.indexOf(" #");
-  return index >= 0 ? value.slice(0, index).trim() : value.trim();
-}
-
-function splitYamlInlineList(value: string) {
-  const trimmed = stripYamlComment(value);
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return [];
-  return trimmed.slice(1, -1).split(",").map((item) =>
-    unquoteYamlValue(item.trim())
-  ).filter(Boolean);
-}
-
-function yamlValue(line: string, key: string) {
-  const match = line.match(new RegExp(`^\\s*${key}:\\s*(.*)$`));
-  return match ? stripYamlComment(match[1]) : null;
-}
-
-function collectYamlList(lines: string[], startIndex: number) {
-  const result: string[] = [];
-  for (let index = startIndex + 1; index < lines.length; index += 1) {
-    const trimmed = lines[index].trim();
-    if (!trimmed) continue;
-    if (!trimmed.startsWith("- ")) break;
-    result.push(unquoteYamlValue(trimmed.slice(2).trim()));
-  }
-  return result;
-}
-
-function parseRimeSwitchStates(schemaYaml: string): RimeSwitchStateMap {
-  const lines = schemaYaml.split(/\r?\n/);
-  const named: Record<string, [string, string]> = {};
-  const options: Record<string, string> = {};
-  const switchesIndex = lines.findIndex((line) =>
-    /^\s*switches\s*:/.test(line)
-  );
-  if (switchesIndex < 0) return { named, options };
-
-  let currentName = "";
-  let currentOptions: string[] = [];
-  let currentStates: string[] = [];
-  function flush() {
-    if (currentStates.length >= 2 && currentName) {
-      named[currentName] = [currentStates[0], currentStates[1]];
-    }
-    if (currentStates.length > 0 && currentOptions.length > 0) {
-      currentOptions.forEach((option, index) => {
-        const state = currentStates[index];
-        if (option && state) options[option] = state;
-      });
-    }
-    currentName = "";
-    currentOptions = [];
-    currentStates = [];
-  }
-
-  for (let index = switchesIndex + 1; index < lines.length; index += 1) {
-    const raw = lines[index];
-    const trimmed = raw.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    if (/^\S/.test(raw)) break;
-    if (trimmed.startsWith("- ")) {
-      flush();
-      const rest = trimmed.slice(2).trim();
-      const nameValue = yamlValue(rest, "name");
-      const optionsValue = yamlValue(rest, "options");
-      const statesValue = yamlValue(rest, "states");
-      if (nameValue != null) currentName = unquoteYamlValue(nameValue);
-      if (optionsValue != null) {
-        currentOptions = splitYamlInlineList(optionsValue);
-      }
-      if (statesValue != null) currentStates = splitYamlInlineList(statesValue);
-      continue;
-    }
-
-    const nameValue = yamlValue(raw, "name");
-    if (nameValue != null) {
-      currentName = unquoteYamlValue(nameValue);
-      continue;
-    }
-    const optionsValue = yamlValue(raw, "options");
-    if (optionsValue != null) {
-      currentOptions = splitYamlInlineList(optionsValue);
-      if (currentOptions.length === 0) {
-        currentOptions = collectYamlList(lines, index);
-      }
-      continue;
-    }
-    const statesValue = yamlValue(raw, "states");
-    if (statesValue != null) {
-      currentStates = splitYamlInlineList(statesValue);
-      if (currentStates.length === 0) {
-        currentStates = collectYamlList(lines, index);
-      }
-    }
-  }
-  flush();
-  return { named, options };
 }
 
 export function KeyboardView() {
@@ -300,10 +188,15 @@ function KeyboardContent(props: {
   const cursorRepeatTimerRef = useRef<any>(null);
   const cursorRepeatTokenRef = useRef(0);
   const rimeNotificationTimerRef = useRef<any>(null);
-  const schemasRef = useRef<Rime.Schema[]>([]);
-  const switchStateMapRef = useRef<RimeSwitchStateMap>(
-    EMPTY_SWITCH_STATE_MAP,
+  const rimeNotificationFlushTimerRef = useRef<any>(null);
+  const rimeNotificationPendingRef = useRef<RimeNotificationToast | null>(null);
+  const lastRimeNotificationShownAtRef = useRef(0);
+  const rimeNotificationHandlerRef = useRef<
+    ((event: Rime.Event) => void) | null
+  >(
+    null,
   );
+  const schemasRef = useRef<Rime.Schema[]>([]);
   const rimeOptionStateRef = useRef<Record<string, boolean>>({});
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
@@ -332,13 +225,6 @@ function KeyboardContent(props: {
 
   useEffect(() => {
     stopRepeatingBackspace();
-    const previousRimeNotification = Rime.onNotification;
-    const rimeNotificationHandler = (event: Rime.Event) => {
-      try {
-        handleRimeNotification(event);
-      } catch {}
-    };
-    Rime.onNotification = rimeNotificationHandler;
     const syncKeyboardAppearance = (
       traits?: CustomKeyboard.TextInputTraits,
     ) => {
@@ -360,11 +246,18 @@ function KeyboardContent(props: {
     return () => {
       disposedRef.current = true;
       clearTimeout(hapticPrepareTimer);
-      if (Rime.onNotification === rimeNotificationHandler) {
-        Rime.onNotification = previousRimeNotification;
+      if (
+        rimeNotificationHandlerRef.current &&
+        Rime.onNotification === rimeNotificationHandlerRef.current
+      ) {
+        Rime.onNotification = null;
       }
+      rimeNotificationHandlerRef.current = null;
       if (rimeNotificationTimerRef.current != null) {
         clearTimeout(rimeNotificationTimerRef.current);
+      }
+      if (rimeNotificationFlushTimerRef.current != null) {
+        clearTimeout(rimeNotificationFlushTimerRef.current);
       }
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
       CustomKeyboard.removeListener(
@@ -424,8 +317,11 @@ function KeyboardContent(props: {
         return;
       }
       sessionRef.current = s;
-      updateSwitchStateMap(s.currentSchema?.id ?? null);
       refresh(s);
+      if (settings.showNotifications) {
+        refreshKnownRimeOptionStates(s);
+        installRimeNotificationHandler();
+      }
       setRimeReady(true);
     } catch (e) {
       setRimeReady(false);
@@ -488,56 +384,10 @@ function KeyboardContent(props: {
     }
   }
 
-  function readTextFile(path: string) {
-    try {
-      if (!FileManager.existsSync(path)) return null;
-      return Data.fromFile(path)?.toDecodedString() ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  function joinPath(...parts: string[]) {
-    return parts
-      .map((part, index) =>
-        index === 0 ? part.replace(/\/+$/, "") : part.replace(/^\/+|\/+$/g, "")
-      )
-      .filter(Boolean)
-      .join("/");
-  }
-
-  function loadSwitchStateMap(schemaId: string | null) {
-    if (!schemaId) return EMPTY_SWITCH_STATE_MAP;
-    const paths = [
-      joinPath(Rime.userDataDir, "build", `${schemaId}.schema.yaml`),
-      joinPath(Rime.userDataDir, `${schemaId}.schema.yaml`),
-      joinPath(Rime.sharedDataDir, `${schemaId}.schema.yaml`),
-    ];
-    for (const path of paths) {
-      const text = readTextFile(path);
-      if (text) return parseRimeSwitchStates(text);
-    }
-    return EMPTY_SWITCH_STATE_MAP;
-  }
-
-  function trackedRimeOptions(stateMap = switchStateMapRef.current) {
-    return new Set([
-      "ascii_mode",
-      "full_shape",
-      "simplification",
-      "ascii_punct",
-      ...Object.keys(stateMap.named),
-      ...Object.keys(stateMap.options),
-    ]);
-  }
-
-  function refreshKnownRimeOptionStates(
-    session = sessionRef.current,
-    stateMap = switchStateMapRef.current,
-  ) {
+  function refreshKnownRimeOptionStates(session = sessionRef.current) {
     if (!session) return;
     const nextStates: Record<string, boolean> = {};
-    for (const option of trackedRimeOptions(stateMap)) {
+    for (const option of NOTIFIED_RIME_OPTIONS) {
       try {
         nextStates[option] = session.getOption(option);
       } catch {}
@@ -545,18 +395,18 @@ function KeyboardContent(props: {
     rimeOptionStateRef.current = nextStates;
   }
 
-  function updateSwitchStateMap(schemaId: string | null) {
-    const stateMap = loadSwitchStateMap(schemaId);
-    switchStateMapRef.current = stateMap;
-    refreshKnownRimeOptionStates(sessionRef.current, stateMap);
+  function installRimeNotificationHandler() {
+    if (rimeNotificationHandlerRef.current) return;
+    const handler = (event: Rime.Event) => {
+      try {
+        handleRimeNotification(event);
+      } catch {}
+    };
+    rimeNotificationHandlerRef.current = handler;
+    Rime.onNotification = handler;
   }
 
   function optionNotificationText(option: string, enabled: boolean) {
-    const stateMap = switchStateMapRef.current;
-    const namedStates = stateMap.named[option];
-    if (namedStates) return namedStates[enabled ? 1 : 0];
-    const optionState = stateMap.options[option];
-    if (optionState) return enabled ? optionState : "";
     switch (option) {
       case "ascii_mode":
         return enabled ? "英文模式" : "中文模式";
@@ -572,7 +422,7 @@ function KeyboardContent(props: {
   }
 
   function shouldShowOptionNotification(option: string, enabled: boolean) {
-    if (!trackedRimeOptions().has(option)) return false;
+    if (!NOTIFIED_RIME_OPTIONS.has(option)) return false;
     const previous = rimeOptionStateRef.current[option];
     rimeOptionStateRef.current[option] = enabled;
     return previous !== undefined && previous !== enabled;
@@ -580,19 +430,31 @@ function KeyboardContent(props: {
 
   function showRimeNotificationToast(text: string) {
     if (disposedRef.current || !text.trim()) return;
-    if (rimeNotificationTimerRef.current != null) {
-      clearTimeout(rimeNotificationTimerRef.current);
-    }
-    setRimeNotificationToast({ id: Date.now(), text });
-    rimeNotificationTimerRef.current = setTimeout(() => {
-      rimeNotificationTimerRef.current = null;
-      setRimeNotificationToast(null);
-    }, 1400);
+    rimeNotificationPendingRef.current = { id: Date.now(), text };
+    if (rimeNotificationFlushTimerRef.current != null) return;
+    const elapsed = Date.now() - lastRimeNotificationShownAtRef.current;
+    const delay = Math.max(0, RIME_NOTIFICATION_MIN_INTERVAL_MS - elapsed);
+    rimeNotificationFlushTimerRef.current = setTimeout(() => {
+      rimeNotificationFlushTimerRef.current = null;
+      if (disposedRef.current) return;
+      const pending = rimeNotificationPendingRef.current;
+      rimeNotificationPendingRef.current = null;
+      if (!pending) return;
+      lastRimeNotificationShownAtRef.current = Date.now();
+      if (rimeNotificationTimerRef.current != null) {
+        clearTimeout(rimeNotificationTimerRef.current);
+      }
+      setRimeNotificationToast(pending);
+      rimeNotificationTimerRef.current = setTimeout(() => {
+        rimeNotificationTimerRef.current = null;
+        setRimeNotificationToast(null);
+      }, RIME_NOTIFICATION_TOAST_DURATION_MS);
+    }, delay);
   }
 
   function handleRimeNotification(event: Rime.Event) {
     if (event.type === "schemaChanged") {
-      updateSwitchStateMap(event.schemaId);
+      rimeOptionStateRef.current = {};
       const schemaName = event.schemaName ||
         schemasRef.current.find((schema) => schema.id === event.schemaId)
           ?.name ||
@@ -1411,7 +1273,7 @@ function KeyboardContent(props: {
     if (!s) return;
     s.clearComposition();
     s.selectSchema(id);
-    updateSwitchStateMap(id);
+    if (settings.showNotifications) refreshKnownRimeOptionStates(s);
     refresh(s);
   }
 

@@ -1856,11 +1856,17 @@ function SettingsView() {
             )
             : null}
           <Toggle
+            title="显示通知"
+            systemImage="bell"
+            value={settings.showNotifications}
+            onChanged={(value) =>
+              patchSettings({ showNotifications: value })}
+          />
+          <Toggle
             title="键盘启动时轻量部署"
             systemImage="checkmark.seal"
             value={settings.autoDeployOnLaunch}
-            onChanged={(value) =>
-              patchSettings({ autoDeployOnLaunch: value })}
+            onChanged={(value) => patchSettings({ autoDeployOnLaunch: value })}
           />
         </Section>
       </List>
