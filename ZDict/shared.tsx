@@ -65,6 +65,30 @@ type InlineLinkToken = {
 const HAN_RE = /[\u3400-\u9fff\uf900-\ufaff]/
 const PURE_HAN_RE = /^[\u3400-\u9fff\uf900-\ufaff]+$/
 
+function summarizeText(text: string, maxLength = 48) {
+  const normalized = String(text ?? "").replace(/\s+/g, " ").trim()
+  if (!normalized) return ""
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength)}...`
+    : normalized
+}
+
+function logZDictEvent(message: string, payload?: Record<string, unknown>) {
+  if (payload) {
+    console.log(`[ZDict] ${message}`, payload)
+    return
+  }
+  console.log(`[ZDict] ${message}`)
+}
+
+function logZDictError(message: string, payload?: Record<string, unknown>) {
+  if (payload) {
+    console.error(`[ZDict] ${message}`, payload)
+    return
+  }
+  console.error(`[ZDict] ${message}`)
+}
+
 function hapticLight() {
   try {
     HapticFeedback.lightImpact()
@@ -198,10 +222,25 @@ function tokenizeWords(text: string): DictToken[] {
     for (const token of tokens) {
       pushTextParts(result, token.text)
     }
+    logZDictEvent("系统分词完成", {
+      sourceLength: Array.from(source).length,
+      language: language ?? "(auto)",
+      tokenCount: result.length,
+      tokensPreview: result.slice(0, 12).map((token) => token.text).join(" / "),
+    })
     return result
-  } catch {
+  } catch (error: any) {
+    logZDictError("系统分词失败，使用备用分词", {
+      sourcePreview: summarizeText(source),
+      error: String(error?.message ?? error ?? "unknown"),
+    })
     const result: DictToken[] = []
     pushTextParts(result, source)
+    logZDictEvent("备用分词完成", {
+      sourceLength: Array.from(source).length,
+      tokenCount: result.length,
+      tokensPreview: result.slice(0, 12).map((token) => token.text).join(" / "),
+    })
     return result
   }
 }
@@ -909,7 +948,14 @@ function parseZdicSections(html: string, fallbackTitle: string, query: string): 
     }
   }
 
-  for (const sectionHtml of extractDictSections(source)) {
+  const dictSections = extractDictSections(source)
+  logZDictEvent("解析汉典页面结构", {
+    query,
+    hasCharInfo: Boolean(head),
+    dictSectionCount: dictSections.length,
+  })
+
+  for (const sectionHtml of dictSections) {
     const dataTitle = decodeHtmlEntities(firstMatch(sectionHtml, /\bdata-section="([^"]+)"/i)).trim()
     const h2Title = decodeHtmlEntities(firstMatch(sectionHtml, /<h2\b[^>]*>([\s\S]*?)<\/h2>/i).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim()
     const title = dataTitle || h2Title || "解释"
@@ -969,23 +1015,58 @@ function normalizeQuery(text: string): string {
 async function lookupZdic(rawQuery: string): Promise<ZdicResult> {
   const query = normalizeQuery(rawQuery)
   if (!isChineseQuery(query)) {
+    logZDictEvent("拒绝非中文查询", {
+      rawQuery: summarizeText(rawQuery),
+      normalizedQuery: query,
+    })
     throw new Error("仅支持查询中文汉字或词语")
   }
   const encodedQuery = encodeURIComponent(query)
   const requestUrl = `https://zdic.net/hans/${encodedQuery}`
+  const startedAt = Date.now()
+  logZDictEvent("开始查询汉典", {
+    query,
+    requestUrl,
+  })
   const response = await fetch(requestUrl)
   const url = String((response as any).url || requestUrl)
+  logZDictEvent("收到汉典响应", {
+    query,
+    status: response.status,
+    ok: response.ok,
+    url,
+    elapsedMs: Date.now() - startedAt,
+  })
   if (!response.ok) {
+    logZDictError("汉典请求失败", {
+      query,
+      status: response.status,
+      url,
+      elapsedMs: Date.now() - startedAt,
+    })
     throw new Error(`汉典返回 ${response.status}`)
   }
   const html = await response.text()
   const title = extractTitle(html, query)
   const sections = parseZdicSections(html, title, query)
+  const finalSections = sections.length ? sections : [{ title: "查询结果", lines: ["未从页面中解析到可展示内容。"] }]
+  logZDictEvent("汉典查询解析完成", {
+    query,
+    title,
+    url,
+    htmlLength: html.length,
+    elapsedMs: Date.now() - startedAt,
+    sectionCount: finalSections.length,
+    sections: finalSections.map((section) => ({
+      title: section.title,
+      lineCount: section.lines.length,
+    })),
+  })
   return {
     query,
     url,
     title,
-    sections: sections.length ? sections : [{ title: "查询结果", lines: ["未从页面中解析到可展示内容。"] }],
+    sections: finalSections,
   }
 }
 
@@ -1552,6 +1633,8 @@ export {
   hapticLight,
   hapticSuccess,
   isChineseQuery,
+  logZDictError,
+  logZDictEvent,
   lookupZdic,
   normalizeQuery,
   selectedTokenText,

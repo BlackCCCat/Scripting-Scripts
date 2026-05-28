@@ -18,6 +18,8 @@ import {
   hapticLight,
   hapticSuccess,
   isChineseQuery,
+  logZDictError,
+  logZDictEvent,
   lookupZdic,
   normalizeQuery,
   type ZdicResult,
@@ -92,23 +94,58 @@ function ZDictScriptView() {
   async function runLookup(nextQuery = queryText) {
     const normalized = normalizeQuery(nextQuery)
     if (!isChineseQuery(normalized)) {
+      logZDictEvent("脚本页拒绝查询", {
+        query: normalized,
+      })
       setResult(null)
       setErrorText(normalized ? "仅支持查询中文汉字或词语" : "")
       return
     }
     requestIdRef.current += 1
     const requestId = requestIdRef.current
+    const startedAt = Date.now()
+    logZDictEvent("脚本页提交查询", {
+      requestId,
+      query: normalized,
+    })
     setLoading(true)
     setErrorText("")
     try {
       const nextResult = await lookupZdic(normalized)
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current) {
+        logZDictEvent("脚本页丢弃过期查询结果", {
+          requestId,
+          activeRequestId: requestIdRef.current,
+          query: normalized,
+        })
+        return
+      }
       setResult(nextResult)
+      logZDictEvent("脚本页查询成功", {
+        requestId,
+        query: normalized,
+        elapsedMs: Date.now() - startedAt,
+        sectionCount: nextResult.sections.length,
+      })
       hapticSuccess()
     } catch (error: any) {
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current) {
+        logZDictEvent("脚本页丢弃过期查询错误", {
+          requestId,
+          activeRequestId: requestIdRef.current,
+          query: normalized,
+        })
+        return
+      }
+      const message = String(error?.message ?? error ?? "查询失败")
+      logZDictError("脚本页查询失败", {
+        requestId,
+        query: normalized,
+        elapsedMs: Date.now() - startedAt,
+        error: message,
+      })
       setResult(null)
-      setErrorText(String(error?.message ?? error ?? "查询失败"))
+      setErrorText(message)
     } finally {
       if (requestId === requestIdRef.current) setLoading(false)
     }
@@ -117,12 +154,16 @@ function ZDictScriptView() {
   function queryLinkedText(text: string) {
     const normalized = normalizeQuery(text)
     if (!isChineseQuery(normalized)) return
+    logZDictEvent("脚本页点击结果联查", {
+      query: normalized,
+    })
     setInputText(normalized)
     hapticLight()
     void runLookup(normalized)
   }
 
   function clearQuery() {
+    logZDictEvent("脚本页清空查询")
     hapticLight()
     setInputText("")
     setResult(null)
@@ -130,6 +171,9 @@ function ZDictScriptView() {
   }
 
   function submitQuery() {
+    logZDictEvent("脚本页触发查询", {
+      query: queryText,
+    })
     hapticLight()
     void runLookup(queryText)
   }
@@ -165,10 +209,12 @@ function ZDictScriptView() {
 
 export async function run() {
   try {
+    logZDictEvent("打开脚本查询页")
     await Navigation.present({
       element: <ZDictScriptView />,
     })
   } finally {
+    logZDictEvent("关闭脚本查询页")
     Script.exit()
   }
 }

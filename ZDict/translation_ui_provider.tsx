@@ -18,6 +18,8 @@ import {
   hapticLight,
   hapticSuccess,
   isChineseQuery,
+  logZDictError,
+  logZDictEvent,
   lookupZdic,
   normalizeQuery,
   selectedTokenText,
@@ -61,24 +63,59 @@ function ZDictTranslationView() {
   async function runLookup(nextQuery = queryText) {
     const normalized = normalizeQuery(nextQuery)
     if (!isChineseQuery(normalized)) {
+      logZDictEvent("系统翻译页拒绝查询", {
+        query: normalized,
+      })
       setResult(null)
       setErrorText(normalized ? "仅支持查询中文汉字或词语" : "")
       return
     }
     requestIdRef.current += 1
     const requestId = requestIdRef.current
+    const startedAt = Date.now()
+    logZDictEvent("系统翻译页提交查询", {
+      requestId,
+      query: normalized,
+    })
     setLoading(true)
     setErrorText("")
     try {
       TranslationUIProvider.expandSheet?.()
       const nextResult = await lookupZdic(normalized)
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current) {
+        logZDictEvent("系统翻译页丢弃过期查询结果", {
+          requestId,
+          activeRequestId: requestIdRef.current,
+          query: normalized,
+        })
+        return
+      }
       setResult(nextResult)
+      logZDictEvent("系统翻译页查询成功", {
+        requestId,
+        query: normalized,
+        elapsedMs: Date.now() - startedAt,
+        sectionCount: nextResult.sections.length,
+      })
       hapticSuccess()
     } catch (error: any) {
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current) {
+        logZDictEvent("系统翻译页丢弃过期查询错误", {
+          requestId,
+          activeRequestId: requestIdRef.current,
+          query: normalized,
+        })
+        return
+      }
+      const message = String(error?.message ?? error ?? "查询失败")
+      logZDictError("系统翻译页查询失败", {
+        requestId,
+        query: normalized,
+        elapsedMs: Date.now() - startedAt,
+        error: message,
+      })
       setResult(null)
-      setErrorText(String(error?.message ?? error ?? "查询失败"))
+      setErrorText(message)
     } finally {
       if (requestId === requestIdRef.current) setLoading(false)
     }
@@ -86,14 +123,26 @@ function ZDictTranslationView() {
 
   function toggleToken(token: DictToken) {
     setDirectQueryText("")
-    setSelectedIds((ids) => ids.includes(token.id)
-      ? ids.filter((id) => id !== token.id)
-      : [...ids, token.id])
+    setSelectedIds((ids) => {
+      const selected = !ids.includes(token.id)
+      const nextIds = selected
+        ? [...ids, token.id]
+        : ids.filter((id) => id !== token.id)
+      logZDictEvent("系统翻译页切换分词", {
+        token: token.text,
+        selected,
+        selectedText: selectedTokenText(tokens, nextIds),
+      })
+      return nextIds
+    })
   }
 
   function queryLinkedText(text: string) {
     const normalized = normalizeQuery(text)
     if (!isChineseQuery(normalized)) return
+    logZDictEvent("系统翻译页点击结果联查", {
+      query: normalized,
+    })
     setSelectedIds([])
     setDirectQueryText(normalized)
     hapticLight()
@@ -101,7 +150,16 @@ function ZDictTranslationView() {
   }
 
   useEffect(() => {
+    logZDictEvent("打开系统翻译查询页", {
+      inputLength: Array.from(sourceText).length,
+      allowsReplacement: TranslationUIProvider.allowsReplacement,
+      tokenCount: tokens.length,
+      initialQuery: queryText,
+    })
     if (canQuery && !result && !loading) {
+      logZDictEvent("系统翻译页自动查询", {
+        query: queryText,
+      })
       void runLookup(queryText)
     }
   }, [])
@@ -141,6 +199,9 @@ function ZDictTranslationView() {
             systemImage="doc.on.doc"
             disabled={!queryText}
             action={() => {
+              logZDictEvent("系统翻译页复制选词", {
+                query: queryText,
+              })
               hapticLight()
               void copyText(queryText)
             }}
@@ -150,6 +211,9 @@ function ZDictTranslationView() {
             systemImage="arrow.counterclockwise"
             disabled={!selectedIds.length && !directQueryText}
             action={() => {
+              logZDictEvent("系统翻译页清空选词", {
+                query: queryText,
+              })
               hapticLight()
               setDirectQueryText("")
               setSelectedIds([])
@@ -162,6 +226,9 @@ function ZDictTranslationView() {
             systemImage="magnifyingglass"
             disabled={!canQuery || loading}
             action={() => {
+              logZDictEvent("系统翻译页触发查询按钮", {
+                query: queryText,
+              })
               hapticLight()
               void runLookup(queryText)
             }}
