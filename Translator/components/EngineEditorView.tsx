@@ -240,9 +240,16 @@ export function EngineEditorView(props: {
         navigationBarTitleDisplayMode="inline"
         formStyle="grouped"
         toolbar={{
+          topBarLeading: (
+            <Button action={() => dismiss()}>
+            <Image systemName="chevron.left" fontWeight="semibold" foregroundStyle="#007AFF"/>
+            </Button>
+          ),
           topBarTrailing: (
-            <Button
+            <Button 
               title="保存"
+              fontWeight="semibold" 
+              foregroundStyle="#007AFF"
               action={save}
             />
           ),
@@ -316,7 +323,6 @@ export function EngineEditorView(props: {
             <HStack spacing={12}>
               <Text>模型</Text>
               <Spacer />
-              {/* 这里保持原地刷新模型，避免保存前还要再做一遍可用性检查。 */}
               <ProgressView />
             </HStack>
           ) : modelIds.length > 0 ? (

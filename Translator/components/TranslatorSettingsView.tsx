@@ -1,6 +1,5 @@
 import {
   Button,
-  EditButton,
   ForEach,
   HStack,
   Image,
@@ -17,7 +16,7 @@ import {
   useState,
 } from "scripting"
 
-import { LANGUAGE_OPTIONS } from "../constants"
+import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
   TranslationEngineConfig,
   TranslatorEngineEntry,
@@ -28,23 +27,26 @@ import { isLocalTranslationAvailable } from "../utils/translation_engine"
 import { isSystemTranslationAvailable } from "../utils/system_translation_engine"
 import {
   addAiApiEngine,
+  addDeepLxEngine,
   loadTranslatorSettings,
   removeEngine,
   reorderEngines,
   saveTranslatorSettings,
   updateEngineConfig,
+  updateDefaultSourceLanguage,
   updateDefaultTargetLanguage,
   updateEngineEnabled,
 } from "../utils/translator_settings"
 import { AssistantEngineEditorView } from "./AssistantEngineEditorView"
 import { EngineEditorView } from "./EngineEditorView"
+import { DeepLXEditorView } from "./DeepLXEditorView"
 
 function isEngineEditable(engine: TranslatorEngineEntry) {
-  return engine.kind === "ai_api" || engine.kind === "assistant"
+  return engine.kind === "ai_api" || engine.kind === "assistant" || engine.kind === "deeplx"
 }
 
 function canDeleteEngine(engine: TranslatorEngineEntry) {
-  return engine.kind === "ai_api"
+  return engine.kind === "ai_api" || engine.kind === "deeplx"
 }
 
 function isEngineAvailable(engine: TranslatorEngineEntry) {
@@ -66,7 +68,7 @@ function isEngineAvailable(engine: TranslatorEngineEntry) {
     return true
   }
 
-  if (engine.kind === "ai_api") {
+  if (engine.kind === "deeplx" || engine.kind === "ai_api") {
     return isExternalEngineConfigured(engine)
   }
 
@@ -83,14 +85,89 @@ function targetLanguageLabel(code: string) {
   return `${option.label}-${promptName}`
 }
 
+function sourceLanguageLabel(code: string) {
+  if (code === AUTO_LANGUAGE.code) {
+    return "自动检测-Auto"
+  }
+  return targetLanguageLabel(code)
+}
+
 export function TranslatorSettingsView() {
+  const dismiss = Navigation.useDismiss()
   const [settings, setSettings] = useState(() => loadTranslatorSettings())
   const engines = useObservable<TranslatorEngineEntry[]>(() => loadTranslatorSettings().engines)
+  const editMode = useObservable(() => EditMode.inactive())
+  const [isEditing, setIsEditing] = useState(false)
+  const [skipNextSync] = useState(() => ({ current: false }))
+
+  // When ForEach with editActions="move" auto-updates the observable on drag reorder,
+  // the onMove callback is NOT invoked. Subscribe to persist the new order.
+  useState(() => {
+    engines.subscribe((nextEngines) => {
+      if (skipNextSync.current) {
+        skipNextSync.current = false
+        return
+      }
+      const merged = { ...loadTranslatorSettings(), engines: nextEngines }
+      setSettings(merged)
+      saveTranslatorSettings(merged)
+    })
+    return true
+  })
 
   function persist(next: ReturnType<typeof loadTranslatorSettings>) {
+    skipNextSync.current = true
     setSettings(next)
     engines.setValue(next.engines)
     saveTranslatorSettings(next)
+  }
+
+  function persistEngineLabelAndImage(
+    nextSettings: ReturnType<typeof loadTranslatorSettings>,
+    engineId: string,
+    changes: Partial<Pick<TranslatorEngineEntry, "label" | "systemImage">>
+  ) {
+    persist({
+      defaultTargetLanguageCode: nextSettings.defaultTargetLanguageCode,
+      defaultSourceLanguageCode: nextSettings.defaultSourceLanguageCode,
+      engines: nextSettings.engines.map((item) => (
+        item.id === engineId
+          ? {
+              ...item,
+              label: String(changes.label ?? item.label).trim() || item.label,
+              systemImage: String(changes.systemImage ?? item.systemImage).trim() || item.systemImage,
+            }
+          : item
+      )),
+    })
+  }
+
+  async function presentDeepLxEditor(title: string, initial: { baseUrl: string; label: string }) {
+    const result = await Navigation.present({
+      element: (
+        <DeepLXEditorView
+          title={title}
+          initial={initial}
+        />
+      ),
+    })
+
+    return result as { baseUrl: string; label?: string } | null
+  }
+
+  function persistDeepLxResult(
+    baseSettings: ReturnType<typeof loadTranslatorSettings>,
+    engine: TranslatorEngineEntry,
+    result: { baseUrl: string; label?: string }
+  ) {
+    const nextWithConfig = updateEngineConfig(
+      baseSettings,
+      engine.id,
+      { baseUrl: result.baseUrl } as TranslationEngineConfig
+    )
+    persistEngineLabelAndImage(nextWithConfig, engine.id, {
+      label: String(result.label ?? engine.label).trim() || engine.label,
+    })
   }
 
   async function openCreateAiEngine() {
@@ -119,23 +196,27 @@ export function TranslatorSettingsView() {
       result.config as TranslationEngineConfig
     )
 
-    persist({
-      defaultTargetLanguageCode: nextWithConfig.defaultTargetLanguageCode,
-      engines: nextWithConfig.engines.map((item) => (
-        item.id === draft.id
-          ? {
-              ...item,
-              label: String(result.label ?? item.label).trim() || item.label,
-              systemImage: String(result.systemImage ?? item.systemImage).trim() || item.systemImage,
-            }
-          : item
-      )),
+    persistEngineLabelAndImage(nextWithConfig, draft.id, {
+      label: String(result.label ?? draft.label).trim() || draft.label,
+      systemImage: String(result.systemImage ?? draft.systemImage).trim() || draft.systemImage,
     })
   }
 
+  async function openCreateDeepLxEngine() {
+    const draftSettings = addDeepLxEngine(settings)
+    const draft = draftSettings.engines[draftSettings.engines.length - 1]
+    if (!draft || draft.kind !== "deeplx") return
+
+    const result = await presentDeepLxEditor("添加 DeepLX", {
+      baseUrl: draft.config?.baseUrl ?? "",
+      label: draft.label,
+    })
+    if (!result) return
+    persistDeepLxResult(draftSettings, draft, result)
+  }
+
   async function openEditEngine(
-    engine: TranslatorEngineEntry,
-    baseSettings = settings
+    engine: TranslatorEngineEntry
   ) {
     if (!isEngineEditable(engine)) return
 
@@ -144,6 +225,14 @@ export function TranslatorSettingsView() {
         <AssistantEngineEditorView
           title={`配置 ${engine.label}`}
           initial={engine.config}
+        />
+      ) : engine.kind === "deeplx" ? (
+        <DeepLXEditorView
+          title={`配置 ${engine.label}`}
+          initial={{
+            baseUrl: engine.config?.baseUrl ?? "",
+            label: engine.label,
+          }}
         />
       ) : (
         <EngineEditorView
@@ -159,30 +248,27 @@ export function TranslatorSettingsView() {
 
     if (!result) return
 
+    if (engine.kind === "deeplx") {
+      persistDeepLxResult(settings, engine, result as { baseUrl: string; label?: string })
+      return
+    }
+
     const nextWithConfig = (engine.kind === "ai_api" || engine.kind === "assistant")
       ? updateEngineConfig(
-          baseSettings,
+          settings,
           engine.id,
           (engine.kind === "assistant" ? result : result.config) as TranslationEngineConfig
         )
-      : baseSettings
+      : settings
 
     if (engine.kind === "assistant") {
       persist(nextWithConfig)
       return
     }
 
-    persist({
-      defaultTargetLanguageCode: nextWithConfig.defaultTargetLanguageCode,
-      engines: nextWithConfig.engines.map((item) => (
-        item.id === engine.id
-          ? {
-              ...item,
-              label: String(result.label ?? item.label).trim() || item.label,
-              systemImage: String(result.systemImage ?? item.systemImage).trim() || item.systemImage,
-            }
-          : item
-      )),
+    persistEngineLabelAndImage(nextWithConfig, engine.id, {
+      label: String(result.label ?? engine.label).trim() || engine.label,
+      systemImage: String(result.systemImage ?? engine.systemImage).trim() || engine.systemImage,
     })
   }
 
@@ -207,13 +293,69 @@ export function TranslatorSettingsView() {
         navigationTitle="翻译器"
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
+        environments={{
+          editMode,
+        }}
         toolbar={{
+          topBarLeading: (
+            <Button action={() => dismiss()}>
+            <Image systemName="xmark" fontWeight="semibold" foregroundStyle="red"/>
+            </Button>
+          ),
           confirmationAction: [
-            <EditButton />,
+            <Button
+              title={isEditing ? "完成" : "编辑"}
+              fontWeight="semibold"
+              foregroundStyle="#007AFF"
+              action={() => {
+                const nextIsEditing = !isEditing
+                setIsEditing(nextIsEditing)
+                editMode.setValue(nextIsEditing ? EditMode.active() : EditMode.inactive())
+              }}
+            />,
           ],
         }}
       >
         <Section header={<Text>翻译设置</Text>}>
+          <HStack spacing={12}>
+            <Text>默认源语言</Text>
+            <Spacer />
+            <Menu
+              label={
+                <HStack spacing={4}>
+                  <Text
+                    foregroundStyle="accentColor"
+                    lineLimit={1}
+                    truncationMode="tail"
+                    allowsTightening
+                    frame={{ maxWidth: 160, alignment: "trailing" as any }}
+                    multilineTextAlignment="trailing"
+                  >
+                    {sourceLanguageLabel(settings.defaultSourceLanguageCode)}
+                  </Text>
+                  <Image
+                    systemName="chevron.down"
+                    font="caption2"
+                    foregroundStyle="accentColor"
+                  />
+                </HStack>
+              }
+            >
+              <Picker
+                title="默认源语言"
+                value={settings.defaultSourceLanguageCode}
+                onChanged={(value: string) => {
+                  persist(updateDefaultSourceLanguage(settings, value))
+                }}
+              >
+                {[AUTO_LANGUAGE, ...LANGUAGE_OPTIONS].map((option) => (
+                  <Text key={option.code} tag={option.code}>
+                    {sourceLanguageLabel(option.code)}
+                  </Text>
+                ))}
+              </Picker>
+            </Menu>
+          </HStack>
           <HStack spacing={12}>
             <Text>默认目标语言</Text>
             <Spacer />
@@ -255,7 +397,7 @@ export function TranslatorSettingsView() {
           </HStack>
         </Section>
 
-        <Section>
+        <Section header={<Text>翻译引擎</Text>}>
           <ForEach
             data={engines}
             builder={(engine: TranslatorEngineEntry) => {
@@ -307,13 +449,44 @@ export function TranslatorSettingsView() {
         </Section>
 
         <Section>
-          <Button
-            title="添加引擎"
-            systemImage="plus"
-            action={() => {
-              void openCreateAiEngine()
-            }}
-          />
+          <Menu
+            label={
+              <HStack
+                spacing={4}
+                frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+                contentShape={{
+                  kind: "interaction",
+                  shape: "rect",
+                }}
+              >
+                <Image
+                  systemName="plus"
+                  foregroundStyle="accentColor"
+                  fontWeight="semibold"
+                />
+                <Text 
+                  foregroundStyle="accentColor" 
+                  fontWeight="semibold">
+                  添加引擎
+                </Text>
+              </HStack>
+            }
+          >
+            <Button
+              title="AI 接口"
+              systemImage="sparkles"
+              action={() => {
+                void openCreateAiEngine()
+              }}
+            />
+            <Button
+              title="DeepLX"
+              systemImage="d.circle"
+              action={() => {
+                void openCreateDeepLxEngine()
+              }}
+            />
+          </Menu>
         </Section>
       </List>
     </NavigationStack>

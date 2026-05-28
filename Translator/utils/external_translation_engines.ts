@@ -8,6 +8,7 @@ import type {
 } from "../types"
 
 const GOOGLE_WEB_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
+const DEEPLX_DEFAULT_ENDPOINT = "http://localhost:1188/translate"
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com"
 const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 const SILICONFLOW_DEFAULT_BASE_URL = "https://api.siliconflow.cn"
@@ -144,6 +145,41 @@ function mapGoogleLanguage(code: string, isSource = false) {
   if (code === "auto") return isSource ? "auto" : code
   if (code === "zh-Hans") return "zh-CN"
   if (code === "zh-Hant") return "zh-TW"
+  return code
+}
+
+function mapDeepLXLanguage(code: string, isSource = false) {
+  if (code === "auto") return isSource ? "auto" : code
+  if (code === "zh-Hans") return "zh"
+  if (code === "zh-Hant") return "zh"
+  if (code === "en") return "en"
+  if (code === "ja") return "ja"
+  if (code === "ko") return "ko"
+  if (code === "cs") return "cs"
+  if (code === "da") return "da"
+  if (code === "fr") return "fr"
+  if (code === "de") return "de"
+  if (code === "el") return "el"
+  if (code === "es") return "es"
+  if (code === "fi") return "fi"
+  if (code === "he") return "he"
+  if (code === "hu") return "hu"
+  if (code === "it") return "it"
+  if (code === "no") return "nb"
+  if (code === "pt") return "pt"
+  if (code === "ro") return "ro"
+  if (code === "ru") return "ru"
+  if (code === "sv") return "sv"
+  if (code === "ar") return "ar"
+  if (code === "nl") return "nl"
+  if (code === "pl") return "pl"
+  if (code === "tr") return "tr"
+  if (code === "uk") return "uk"
+  if (code === "vi") return "vi"
+  if (code === "th") return "th"
+  if (code === "id") return "id"
+  if (code === "ms") return "ms"
+  if (code === "hi") return "hi"
   return code
 }
 
@@ -552,6 +588,49 @@ async function translateWithGoogleWeb(request: TranslationRequest): Promise<Tran
   }
 }
 
+async function translateWithDeepLX(
+  engine: TranslatorEngineEntry,
+  request: TranslationRequest
+): Promise<TranslationResult> {
+  const endpoint = normalizeBaseUrl(engine.config?.baseUrl ?? "") || DEEPLX_DEFAULT_ENDPOINT
+  const sourceLang = mapDeepLXLanguage(request.sourceLanguageCode, true)
+  const targetLang = mapDeepLXLanguage(request.targetLanguageCode)
+
+  const body = JSON.stringify({
+    text: request.sourceText,
+    source_lang: sourceLang.toUpperCase(),
+    target_lang: targetLang.toUpperCase(),
+  })
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body,
+    timeout: 25,
+  })
+
+  if (!response.ok) {
+    const detail = await extractResponseErrorDetail(response)
+    throw new Error(detail
+      ? `${normalizeErrorMessage(response, "DeepLX 翻译请求失败")}：${detail}`
+      : normalizeErrorMessage(response, "DeepLX 翻译请求失败"))
+  }
+
+  const payload = await readJsonWithFallback(response)
+  const translatedText = String(payload?.data ?? payload?.translations?.[0]?.text ?? "").trim()
+
+  if (!translatedText) {
+    throw new Error("DeepLX 没有返回可用译文。")
+  }
+
+  return {
+    translatedText,
+  }
+}
+
 async function translateWithAiApi(
   engine: TranslatorEngineEntry,
   request: TranslationRequest
@@ -646,6 +725,10 @@ async function translateWithAiApi(
 }
 
 export function isExternalEngineConfigured(engine: TranslatorEngineEntry) {
+  if (engine.kind === "deeplx") {
+    return !!String(engine.config?.baseUrl ?? "").trim()
+  }
+
   if (engine.kind === "ai_api") {
     const mode = normalizeAiMode(engine.config?.compatibilityMode)
     return (
@@ -665,6 +748,8 @@ export async function translateWithExternalEngine(
   switch (engine.kind) {
     case "google_translate":
       return await translateWithGoogleWeb(request)
+    case "deeplx":
+      return await translateWithDeepLX(engine, request)
     case "ai_api":
       return await translateWithAiApi(engine, request)
     default:

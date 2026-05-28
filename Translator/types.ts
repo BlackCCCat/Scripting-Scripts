@@ -24,6 +24,7 @@ export type AiApiCompatibilityMode =
 export type TranslationEngineKind =
   | KnownTranslationEngineKind
   | "ai_api"
+  | "deeplx"
 
 export type TranslationEngineOption = {
   id: KnownTranslationEngineKind
@@ -55,6 +56,7 @@ export type TranslatorEngineEntry = {
 export type TranslatorSettings = {
   engines: TranslatorEngineEntry[]
   defaultTargetLanguageCode: string
+  defaultSourceLanguageCode: string
 }
 
 export type TranslationRequest = {

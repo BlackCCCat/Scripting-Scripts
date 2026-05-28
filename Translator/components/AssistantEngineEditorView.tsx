@@ -9,6 +9,7 @@ import {
   Text,
   TextField,
   useState,
+  Image
 } from "scripting"
 
 import type { TranslationEngineConfig } from "../types"
@@ -68,9 +69,16 @@ export function AssistantEngineEditorView(props: {
         navigationBarTitleDisplayMode="inline"
         formStyle="grouped"
         toolbar={{
+          topBarLeading: (
+            <Button action={() => dismiss()}>
+            <Image systemName="chevron.left" fontWeight="semibold" foregroundStyle="#007AFF"/>
+            </Button>
+          ),
           topBarTrailing: (
             <Button
               title="保存"
+              fontWeight="semibold" 
+              foregroundStyle="#007AFF"
               action={save}
             />
           ),

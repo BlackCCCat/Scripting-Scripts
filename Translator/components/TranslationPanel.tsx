@@ -102,7 +102,9 @@ function LanguageMenu(props: {
   selectedLabel: string
   onChanged: (value: string) => void
   options: LanguageOption[]
+  alignment?: "leading" | "trailing"
 }) {
+  const align = props.alignment ?? "leading"
   return (
     <Menu
       label={
@@ -113,8 +115,8 @@ function LanguageMenu(props: {
             lineLimit={1}
             truncationMode="tail"
             allowsTightening
-            frame={{ maxWidth: 150, alignment: "trailing" as any }}
-            multilineTextAlignment="trailing"
+            frame={{ maxWidth: 150, alignment: align as any }}
+            multilineTextAlignment={align}
           >
             {props.selectedLabel}
           </Text>
@@ -238,7 +240,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const sourceText = props.inputText ?? ""
   const hasInput = sourceText.trim().length > 0
   const [settings] = useState(() => loadTranslatorSettings())
-  const [sourceLanguageCode, setSourceLanguageCode] = useState(AUTO_LANGUAGE.code)
+  const [sourceLanguageCode, setSourceLanguageCode] = useState(() => settings.defaultSourceLanguageCode)
   const [targetLanguageCode, setTargetLanguageCode] = useState(() => settings.defaultTargetLanguageCode)
   const [systemTranslationHost] = useState(() => new Translation())
   const [errorText, setErrorText] = useState("")
@@ -619,16 +621,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
       translationHost={systemTranslationHost}
     >
       <Section>
-        <HStack
-          spacing={10}
-        >
-          <Image
-            systemName="doc.text"
-            font="subheadline"
-            foregroundStyle="systemBlue"
-          />
-          <Text font="headline">原文</Text>
-          <Spacer />
+        <HStack spacing={6}>
           <LanguageMenu
             title="源语言"
             value={sourceLanguageCode}
@@ -637,6 +630,18 @@ export function TranslationPanel(props: TranslationPanelProps) {
               : pickerLabel([AUTO_LANGUAGE, ...LANGUAGE_OPTIONS].find((option) => option.code === sourceLanguageCode) ?? AUTO_LANGUAGE)}
             onChanged={selectSourceLanguage}
             options={[AUTO_LANGUAGE, ...LANGUAGE_OPTIONS]}
+          />
+          <Image
+            systemName="arrow.right"
+            font="caption"
+            foregroundStyle="tertiaryLabel"
+          />
+          <LanguageMenu
+            title="目标语言"
+            value={targetLanguageCode}
+            selectedLabel={pickerLabel(LANGUAGE_OPTIONS.find((option) => option.code === targetLanguageCode) ?? LANGUAGE_OPTIONS[0])}
+            onChanged={selectTargetLanguage}
+            options={LANGUAGE_OPTIONS}
           />
         </HStack>
         <CopyableTextRow
@@ -650,25 +655,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
             },
           ] : undefined}
         />
-      </Section>
-
-      <Section>
-        <HStack spacing={10}>
-          <Image
-            systemName="text.bubble"
-            font="subheadline"
-            foregroundStyle="systemBlue"
-          />
-          <Text font="headline">译文</Text>
-          <Spacer />
-          <LanguageMenu
-            title="目标语言"
-            value={targetLanguageCode}
-            selectedLabel={pickerLabel(LANGUAGE_OPTIONS.find((option) => option.code === targetLanguageCode) ?? LANGUAGE_OPTIONS[0])}
-            onChanged={selectTargetLanguage}
-            options={LANGUAGE_OPTIONS}
-          />
-        </HStack>
       </Section>
 
       {visibleEngines.length === 0 ? (

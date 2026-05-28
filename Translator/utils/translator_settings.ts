@@ -11,6 +11,7 @@ import { isLocalTranslationAvailable } from "./translation_engine"
 
 const STORAGE_KEY = "translator_settings_v2"
 const DEFAULT_TARGET_LANGUAGE_CODE = "zh-Hans"
+const DEFAULT_SOURCE_LANGUAGE_CODE = "auto"
 
 function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
   const option = TRANSLATION_ENGINE_OPTIONS.find((item) => item.id === kind)!
@@ -37,6 +38,7 @@ function builtInEntry(kind: KnownTranslationEngineKind): TranslatorEngineEntry {
 function createDefaultSettings(): TranslatorSettings {
   return {
     defaultTargetLanguageCode: DEFAULT_TARGET_LANGUAGE_CODE,
+    defaultSourceLanguageCode: DEFAULT_SOURCE_LANGUAGE_CODE,
     engines: [
       builtInEntry("apple_intelligence"),
       builtInEntry("assistant"),
@@ -87,12 +89,52 @@ function normalizeDefaultTargetLanguageCode(code: unknown) {
   return DEFAULT_TARGET_LANGUAGE_CODE
 }
 
+function normalizeDefaultSourceLanguageCode(code: unknown) {
+  const normalized = String(code ?? "").trim()
+  if (normalized === "auto" || LANGUAGE_OPTIONS.some((item) => item.code === normalized)) {
+    return normalized
+  }
+  return DEFAULT_SOURCE_LANGUAGE_CODE
+}
+
 function isKnownEngineKind(kind: unknown): kind is KnownTranslationEngineKind {
   return TRANSLATION_ENGINE_OPTIONS.some((item) => item.id === kind)
 }
 
+function normalizeEngineSystemImage(value: unknown, fallback: string) {
+  const normalized = String(value ?? fallback).trim()
+  if (!normalized || normalized === "network") return fallback
+  return normalized
+}
+
+function normalizeExternalEngineEntry(
+  raw: Partial<TranslatorEngineEntry>,
+  kind: "ai_api" | "deeplx",
+  fallbackLabel: string,
+  fallbackSystemImage: string,
+  fallbackIdPrefix: string
+): TranslatorEngineEntry {
+  return {
+    id: String(raw.id ?? "").trim() || `${fallbackIdPrefix}_${Date.now().toString(36)}`,
+    kind,
+    label: String(raw.label ?? "").trim() || fallbackLabel,
+    systemImage: normalizeEngineSystemImage(raw.systemImage, fallbackSystemImage),
+    enabled: raw.enabled ?? false,
+    isBuiltIn: false,
+    config: raw.config,
+  }
+}
+
 function normalizeEngineEntry(raw: Partial<TranslatorEngineEntry> | null | undefined): TranslatorEngineEntry | null {
   if (!raw) return null
+
+  if (raw.kind === "ai_api") {
+    return normalizeExternalEngineEntry(raw, "ai_api", "AI 接口", "sparkles", "ai_api")
+  }
+
+  if (raw.kind === "deeplx") {
+    return normalizeExternalEngineEntry(raw, "deeplx", "DeepLX", "d.circle", "deeplx")
+  }
 
   if (isKnownEngineKind(raw.kind)) {
     const base = builtInEntry(raw.kind)
@@ -105,25 +147,6 @@ function normalizeEngineEntry(raw: Partial<TranslatorEngineEntry> | null | undef
             ...raw.config,
           }
         : raw.config,
-    }
-  }
-
-  if (raw.kind === "ai_api") {
-    const label = String(raw.label ?? "").trim() || "AI 接口"
-    const id = String(raw.id ?? "").trim() || `ai_api_${Date.now().toString(36)}`
-
-    return {
-      id,
-      kind: "ai_api",
-      label,
-      systemImage: (() => {
-        const value = String(raw.systemImage ?? "sparkles").trim()
-        if (!value || value === "network") return "sparkles"
-        return value
-      })(),
-      enabled: raw.enabled ?? false,
-      isBuiltIn: false,
-      config: raw.config,
     }
   }
 
@@ -153,6 +176,7 @@ function applyAvailabilityRules(entry: TranslatorEngineEntry): TranslatorEngineE
 function applyAvailabilityRulesToSettings(settings: TranslatorSettings): TranslatorSettings {
   return {
     defaultTargetLanguageCode: normalizeDefaultTargetLanguageCode(settings.defaultTargetLanguageCode),
+    defaultSourceLanguageCode: normalizeDefaultSourceLanguageCode(settings.defaultSourceLanguageCode),
     engines: settings.engines.map((entry) => applyAvailabilityRules(entry)),
   }
 }
@@ -180,7 +204,7 @@ function migrateLegacySettings(raw: any): TranslatorSettings | null {
     }
   }
 
-  return { engines }
+  return { engines, defaultTargetLanguageCode: DEFAULT_TARGET_LANGUAGE_CODE, defaultSourceLanguageCode: DEFAULT_SOURCE_LANGUAGE_CODE }
 }
 
 export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | null): TranslatorSettings {
@@ -215,6 +239,7 @@ export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | 
 
   return applyAvailabilityRulesToSettings({
     defaultTargetLanguageCode: normalizeDefaultTargetLanguageCode(raw?.defaultTargetLanguageCode),
+    defaultSourceLanguageCode: normalizeDefaultSourceLanguageCode(raw?.defaultSourceLanguageCode),
     engines: normalized,
   })
 }
@@ -257,6 +282,7 @@ export function updateEngineEnabled(
   enabled: boolean
 ): TranslatorSettings {
   return normalizeTranslatorSettings({
+    ...settings,
     engines: settings.engines.map((item) => (
       item.id === engineId
         ? { ...item, enabled }
@@ -275,12 +301,23 @@ export function updateDefaultTargetLanguage(
   })
 }
 
+export function updateDefaultSourceLanguage(
+  settings: TranslatorSettings,
+  code: string
+): TranslatorSettings {
+  return normalizeTranslatorSettings({
+    ...settings,
+    defaultSourceLanguageCode: code,
+  })
+}
+
 export function updateEngineConfig(
   settings: TranslatorSettings,
   engineId: string,
   config: TranslationEngineConfig
 ): TranslatorSettings {
   return normalizeTranslatorSettings({
+    ...settings,
     engines: settings.engines.map((item) => (
       item.id === engineId
         ? { ...item, config: { ...config } }
@@ -299,6 +336,7 @@ export function reorderEngines(
   next.splice(newOffset, 0, ...movingItems)
 
   return normalizeTranslatorSettings({
+    ...settings,
     engines: next,
   })
 }
@@ -309,6 +347,7 @@ export function getExecutableEngines(settings: TranslatorSettings) {
 
 export function addAiApiEngine(settings: TranslatorSettings): TranslatorSettings {
   return normalizeTranslatorSettings({
+    ...settings,
     engines: [
       ...settings.engines,
       {
@@ -334,6 +373,27 @@ export function removeEngine(
   engineId: string
 ): TranslatorSettings {
   return normalizeTranslatorSettings({
+    ...settings,
     engines: settings.engines.filter((item) => item.id !== engineId),
+  })
+}
+
+export function addDeepLxEngine(settings: TranslatorSettings): TranslatorSettings {
+  return normalizeTranslatorSettings({
+    ...settings,
+    engines: [
+      ...settings.engines,
+      {
+        id: `deeplx_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        kind: "deeplx",
+        label: "DeepLX",
+        systemImage: "d.circle",
+        enabled: false,
+        isBuiltIn: false,
+        config: {
+          baseUrl: "",
+        },
+      },
+    ],
   })
 }
