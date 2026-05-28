@@ -1554,7 +1554,7 @@ function ResultView(props: {
   )
 }
 
-function ZdictTranslationView() {
+function ZDictTranslationView() {
   const sourceText = TranslationUIProvider.inputText ?? ""
   const tokens = useMemo(() => tokenizeWords(sourceText), [sourceText])
   const initialSelectedIds = useMemo(() => {
@@ -1704,4 +1704,4 @@ function ZdictTranslationView() {
   )
 }
 
-TranslationUIProvider.present(<ZdictTranslationView />)
+TranslationUIProvider.present(<ZDictTranslationView />)
