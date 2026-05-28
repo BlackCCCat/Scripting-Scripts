@@ -16,6 +16,7 @@
 - [CAIS](./CAIS/)：`Clipboard All in Scripting`，[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
 - [Scripting Rime Keyboard](./Scripting-Rime-Keyboard)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Scripting-Rime-Keyboard.zip)
 - [DouYin Downloader](./DouYin-Downloader)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/DouYin-Downloader.zip)
+- [ZDict](./ZDict)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/ZDict.zip)
 
 
 
@@ -31,3 +32,4 @@
 - [CAIS](./CAIS/) 参考了`CAIO`的键盘样式
 - [Scripting Rime Keyboard](./Scripting-Rime-Keyboard) 的全选功能由仓/元书开发者提供帮助实现
 - [DouYin Downloader](./DouYin-Downloader)由`Scripting`开发者提供的脚本二次修改
+- [ZDict](./ZDict) 数据来源为[汉典](https://zdic.net)

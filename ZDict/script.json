@@ -1,0 +1,44 @@
+{
+  "name": "ZDict",
+  "author": {
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts",
+    "name": "BlackCCCat"
+  },
+  "localizedNames": {
+    "ja": "",
+    "en": "",
+    "ru": "",
+    "fr": "",
+    "es": "",
+    "de": "",
+    "it": "",
+    "zh": "汉典",
+    "pt": ""
+  },
+  "version": "",
+  "entry": "index.tsx",
+  "iconImage": "",
+  "runInApp": false,
+  "icon": "book.closed.fill",
+  "intentInputTypes": [],
+  "color": "rgba(238, 92, 98,1)",
+  "remoteResource": {
+    "autoUpdateInterval": 86400,
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/ZDict.zip",
+    "hash": ""
+  },
+  "description": "汉典",
+  "localizedDescriptions": {
+    "es": "",
+    "pt": "",
+    "ru": "",
+    "fr": "",
+    "de": "",
+    "zh": "",
+    "en": "",
+    "it": "",
+    "ja": ""
+  },
+  "contributors": []
+}
