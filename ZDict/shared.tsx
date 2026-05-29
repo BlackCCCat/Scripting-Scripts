@@ -558,13 +558,39 @@ function extractTagTexts(html: string, pattern: RegExp): string[] {
   return result
 }
 
+function extractCharMetaRows(articleHtml: string): string[] {
+  const rows: string[] = []
+  const metaBlocks = extractBalancedBlocks(articleHtml, "div", "meta-row")
+  for (const block of metaBlocks) {
+    const badgePattern = /<span\b[^>]*class="[^"]*meta-badge[^"]*"[^>]*>([\s\S]*?)<\/span>/gi
+    const badges: Array<{ label: string; valueStart: number; badgeStart: number }> = []
+    let badgeMatch: RegExpExecArray | null
+    while ((badgeMatch = badgePattern.exec(block))) {
+      const label = htmlInlineText(badgeMatch[1])
+      if (!label) continue
+      badges.push({
+        label,
+        valueStart: badgePattern.lastIndex,
+        badgeStart: badgeMatch.index,
+      })
+    }
+
+    for (let index = 0; index < badges.length; index += 1) {
+      const item = badges[index]
+      const nextStart = badges[index + 1]?.badgeStart ?? block.length
+      const value = htmlInlineText(block.slice(item.valueStart, nextStart))
+      if (value) rows.push(`${item.label} ${value}`)
+    }
+  }
+  return rows
+}
+
 function parseCharInfoSection(articleHtml: string, query: string): string[] {
   const rows: string[] = []
   rows.push(...extractImages(articleHtml, { onlyAlt: query, labelPrefix: query }).slice(0, 1))
   const headword = htmlInlineText(firstMatch(articleHtml, /<div\b[^>]*class="[^"]*word-headword-row[^"]*"[^>]*>([\s\S]*?)<\/div>/i))
   if (headword) rows.push(headword)
-  const metaRows = extractTagTexts(articleHtml, /<div\b[^>]*class="[^"]*meta-row[^"]*"[^>]*>([\s\S]*?)<\/div>/gi)
-  rows.push(...metaRows)
+  rows.push(...extractCharMetaRows(articleHtml))
   const pronunRows = extractTagTexts(articleHtml, /<div\b[^>]*class="[^"]*word-pronun-row[^"]*"[^>]*>([\s\S]*?)<\/div>/gi)
   rows.push(...pronunRows)
   if (!rows.length) rows.push(...stripHtmlToLines(articleHtml).slice(0, 20))
@@ -1143,6 +1169,39 @@ function ResultLine(props: {
               </Text>
             ))}
           </HStack>
+        </HStack>
+      )
+    }
+    const labeledMeta = inlineLinks.text.match(/^(词性|拼音|注音|部首|部外|总笔画|统一码|笔顺|字形结构|字形分析|繁体|异体|英文|英语|德语|法语|日语|韩语|书证|例如)\s+(.+)$/)
+    if (labeledMeta) {
+      const tone = lineTone(inlineLinks.text)
+      const foregroundStyle =
+        /^词性/.test(inlineLinks.text) ? "systemRed"
+        : tone === "meta" ? "label"
+        : tone === "translation" ? "systemBlue"
+        : tone === "example" ? "systemGreen"
+        : "label"
+      const markerWidth = labeledMeta[1].length <= 1 ? 22 : Math.min(72, labeledMeta[1].length * 18 + 10)
+      return (
+        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+          <ZStack
+            frame={{ width: markerWidth, height: 22 }}
+            background={"clear" as any}
+            glassEffect={{ type: "rect", cornerRadius: 6 } as any}
+            clipShape={{ type: "rect", cornerRadius: 6 } as any}
+          >
+            <Text font="caption2" foregroundStyle={foregroundStyle as any}>{labeledMeta[1]}</Text>
+          </ZStack>
+          <Text
+            font={tone === "definition" ? "body" : "subheadline"}
+            foregroundStyle={foregroundStyle as any}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            multilineTextAlignment="leading"
+            selectionDisabled={false}
+            onTapGesture={() => props.onQuery?.(inlineLinks.links[0]?.label ?? "")}
+          >
+            {labeledMeta[2]}
+          </Text>
         </HStack>
       )
     }
