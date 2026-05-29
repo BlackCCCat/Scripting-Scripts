@@ -37,13 +37,38 @@ import { postDownloadAction, exportFilePathToFiles, saveFilePathToPhotos } from 
 import { getPreferences, persistPreferences, type Preferences, type SaveMode } from "./services/preferences"
 import { extractFirstURL, formatBytes, formatDate } from "./utils/common"
 
-declare const openURL: (url: string) => Promise<boolean>
-
 const HISTORY_TAB = 0
 const DOWNLOAD_TAB = 1
 const SETTINGS_TAB = 2
 
 type ContentTab = typeof HISTORY_TAB | typeof DOWNLOAD_TAB | typeof SETTINGS_TAB
+
+function extractAwemeIDFromURL(url: string): string | null {
+  const match = url.match(/(?:video|share\/video|note)\/(\d{10,})/) || url.match(/[?&](?:aweme_id|item_id|modal_id)=(\d{10,})/)
+  return match?.[1] ?? null
+}
+
+function buildDouyinAppURLs(url: string): string[] {
+  const awemeID = extractAwemeIDFromURL(url)
+  if (!awemeID) return []
+
+  return [
+    `snssdk1128://aweme/detail/${awemeID}`,
+    `aweme://aweme/detail/${awemeID}`,
+    `douyin://aweme/detail/${awemeID}`,
+  ]
+}
+
+async function openOriginalPage(url: string) {
+  for (const appURL of buildDouyinAppURLs(url)) {
+    try {
+      const opened = await Safari.openURL(appURL)
+      if (opened) return
+    } catch {}
+  }
+
+  await Safari.present(url, true)
+}
 
 function resolveIntentURL(): string | null {
   if (Intent.urlsParameter?.length) {
@@ -176,7 +201,16 @@ function RecentDownloadPage(props: {
                 <Button
                   title="打开原页面"
                   systemImage="safari"
-                  action={() => void openURL(item.extracted.pageURL)}
+                  action={async () => {
+                    try {
+                      await openOriginalPage(item.extracted.canonical || item.extracted.pageURL)
+                    } catch (error) {
+                      await Dialog.alert({
+                        title: "打开失败",
+                        message: error instanceof Error ? error.message : String(error),
+                      })
+                    }
+                  }}
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                   padding={{ horizontal: 12, vertical: 8 }}
                   glassEffect
@@ -233,51 +267,59 @@ function HistoryRow(props: {
 
   const openActions = async () => {
     const fileExists = await FileManager.exists(item.file_path)
+    const actions = [
+      ...(fileExists ? [{ label: "播放视频" }] : []),
+      { label: "分享文件" },
+      { label: "保存到相册" },
+      { label: "导出到文件" },
+      { label: "打开原始页面" },
+      { label: "复制原始链接" },
+      { label: fileExists ? "删除记录并删除文件" : "删除记录", destructive: true },
+    ]
     const result = await Dialog.actionSheet({
       title: item.title || item.file_name,
       message: `${formatDate(item.created_at)} · ${formatBytes(item.bytes_written)}`,
-      actions: [
-        { label: "分享文件" },
-        { label: "保存到相册" },
-        { label: "导出到文件" },
-        { label: "打开原始页面" },
-        { label: "复制原始链接" },
-        { label: fileExists ? "删除记录并删除文件" : "删除记录", destructive: true },
-      ],
+      actions,
       cancelButton: true,
     })
 
     if (result == null) return
+    const action = actions[result]?.label
 
     try {
-      if (result === 0) {
+      if (action === "播放视频") {
+        if (!fileExists) throw new Error("本地文件不存在")
+        await QuickLook.previewURLs([item.file_path], true)
+        return
+      }
+      if (action === "分享文件") {
         if (!fileExists) throw new Error("本地文件不存在")
         await ShareSheet.present([item.file_path])
         onStatus("已打开分享面板。")
         return
       }
-      if (result === 1) {
+      if (action === "保存到相册") {
         if (!fileExists) throw new Error("本地文件不存在")
         await saveFilePathToPhotos(item.file_path, item.file_name)
         onStatus("已保存到相册。")
         return
       }
-      if (result === 2) {
+      if (action === "导出到文件") {
         if (!fileExists) throw new Error("本地文件不存在")
         const exportedPath = await exportFilePathToFiles(item.file_path, item.file_name)
         onStatus(`已导出到文件：${exportedPath}`)
         return
       }
-      if (result === 3) {
-        await openURL(item.page_url || item.source_url)
+      if (action === "打开原始页面") {
+        await openOriginalPage(item.canonical_url || item.page_url || item.source_url)
         return
       }
-      if (result === 4) {
+      if (action === "复制原始链接") {
         await Pasteboard.setString(item.source_url)
         onStatus("已复制原始链接到剪贴板。")
         return
       }
-      if (result === 5) {
+      if (action === "删除记录并删除文件" || action === "删除记录") {
         if (fileExists) {
           await FileManager.remove(item.file_path)
         }
@@ -532,12 +574,11 @@ function View() {
         navigationBarTitleDisplayMode="inline"
         toolbar={{
           cancellationAction: <Button title="关闭" action={dismiss} />,
-          topBarTrailing: <Button title="刷新" action={() => void refreshHistory()} />,
         }}
       >
         <Section
           header={<Text>{`下载历史 (${history.length})`}</Text>}
-          footer={<Text font="caption" foregroundStyle="secondaryLabel">点击记录可打开更多操作；左滑可快速删除历史记录。</Text>}
+          footer={<Text font="caption" foregroundStyle="secondaryLabel">点击未删除的视频记录可播放或打开更多操作；左滑可快速删除历史记录。</Text>}
         >
           {history.length === 0 ? (
             <Text foregroundStyle="secondaryLabel">还没有下载历史。可以先输入一个链接试试。</Text>

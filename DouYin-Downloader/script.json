@@ -1,36 +1,35 @@
 {
-  "localizedNames": {
-    "zh": "抖音分享下载",
-    "en": "Douyin Share Downloader"
+  "localizedNames" : {
+    "zh" : "抖音分享下载",
+    "en" : "Douyin Share Downloader"
   },
-  "iconImage": "",
-  "color": "rgba(30, 144, 255, 1)",
-  "contributors": [
+  "iconImage" : "",
+  "color" : "rgba(30, 144, 255, 1)",
+  "contributors" : [
     {
-      "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts",
-      "name": "BlackCCCat",
-      "email": null
+      "homepage" : "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts",
+      "name" : "BlackCCCat",
+      "email" : null
     }
   ],
-  "author": {
-    "name": "OpenAI Assistant",
-    "email": "",
-    "homepage": null
+  "author" : {
+    "name" : "OpenAI Assistant",
+    "email" : "",
+    "homepage" : null
   },
-  "icon": "square.and.arrow.down",
-  "entry": "index.tsx",
-  "name": "DouYin Downloader",
-  "intentInputTypes": ["URLs", "Text"],
-  "version": "",
-  "localizedDescriptions": {
-    "en": "Receive a Douyin shared link, download the video, and save to Photos or export to Files.",
-    "zh": "从分享菜单接收抖音链接，自动解析并下载视频，可保存到相册或导出到文件。"
+  "icon" : "square.and.arrow.down",
+  "entry" : "index.tsx",
+  "name" : "DouYin Downloader",
+  "intentInputTypes" : [
+    "URLs",
+    "Text"
+  ],
+  "version" : "1.0.0",
+  "localizedDescriptions" : {
+    "en" : "Receive a Douyin shared link, download the video, and save to Photos or export to Files.",
+    "zh" : "从分享菜单接收抖音链接，自动解析并下载视频，可保存到相册或导出到文件。"
   },
-  "runInApp": true,
-  "description": "从分享菜单接收抖音链接，自动解析并下载视频，可保存到相册或导出到文件。",
-  "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/DouYin-Downloader.zip",
-    "hash": "",
-    "autoUpdateInterval": 86400
-  }
+  "runInApp" : true,
+  "description" : "从分享菜单接收抖音链接，自动解析并下载视频，可保存到相册或导出到文件。",
+  "remoteResource" : null
 }
