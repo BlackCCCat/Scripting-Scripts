@@ -1,5 +1,6 @@
 import {
   Button,
+  DirectoryBrowserView,
   HStack,
   Image,
   Intent,
@@ -24,16 +25,29 @@ import {
   useRef,
   useState,
 } from "scripting"
-import { downloadVideo, type DownloadProgress, type DownloadSuccess } from "./services/douyin"
+import {
+  DOWNLOAD_DIR,
+  IMAGE_DOWNLOAD_DIR,
+  ROOT_DIR,
+  downloadVideo,
+  ensureDownloadDirectories,
+  type DownloadProgress,
+  type DownloadSuccess,
+} from "./services/douyin"
 import {
   clearHistoryRecords,
   deleteHistoryRecord,
   initDatabase,
   insertHistory,
   listHistory,
+  getHistoryFiles,
   type HistoryRecord,
 } from "./services/history"
-import { postDownloadAction, exportFilePathToFiles, saveFilePathToPhotos } from "./services/file-actions"
+import {
+  postDownloadAction,
+  exportDownloadedFilesToFiles,
+  saveDownloadedFilesToPhotos,
+} from "./services/file-actions"
 import { getPreferences, persistPreferences, type Preferences, type SaveMode } from "./services/preferences"
 import { extractFirstURL, formatBytes, formatDate } from "./utils/common"
 
@@ -44,7 +58,7 @@ const SETTINGS_TAB = 2
 type ContentTab = typeof HISTORY_TAB | typeof DOWNLOAD_TAB | typeof SETTINGS_TAB
 
 function extractAwemeIDFromURL(url: string): string | null {
-  const match = url.match(/(?:video|share\/video|note)\/(\d{10,})/) || url.match(/[?&](?:aweme_id|item_id|modal_id)=(\d{10,})/)
+  const match = url.match(/(?:video|share\/video|note|share\/note|gallery|share\/gallery|slides|share\/slides)\/(\d{10,})/) || url.match(/[?&](?:aweme_id|item_id|modal_id)=(\d{10,})/)
   return match?.[1] ?? null
 }
 
@@ -68,6 +82,51 @@ async function openOriginalPage(url: string) {
   }
 
   await Safari.present(url, true)
+}
+
+async function removeExistingFile(path: string): Promise<boolean> {
+  if (!(await FileManager.exists(path))) return false
+  await FileManager.remove(path)
+  return true
+}
+
+async function deleteHistoryRecordAndFiles(record: HistoryRecord): Promise<number> {
+  const files = getHistoryFiles(record)
+  const seen = new Set<string>()
+  let deletedCount = 0
+
+  for (const file of files) {
+    if (!file.filePath || seen.has(file.filePath)) continue
+    seen.add(file.filePath)
+    if (await removeExistingFile(file.filePath)) {
+      deletedCount += 1
+    }
+  }
+
+  await deleteHistoryRecord(record.id)
+  return deletedCount
+}
+
+async function removeDownloadCacheDirectories(): Promise<number> {
+  let deletedCount = 0
+
+  for (const directory of [DOWNLOAD_DIR, IMAGE_DOWNLOAD_DIR]) {
+    if (!(await FileManager.exists(directory))) continue
+    try {
+      const entries = await FileManager.readDirectory(directory, true)
+      for (const path of entries) {
+        try {
+          if (await FileManager.isFile(path)) {
+            deletedCount += 1
+          }
+        } catch {}
+      }
+    } catch {}
+    await FileManager.remove(directory)
+  }
+
+  await ensureDownloadDirectories()
+  return deletedCount
 }
 
 function resolveIntentURL(): string | null {
@@ -119,6 +178,8 @@ async function runIntentDownload(url: string) {
         finalURL: download.finalURL,
         bytesWritten: download.bytesWritten,
         localFilePath: download.filePath,
+        localFilePaths: download.files.map((file) => file.filePath),
+        mediaType: download.mediaType,
         preferNoWatermark: preferences.preferNoWatermark,
         matchedCandidateLabel: download.matchedCandidateLabel,
         logs,
@@ -193,7 +254,7 @@ function RecentDownloadPage(props: {
                 <Button
                   title="分享文件"
                   systemImage="square.and.arrow.up"
-                  action={() => void ShareSheet.present([item.filePath])}
+                  action={() => void ShareSheet.present(item.files?.length ? item.files.map((file) => file.filePath) : [item.filePath])}
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                   padding={{ horizontal: 12, vertical: 8 }}
                   glassEffect
@@ -220,6 +281,17 @@ function RecentDownloadPage(props: {
           </HStack>
         </Section>
       </List>
+    </NavigationStack>
+  )
+}
+
+function SavedFilesPage() {
+  return (
+    <NavigationStack>
+      <DirectoryBrowserView
+        title="保存文件"
+        directoryPath={ROOT_DIR}
+      />
     </NavigationStack>
   )
 }
@@ -266,9 +338,17 @@ function HistoryRow(props: {
   const { item, onRefresh, onStatus } = props
 
   const openActions = async () => {
-    const fileExists = await FileManager.exists(item.file_path)
+    const files = getHistoryFiles(item)
+    const existingFiles: typeof files = []
+    for (const file of files) {
+      if (await FileManager.exists(file.filePath)) {
+        existingFiles.push(file)
+      }
+    }
+    const fileExists = existingFiles.length > 0
+    const isImagePost = existingFiles.some((file) => file.mediaType === "image")
     const actions = [
-      ...(fileExists ? [{ label: "播放视频" }] : []),
+      ...(fileExists ? [{ label: isImagePost ? "预览图片" : "播放视频" }] : []),
       { label: "分享文件" },
       { label: "保存到相册" },
       { label: "导出到文件" },
@@ -287,27 +367,27 @@ function HistoryRow(props: {
     const action = actions[result]?.label
 
     try {
-      if (action === "播放视频") {
+      if (action === "播放视频" || action === "预览图片") {
         if (!fileExists) throw new Error("本地文件不存在")
-        await QuickLook.previewURLs([item.file_path], true)
+        await QuickLook.previewURLs(existingFiles.map((file) => file.filePath), true)
         return
       }
       if (action === "分享文件") {
         if (!fileExists) throw new Error("本地文件不存在")
-        await ShareSheet.present([item.file_path])
+        await ShareSheet.present(existingFiles.map((file) => file.filePath))
         onStatus("已打开分享面板。")
         return
       }
       if (action === "保存到相册") {
         if (!fileExists) throw new Error("本地文件不存在")
-        await saveFilePathToPhotos(item.file_path, item.file_name)
+        await saveDownloadedFilesToPhotos(existingFiles)
         onStatus("已保存到相册。")
         return
       }
       if (action === "导出到文件") {
         if (!fileExists) throw new Error("本地文件不存在")
-        const exportedPath = await exportFilePathToFiles(item.file_path, item.file_name)
-        onStatus(`已导出到文件：${exportedPath}`)
+        const exportedPaths = await exportDownloadedFilesToFiles(existingFiles)
+        onStatus(`已导出到文件：${exportedPaths.join(", ")}`)
         return
       }
       if (action === "打开原始页面") {
@@ -320,12 +400,9 @@ function HistoryRow(props: {
         return
       }
       if (action === "删除记录并删除文件" || action === "删除记录") {
-        if (fileExists) {
-          await FileManager.remove(item.file_path)
-        }
-        await deleteHistoryRecord(item.id)
+        const deletedCount = await deleteHistoryRecordAndFiles(item)
         await onRefresh()
-        onStatus("已删除记录。")
+        onStatus(deletedCount > 0 ? `已删除记录和 ${deletedCount} 个本地文件。` : "已删除记录。")
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -347,9 +424,9 @@ function HistoryRow(props: {
             title="删除"
             role="destructive"
             action={async () => {
-              await deleteHistoryRecord(item.id)
+              const deletedCount = await deleteHistoryRecordAndFiles(item)
               await onRefresh()
-              onStatus("已删除历史记录。")
+              onStatus(deletedCount > 0 ? `已删除历史记录和 ${deletedCount} 个本地文件。` : "已删除历史记录。")
             }}
           />,
         ],
@@ -364,7 +441,9 @@ function HistoryRow(props: {
           <Spacer />
           <Text font="caption2" foregroundStyle="secondaryLabel">{formatDate(item.created_at)}</Text>
         </HStack>
-        <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>命中策略：{item.matched_candidate_label || "未知"}</Text>
+        <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
+          {(item.media_type === "image" ? "图文" : "视频")} · 命中策略：{item.matched_candidate_label || "未知"}
+        </Text>
       </VStack>
     </HStack>
   )
@@ -526,23 +605,23 @@ function View() {
   }
 
   const handleClearHistory = async () => {
-    if (!history.length) {
-      setStatus("当前没有历史记录可清空。")
-      return
-    }
-
     const result = await Dialog.actionSheet({
       title: "清空历史记录",
-      message: "仅删除历史记录，不删除本地下载文件。",
-      actions: [{ label: "清空", destructive: true }],
+      message: "会删除全部历史记录、本地下载文件，并清理旧版本残留的下载文件。",
+      actions: [{ label: "清空历史和本地文件", destructive: true }],
       cancelButton: true,
     })
 
     if (result !== 0) return
 
+    let deletedFromHistory = 0
+    for (const item of history) {
+      deletedFromHistory += await deleteHistoryRecordAndFiles(item)
+    }
+    const deletedResidual = await removeDownloadCacheDirectories()
     await clearHistoryRecords()
     await refreshHistory()
-    setStatus("已清空历史记录。")
+    setStatus(`已清空历史记录，删除 ${deletedFromHistory + deletedResidual} 个本地文件。`)
   }
 
   const chooseDefaultSaveMode = async () => {
@@ -567,6 +646,13 @@ function View() {
     setStatus(`默认保存方式已更新为：${nextMode === "ask" ? "每次询问" : nextMode === "photos" ? "自动保存到相册" : "自动导出到文件"}`)
   }
 
+  const openSavedFiles = async () => {
+    await ensureDownloadDirectories()
+    await Navigation.present({
+      element: <SavedFilesPage />,
+    })
+  }
+
   const renderHistoryPage = () => (
     <NavigationStack>
       <List
@@ -574,6 +660,7 @@ function View() {
         navigationBarTitleDisplayMode="inline"
         toolbar={{
           cancellationAction: <Button title="关闭" action={dismiss} />,
+          topBarTrailing: <Button title="" systemImage="folder" action={() => void openSavedFiles()} />,
         }}
       >
         <Section

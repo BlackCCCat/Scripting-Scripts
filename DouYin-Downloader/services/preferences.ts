@@ -13,13 +13,22 @@ export const DEFAULT_PREFERENCES: Preferences = {
 }
 
 export function getPreferences(): Preferences {
-  const saved = Storage.get<Partial<Preferences>>(PREFS_KEY)
+  const saved = Storage.get<Partial<Preferences>>(PREFS_KEY, { shared: false })
+  const sharedSaved = Storage.get<Partial<Preferences>>(PREFS_KEY, { shared: true })
+  if (!saved && sharedSaved) {
+    Storage.set(PREFS_KEY, sharedSaved, { shared: false })
+  }
+  if (sharedSaved) {
+    Storage.remove(PREFS_KEY, { shared: true })
+  }
+
   return {
     ...DEFAULT_PREFERENCES,
-    ...(saved || {}),
+    ...(saved || sharedSaved || {}),
   }
 }
 
 export function persistPreferences(next: Preferences) {
-  Storage.set(PREFS_KEY, next)
+  Storage.set(PREFS_KEY, next, { shared: false })
+  Storage.remove(PREFS_KEY, { shared: true })
 }

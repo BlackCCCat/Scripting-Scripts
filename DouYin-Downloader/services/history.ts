@@ -1,5 +1,5 @@
 import { Path } from "scripting"
-import type { DownloadSuccess } from "./douyin"
+import type { DownloadedFile, DownloadSuccess } from "./douyin"
 
 export type HistoryRecord = {
   id: string
@@ -15,6 +15,8 @@ export type HistoryRecord = {
   bytes_written: number
   created_at: string
   matched_candidate_label: string
+  media_type: "video" | "image" | null
+  files_json: string | null
 }
 
 const ROOT_DIR = Path.join(FileManager.documentsDirectory, "douyin-downloader")
@@ -52,7 +54,9 @@ export async function initDatabase() {
       final_url TEXT NOT NULL,
       bytes_written INTEGER NOT NULL,
       created_at TEXT NOT NULL,
-      matched_candidate_label TEXT NOT NULL DEFAULT ''
+      matched_candidate_label TEXT NOT NULL DEFAULT '',
+      media_type TEXT,
+      files_json TEXT
     )
   `)
 
@@ -62,6 +66,14 @@ export async function initDatabase() {
 
   try {
     await database.execute(`ALTER TABLE downloads ADD COLUMN thumbnail_url TEXT`)
+  } catch {}
+
+  try {
+    await database.execute(`ALTER TABLE downloads ADD COLUMN media_type TEXT`)
+  } catch {}
+
+  try {
+    await database.execute(`ALTER TABLE downloads ADD COLUMN files_json TEXT`)
   } catch {}
 }
 
@@ -81,10 +93,39 @@ export async function listHistory(): Promise<HistoryRecord[]> {
       final_url,
       bytes_written,
       created_at,
-      matched_candidate_label
+      matched_candidate_label,
+      media_type,
+      files_json
     FROM downloads
     ORDER BY datetime(created_at) DESC
   `)
+}
+
+export function getHistoryFiles(record: HistoryRecord): DownloadedFile[] {
+  if (record.files_json) {
+    try {
+      const files = JSON.parse(record.files_json)
+      if (Array.isArray(files)) {
+        return files
+          .filter((file) => file && typeof file.filePath === "string" && typeof file.fileName === "string")
+          .map((file) => ({
+            filePath: file.filePath,
+            fileName: file.fileName,
+            finalURL: typeof file.finalURL === "string" ? file.finalURL : record.final_url,
+            bytesWritten: typeof file.bytesWritten === "number" ? file.bytesWritten : 0,
+            mediaType: file.mediaType === "image" ? "image" : "video",
+          }))
+      }
+    } catch {}
+  }
+
+  return [{
+    filePath: record.file_path,
+    fileName: record.file_name,
+    finalURL: record.final_url,
+    bytesWritten: record.bytes_written,
+    mediaType: record.media_type === "image" ? "image" : "video",
+  }]
 }
 
 export async function insertHistory(record: DownloadSuccess) {
@@ -94,8 +135,8 @@ export async function insertHistory(record: DownloadSuccess) {
       INSERT OR REPLACE INTO downloads (
         id, source_url, page_url, canonical_url, title, description,
         thumbnail_url, file_path, file_name, final_url, bytes_written, created_at,
-        matched_candidate_label
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        matched_candidate_label, media_type, files_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       record.id,
@@ -111,6 +152,8 @@ export async function insertHistory(record: DownloadSuccess) {
       record.bytesWritten,
       record.createdAt,
       record.matchedCandidateLabel,
+      record.mediaType,
+      JSON.stringify(record.files || []),
     ]
   )
 }

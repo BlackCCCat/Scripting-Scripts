@@ -133,6 +133,8 @@ function IntentDownloadView(props: {
             finalURL: download.finalURL,
             bytesWritten: download.bytesWritten,
             localFilePath: download.filePath,
+            localFilePaths: download.files.map((file) => file.filePath),
+            mediaType: download.mediaType,
             preferNoWatermark: preferences.preferNoWatermark,
             matchedCandidateLabel: download.matchedCandidateLabel,
             logs: logsRef.current,

@@ -7,7 +7,9 @@ export type ExtractedInfo = {
   title: string
   description: string | null
   thumbnailURL: string | null
+  imageURLs: string[]
   videoSrc: string | null
+  apiDetailJSON: string | null
   routerDataJSON: string | null
   videoInfoResJSON: string | null
   bodyTextPreview: string
@@ -15,11 +17,21 @@ export type ExtractedInfo = {
   performanceMedia: string[]
 }
 
+export type DownloadedFile = {
+  filePath: string
+  fileName: string
+  finalURL: string
+  bytesWritten: number
+  mediaType: "video" | "image"
+}
+
 export type DownloadSuccess = {
   id: string
   sourceURL: string
   filePath: string
   fileName: string
+  files: DownloadedFile[]
+  mediaType: "video" | "image"
   extracted: ExtractedInfo
   finalURL: string
   bytesWritten: number
@@ -43,6 +55,7 @@ export type DownloadCandidate = {
 
 export const ROOT_DIR = Path.join(FileManager.documentsDirectory, "douyin-downloader")
 export const DOWNLOAD_DIR = Path.join(ROOT_DIR, "videos")
+export const IMAGE_DOWNLOAD_DIR = Path.join(ROOT_DIR, "images")
 export const MOBILE_SAFARI_UA = [
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
   "AppleWebKit/605.1.15 (KHTML, like Gecko)",
@@ -60,6 +73,17 @@ function extractVideoId(url: string | null): string | null {
   return match?.[1] || null
 }
 
+function extractAwemeIdFromURL(url: string | null): string | null {
+  if (!url) return null
+  const match = url.match(/\/(?:share\/)?(?:video|note|gallery|slides)\/(\d{15,20})/) || url.match(/[?&](?:modal_id|aweme_id|item_id)=(\d{15,20})/)
+  return match?.[1] || null
+}
+
+function isGalleryURL(url: string | null): boolean {
+  if (!url) return false
+  return /\/(?:share\/)?(?:note|gallery|slides)\//.test(url)
+}
+
 function firstURLFromAddress(address: unknown): string | null {
   if (!isRecord(address)) return null
 
@@ -69,6 +93,174 @@ function firstURLFromAddress(address: unknown): string | null {
   if (urls.length) return urls[0]
 
   return getString(address.url) || getString(address.uri)
+}
+
+function urlsFromAddress(address: unknown): string[] {
+  if (!isRecord(address)) return []
+
+  const urls = getArray(address.url_list)
+    .map((item: unknown) => getString(item))
+    .filter((item: string | null): item is string => Boolean(item))
+  const singleURL = getString(address.url) || getString(address.uri)
+  if (singleURL) urls.push(singleURL)
+
+  return urls
+}
+
+function dedupeStrings(items: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of items) {
+    if (!item || seen.has(item)) continue
+    seen.add(item)
+    result.push(item)
+  }
+  return result
+}
+
+function normalizeMediaURLForDedupe(url: string): string {
+  const withoutQuery = url.split("?")[0]
+  return withoutQuery
+    .replace(/^https?:\/\//, "")
+    .replace(/~tplv-[^./]+/g, "")
+    .replace(/image-cut-tos-[^/]+\//g, "")
+}
+
+function dedupeMediaURLs(items: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of items) {
+    if (!item) continue
+    const key = normalizeMediaURLForDedupe(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(item)
+  }
+  return result
+}
+
+function collectMediaURLs(source: unknown): string[] {
+  if (!source) return []
+  if (typeof source === "string") return source ? [source] : []
+  if (Array.isArray(source)) return source.flatMap((item) => collectMediaURLs(item))
+  if (!isRecord(source)) return []
+
+  const urls: string[] = []
+  for (const key of ["url_list", "urlList"]) {
+    const list = getArray(source[key])
+    for (const item of list) {
+      const url = getString(item)
+      if (url) urls.push(url)
+    }
+  }
+  for (const key of ["url", "uri"]) {
+    const url = getString(source[key])
+    if (url) urls.push(url)
+  }
+  return urls.sort((a, b) => mediaURLPriority(a) - mediaURLPriority(b))
+}
+
+function mediaURLPriority(url: string): number {
+  const lower = url.toLowerCase()
+  const isWatermarked = [
+    "tplv-dy-water",
+    "dy-water",
+    "owner_watermark",
+    "watermark_image",
+    "watermark=1",
+    "playwm",
+  ].some((hint) => lower.includes(hint))
+  return (isWatermarked ? 100 : 0) + (lower.includes(".webp") ? 1 : 0)
+}
+
+export function extractImageURLs(extracted: ExtractedInfo): string[] {
+  const inlineRoot = extractInlineDetailRoot(extracted)
+  const urls: string[] = []
+
+  if (inlineRoot) {
+    const imagePostInfo = getNestedRecord(inlineRoot, "image_post_info")
+    const postImages = imagePostInfo
+      ? (getArray(imagePostInfo.images).length ? getArray(imagePostInfo.images) : getArray(imagePostInfo.image_list))
+      : []
+    const images = postImages.length
+      ? postImages
+      : (getArray(inlineRoot.images).length ? getArray(inlineRoot.images) : getArray(inlineRoot.image_list))
+    for (const image of images) {
+      if (!isRecord(image)) continue
+      const imageCandidates: string[] = []
+      for (const key of [
+        "watermark_free_download_url_list",
+        "origin_image",
+        "display_image",
+        "download_url",
+        "download_addr",
+        "download_url_list",
+        "owner_watermark_image",
+      ]) {
+        imageCandidates.push(...collectMediaURLs(image[key]))
+      }
+      imageCandidates.push(...urlsFromAddress(image))
+      for (const key of ["download_url", "origin_cover", "cover", "large", "medium", "url"]) {
+        imageCandidates.push(...urlsFromAddress(image[key]))
+        const directURL = getString(image[key])
+        if (directURL) imageCandidates.push(directURL)
+      }
+      const sortedCandidates = dedupeStrings(imageCandidates).sort((a, b) => mediaURLPriority(a) - mediaURLPriority(b))
+      if (sortedCandidates[0]) {
+        urls.push(sortedCandidates[0])
+      }
+    }
+  }
+
+  const hasStructuredImages = urls.length > 0
+  if (!hasStructuredImages) {
+    urls.push(...filterFallbackDOMImageURLs(extracted.imageURLs || []))
+  }
+
+  return dedupeMediaURLs(
+    urls.filter((url) => {
+      const lower = url.toLowerCase()
+      return (
+        lower.startsWith("http") &&
+        !lower.includes("avatar") &&
+        !lower.includes("music-cover") &&
+        !lower.includes("emoji") &&
+        !lower.includes("emoticon") &&
+        !lower.includes("sticker") &&
+        !lower.includes("logo") &&
+        !lower.includes("favicon") &&
+        !lower.includes("webcast") &&
+        !lower.includes("douyin-pc") &&
+        (lower.includes("douyinpic") ||
+          lower.includes("p3-sign") ||
+          lower.includes("tos-cn") ||
+          lower.includes(".jpeg") ||
+          lower.includes(".jpg") ||
+          lower.includes(".png") ||
+          lower.includes(".webp"))
+      )
+    })
+  )
+}
+
+function filterFallbackDOMImageURLs(urls: string[]) {
+  return urls.filter((url) => {
+    const lower = url.toLowerCase()
+    return (
+      lower.startsWith("http") &&
+      !lower.includes("avatar") &&
+      !lower.includes("emoji") &&
+      !lower.includes("emoticon") &&
+      !lower.includes("sticker") &&
+      !lower.includes("logo") &&
+      !lower.includes("favicon") &&
+      !lower.includes("music-cover") &&
+      !lower.includes("webcast") &&
+      (lower.includes("douyinpic") || lower.includes("p3-sign") || lower.includes("tos-cn")) &&
+      !lower.includes("resize,w_") &&
+      !lower.includes("tplv-dy-res")
+    )
+  })
 }
 
 export function extractThumbnailURL(extracted: ExtractedInfo): string | null {
@@ -115,6 +307,7 @@ export function extractAwemeDetailRoot(data: unknown): Record<string, unknown> |
 
 export function extractInlineDetailRoot(extracted: ExtractedInfo): Record<string, unknown> | null {
   const directCandidates = [
+    safeJSONParse(extracted.apiDetailJSON),
     safeJSONParse(extracted.videoInfoResJSON),
     safeJSONParse(extracted.routerDataJSON),
   ]
@@ -282,6 +475,7 @@ async function ensureDir(path: string) {
 export async function ensureDownloadDirectories() {
   await ensureDir(ROOT_DIR)
   await ensureDir(DOWNLOAD_DIR)
+  await ensureDir(IMAGE_DOWNLOAD_DIR)
 }
 
 export function isLikelyMediaResponse(finalURL: string, mimeType?: string): boolean {
@@ -289,6 +483,115 @@ export function isLikelyMediaResponse(finalURL: string, mimeType?: string): bool
   if (mime.startsWith("video/")) return true
   if (mime === "application/octet-stream") return true
   return ["douyinvod", ".mp4", "video_mp4", "tos-cn", "aweme.snssdk.com/aweme/v1/play"].some((token) => finalURL.includes(token))
+}
+
+export function isLikelyImageResponse(finalURL: string, mimeType?: string): boolean {
+  const mime = mimeType || ""
+  if (mime.startsWith("image/")) return true
+  const lower = finalURL.toLowerCase()
+  return [".jpg", ".jpeg", ".png", ".webp", "douyinpic", "p3-sign", "tos-cn"].some((token) => lower.includes(token))
+}
+
+function imageExtensionFromResponse(finalURL: string, mimeType?: string): string {
+  const mime = mimeType || ""
+  if (mime.includes("png")) return "png"
+  if (mime.includes("webp")) return "webp"
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg"
+  const pathMatch = finalURL.toLowerCase().match(/\.(jpe?g|png|webp)(?:[?#]|$)/)
+  return pathMatch?.[1]?.replace("jpeg", "jpg") || "jpg"
+}
+
+async function downloadImageBatch(options: {
+  sourceURL: string
+  extracted: ExtractedInfo
+  imageURLs: string[]
+  onProgress: (fraction: number, stage: string) => void
+  onLog: (message: string) => void
+}): Promise<DownloadSuccess> {
+  const { sourceURL, extracted, imageURLs, onProgress, onLog } = options
+  const baseName = sanitizeFileName(extracted.title || "douyin_images")
+  const files: DownloadedFile[] = []
+  let lastError = "未开始下载图片"
+
+  onLog(`检测到 ${imageURLs.length} 张图片，开始批量下载图文。`)
+  onProgress(0.22, `检测到 ${imageURLs.length} 张图片`)
+
+  for (let index = 0; index < imageURLs.length; index++) {
+    const imageURL = imageURLs[index]
+    onProgress(0.22 + (index / imageURLs.length) * 0.68, `正在下载图片 ${index + 1}/${imageURLs.length}`)
+    onLog(`下载图片 ${index + 1}/${imageURLs.length}`)
+
+    try {
+      const response = await fetch(imageURL, {
+        method: "GET",
+        timeout: 180,
+        debugLabel: `douyin-downloader-image-${index + 1}`,
+        headers: {
+          "User-Agent": MOBILE_SAFARI_UA,
+          Referer: extracted.pageURL,
+          Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        },
+      })
+
+      if (!response.ok) {
+        lastError = `image_${index + 1}: ${response.status} ${response.statusText}`
+        onLog(`图片下载失败：${lastError}`)
+        continue
+      }
+
+      if (!isLikelyImageResponse(response.url, response.mimeType)) {
+        lastError = `image_${index + 1}: 响应不是图片资源 ${response.mimeType || "unknown"}`
+        onLog(`图片跳过：${lastError}`)
+        continue
+      }
+
+      const bytes = await response.bytes()
+      if (bytes.byteLength === 0) {
+        lastError = `image_${index + 1}: 图片响应为空`
+        onLog(`图片跳过：${lastError}`)
+        continue
+      }
+      const ext = imageExtensionFromResponse(response.url, response.mimeType)
+      const fileName = `${baseName}_${String(files.length + 1).padStart(2, "0")}.${ext}`
+      const filePath = Path.join(IMAGE_DOWNLOAD_DIR, fileName)
+      await FileManager.writeAsBytes(filePath, bytes)
+      files.push({
+        filePath,
+        fileName,
+        finalURL: response.url,
+        bytesWritten: bytes.byteLength,
+        mediaType: "image",
+      })
+      onLog(`图片写入完成：${fileName}，大小 ${formatBytes(bytes.byteLength)}`)
+    } catch (error) {
+      lastError = `image_${index + 1}: ${error instanceof Error ? error.message : String(error)}`
+      onLog(`图片下载异常：${lastError}`)
+    }
+  }
+
+  if (!files.length) {
+    throw new Error(`图文图片下载失败：${lastError}`)
+  }
+
+  const bytesWritten = files.reduce((sum, file) => sum + file.bytesWritten, 0)
+  onProgress(1, `图文下载完成：${files.length} 张图片`)
+
+  return {
+    id: UUID.string(),
+    sourceURL,
+    filePath: files[0].filePath,
+    fileName: files.length === 1 ? files[0].fileName : `${baseName}（${files.length}张图片）`,
+    files,
+    mediaType: "image",
+    extracted: {
+      ...extracted,
+      imageURLs,
+    },
+    finalURL: files.map((file) => file.finalURL).join("\n"),
+    bytesWritten,
+    createdAt: new Date().toISOString(),
+    matchedCandidateLabel: `image_batch_${files.length}`,
+  }
 }
 
 export async function extractFromWebView(
@@ -340,10 +643,10 @@ export async function extractFromWebView(
     const data = await webView.evaluateJavaScript<ExtractedInfo>(`
       const mediaEntries = performance.getEntriesByType('resource')
         .map((item) => item.name)
-        .filter((name) => ['video','playwm','/play/','mp4','m3u8','aweme','douyinvod','tos-cn','iteminfo'].some((token) => name.includes(token)))
+        .filter((name) => ['video','playwm','/play/','mp4','m3u8','aweme','douyinvod','tos-cn','iteminfo','image','douyinpic'].some((token) => name.includes(token)))
       const scripts = Array.from(document.scripts)
         .map((s) => s.textContent || '')
-        .filter((text) => ['aweme_detail','play_addr','bit_rate','playwm','video_id','iteminfo','_ROUTER_DATA','videoInfoRes'].some((token) => text.includes(token)))
+        .filter((text) => ['aweme_detail','play_addr','bit_rate','playwm','video_id','iteminfo','_ROUTER_DATA','videoInfoRes','image_post_info','images'].some((token) => text.includes(token)))
         .slice(0, 8)
         .map((text) => text.slice(0, 12000))
       let routerDataJSON = null
@@ -372,7 +675,12 @@ export async function extractFromWebView(
           || document.querySelector('meta[name="twitter:image"]')?.content
           || document.querySelector('video')?.poster
           || null,
+        imageURLs: Array.from(document.images)
+          .map((img) => img.currentSrc || img.src)
+          .filter(Boolean)
+          .slice(0, 80),
         videoSrc: document.querySelector('video')?.currentSrc || document.querySelector('video')?.src || null,
+        apiDetailJSON: null,
         routerDataJSON,
         videoInfoResJSON,
         bodyTextPreview: document.body?.innerText?.slice(0, 600) || '',
@@ -382,15 +690,104 @@ export async function extractFromWebView(
     `)
 
     log?.(`页面信息读取完成：title=${data.title || "(空)"}`)
-    log?.(`videoSrc=${data.videoSrc ? "已提取" : "未提取"}，routerData=${data.routerDataJSON ? "有" : "无"}，videoInfoRes=${data.videoInfoResJSON ? "有" : "无"}`)
+    const preliminaryImages = extractImageURLs(data)
+    const galleryLike = isGalleryURL(url) || isGalleryURL(data.canonical) || isGalleryURL(data.pageURL)
+    const shouldFetchDetail = galleryLike || (!data.videoSrc && preliminaryImages.length === 0)
+    const awemeId = shouldFetchDetail ? (extractAwemeIdFromURL(data.canonical) || extractAwemeIdFromURL(data.pageURL) || extractAwemeIdFromURL(url)) : null
+    if (awemeId) {
+      report?.({ fraction: 0.19, stage: "正在尝试读取作品详情接口" })
+      try {
+        const apiDetailJSON = await fetchAwemeDetailInWebView(webView, awemeId)
+        if (apiDetailJSON) {
+          data.apiDetailJSON = apiDetailJSON
+          log?.("作品详情接口已命中。")
+        } else {
+          log?.("作品详情接口未命中，继续使用页面内嵌数据。")
+        }
+      } catch (error) {
+        log?.(`作品详情接口跳过：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    log?.(`videoSrc=${data.videoSrc ? "已提取" : "未提取"}，apiDetail=${data.apiDetailJSON ? "有" : "无"}，routerData=${data.routerDataJSON ? "有" : "无"}，videoInfoRes=${data.videoInfoResJSON ? "有" : "无"}`)
     data.thumbnailURL = extractThumbnailURL(data)
+    const structuredImageCount = extractImageURLs({ ...data, imageURLs: [] }).length
+    data.imageURLs = extractImageURLs(data)
     log?.(`thumbnail=${data.thumbnailURL ? "已提取" : "未提取"}`)
+    log?.(`imageURLs=${data.imageURLs.length}，structuredImages=${structuredImageCount}`)
     log?.(`performanceMedia=${data.performanceMedia.length}，resourceHints=${data.resourceHints.length}`)
 
     return data
   } finally {
     webView.dispose()
   }
+}
+
+async function fetchAwemeDetailInWebView(webView: WebViewController, awemeId: string): Promise<string | null> {
+  const escapedAwemeId = JSON.stringify(awemeId)
+  return webView.evaluateJavaScript<string | null>(`
+    (async () => {
+      const awemeId = ${escapedAwemeId}
+      const timeout = (ms) => new Promise((resolve) => setTimeout(() => resolve(null), ms))
+      const fetchDetail = async () => {
+        const baseParams = {
+          device_platform: 'webapp',
+          channel: 'channel_pc_web',
+          update_version_code: '170400',
+          pc_client_type: '1',
+          pc_libra_divert: 'Windows',
+          version_code: '290100',
+          version_name: '29.1.0',
+          cookie_enabled: 'true',
+          screen_width: String(window.screen?.width || 390),
+          screen_height: String(window.screen?.height || 844),
+          browser_language: navigator.language || 'zh-CN',
+          browser_platform: navigator.platform || 'iPhone',
+          browser_name: 'Safari',
+          browser_version: '18.0',
+          browser_online: String(navigator.onLine),
+          engine_name: 'WebKit',
+          engine_version: '605.1.15',
+          os_name: 'iOS',
+          os_version: '18',
+          cpu_core_num: String(navigator.hardwareConcurrency || 8),
+          device_memory: '8',
+          platform: 'PC',
+          downlink: '10',
+          effective_type: '4g',
+          round_trip_time: '200',
+          support_h265: '1',
+          support_dash: '1',
+          uifid: '',
+          aweme_id: awemeId,
+        }
+        const endpoints = [
+          '/aweme/v1/web/aweme/detail/',
+          'https://www.douyin.com/aweme/v1/web/aweme/detail/',
+          'https://www.iesdouyin.com/aweme/v1/web/aweme/detail/',
+        ]
+        for (const aid of ['6383', '1128']) {
+          const params = new URLSearchParams({ ...baseParams, aid })
+          for (const endpoint of endpoints) {
+            try {
+              const controller = new AbortController()
+              const timer = setTimeout(() => controller.abort(), 1800)
+              const response = await fetch(endpoint + '?' + params.toString(), {
+                credentials: 'include',
+                signal: controller.signal,
+                headers: { accept: 'application/json, text/plain, */*' },
+              })
+              clearTimeout(timer)
+              if (!response.ok) continue
+              const json = await response.json()
+              if (json?.aweme_detail) return JSON.stringify(json)
+            } catch (e) {}
+          }
+        }
+        return null
+      }
+      return await Promise.race([fetchDetail(), timeout(4500)])
+    })()
+  `)
 }
 
 export async function downloadVideo(
@@ -419,18 +816,46 @@ export async function downloadVideo(
   const inlineRoot = extractInlineDetailRoot(extracted)
   log(`页面 aweme 内嵌数据：${inlineRoot ? "已命中" : "未命中"}`)
 
-  if (!extracted.videoSrc && !inlineRoot) {
-    throw new Error("未能从页面中提取到视频地址或 aweme 内嵌数据")
+  const imageURLs = extractImageURLs(extracted)
+  const galleryLike = isGalleryURL(sourceURL) || isGalleryURL(extracted.canonical) || isGalleryURL(extracted.pageURL)
+
+  if (!extracted.videoSrc && !inlineRoot && !imageURLs.length) {
+    throw new Error("未能从页面中提取到视频地址、图片地址或 aweme 内嵌数据")
   }
 
   await ensureDownloadDirectories()
-  log("已确认下载目录可用：Documents/douyin-downloader/videos")
+  log("已确认下载目录可用：Documents/douyin-downloader/videos 与 images")
 
   const candidates = buildDownloadCandidates(
     extracted,
     options?.preferNoWatermark ?? true
   )
   let lastError = "未生成可用下载候选地址"
+
+  if (galleryLike && imageURLs.length) {
+    log("已识别为图文链接，优先批量下载图片，跳过视频候选。")
+    return downloadImageBatch({
+      sourceURL,
+      extracted,
+      imageURLs,
+      onProgress: reportProgress,
+      onLog: log,
+    })
+  }
+
+  if (galleryLike && !imageURLs.length) {
+    throw new Error("已识别为图文链接，但未能提取到图片地址")
+  }
+
+  if (!candidates.length && imageURLs.length) {
+    return downloadImageBatch({
+      sourceURL,
+      extracted,
+      imageURLs,
+      onProgress: reportProgress,
+      onLog: log,
+    })
+  }
 
   if (!candidates.length) {
     throw new Error(lastError)
@@ -472,6 +897,11 @@ export async function downloadVideo(
       reportProgress(0.8, `候选命中：${candidate.label}，正在读取视频数据`)
 
       const bytes = await response.bytes()
+      if (bytes.byteLength === 0) {
+        lastError = `${candidate.label}: 视频响应为空`
+        log(`候选跳过：${lastError}`)
+        continue
+      }
       const fileName = `${sanitizeFileName(extracted.title)}.mp4`
       const filePath = Path.join(DOWNLOAD_DIR, fileName)
 
@@ -486,6 +916,14 @@ export async function downloadVideo(
         sourceURL,
         filePath,
         fileName,
+        files: [{
+          filePath,
+          fileName,
+          finalURL: response.url,
+          bytesWritten: bytes.byteLength,
+          mediaType: "video",
+        }],
+        mediaType: "video",
         extracted,
         finalURL: response.url,
         bytesWritten: bytes.byteLength,
@@ -496,6 +934,17 @@ export async function downloadVideo(
       lastError = `${candidate.label}: ${error instanceof Error ? error.message : String(error)}`
       log(`候选异常：${lastError}`)
     }
+  }
+
+  if (imageURLs.length) {
+    log(`视频候选均失败，回退到图文图片下载。最后视频错误：${lastError}`)
+    return downloadImageBatch({
+      sourceURL,
+      extracted,
+      imageURLs,
+      onProgress: reportProgress,
+      onLog: log,
+    })
   }
 
   throw new Error(`所有下载候选均失败：${lastError}`)
