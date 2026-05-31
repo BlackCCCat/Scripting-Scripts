@@ -17,6 +17,7 @@
 - [Scripting Rime Keyboard](./Scripting-Rime-Keyboard)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Scripting-Rime-Keyboard.zip)
 - [DouYin Downloader](./DouYin-Downloader)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/DouYin-Downloader.zip)
 - [ZDict](./ZDict)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/ZDict.zip)
+- [Gas Info](./ZDict)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Gas-Info.zip)
 
 
 
@@ -33,3 +34,4 @@
 - [Scripting Rime Keyboard](./Scripting-Rime-Keyboard) 的全选功能由仓/元书开发者提供帮助实现
 - [DouYin Downloader](./DouYin-Downloader)由`Scripting`开发者提供的脚本二次修改
 - [ZDict](./ZDict) 数据来源为[汉典](https://zdic.net)
+- [Gas Info](./ZDict) 数据来源为[汽油价格](http://www.qiyoujiage.com)，UI几乎照搬[今日油价](https://apps.apple.com/us/app/%E4%BB%8A%E6%97%A5%E6%B2%B9%E4%BB%B7-%E6%B2%B9%E4%BB%B7%E6%9F%A5%E8%AF%A2%E6%B1%BD%E6%B2%B9%E4%BB%B7%E6%A0%BC%E5%AE%9E%E6%97%B6%E5%8A%A0%E6%B2%B9%E8%A1%8C%E6%83%85%E6%9F%A5%E8%AF%A2/id6757325239)

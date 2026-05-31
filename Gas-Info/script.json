@@ -1,0 +1,44 @@
+{
+  "contributors": [],
+  "name": "今日油价",
+  "iconImage": null,
+  "localizedNames": {
+    "zh": "",
+    "pt": "",
+    "de": "",
+    "es": "",
+    "ja": "",
+    "en": "",
+    "fr": "",
+    "it": "",
+    "ru": ""
+  },
+  "localizedDescriptions": {
+    "zh": "",
+    "pt": "",
+    "de": "",
+    "es": "",
+    "ja": "",
+    "en": "",
+    "fr": "",
+    "it": "",
+    "ru": ""
+  },
+  "icon": "fuelpump.fill",
+  "description": null,
+  "version": "",
+  "color": "rgba(235, 141, 0, 1.00)",
+  "runInApp": false,
+  "author": {
+    "name": "BlackCCCat",
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts"
+  },
+  "entry": "index.tsx",
+  "intentInputTypes": [],
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Gas-Info.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  }
+}
