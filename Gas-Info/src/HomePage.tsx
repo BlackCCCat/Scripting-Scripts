@@ -263,19 +263,31 @@ function ProvinceDetailPage({
           clipShape={{ type: "rect", cornerRadius: 14 }}
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         >
-          <HStack spacing={8}>
+          <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
             <Image systemName="info.circle" font={16} foregroundStyle={Theme.orange} />
             <Text font={17} fontWeight="semibold">
               说明
             </Text>
           </HStack>
-          <Text font={14} foregroundStyle={Theme.secondary}>
+          <Text
+            font={14}
+            foregroundStyle={Theme.secondary}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          >
             · 油价数据来源于 {source}
           </Text>
-          <Text font={14} foregroundStyle={Theme.secondary}>
+          <Text
+            font={14}
+            foregroundStyle={Theme.secondary}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          >
             · 实际价格以加油站公示价格为准
           </Text>
-          <Text font={14} foregroundStyle={Theme.secondary}>
+          <Text
+            font={14}
+            foregroundStyle={Theme.secondary}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          >
             · 当前数据源未提供历史趋势数据
           </Text>
         </VStack>
