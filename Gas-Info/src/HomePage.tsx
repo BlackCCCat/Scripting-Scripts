@@ -126,11 +126,6 @@ function HeaderCard({
           <Text font={13} fontWeight="medium" foregroundStyle="white">
             下次调价: {forecast.nextAdjustText} · 剩余 {forecast.remainingDays} 天
           </Text>
-          <Image
-            systemName="chevron.right"
-            font={11}
-            foregroundStyle="rgba(255,255,255,0.8)"
-          />
         </HStack>
         <Text
           font={12}
@@ -424,6 +419,7 @@ function ProvinceSelectorPage({
 export function HomePage({ preferred }: { preferred: FuelCode }) {
   const [data, setData] = useState<OilPriceData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [resolvingProvince, setResolvingProvince] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [autoProvince, setAutoProvince] = useState<ProvincePrice | null>(null)
@@ -440,6 +436,7 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
     } else {
       setLoading(true)
     }
+    setResolvingProvince(true)
     setError(null)
     try {
       const result = await fetchOilPrices({ forceRefresh })
@@ -472,6 +469,7 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
       setError(e instanceof Error ? e.message : "油价数据加载失败")
     } finally {
       setLoading(false)
+      setResolvingProvince(false)
       setRefreshing(false)
     }
   }
@@ -485,8 +483,9 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
     : null
   const headerProvince =
     locationModeState === "manual"
-      ? manualProvince ?? autoProvince ?? data?.provinces[0] ?? null
-      : autoProvince ?? data?.provinces[0] ?? null
+      ? manualProvince ??
+        (!resolvingProvince ? autoProvince ?? data?.provinces[0] ?? null : null)
+      : autoProvince ?? (!resolvingProvince ? data?.provinces[0] ?? null : null)
   const others = data
     ? data.provinces.filter(p => p.province !== headerProvince?.province)
     : []
@@ -558,7 +557,7 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
         padding={{ horizontal: 16, top: 8, bottom: 24 }}
         alignment="leading"
       >
-        {loading && !data ? (
+        {(loading && !data) || (data && resolvingProvince && !headerProvince) ? (
           <HStack frame={{ maxWidth: "infinity", minHeight: 200 }}>
             <Spacer />
             <VStack spacing={10}>
@@ -567,7 +566,9 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
                 font={32}
                 foregroundStyle={Theme.orange}
               />
-              <Text foregroundStyle={Theme.secondary}>加载中…</Text>
+              <Text foregroundStyle={Theme.secondary}>
+                {data ? "正在确认省份…" : "加载中…"}
+              </Text>
             </VStack>
             <Spacer />
           </HStack>
