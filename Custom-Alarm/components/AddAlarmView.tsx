@@ -22,6 +22,7 @@ import {
   nextRoundedTimestamp,
 } from "../utils/alarm_runtime"
 import { DEFAULT_HOLIDAY_SOURCE_ID, DEFAULT_SNOOZE_MINUTES } from "../utils/storage"
+import { DEFAULT_SOUND_NAME, soundDisplayName } from "../utils/alarm_sounds"
 import { CenterRowButton } from "./CenterRowButton"
 
 type DraftRepeatMode = "daily" | "weekly" | "monthly" | "holiday" | "custom"
@@ -131,12 +132,14 @@ function draftKey(draft: AlarmDraft): string {
   return JSON.stringify({
     title: draft.title.trim(),
     snoozeMinutes: draft.snoozeMinutes,
+    soundName: draft.soundName,
     repeatRule: normalizeRepeatRule(draft.repeatRule),
   })
 }
 
 export function AddAlarmView(props: {
   holidaySources: HolidayCalendarSource[]
+  availableSounds: string[]
   existingDrafts?: AlarmDraft[]
   initial?: AlarmDraft | null
   mode?: "create" | "edit"
@@ -162,6 +165,13 @@ export function AddAlarmView(props: {
 
   const [title, setTitle] = useState(initialDraft?.title ?? "闹钟")
   const [snoozeMinutes, setSnoozeMinutes] = useState(initialDraft?.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES)
+  const soundOptions = (() => {
+    const merged = new Set<string>(props.availableSounds.length ? props.availableSounds : [DEFAULT_SOUND_NAME])
+    if (initialDraft?.soundName) merged.add(initialDraft.soundName)
+    merged.add(DEFAULT_SOUND_NAME)
+    return Array.from(merged)
+  })()
+  const [soundName, setSoundName] = useState<string>(initialDraft?.soundName ?? DEFAULT_SOUND_NAME)
   const [repeatEnabled, setRepeatEnabled] = useState(initialRepeatEnabled)
   const [repeatMode, setRepeatMode] = useState<DraftRepeatMode>(initialRepeatMode)
   const [oneTimeTimestamp, setOneTimeTimestamp] = useState<number>(initialTimestamp)
@@ -239,6 +249,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "once",
           timestamp: oneTimeTimestamp,
@@ -248,6 +259,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "daily",
           hour,
@@ -259,6 +271,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "weekly",
           hour,
@@ -271,6 +284,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "monthly",
           hour,
@@ -283,6 +297,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "holiday",
           hour,
@@ -295,6 +310,7 @@ export function AddAlarmView(props: {
       result = {
         title: fixedTitle,
         snoozeMinutes,
+        soundName,
         repeatRule: {
           kind: "custom",
           hour,
@@ -334,6 +350,18 @@ export function AddAlarmView(props: {
             prompt="例如：起床、吃药、出门"
             onChanged={setTitle}
           />
+          <Picker
+            title="闹钟声音"
+            pickerStyle="menu"
+            value={Math.max(0, soundOptions.indexOf(soundName))}
+            onChanged={(index: number) => setSoundName(soundOptions[index] ?? DEFAULT_SOUND_NAME)}
+          >
+            {soundOptions.map((item, index) => (
+              <Text key={`sound-${item}`} tag={index}>
+                {soundDisplayName(item)}
+              </Text>
+            ))}
+          </Picker>
           <Picker
             title="推迟时长"
             pickerStyle="menu"

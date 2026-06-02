@@ -1,6 +1,7 @@
 import { AppIntentManager, AppIntentProtocol, Script, Widget } from "scripting"
 
 import type { AlarmRecord, HolidayCalendarSource } from "./types"
+import { DEFAULT_SOUND_NAME } from "./utils/alarm_sounds"
 import {
   DEFAULT_HOLIDAY_SOURCE_ID,
   loadCustomAlarmState,
@@ -14,6 +15,7 @@ type SnoozeIntentParams = {
   logicalAlarmId: string
   title: string
   snoozeMinutes: number
+  soundName: string
 }
 
 type StopIntentParams = {
@@ -212,6 +214,7 @@ function buildRollingAlarmConfiguration(
     logicalAlarmId: string
     title: string
     snoozeMinutes: number
+    soundName: string
     fireDate: Date
   }
 ): AlarmManager.Configuration {
@@ -222,7 +225,9 @@ function buildRollingAlarmConfiguration(
       params.logicalAlarmId,
       params.snoozeMinutes
     ),
-    sound: AlarmManager.Sound.default(),
+    sound: params.soundName !== DEFAULT_SOUND_NAME
+      ? AlarmManager.Sound.named(params.soundName)
+      : AlarmManager.Sound.default(),
     stopIntent: StopCustomAlarmIntent({
       alarmId: params.alarmId,
       logicalAlarmId: params.logicalAlarmId,
@@ -232,6 +237,7 @@ function buildRollingAlarmConfiguration(
       logicalAlarmId: params.logicalAlarmId,
       title: params.title,
       snoozeMinutes: params.snoozeMinutes,
+      soundName: params.soundName,
     }) as any : null,
   })
 
@@ -285,7 +291,9 @@ function buildSnoozeConfiguration(params: SnoozeIntentParams): AlarmManager.Conf
       params.logicalAlarmId,
       params.snoozeMinutes
     ),
-    sound: AlarmManager.Sound.default(),
+    sound: params.soundName !== DEFAULT_SOUND_NAME
+      ? AlarmManager.Sound.named(params.soundName)
+      : AlarmManager.Sound.default(),
     stopIntent: StopCustomAlarmIntent({
       alarmId: params.alarmId,
       logicalAlarmId: params.logicalAlarmId,
@@ -418,6 +426,7 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
                   logicalAlarmId: record.id,
                   title: record.title,
                   snoozeMinutes: record.snoozeMinutes,
+                  soundName: record.soundName,
                   fireDate: nextDate,
                 })
               )

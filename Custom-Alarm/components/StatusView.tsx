@@ -1,4 +1,5 @@
 import {
+  Button,
   Form,
   HStack,
   Image,
@@ -40,6 +41,7 @@ export function StatusView(props: {
   enabledCount: number
   managedInstanceCount: number
   cleanupCandidateCount: number
+  availableSoundCount: number
   currentHolidayTitle: string
   syncedHolidayCount: number
   currentMonthTotalOffCount: number
@@ -47,6 +49,7 @@ export function StatusView(props: {
   currentMonthTotalWorkCount: number
   currentMonthRemainingWorkCount: number
   lastSyncedAt: number | null
+  onOpenSoundSettings?: () => void
   embedded?: boolean
 }) {
   const dismiss = Navigation.useDismiss()
@@ -70,6 +73,22 @@ export function StatusView(props: {
         <MetricRow icon="checkmark.circle.fill" title="已启用" value={String(props.enabledCount)} tint="#16A34A" />
         <MetricRow icon="bell.and.waves.left.and.right.fill" title="注册到系统闹钟" value={String(props.managedInstanceCount)} />
         <MetricRow icon="exclamationmark.triangle.fill" title="残留闹钟" value={String(props.cleanupCandidateCount)} tint="#DC2626" />
+        <Button
+          buttonStyle="plain"
+          action={() => props.onOpenSoundSettings?.()}
+        >
+          <HStack spacing={12} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            <Image
+              systemName="speaker.wave.2.fill"
+              foregroundStyle={"#F59E0B" as any}
+              frame={{ width: 20, alignment: "center" as any }}
+            />
+            <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              声音
+            </Text>
+            <Text foregroundStyle="secondaryLabel">{String(props.availableSoundCount)}</Text>
+          </HStack>
+        </Button>
       </Section>
 
       <Section header={<Text>节假日日历</Text>}>

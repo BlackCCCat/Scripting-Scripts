@@ -5,6 +5,7 @@ import type {
   HolidayCalendarSource,
   HolidayMatchMode,
 } from "../types"
+import { DEFAULT_SOUND_NAME, normalizeSoundNames } from "./alarm_sounds"
 
 export const DEFAULT_HOLIDAY_SOURCE_ID = "cn-holiday-calendar"
 export const DEFAULT_HOLIDAY_URL = "https://calendars.icloud.com/holidays/cn_zh.ics"
@@ -65,6 +66,7 @@ function emptyState(): CustomAlarmState {
   return {
     alarms: [],
     holidaySources: [defaultHolidaySource()],
+    availableSounds: [DEFAULT_SOUND_NAME],
     managedSystemAlarmIds: [],
     cleanupCandidateAlarmIds: [],
   }
@@ -216,6 +218,7 @@ function normalizeRecord(value: any): AlarmRecord | null {
     title,
     enabled: Boolean(value.enabled ?? true),
     snoozeMinutes: clampSnoozeMinutes(value.snoozeMinutes),
+    soundName: String(value.soundName ?? DEFAULT_SOUND_NAME).trim() || DEFAULT_SOUND_NAME,
     repeatRule,
     completedOccurrences: Math.max(0, Math.floor(Number(value.completedOccurrences) || 0)),
     systemAlarmIds: Array.isArray(value.systemAlarmIds)
@@ -302,6 +305,7 @@ export function loadCustomAlarmState(): CustomAlarmState {
     return {
       alarms,
       holidaySources: [builtinHolidaySource(normalizedSources)],
+      availableSounds: normalizeSoundNames(Array.isArray(data?.availableSounds) ? data.availableSounds : []),
       managedSystemAlarmIds: mergeManagedSystemAlarmIds(
         normalizeStringIdList(data?.managedSystemAlarmIds),
         collectRecordSystemAlarmIds(alarms)
@@ -323,6 +327,7 @@ export function saveCustomAlarmState(state: CustomAlarmState): void {
     JSON.stringify({
       alarms: state.alarms,
       holidaySources: [builtinHolidaySource(state.holidaySources)],
+      availableSounds: normalizeSoundNames(state.availableSounds),
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds: normalizeStringIdList(state.cleanupCandidateAlarmIds),
     }, null, 2)

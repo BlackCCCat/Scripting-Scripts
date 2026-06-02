@@ -1,5 +1,6 @@
 import type { AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { SnoozeCustomAlarmIntent, StopCustomAlarmIntent } from "../app_intents"
+import { DEFAULT_SOUND_NAME } from "./alarm_sounds"
 import { buildHolidayDayMap } from "./holiday_calendar"
 
 export const EXPANDED_RULE_HORIZON_DAYS = 365
@@ -198,10 +199,17 @@ function buildAttributes(
   return attributes
 }
 
+function buildAlarmSound(soundName: string) {
+  return soundName && soundName !== DEFAULT_SOUND_NAME
+    ? AlarmManager.Sound.named(soundName)
+    : AlarmManager.Sound.default()
+}
+
 function buildConfiguration(
   systemAlarmId: string,
   logicalAlarmId: string,
   title: string,
+  soundName: string,
   schedule: AlarmManager.Schedule,
   snoozeMinutes: number,
   options?: {
@@ -211,7 +219,7 @@ function buildConfiguration(
   const configuration = AlarmManager.Configuration.alarm({
     schedule,
     attributes: buildAttributes(title, logicalAlarmId, snoozeMinutes),
-    sound: AlarmManager.Sound.default(),
+    sound: buildAlarmSound(soundName),
     stopIntent: options?.attachStopIntent ? StopCustomAlarmIntent({
       alarmId: systemAlarmId,
       logicalAlarmId,
@@ -221,6 +229,7 @@ function buildConfiguration(
       logicalAlarmId,
       title,
       snoozeMinutes,
+      soundName,
     }) as any : null,
   })
   if (!configuration) throw new Error("闹钟配置创建失败")
@@ -575,6 +584,7 @@ async function scheduleFixedTimestamps(
       systemId,
       record.id,
       record.title,
+      record.soundName,
       AlarmManager.Schedule.fixed(new Date(timestamp)),
       record.snoozeMinutes
     )
@@ -717,6 +727,7 @@ export async function scheduleAlarm(
           systemId,
           record.id,
           record.title,
+          record.soundName,
           AlarmManager.Schedule.fixed(new Date(record.repeatRule.timestamp)),
           record.snoozeMinutes
         )
@@ -733,6 +744,7 @@ export async function scheduleAlarm(
             systemId,
             record.id,
             record.title,
+            record.soundName,
             AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
             record.snoozeMinutes,
             { attachStopIntent: true }
@@ -745,6 +757,7 @@ export async function scheduleAlarm(
             systemId,
             record.id,
             record.title,
+            record.soundName,
             AlarmManager.Schedule.relative(record.repeatRule.hour, record.repeatRule.minute),
             record.snoozeMinutes
           )
@@ -762,6 +775,7 @@ export async function scheduleAlarm(
             systemId,
             record.id,
             record.title,
+            record.soundName,
             AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
             record.snoozeMinutes,
             { attachStopIntent: true }
@@ -774,6 +788,7 @@ export async function scheduleAlarm(
             systemId,
             record.id,
             record.title,
+            record.soundName,
             AlarmManager.Schedule.weekly(
               record.repeatRule.hour,
               record.repeatRule.minute,
@@ -794,6 +809,7 @@ export async function scheduleAlarm(
           systemId,
           record.id,
           record.title,
+          record.soundName,
           AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
           record.snoozeMinutes,
           { attachStopIntent: true }
@@ -817,6 +833,7 @@ export async function scheduleAlarm(
           systemId,
           record.id,
           record.title,
+          record.soundName,
           AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
           record.snoozeMinutes,
           { attachStopIntent: true }
@@ -833,6 +850,7 @@ export async function scheduleAlarm(
           systemId,
           record.id,
           record.title,
+          record.soundName,
           AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
           record.snoozeMinutes,
           { attachStopIntent: true }
