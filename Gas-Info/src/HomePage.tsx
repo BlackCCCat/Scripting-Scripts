@@ -537,7 +537,7 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
       // 定位当前省份
       let provinceName: string | null = null
       try {
-        const loc = await Location.requestCurrent()
+        const loc = await Location.requestCurrent({ forceRequest: forceRefresh })
         if (loc) {
           const placemarks = await Location.reverseGeocode({
             latitude: loc.latitude,

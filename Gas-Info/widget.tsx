@@ -59,7 +59,7 @@ async function locateProvinceName(): Promise<string | null> {
     if (!Location.isAuthorizedForWidgetUpdates) {
       return null
     }
-    const loc = await Location.requestCurrent()
+    const loc = await Location.requestCurrent({ forceRequest: true })
     if (!loc) {
       return null
     }
