@@ -1,7 +1,7 @@
 import { Path } from "scripting"
 
 export const DEFAULT_SOUND_NAME = "Default"
-const SUPPORTED_SOUND_EXTENSIONS = new Set([".aiff", ".wav", ".caf"])
+const SUPPORTED_SOUND_EXTENSIONS = new Set([".aiff", ".wav", ".caf", ".mp3"])
 
 export function soundsDirectoryPath(): string {
   const fileManager = getFileManager()
