@@ -7,6 +7,7 @@ import {
   Spacer,
   Button,
   Divider,
+  Menu,
   NavigationLink,
   Navigation,
   useState,
@@ -25,6 +26,13 @@ import {
   setLocationMode,
   setManualProvinceName,
 } from "./settings"
+
+type ProvinceSortMode =
+  | "default"
+  | "nameAsc"
+  | "nameDesc"
+  | "priceAsc"
+  | "priceDesc"
 
 /** 头部高亮油价卡片 */
 function HeaderCard({
@@ -115,17 +123,21 @@ function HeaderCard({
         frame={{ maxWidth: "infinity" }}
       >
         <HStack
-          spacing={6}
-          frame={{ maxWidth: "infinity", alignment: "center" as any }}
+          spacing={0}
+          frame={{ maxWidth: "infinity" }}
         >
-          <Image
-            systemName="calendar"
-            font={13}
-            foregroundStyle="rgba(255,255,255,0.9)"
-          />
-          <Text font={13} fontWeight="medium" foregroundStyle="white">
-            下次调价: {forecast.nextAdjustText} · 剩余 {forecast.remainingDays} 天
-          </Text>
+          <Spacer />
+          <HStack spacing={6}>
+            <Image
+              systemName="calendar"
+              font={13}
+              foregroundStyle="rgba(255,255,255,0.9)"
+            />
+            <Text font={13} fontWeight="medium" foregroundStyle="white">
+              下次调价: {forecast.nextAdjustText} · 剩余 {forecast.remainingDays} 天
+            </Text>
+          </HStack>
+          <Spacer />
         </HStack>
         <Text
           font={12}
@@ -173,6 +185,82 @@ function ProvinceRow({ item }: { item: ProvincePrice }) {
         ))}
       </HStack>
     </VStack>
+  )
+}
+
+function sortModeLabel(mode: ProvinceSortMode): string {
+  switch (mode) {
+    case "nameAsc":
+      return "名称正序"
+    case "nameDesc":
+      return "名称倒序"
+    case "priceAsc":
+      return "价格低到高"
+    case "priceDesc":
+      return "价格高到低"
+    default:
+      return "默认排序"
+  }
+}
+
+function sortProvinces(
+  provinces: ProvincePrice[],
+  mode: ProvinceSortMode,
+  preferred: FuelCode
+): ProvincePrice[] {
+  if (mode === "default") {
+    return provinces
+  }
+
+  return [...provinces].sort((a, b) => {
+    if (mode === "nameAsc" || mode === "nameDesc") {
+      const result = a.province.localeCompare(b.province, "zh-Hans-CN")
+      return mode === "nameAsc" ? result : -result
+    }
+
+    const result = a.prices[preferred] - b.prices[preferred]
+    return mode === "priceAsc" ? result : -result
+  })
+}
+
+function SortMenu({
+  value,
+  onChange,
+}: {
+  value: ProvinceSortMode
+  onChange: (value: ProvinceSortMode) => void
+}) {
+  const options: Array<{ value: ProvinceSortMode; title: string }> = [
+    { value: "default", title: "默认排序" },
+    { value: "nameAsc", title: "名称正序" },
+    { value: "nameDesc", title: "名称倒序" },
+    { value: "priceAsc", title: "价格低到高" },
+    { value: "priceDesc", title: "价格高到低" },
+  ]
+
+  return (
+    <Menu
+      label={
+        <HStack spacing={4}>
+          <Text font={13} fontWeight="medium" foregroundStyle={Theme.orange}>
+            {sortModeLabel(value)}
+          </Text>
+          <Image
+            systemName="arrow.up.arrow.down"
+            font={13}
+            foregroundStyle={Theme.orange}
+          />
+        </HStack>
+      }
+    >
+      {options.map(option => (
+        <Button
+          title={option.title}
+          systemImage={option.value === value ? "checkmark" : undefined}
+          action={() => onChange(option.value)}
+        />
+      ))}
+    </Menu>
   )
 }
 
@@ -429,6 +517,7 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
   const [manualProvinceName, setManualProvinceNameState] = useState<
     string | null
   >(getManualProvinceName())
+  const [sortMode, setSortMode] = useState<ProvinceSortMode>("default")
 
   async function load(forceRefresh = false) {
     if (forceRefresh) {
@@ -487,7 +576,11 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
         (!resolvingProvince ? autoProvince ?? data?.provinces[0] ?? null : null)
       : autoProvince ?? (!resolvingProvince ? data?.provinces[0] ?? null : null)
   const others = data
-    ? data.provinces.filter(p => p.province !== headerProvince?.province)
+    ? sortProvinces(
+        data.provinces.filter(p => p.province !== headerProvince?.province),
+        sortMode,
+        preferred
+      )
     : []
   const selectorDestination =
     data && headerProvince ? (
@@ -605,9 +698,16 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
               />
             </NavigationLink>
 
-            <Text font={20} fontWeight="bold" padding={{ top: 4 }}>
-              全国油价
-            </Text>
+            <HStack
+              padding={{ top: 4 }}
+              frame={{ maxWidth: "infinity" }}
+            >
+              <Text font={20} fontWeight="bold">
+                全国油价
+              </Text>
+              <Spacer />
+              <SortMenu value={sortMode} onChange={setSortMode} />
+            </HStack>
 
             <VStack spacing={12} alignment="leading">
               {others.map(p => (
