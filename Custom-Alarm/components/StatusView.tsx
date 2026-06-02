@@ -60,7 +60,7 @@ export function StatusView(props: {
         header={<Text>闹钟</Text>}
         footer={
           <Text>
-            注册到系统闹钟：按当前启用规则计算的本年应响次数
+            注册到系统闹钟：当前仍登记在系统中的闹钟实例
             {"\n"}
             残留闹钟：首页删除后由于意外错误仍残留在系统中的闹钟实例
           </Text>

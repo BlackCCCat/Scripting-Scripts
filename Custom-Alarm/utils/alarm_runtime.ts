@@ -1,5 +1,5 @@
 import type { AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
-import { SnoozeCustomAlarmIntent } from "../app_intents"
+import { SnoozeCustomAlarmIntent, StopCustomAlarmIntent } from "../app_intents"
 import { buildHolidayDayMap } from "./holiday_calendar"
 
 export const EXPANDED_RULE_HORIZON_DAYS = 365
@@ -110,6 +110,61 @@ export function displaySubtitle(
   }
 }
 
+export function nextOccurrenceTimestamp(
+  record: AlarmRecord,
+  sourceMap: Map<string, HolidayCalendarSource>,
+  now = Date.now()
+): number | null {
+  if (!record.enabled) return null
+
+  switch (record.repeatRule.kind) {
+    case "once":
+      return record.repeatRule.timestamp > now ? record.repeatRule.timestamp : null
+    case "daily": {
+      const limit = effectiveOccurrenceLimit(record.repeatRule)
+      if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
+      return buildNextDailyTimestamp(record.repeatRule, now)
+    }
+    case "weekly": {
+      const limit = effectiveOccurrenceLimit(record.repeatRule)
+      if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
+      return buildNextWeeklyTimestamp(record.repeatRule, now)
+    }
+    case "monthly": {
+      const limit = effectiveOccurrenceLimit(record.repeatRule)
+      if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
+      return buildNextMonthlyTimestamp(record.repeatRule, now)
+    }
+    case "holiday": {
+      const source = sourceMap.get(record.repeatRule.sourceId)
+      if (!source) return null
+      return buildNextHolidayTimestamp(record.repeatRule, source, now)
+    }
+    case "custom": {
+      const limit = effectiveOccurrenceLimit(record.repeatRule)
+      if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
+      return buildNextCustomTimestamp(record.repeatRule, now)
+    }
+    default:
+      return null
+  }
+}
+
+export function nextOccurrenceDateLabel(
+  record: AlarmRecord,
+  sourceMap: Map<string, HolidayCalendarSource>,
+  now = Date.now()
+): string {
+  if (!record.enabled) return "已关闭"
+  const timestamp = nextOccurrenceTimestamp(record, sourceMap, now)
+  if (!timestamp) return "未安排"
+  const date = new Date(timestamp)
+  const yyyy = date.getFullYear()
+  const mm = twoDigits(date.getMonth() + 1)
+  const dd = twoDigits(date.getDate())
+  return `${yyyy}-${mm}-${dd}`
+}
+
 function buildAttributes(
   title: string,
   logicalAlarmId: string,
@@ -148,12 +203,19 @@ function buildConfiguration(
   logicalAlarmId: string,
   title: string,
   schedule: AlarmManager.Schedule,
-  snoozeMinutes: number
+  snoozeMinutes: number,
+  options?: {
+    attachStopIntent?: boolean
+  }
 ): AlarmManager.Configuration {
   const configuration = AlarmManager.Configuration.alarm({
     schedule,
     attributes: buildAttributes(title, logicalAlarmId, snoozeMinutes),
     sound: AlarmManager.Sound.default(),
+    stopIntent: options?.attachStopIntent ? StopCustomAlarmIntent({
+      alarmId: systemAlarmId,
+      logicalAlarmId,
+    }) as any : null,
     secondaryIntent: snoozeMinutes > 0 ? SnoozeCustomAlarmIntent({
       alarmId: systemAlarmId,
       logicalAlarmId,
@@ -295,6 +357,77 @@ function shouldRingForHolidayMode(
 
   const isRegularWeekday = weekday >= 1 && weekday <= 5
   return matchMode === "nonHoliday" ? isRegularWeekday : !isRegularWeekday
+}
+
+function buildNextHolidayTimestamp(
+  rule: Extract<AlarmRepeatRule, { kind: "holiday" }>,
+  source: HolidayCalendarSource,
+  now = Date.now()
+): number | null {
+  const timestamps = buildHolidayTimestamps(rule, source, now)
+  return timestamps[0] ?? null
+}
+
+function buildNextCustomTimestamp(
+  rule: Extract<AlarmRepeatRule, { kind: "custom" }>,
+  now = Date.now()
+): number | null {
+  const timestamps = buildCustomTimestamps({
+    ...rule,
+    occurrenceLimit: 1,
+  }, now)
+  return timestamps[0] ?? null
+}
+
+function buildNextDailyTimestamp(
+  rule: Extract<AlarmRepeatRule, { kind: "daily" }>,
+  now = Date.now()
+): number | null {
+  const cursor = new Date(now)
+  cursor.setSeconds(0, 0)
+  cursor.setHours(rule.hour, rule.minute, 0, 0)
+  if (cursor.getTime() <= now) cursor.setDate(cursor.getDate() + 1)
+  return cursor.getTime()
+}
+
+function buildNextWeeklyTimestamp(
+  rule: Extract<AlarmRepeatRule, { kind: "weekly" }>,
+  now = Date.now()
+): number | null {
+  const weekdays = new Set(rule.weekdays)
+  const cursor = new Date(now)
+  cursor.setHours(0, 0, 0, 0)
+
+  for (let dayOffset = 0; dayOffset < 14; dayOffset += 1) {
+    const weekday = cursor.getDay() + 1
+    if (weekdays.has(weekday)) {
+      const fireDate = new Date(cursor.getTime())
+      fireDate.setHours(rule.hour, rule.minute, 0, 0)
+      if (fireDate.getTime() > now) return fireDate.getTime()
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+
+  return null
+}
+
+function buildNextMonthlyTimestamp(
+  rule: Extract<AlarmRepeatRule, { kind: "monthly" }>,
+  now = Date.now()
+): number | null {
+  const start = new Date(now)
+  start.setDate(1)
+  start.setHours(0, 0, 0, 0)
+
+  for (let monthOffset = 0; monthOffset < 18; monthOffset += 1) {
+    const monthDate = new Date(start.getFullYear(), start.getMonth() + monthOffset, 1)
+    const lastDay = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate()
+    const targetDay = Math.min(rule.dayOfMonth, lastDay)
+    const fireDate = new Date(monthDate.getFullYear(), monthDate.getMonth(), targetDay, rule.hour, rule.minute, 0, 0)
+    if (fireDate.getTime() > now) return fireDate.getTime()
+  }
+
+  return null
 }
 
 function buildHolidayTimestamps(
@@ -592,9 +725,20 @@ export async function scheduleAlarm(
         break
       }
       case "daily": {
-        const timestamps = buildDailyTimestamps(record.repeatRule, scheduledAt)
-        if (timestamps.length) {
-          await scheduleFixedTimestamps(record, timestamps, createdIds)
+        if (effectiveOccurrenceLimit(record.repeatRule)) {
+          const nextTimestamp = buildNextDailyTimestamp(record.repeatRule, scheduledAt)
+          if (!nextTimestamp) throw new Error("没有可安排的每日闹钟。")
+          const systemId = UUID.string()
+          const configuration = buildConfiguration(
+            systemId,
+            record.id,
+            record.title,
+            AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
+            record.snoozeMinutes,
+            { attachStopIntent: true }
+          )
+          await AlarmManager.schedule(systemId, configuration)
+          createdIds.push(systemId)
         } else {
           const systemId = UUID.string()
           const configuration = buildConfiguration(
@@ -610,9 +754,20 @@ export async function scheduleAlarm(
         break
       }
       case "weekly": {
-        const timestamps = buildWeeklyTimestamps(record.repeatRule, scheduledAt)
-        if (timestamps.length) {
-          await scheduleFixedTimestamps(record, timestamps, createdIds)
+        if (effectiveOccurrenceLimit(record.repeatRule)) {
+          const nextTimestamp = buildNextWeeklyTimestamp(record.repeatRule, scheduledAt)
+          if (!nextTimestamp) throw new Error("没有可安排的每周闹钟。")
+          const systemId = UUID.string()
+          const configuration = buildConfiguration(
+            systemId,
+            record.id,
+            record.title,
+            AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
+            record.snoozeMinutes,
+            { attachStopIntent: true }
+          )
+          await AlarmManager.schedule(systemId, configuration)
+          createdIds.push(systemId)
         } else {
           const systemId = UUID.string()
           const configuration = buildConfiguration(
@@ -632,9 +787,19 @@ export async function scheduleAlarm(
         break
       }
       case "monthly": {
-        const timestamps = buildMonthlyTimestamps(record.repeatRule, scheduledAt)
-        if (!timestamps.length) throw new Error("未来 18 个月内没有可安排的每月闹钟。")
-        await scheduleFixedTimestamps(record, timestamps, createdIds)
+        const nextTimestamp = buildNextMonthlyTimestamp(record.repeatRule, scheduledAt)
+        if (!nextTimestamp) throw new Error("未来 18 个月内没有可安排的每月闹钟。")
+        const systemId = UUID.string()
+        const configuration = buildConfiguration(
+          systemId,
+          record.id,
+          record.title,
+          AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
+          record.snoozeMinutes,
+          { attachStopIntent: true }
+        )
+        await AlarmManager.schedule(systemId, configuration)
+        createdIds.push(systemId)
         break
       }
       case "holiday": {
@@ -643,17 +808,37 @@ export async function scheduleAlarm(
         if (!source.lastSyncedAt && !source.holidayItems.length && !source.holidayDates.length) {
           throw new Error("节假日日历还没有同步到本地，请先打开日历设置进行同步。")
         }
-        const timestamps = buildHolidayTimestamps(record.repeatRule, source, scheduledAt)
-        if (!timestamps.length) {
+        const nextTimestamp = buildNextHolidayTimestamp(record.repeatRule, source, scheduledAt)
+        if (!nextTimestamp) {
           throw new Error("今年剩余时间内没有可安排的班休日闹钟。")
         }
-        await scheduleFixedTimestamps(record, timestamps, createdIds)
+        const systemId = UUID.string()
+        const configuration = buildConfiguration(
+          systemId,
+          record.id,
+          record.title,
+          AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
+          record.snoozeMinutes,
+          { attachStopIntent: true }
+        )
+        await AlarmManager.schedule(systemId, configuration)
+        createdIds.push(systemId)
         break
       }
       case "custom": {
-        const timestamps = buildCustomTimestamps(record.repeatRule, scheduledAt)
-        if (!timestamps.length) throw new Error("未来一年内没有可安排的自定义周期闹钟。")
-        await scheduleFixedTimestamps(record, timestamps, createdIds)
+        const nextTimestamp = buildNextCustomTimestamp(record.repeatRule, scheduledAt)
+        if (!nextTimestamp) throw new Error("未来一年内没有可安排的自定义周期闹钟。")
+        const systemId = UUID.string()
+        const configuration = buildConfiguration(
+          systemId,
+          record.id,
+          record.title,
+          AlarmManager.Schedule.fixed(new Date(nextTimestamp)),
+          record.snoozeMinutes,
+          { attachStopIntent: true }
+        )
+        await AlarmManager.schedule(systemId, configuration)
+        createdIds.push(systemId)
         break
       }
       default:

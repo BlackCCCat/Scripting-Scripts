@@ -48,6 +48,7 @@ export type AlarmRecord = {
   enabled: boolean
   snoozeMinutes: number
   repeatRule: AlarmRepeatRule
+  completedOccurrences?: number
   systemAlarmIds: string[]
   lastScheduledAt: number | null
   createdAt: number

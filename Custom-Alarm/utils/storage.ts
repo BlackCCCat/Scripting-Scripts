@@ -217,6 +217,7 @@ function normalizeRecord(value: any): AlarmRecord | null {
     enabled: Boolean(value.enabled ?? true),
     snoozeMinutes: clampSnoozeMinutes(value.snoozeMinutes),
     repeatRule,
+    completedOccurrences: Math.max(0, Math.floor(Number(value.completedOccurrences) || 0)),
     systemAlarmIds: Array.isArray(value.systemAlarmIds)
       ? (value.systemAlarmIds as unknown[]).map((item: unknown) => String(item)).filter(Boolean)
       : [],

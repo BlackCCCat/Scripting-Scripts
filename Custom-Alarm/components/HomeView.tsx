@@ -28,11 +28,11 @@ import { StatusView } from "./StatusView"
 import { SystemAlarmSettingsView } from "./SystemAlarmSettingsView"
 import {
   cancelManagedSystemAlarmIds,
-  countExpectedRingsInYear,
   deleteAlarm,
   disableAlarm,
   displaySubtitle,
   displayTime,
+  nextOccurrenceDateLabel,
   reconcileAlarmRecords,
   scheduleAlarm,
 } from "../utils/alarm_runtime"
@@ -239,18 +239,44 @@ function rowSwipeActions(props: {
   }
 }
 
+function AlarmMetaTag(props: {
+  icon: string
+  text: string
+  tint?: string
+}) {
+  const tint = (props.tint ?? "#FF9500") as any
+  return (
+    <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      <Image
+        systemName={props.icon}
+        foregroundStyle={tint}
+        frame={{ width: 12, alignment: "center" as any }}
+      />
+      <Text
+        font="caption2"
+        foregroundStyle="secondaryLabel"
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      >
+        {props.text}
+      </Text>
+    </HStack>
+  )
+}
+
 function AlarmRow(props: {
   record: AlarmRecord
   subtitle: string
+  nextDateText: string
   onToggle: (record: AlarmRecord, enabled: boolean) => void | Promise<void>
 }) {
-  const colorScheme = useColorScheme()
+  const titleText = props.record.title.trim()
+  const showsTitle = titleText.length > 0 && titleText !== "闹钟"
 
   return (
     <HStack
-      spacing={14}
+      spacing={10}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      padding={{ top: 16, bottom: 16, leading: 16, trailing: 16 }}
+      padding={{ top: 8, bottom: 8, leading: 4, trailing: 2 }}
       modifiers={
         modifiers()
           .contentShape({
@@ -268,54 +294,47 @@ function AlarmRow(props: {
             },
           })
       }
-      background={{
-        style: colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground",
-        shape: { type: "rect", cornerRadius: 22 },
-      }}
-      shadow={{
-        color: colorScheme === "dark" ? "rgba(0,0,0,0)" : "rgba(0,0,0,0.04)",
-        radius: colorScheme === "dark" ? 0 : 12,
-        y: colorScheme === "dark" ? 0 : 4,
-      }}
     >
-      <VStack
-        frame={{ width: 30, alignment: "center" as any }}
-        padding={{ top: 4 }}
-      >
-        <Image systemName={repeatIcon(props.record)} foregroundStyle="#FF9500" />
-      </VStack>
-
-      <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={4}>
-        <Text
-          font="title2"
-          foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
-          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        >
-          {displayTime(props.record)}
-        </Text>
-        <Text
-          font="subheadline"
-          foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
-          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        >
-          {props.record.title}
-        </Text>
-        <Text
-          font="caption"
-          foregroundStyle="secondaryLabel"
-          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        >
-          {props.subtitle}
-        </Text>
-      </VStack>
-
-      <VStack frame={{ width: 56, alignment: "trailing" as any }}>
-        <Toggle
-          title=""
-          value={props.record.enabled}
-          onChanged={(value: boolean) => props.onToggle(props.record, value)}
-          toggleStyle="switch"
-        />
+      <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={6}>
+        <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
+          <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={2}>
+            <Text
+              font="title2"
+              foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            >
+              {displayTime(props.record)}
+            </Text>
+            {showsTitle ? (
+              <Text
+                font="subheadline"
+                foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
+                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              >
+                {titleText}
+              </Text>
+            ) : null}
+          </VStack>
+          <VStack frame={{ width: 56, alignment: "trailing" as any }}>
+            <Toggle
+              title=""
+              value={props.record.enabled}
+              onChanged={(value: boolean) => props.onToggle(props.record, value)}
+              toggleStyle="switch"
+            />
+          </VStack>
+        </HStack>
+        <VStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <AlarmMetaTag
+            icon="arrow.trianglehead.2.clockwise"
+            text={props.subtitle}
+          />
+          <AlarmMetaTag
+            icon="calendar"
+            text={`下次 ${props.nextDateText}`}
+            tint="#2563EB"
+          />
+        </VStack>
       </VStack>
     </HStack>
   )
@@ -341,13 +360,20 @@ export function HomeView() {
   const holidaySourceMap = useMemo(() => {
     return new Map(holidaySources.map((item) => [item.id, item]))
   }, [holidaySources])
+  const systemAlarmIdSet = useMemo(() => {
+    return new Set(systemAlarms.map((item) => item.id))
+  }, [systemAlarms])
 
   const enabledCount = useMemo(() => records.filter((item) => item.enabled).length, [records])
   const managedInstanceCount = useMemo(() => {
-    return records.reduce((sum, item) => {
-      return sum + countExpectedRingsInYear(item, holidaySourceMap)
-    }, 0)
-  }, [records, holidaySourceMap])
+    const activeIds = new Set<string>()
+    for (const record of records) {
+      for (const id of record.systemAlarmIds) {
+        if (systemAlarmIdSet.has(id)) activeIds.add(id)
+      }
+    }
+    return activeIds.size
+  }, [records, systemAlarmIdSet])
   const selectedHolidaySource = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
   const currentMonthSummary = useMemo(() => {
     if (!selectedHolidaySource) return { totalOff: 0, remainingOff: 0, totalWork: 0, remainingWork: 0 }
@@ -643,6 +669,7 @@ export function HomeView() {
         enabled: true,
         snoozeMinutes: draft.snoozeMinutes,
         repeatRule: draft.repeatRule,
+        completedOccurrences: 0,
         systemAlarmIds: [],
         lastScheduledAt: null,
         createdAt: Date.now(),
@@ -740,6 +767,9 @@ export function HomeView() {
         title: draft.title,
         snoozeMinutes: draft.snoozeMinutes,
         repeatRule: draft.repeatRule,
+        completedOccurrences: normalizeRepeatRule(record.repeatRule) === normalizeRepeatRule(draft.repeatRule)
+          ? (record.completedOccurrences ?? 0)
+          : 0,
         enabled: record.enabled,
         updatedAt: Date.now(),
       }
@@ -869,6 +899,7 @@ export function HomeView() {
                     <AlarmRow
                       record={record}
                       subtitle={displaySubtitle(record, holidaySourceMap)}
+                      nextDateText={nextOccurrenceDateLabel(record, holidaySourceMap)}
                       onToggle={toggleAlarm}
                     />
                   </VStack>
