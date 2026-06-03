@@ -167,11 +167,13 @@ export function AddAlarmView(props: {
   const [snoozeMinutes, setSnoozeMinutes] = useState(initialDraft?.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES)
   const soundOptions = (() => {
     const merged = new Set<string>(props.availableSounds.length ? props.availableSounds : [DEFAULT_SOUND_NAME])
-    if (initialDraft?.soundName) merged.add(initialDraft.soundName)
     merged.add(DEFAULT_SOUND_NAME)
     return Array.from(merged)
   })()
-  const [soundName, setSoundName] = useState<string>(initialDraft?.soundName ?? DEFAULT_SOUND_NAME)
+  const initialSoundName = initialDraft?.soundName && soundOptions.includes(initialDraft.soundName)
+    ? initialDraft.soundName
+    : DEFAULT_SOUND_NAME
+  const [soundName, setSoundName] = useState<string>(initialSoundName)
   const [repeatEnabled, setRepeatEnabled] = useState(initialRepeatEnabled)
   const [repeatMode, setRepeatMode] = useState<DraftRepeatMode>(initialRepeatMode)
   const [oneTimeTimestamp, setOneTimeTimestamp] = useState<number>(initialTimestamp)

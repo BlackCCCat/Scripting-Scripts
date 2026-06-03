@@ -38,7 +38,7 @@ import {
   scheduleAlarm,
 } from "../utils/alarm_runtime"
 import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
-import { loadAvailableSoundNames } from "../utils/alarm_sounds"
+import { DEFAULT_SOUND_NAME, loadAvailableSoundNames } from "../utils/alarm_sounds"
 import {
   collectRecordSystemAlarmIds,
   DEFAULT_HOLIDAY_SOURCE_ID,
@@ -850,7 +850,7 @@ export function HomeView() {
           currentMonthTotalWorkCount={currentMonthSummary.totalWork}
           currentMonthRemainingWorkCount={currentMonthSummary.remainingWork}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
-          availableSoundCount={availableSounds.length}
+          availableSoundCount={Math.max(0, availableSounds.length - 1)}
           onOpenSoundSettings={() => {
             void openSoundSettings()
           }}
@@ -1019,6 +1019,34 @@ export function HomeView() {
     }
   }
 
+  function replaceSoundName(oldSound: string, newSound: string) {
+    const nextSounds = availableSounds.map((sound) => (sound === oldSound ? newSound : sound))
+    setAvailableSounds(nextSounds)
+    setRecords((current) => {
+      const nextRecords = current.map((record) => (
+        record.soundName === oldSound
+          ? { ...record, soundName: newSound, updatedAt: Date.now() }
+          : record
+      ))
+      saveStateSnapshot(nextRecords, holidaySources, nextSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      return nextRecords
+    })
+  }
+
+  function removeSoundName(sound: string) {
+    const nextSounds = availableSounds.filter((item) => item !== sound)
+    setAvailableSounds(nextSounds)
+    setRecords((current) => {
+      const nextRecords = current.map((record) => (
+        record.soundName === sound
+          ? { ...record, soundName: DEFAULT_SOUND_NAME, updatedAt: Date.now() }
+          : record
+      ))
+      saveStateSnapshot(nextRecords, holidaySources, nextSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
+      return nextRecords
+    })
+  }
+
   async function openSoundSettings() {
     const nextSounds = await refreshAvailableSounds({ showError: false })
     await Navigation.present({
@@ -1026,9 +1054,12 @@ export function HomeView() {
         <SoundSettingsView
           sounds={nextSounds}
           onRefresh={refreshAvailableSounds}
+          onSoundDeleted={removeSoundName}
+          onSoundRenamed={replaceSoundName}
         />
       ),
     })
+    await refreshAvailableSounds({ showError: false })
   }
 
   async function refreshBuiltinHolidayCalendar(options?: { showLoading?: boolean }) {

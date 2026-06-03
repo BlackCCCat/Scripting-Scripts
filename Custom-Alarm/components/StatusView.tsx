@@ -6,6 +6,7 @@ import {
   Navigation,
   NavigationStack,
   Section,
+  Spacer,
   Text,
 } from "scripting"
 
@@ -66,6 +67,8 @@ export function StatusView(props: {
             注册到系统闹钟：当前仍登记在系统中的闹钟实例
             {"\n"}
             残留闹钟：首页删除后由于意外错误仍残留在系统中的闹钟实例
+            {"\n"}
+            声音：点击声音行可进入声音管理，导入、编辑或删除自定义闹钟声音
           </Text>
         }
       >
@@ -75,17 +78,21 @@ export function StatusView(props: {
         <MetricRow icon="exclamationmark.triangle.fill" title="残留闹钟" value={String(props.cleanupCandidateCount)} tint="#DC2626" />
         <Button
           buttonStyle="plain"
+          frame={{ maxWidth: "infinity" }}
           action={() => props.onOpenSoundSettings?.()}
         >
-          <HStack spacing={12} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <HStack
+            spacing={12}
+            frame={{ width: "100%" as any, alignment: "leading" as any }}
+            background={"rgba(0,0,0,0.001)"}
+          >
             <Image
               systemName="speaker.wave.2.fill"
               foregroundStyle={"#F59E0B" as any}
               frame={{ width: 20, alignment: "center" as any }}
             />
-            <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-              声音
-            </Text>
+            <Text>声音</Text>
+            <Spacer />
             <Text foregroundStyle="secondaryLabel">{String(props.availableSoundCount)}</Text>
           </HStack>
         </Button>
