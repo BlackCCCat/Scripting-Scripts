@@ -1,5 +1,5 @@
 import type { AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
-import { SnoozeCustomAlarmIntent, StopCustomAlarmIntent } from "../app_intents"
+import { StopCustomAlarmIntent } from "../app_intents"
 import { DEFAULT_SOUND_NAME } from "./alarm_sounds"
 import { buildHolidayDayMap } from "./holiday_calendar"
 
@@ -183,11 +183,27 @@ function buildAttributes(
       textColor: "#FFFFFF",
       systemImageName: "timer",
     }) : null,
-    secondaryBehavior: snoozeMinutes > 0 ? "custom" : null,
+    secondaryBehavior: snoozeMinutes > 0 ? "countdown" : null,
   })
 
   const attributes = AlarmManager.Attributes.create({
     alert,
+    countdown: snoozeMinutes > 0 ? AlarmManager.CountdownPresentation.create(
+      "推迟提醒中",
+      AlarmManager.Button.create({
+        title: "暂停",
+        textColor: "#FFFFFF",
+        systemImageName: "pause.fill",
+      })
+    ) : null,
+    paused: snoozeMinutes > 0 ? AlarmManager.PausedPresentation.create(
+      "推迟已暂停",
+      AlarmManager.Button.create({
+        title: "继续",
+        textColor: "#FFFFFF",
+        systemImageName: "play.fill",
+      })
+    ) : null,
     tintColor: "#FF9500",
     metadata: {
       source: "custom-alarm",
@@ -216,7 +232,7 @@ function buildConfiguration(
     attachStopIntent?: boolean
   }
 ): AlarmManager.Configuration {
-  const configuration = AlarmManager.Configuration.alarm({
+  const commonOptions = {
     schedule,
     attributes: buildAttributes(title, logicalAlarmId, snoozeMinutes),
     sound: buildAlarmSound(soundName),
@@ -224,14 +240,16 @@ function buildConfiguration(
       alarmId: systemAlarmId,
       logicalAlarmId,
     }) as any : null,
-    secondaryIntent: snoozeMinutes > 0 ? SnoozeCustomAlarmIntent({
-      alarmId: systemAlarmId,
-      logicalAlarmId,
-      title,
-      snoozeMinutes,
-      soundName,
-    }) as any : null,
-  })
+    secondaryIntent: null,
+  }
+  const configuration = snoozeMinutes > 0
+    ? AlarmManager.Configuration.countdown({
+        ...commonOptions,
+        countdown: AlarmManager.Countdown.create({
+          preAlert: snoozeMinutes * 60,
+        }),
+      })
+    : AlarmManager.Configuration.alarm(commonOptions)
   if (!configuration) throw new Error("闹钟配置创建失败")
   return configuration
 }

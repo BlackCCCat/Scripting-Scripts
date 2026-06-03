@@ -10,14 +10,6 @@ import {
 } from "./utils/storage"
 import { buildHolidayDayMap } from "./utils/holiday_calendar"
 
-type SnoozeIntentParams = {
-  alarmId: string
-  logicalAlarmId: string
-  title: string
-  snoozeMinutes: number
-  soundName: string
-}
-
 type StopIntentParams = {
   alarmId: string
   logicalAlarmId: string
@@ -191,11 +183,27 @@ function buildAlertAttributes(
       textColor: "#FFFFFF",
       systemImageName: "timer",
     }) : null,
-    secondaryBehavior: snoozeMinutes > 0 ? "custom" : null,
+    secondaryBehavior: snoozeMinutes > 0 ? "countdown" : null,
   })
 
   const attributes = AlarmManager.Attributes.create({
     alert,
+    countdown: snoozeMinutes > 0 ? AlarmManager.CountdownPresentation.create(
+      "推迟提醒中",
+      AlarmManager.Button.create({
+        title: "暂停",
+        textColor: "#FFFFFF",
+        systemImageName: "pause.fill",
+      })
+    ) : null,
+    paused: snoozeMinutes > 0 ? AlarmManager.PausedPresentation.create(
+      "推迟已暂停",
+      AlarmManager.Button.create({
+        title: "继续",
+        textColor: "#FFFFFF",
+        systemImageName: "play.fill",
+      })
+    ) : null,
     tintColor: "#FF9500",
     metadata: {
       source: "custom-alarm",
@@ -218,7 +226,7 @@ function buildRollingAlarmConfiguration(
     fireDate: Date
   }
 ): AlarmManager.Configuration {
-  const configuration = AlarmManager.Configuration.alarm({
+  const commonOptions = {
     schedule: AlarmManager.Schedule.fixed(params.fireDate),
     attributes: buildAlertAttributes(
       params.title,
@@ -232,132 +240,20 @@ function buildRollingAlarmConfiguration(
       alarmId: params.alarmId,
       logicalAlarmId: params.logicalAlarmId,
     }) as any,
-    secondaryIntent: params.snoozeMinutes > 0 ? SnoozeCustomAlarmIntent({
-      alarmId: params.alarmId,
-      logicalAlarmId: params.logicalAlarmId,
-      title: params.title,
-      snoozeMinutes: params.snoozeMinutes,
-      soundName: params.soundName,
-    }) as any : null,
-  })
+    secondaryIntent: null,
+  }
+  const configuration = params.snoozeMinutes > 0
+    ? AlarmManager.Configuration.countdown({
+        ...commonOptions,
+        countdown: AlarmManager.Countdown.create({
+          preAlert: params.snoozeMinutes * 60,
+        }),
+      })
+    : AlarmManager.Configuration.alarm(commonOptions)
 
   if (!configuration) throw new Error("滚动闹钟配置创建失败")
   return configuration
 }
-
-function buildSnoozeAttributes(
-  title: string,
-  logicalAlarmId: string,
-  snoozeMinutes: number
-): AlarmManager.Attributes {
-  const alert = AlarmManager.AlertPresentation.create({
-    title,
-    stopButton: AlarmManager.Button.create({
-      title: "关闭",
-      textColor: "#FFFFFF",
-      systemImageName: "xmark",
-    }),
-    secondaryButton: AlarmManager.Button.create({
-      title: `推迟${snoozeMinutes}分钟`,
-      textColor: "#FFFFFF",
-      systemImageName: "timer",
-    }),
-    secondaryBehavior: "custom",
-  })
-
-  const attributes = AlarmManager.Attributes.create({
-    alert,
-    tintColor: "#FF9500",
-    metadata: {
-      source: "custom-alarm",
-      logicalAlarmId,
-      snoozeMinutes: String(snoozeMinutes),
-    },
-  })
-
-  if (!attributes) throw new Error("推迟闹钟属性创建失败")
-  return attributes
-}
-
-function buildSnoozeConfiguration(params: SnoozeIntentParams): AlarmManager.Configuration {
-  // “推迟”会重新注册成一个新的固定时间闹钟，这样它会像正常闹钟一样再次响起。
-  const fireDate = new Date(Date.now() + params.snoozeMinutes * 60 * 1000)
-  fireDate.setSeconds(0, 0)
-
-  const configuration = AlarmManager.Configuration.alarm({
-    schedule: AlarmManager.Schedule.fixed(fireDate),
-    attributes: buildSnoozeAttributes(
-      params.title,
-      params.logicalAlarmId,
-      params.snoozeMinutes
-    ),
-    sound: params.soundName !== DEFAULT_SOUND_NAME
-      ? AlarmManager.Sound.named(params.soundName)
-      : AlarmManager.Sound.default(),
-    stopIntent: StopCustomAlarmIntent({
-      alarmId: params.alarmId,
-      logicalAlarmId: params.logicalAlarmId,
-    }) as any,
-    secondaryIntent: SnoozeCustomAlarmIntent({
-      ...params,
-      alarmId: params.alarmId,
-    }) as any,
-  })
-
-  if (!configuration) throw new Error("推迟闹钟配置创建失败")
-  return configuration
-}
-
-function appendSnoozeAlarmId(record: AlarmRecord, nextAlarmId: string): AlarmRecord {
-  // 把推迟出来的新实例挂回原闹钟记录，后面刷新和删除时才能一起清理。
-  return {
-    ...record,
-    systemAlarmIds: Array.from(new Set([...record.systemAlarmIds, nextAlarmId])),
-    lastScheduledAt: Date.now(),
-    updatedAt: Date.now(),
-  }
-}
-
-export const SnoozeCustomAlarmIntent = AppIntentManager.register<SnoozeIntentParams>({
-  name: "SnoozeCustomAlarmIntent",
-  protocol: AppIntentProtocol.LiveActivityIntent,
-  perform: async (params: SnoozeIntentParams) => {
-    try {
-      try {
-        await AlarmManager.stop(params.alarmId)
-      } catch {}
-
-      const nextAlarmId = UUID.string()
-      await AlarmManager.schedule(
-        nextAlarmId,
-        buildSnoozeConfiguration({
-          ...params,
-          alarmId: nextAlarmId,
-        })
-      )
-
-      const state = loadCustomAlarmState()
-      const nextAlarms = state.alarms.map((record) => {
-        if (record.id !== params.logicalAlarmId) return record
-        return appendSnoozeAlarmId(record, nextAlarmId)
-      })
-      saveCustomAlarmState({
-        ...state,
-        alarms: nextAlarms,
-        managedSystemAlarmIds: mergeManagedSystemAlarmIds(state.managedSystemAlarmIds, [nextAlarmId]),
-        cleanupCandidateAlarmIds: state.cleanupCandidateAlarmIds,
-      })
-
-      try {
-        Widget.reloadAll()
-      } catch {}
-    } finally {
-      try {
-        Script.exit()
-      } catch {}
-    }
-  },
-})
 
 export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>({
   name: "StopCustomAlarmIntent",
