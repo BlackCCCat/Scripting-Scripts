@@ -83,4 +83,5 @@ export type CustomAlarmState = {
   availableSounds: string[]
   managedSystemAlarmIds: string[]
   cleanupCandidateAlarmIds: string[]
+  alarmConfigurationVersion: number
 }

@@ -11,6 +11,7 @@ export const DEFAULT_HOLIDAY_SOURCE_ID = "cn-holiday-calendar"
 export const DEFAULT_HOLIDAY_URL = "https://calendars.icloud.com/holidays/cn_zh.ics"
 
 const STORAGE_KEY = "custom_alarm_state_v2"
+export const ALARM_CONFIGURATION_VERSION = 2
 export const DEFAULT_SNOOZE_MINUTES = 5
 
 function getStorage(): any {
@@ -69,6 +70,7 @@ function emptyState(): CustomAlarmState {
     availableSounds: [DEFAULT_SOUND_NAME],
     managedSystemAlarmIds: [],
     cleanupCandidateAlarmIds: [],
+    alarmConfigurationVersion: ALARM_CONFIGURATION_VERSION,
   }
 }
 
@@ -311,6 +313,7 @@ export function loadCustomAlarmState(): CustomAlarmState {
         collectRecordSystemAlarmIds(alarms)
       ),
       cleanupCandidateAlarmIds: normalizeStringIdList(data?.cleanupCandidateAlarmIds),
+      alarmConfigurationVersion: Math.max(0, Math.floor(Number(data?.alarmConfigurationVersion) || 0)),
     }
   } catch {
     return emptyState()
@@ -330,6 +333,7 @@ export function saveCustomAlarmState(state: CustomAlarmState): void {
       availableSounds: normalizeSoundNames(state.availableSounds),
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds: normalizeStringIdList(state.cleanupCandidateAlarmIds),
+      alarmConfigurationVersion: Math.max(0, Math.floor(Number(state.alarmConfigurationVersion) || 0)),
     }, null, 2)
   )
 }

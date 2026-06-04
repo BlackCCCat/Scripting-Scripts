@@ -15,6 +15,11 @@ type StopIntentParams = {
   logicalAlarmId: string
 }
 
+type SnoozeIntentParams = {
+  alarmId: string
+  logicalAlarmId: string
+}
+
 function occurrenceLimitForRecord(record: AlarmRecord): number | null {
   switch (record.repeatRule.kind) {
     case "daily":
@@ -183,27 +188,13 @@ function buildAlertAttributes(
       textColor: "#FFFFFF",
       systemImageName: "timer",
     }) : null,
-    secondaryBehavior: snoozeMinutes > 0 ? "countdown" : null,
+    secondaryBehavior: snoozeMinutes > 0 ? "custom" : null,
   })
 
   const attributes = AlarmManager.Attributes.create({
     alert,
-    countdown: snoozeMinutes > 0 ? AlarmManager.CountdownPresentation.create(
-      "推迟提醒中",
-      AlarmManager.Button.create({
-        title: "暂停",
-        textColor: "#FFFFFF",
-        systemImageName: "pause.fill",
-      })
-    ) : null,
-    paused: snoozeMinutes > 0 ? AlarmManager.PausedPresentation.create(
-      "推迟已暂停",
-      AlarmManager.Button.create({
-        title: "继续",
-        textColor: "#FFFFFF",
-        systemImageName: "play.fill",
-      })
-    ) : null,
+    countdown: null,
+    paused: null,
     tintColor: "#FF9500",
     metadata: {
       source: "custom-alarm",
@@ -240,20 +231,138 @@ function buildRollingAlarmConfiguration(
       alarmId: params.alarmId,
       logicalAlarmId: params.logicalAlarmId,
     }) as any,
-    secondaryIntent: null,
+    secondaryIntent: params.snoozeMinutes > 0 ? SnoozeCustomAlarmIntent({
+      alarmId: params.alarmId,
+      logicalAlarmId: params.logicalAlarmId,
+    }) as any : null,
   }
-  const configuration = params.snoozeMinutes > 0
-    ? AlarmManager.Configuration.countdown({
-        ...commonOptions,
-        countdown: AlarmManager.Countdown.create({
-          preAlert: params.snoozeMinutes * 60,
-        }),
-      })
-    : AlarmManager.Configuration.alarm(commonOptions)
+  const configuration = AlarmManager.Configuration.alarm(commonOptions)
 
   if (!configuration) throw new Error("滚动闹钟配置创建失败")
   return configuration
 }
+
+function buildSnoozeCountdownConfiguration(
+  params: {
+    alarmId: string
+    logicalAlarmId: string
+    title: string
+    snoozeMinutes: number
+    soundName: string
+  }
+): AlarmManager.Configuration {
+  const attributes = AlarmManager.Attributes.create({
+    alert: AlarmManager.AlertPresentation.create({
+      title: params.title,
+      stopButton: AlarmManager.Button.create({
+        title: "关闭",
+        textColor: "#FFFFFF",
+        systemImageName: "xmark",
+      }),
+      secondaryButton: AlarmManager.Button.create({
+        title: `推迟${params.snoozeMinutes}分钟`,
+        textColor: "#FFFFFF",
+        systemImageName: "timer",
+      }),
+      secondaryBehavior: "countdown",
+    }),
+    countdown: AlarmManager.CountdownPresentation.create(
+      "推迟提醒中",
+      AlarmManager.Button.create({
+        title: "暂停",
+        textColor: "#FFFFFF",
+        systemImageName: "pause.fill",
+      })
+    ),
+    paused: AlarmManager.PausedPresentation.create(
+      "推迟已暂停",
+      AlarmManager.Button.create({
+        title: "继续",
+        textColor: "#FFFFFF",
+        systemImageName: "play.fill",
+      })
+    ),
+    tintColor: "#FF9500",
+    metadata: {
+      source: "custom-alarm-snooze",
+      logicalAlarmId: params.logicalAlarmId,
+      snoozeMinutes: String(params.snoozeMinutes),
+    },
+  })
+  if (!attributes) throw new Error("推迟闹钟属性创建失败")
+
+  const configuration = AlarmManager.Configuration.countdown({
+    countdown: AlarmManager.Countdown.create({
+      preAlert: params.snoozeMinutes * 60,
+    }),
+    attributes,
+    sound: params.soundName !== DEFAULT_SOUND_NAME
+      ? AlarmManager.Sound.named(params.soundName)
+      : AlarmManager.Sound.default(),
+    stopIntent: StopCustomAlarmIntent({
+      alarmId: params.alarmId,
+      logicalAlarmId: params.logicalAlarmId,
+    }) as any,
+    secondaryIntent: null,
+  })
+
+  if (!configuration) throw new Error("推迟倒计时配置创建失败")
+  return configuration
+}
+
+export const SnoozeCustomAlarmIntent = AppIntentManager.register<SnoozeIntentParams>({
+  name: "SnoozeCustomAlarmIntent",
+  protocol: AppIntentProtocol.LiveActivityIntent,
+  perform: async (params: SnoozeIntentParams) => {
+    try {
+      try {
+        await AlarmManager.stop(params.alarmId)
+      } catch {}
+
+      const state = loadCustomAlarmState()
+      const record = state.alarms.find((item) => item.id === params.logicalAlarmId)
+      if (!record || !record.enabled || record.snoozeMinutes <= 0) return
+
+      const snoozeAlarmId = UUID.string()
+
+      await AlarmManager.schedule(
+        snoozeAlarmId,
+        buildSnoozeCountdownConfiguration({
+          alarmId: snoozeAlarmId,
+          logicalAlarmId: record.id,
+          title: record.title,
+          snoozeMinutes: record.snoozeMinutes,
+          soundName: record.soundName,
+        })
+      )
+      await AlarmManager.startCountdown(snoozeAlarmId)
+
+      saveCustomAlarmState({
+        ...state,
+        alarms: state.alarms.map((item) => (
+          item.id === record.id
+            ? {
+                ...record,
+                systemAlarmIds: [snoozeAlarmId],
+                lastScheduledAt: Date.now(),
+                updatedAt: Date.now(),
+              }
+            : item
+        )),
+        managedSystemAlarmIds: mergeManagedSystemAlarmIds(state.managedSystemAlarmIds, [snoozeAlarmId]),
+        cleanupCandidateAlarmIds: state.cleanupCandidateAlarmIds,
+      })
+
+      try {
+        Widget.reloadAll()
+      } catch {}
+    } finally {
+      try {
+        Script.exit()
+      } catch {}
+    }
+  },
+})
 
 export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>({
   name: "StopCustomAlarmIntent",

@@ -40,6 +40,7 @@ import {
 import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
 import { DEFAULT_SOUND_NAME, loadAvailableSoundNames } from "../utils/alarm_sounds"
 import {
+  ALARM_CONFIGURATION_VERSION,
   collectRecordSystemAlarmIds,
   DEFAULT_HOLIDAY_SOURCE_ID,
   loadCustomAlarmState,
@@ -333,6 +334,7 @@ export function HomeView() {
   const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
   const [managedSystemAlarmIds, setManagedSystemAlarmIds] = useState<string[]>(() => initialState.managedSystemAlarmIds)
   const [cleanupCandidateAlarmIds, setCleanupCandidateAlarmIds] = useState<string[]>(() => initialState.cleanupCandidateAlarmIds)
+  const [alarmConfigurationVersion, setAlarmConfigurationVersion] = useState<number>(() => initialState.alarmConfigurationVersion)
   const [systemAlarms, setSystemAlarms] = useState<AlarmManager.Alarm[]>([])
   const [globalBusy, setGlobalBusy] = useState(false)
   const [busyRecordId, setBusyRecordId] = useState<string | null>(null)
@@ -393,7 +395,8 @@ export function HomeView() {
     nextHolidaySources = holidaySources,
     nextAvailableSounds = availableSounds,
     nextManagedSystemAlarmIds = managedSystemAlarmIds,
-    nextCleanupCandidateAlarmIds = cleanupCandidateAlarmIds
+    nextCleanupCandidateAlarmIds = cleanupCandidateAlarmIds,
+    nextAlarmConfigurationVersion = alarmConfigurationVersion
   ) {
     saveCustomAlarmState({
       alarms: nextRecords,
@@ -401,6 +404,7 @@ export function HomeView() {
       availableSounds: nextAvailableSounds,
       managedSystemAlarmIds: nextManagedSystemAlarmIds,
       cleanupCandidateAlarmIds: nextCleanupCandidateAlarmIds,
+      alarmConfigurationVersion: nextAlarmConfigurationVersion,
     })
   }
 
@@ -410,6 +414,47 @@ export function HomeView() {
     setCleanupCandidateAlarmIds(next)
     saveStateSnapshot(records, holidaySources, availableSounds, managedSystemAlarmIds, next)
     return next
+  }
+
+  async function migrateAlarmConfigurationsIfNeeded() {
+    const storedState = loadCustomAlarmState()
+    if (storedState.alarmConfigurationVersion >= ALARM_CONFIGURATION_VERSION) return
+    if (!AlarmManager.isAvailable) return
+
+    const sourceMap = new Map(storedState.holidaySources.map((item) => [item.id, item]))
+    const migratedRecords: AlarmRecord[] = []
+    let migrationFailed = false
+
+    for (const record of storedState.alarms) {
+      if (!record.enabled || !record.systemAlarmIds.length) {
+        migratedRecords.push(record)
+        continue
+      }
+
+      try {
+        migratedRecords.push(await scheduleAlarm(record, sourceMap))
+      } catch {
+        migrationFailed = true
+        migratedRecords.push(record)
+      }
+    }
+
+    const nextManagedIds = collectRecordSystemAlarmIds(migratedRecords)
+    const nextAlarmConfigurationVersion = migrationFailed
+      ? storedState.alarmConfigurationVersion
+      : ALARM_CONFIGURATION_VERSION
+    setRecords(migratedRecords)
+    setManagedSystemAlarmIds(nextManagedIds)
+    setAlarmConfigurationVersion(nextAlarmConfigurationVersion)
+    saveStateSnapshot(
+      migratedRecords,
+      storedState.holidaySources,
+      storedState.availableSounds,
+      nextManagedIds,
+      storedState.cleanupCandidateAlarmIds,
+      nextAlarmConfigurationVersion
+    )
+    await refreshSystemState()
   }
 
   function buildAdvancedCleanupItems(
@@ -475,8 +520,9 @@ export function HomeView() {
       availableSounds,
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds,
+      alarmConfigurationVersion,
     })
-  }, [records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds])
+  }, [records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
 
   useEffect(() => {
     if (!AlarmManager.isAvailable) return
@@ -486,7 +532,10 @@ export function HomeView() {
     }
 
     AlarmManager.addAlarmUpdateListener(listener)
-    void refreshSystemState()
+    void (async () => {
+      await refreshSystemState()
+      await migrateAlarmConfigurationsIfNeeded()
+    })()
     void refreshAvailableSounds({ showError: false })
 
     return () => {
