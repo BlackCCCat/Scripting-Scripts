@@ -57,7 +57,7 @@ export function RemoteControlView(props: {
         <Form formStyle="grouped">
           <Section header={<Text>连接信息</Text>}>
             <HStack spacing={10} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
-              <Text frame={{ width: 48, alignment: "leading" as any }}>
+              <Text lineLimit={1} frame={{ width: 64, alignment: "leading" as any }}>
                 地址：
               </Text>
               <TextField
@@ -70,7 +70,7 @@ export function RemoteControlView(props: {
               />
             </HStack>
             <HStack spacing={10} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
-              <Text frame={{ width: 48, alignment: "leading" as any }}>
+              <Text lineLimit={1} frame={{ width: 64, alignment: "leading" as any }}>
                 端口：
               </Text>
               <TextField
@@ -83,7 +83,7 @@ export function RemoteControlView(props: {
               />
             </HStack>
             <HStack spacing={10} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
-              <Text frame={{ width: 48, alignment: "leading" as any }}>
+              <Text lineLimit={1} frame={{ width: 64, alignment: "leading" as any }}>
                 密码：
               </Text>
               <SecureField

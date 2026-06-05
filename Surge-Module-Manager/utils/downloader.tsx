@@ -35,8 +35,7 @@ function injectUrl(content: string, url?: string, preferredPrefix?: string): str
     const t = line.trimStart()
     return !prefixes.some((p) => t.startsWith(p))
   })
-  const space = first.includes("=") ? "" : " "
-  return `${first}${space}${u}\n${filtered.join("\n")}`
+  return `${first}${u}\n${filtered.join("\n")}`
 }
 
 async function fetchModuleText(url: string): Promise<string> {
