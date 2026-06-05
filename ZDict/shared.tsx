@@ -748,7 +748,9 @@ function parseGySenseSection(sectionHtml: string): string[] {
   const posSections = extractBalancedBlocks(senseGuoyu, "section", "")
   if (posSections.length) {
     for (const section of posSections) {
-      const pos = extractBlockText(section, "gy-pos-badge") || htmlInlineText(firstMatch(section, /<span\b[^>]*>([\s\S]*?)<\/span>/i))
+      const explicitPos = extractBlockText(section, "gy-pos-badge")
+      const fallbackPos = htmlInlineText(firstMatch(section, /<span\b[^>]*>([\s\S]*?)<\/span>/i))
+      const pos = explicitPos || (isPartOfSpeechLine(fallbackPos) ? fallbackPos : "")
       if (pos) lines.push(`词性 ${pos}`)
       const body = firstMatch(section, /<div\b[^>]*>([\s\S]*)<\/div>/i) || section
       const senses = extractBalancedBlocks(body, "div", "gy-sense").filter((block) => /gy-sense__body|gy-sense__def/.test(block))
