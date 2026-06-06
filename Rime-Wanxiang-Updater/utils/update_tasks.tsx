@@ -377,11 +377,8 @@ async function deployIfEnabled(cfg: AppConfig, onStage?: (s: string) => void, on
     onStage?.(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
     return
   }
-  const detected = await detectRimeDir(cfg)
   const installRoot = await resolveRimeDir(cfg)
-  const buildBase = cfg.inputMethod === "scripting"
-    ? String(detected.userDataDir ?? installRoot)
-    : installRoot
+  const buildBase = installRoot
   const buildDir = Path.join(buildBase, "build")
   if (cfg.skipBuildCleanup) {
     onLog?.(`跳过清理 build 目录：${buildDir}`)
@@ -402,11 +399,8 @@ export async function deployInputMethod(cfg: AppConfig, onStage?: (s: string) =>
   if (cfg.inputMethod === "scripting") {
     throw new Error(SCRIPTING_MANUAL_DEPLOY_MESSAGE)
   }
-  const detected = await detectRimeDir(cfg)
   const installRoot = await resolveRimeDir(cfg)
-  const buildBase = cfg.inputMethod === "scripting"
-    ? String(detected.userDataDir ?? installRoot)
-    : installRoot
+  const buildBase = installRoot
   const buildDir = Path.join(buildBase, "build")
   if (cfg.skipBuildCleanup) {
     onLog?.(`跳过清理 build 目录：${buildDir}`)
