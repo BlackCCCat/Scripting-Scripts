@@ -1718,7 +1718,7 @@ export function CalendarTimerView() {
                     const countdownSeconds =
                       task.countdownSeconds ?? UNLIMITED_COUNTDOWN_SECONDS;
                     const countdownLabel = task.unlimited
-                      ? "不限时"
+                      ? ""
                       : (COUNTDOWN_OPTIONS.find(
                           (opt) => opt.seconds === countdownSeconds,
                         )?.label ?? "专注倒计时");
