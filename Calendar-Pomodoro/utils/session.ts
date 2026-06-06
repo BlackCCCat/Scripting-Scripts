@@ -17,6 +17,7 @@ export type TimerSession = {
   running: boolean
   paused: boolean
   activityId?: string
+  alarmId?: string
 }
 
 const SESSION_FILE_NAME = "session.json"
@@ -99,6 +100,7 @@ export async function loadSession(): Promise<TimerSession | null> {
       running: Boolean(data.running),
       paused: Boolean(data.paused),
       activityId: data.activityId ? String(data.activityId) : undefined,
+      alarmId: data.alarmId ? String(data.alarmId) : undefined,
     }
   } catch {
     return null

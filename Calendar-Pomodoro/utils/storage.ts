@@ -1,7 +1,12 @@
 // Scripting 路径工具（拼接目录/文件路径）
 import { Path } from "scripting"
 // 存储相关常量
-import { BASE_DIR_NAME, TASKS_FILE_NAME } from "../constants"
+import {
+  BASE_DIR_NAME,
+  COUNTDOWN_OPTIONS,
+  TASKS_FILE_NAME,
+  UNLIMITED_COUNTDOWN_SECONDS,
+} from "../constants"
 // 任务类型
 import type { Task } from "../types"
 
@@ -68,17 +73,29 @@ export async function loadTasks(): Promise<Task[]> {
     const list = JSON.parse(String(raw ?? ""))
     if (!Array.isArray(list)) return []
     return list
-      .map((item) => ({
-        id: String(item?.id ?? ""),
-        name: String(item?.name ?? ""),
-        calendarId: String(item?.calendarId ?? ""),
-        calendarTitle: String(item?.calendarTitle ?? ""),
-        useCountdown: Boolean(item?.useCountdown ?? false),
-        countdownSeconds: Number(item?.countdownSeconds ?? 0) || 0,
-        useNotification: Boolean(item?.useNotification ?? false),
-        notificationIntervalMinutes: Number(item?.notificationIntervalMinutes ?? 0) || 0,
-        noteDraft: String(item?.noteDraft ?? ""),
-      }))
+      .map((item) => {
+        const legacyUseCountdown = Boolean(item?.useCountdown ?? false)
+        const hasUnlimitedField = typeof item?.unlimited === "boolean"
+        const unlimited = hasUnlimitedField ? Boolean(item.unlimited) : !legacyUseCountdown
+        const fallbackSeconds = COUNTDOWN_OPTIONS[3]?.seconds ?? 25 * 60
+        const rawSeconds = Number(item?.countdownSeconds ?? 0) || 0
+        return {
+          id: String(item?.id ?? ""),
+          name: String(item?.name ?? ""),
+          calendarId: String(item?.calendarId ?? ""),
+          calendarTitle: String(item?.calendarTitle ?? ""),
+          useCountdown: true,
+          unlimited,
+          countdownSeconds: unlimited
+            ? UNLIMITED_COUNTDOWN_SECONDS
+            : rawSeconds > 0
+              ? rawSeconds
+              : fallbackSeconds,
+          useNotification: Boolean(item?.useNotification ?? false),
+          notificationIntervalMinutes: Number(item?.notificationIntervalMinutes ?? 0) || 0,
+          noteDraft: String(item?.noteDraft ?? ""),
+        }
+      })
       .filter((item) => item.id && item.name && item.calendarId)
   } catch {
     return []

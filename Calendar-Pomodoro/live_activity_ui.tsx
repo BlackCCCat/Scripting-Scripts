@@ -25,9 +25,9 @@ export const liveActivityBuilder: LiveActivityUIBuilder<TimerActivityState> = (s
     const displayTitle = state.title.length > 12 ? `${state.title.slice(0, 12)}...` : state.title
     // 日历名称可能为空
     const calendarTitle = state.calendarTitle ?? ""
-    // 倒计时蓝色，正计时绿色
+    // 倒计时蓝色，不限时（原正计时）绿色
     const accentColor = state.countsDown ? "systemBlue" : "systemGreen"
-    // 图标：倒计时用 restart，正计时用 play
+    // 图标：倒计时用 restart，不限时用 play，保持原来的灵动岛样式
     const iconName = state.countsDown ? "restart" : "play"
 
     // 默认计时标签（支持暂停）
