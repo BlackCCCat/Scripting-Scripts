@@ -16,7 +16,10 @@ import {
   VStack,
 } from "scripting"
 
-import { StopPomodoroTimerIntent } from "./app_intents"
+import {
+  CancelPomodoroTimerIntent,
+  StopPomodoroTimerIntent,
+} from "./app_intents"
 import { COUNT_UP_WINDOW_MS } from "./constants"
 
 const ALARM_LIVE_ACTIVITY_NAME = "CalendarPomodoroAlarmActivity"
@@ -140,7 +143,13 @@ function AlarmActionButtons({ state }: { state: AlarmLiveActivityState<PomodoroA
       {state.actions.resume ? (
         <ActionButton action={state.actions.resume} fallbackImage="play.fill" title="继续" />
       ) : null}
-      <ActionButton action={state.actions.stop} fallbackImage="xmark" role="destructive" title="取消" />
+      <Button
+        intent={CancelPomodoroTimerIntent({ alarmId: state.alarmID })}
+        role="destructive"
+        controlSize="small"
+      >
+        <Label title="取消" systemImage="xmark" />
+      </Button>
       <Button
         intent={StopPomodoroTimerIntent({ alarmId: state.alarmID })}
         role="destructive"

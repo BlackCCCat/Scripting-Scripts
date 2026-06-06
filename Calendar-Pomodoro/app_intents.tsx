@@ -1,4 +1,4 @@
-import { AppIntentManager, AppIntentProtocol, Widget } from "scripting"
+import { AppIntentManager, AppIntentProtocol, Script, Widget } from "scripting"
 
 import { UNLIMITED_COUNTDOWN_SECONDS } from "./constants"
 import type { Task } from "./types"
@@ -88,6 +88,23 @@ async function clearTaskNoteDraft(tasks: Task[], taskId: string) {
   )))
 }
 
+async function cancelSessionWithoutSaving() {
+  const session = await loadSession()
+  if (!session) return
+
+  const tasks = await loadTasks()
+  await clearSession()
+  await clearTaskNoteDraft(tasks, session.taskId)
+}
+
+function finishIntentExecution() {
+  // LiveActivityIntent 没有主界面上下文；这里不能调用 Script.minimize()。
+  // 否则会留下“不可恢复的最小化脚本”。Intent 完成后显式退出才是干净状态。
+  try {
+    Script.exit()
+  } catch {}
+}
+
 async function saveSessionToCalendar() {
   const session = await loadSession()
   if (!session) return
@@ -139,13 +156,33 @@ async function saveSessionToCalendar() {
 }
 
 export const StopPomodoroTimerIntent = AppIntentManager.register<PomodoroAlarmIntentParams>({
-  name: "StopCalendarPomodoroTimerIntentV3",
+  name: "StopCalendarPomodoroTimerIntentV4",
   protocol: AppIntentProtocol.LiveActivityIntent,
   perform: async (params: PomodoroAlarmIntentParams) => {
-    await saveSessionToCalendar()
-    await stopSystemAlarm(params.alarmId)
     try {
-      Widget.reloadAll()
-    } catch {}
+      await saveSessionToCalendar()
+      await stopSystemAlarm(params.alarmId)
+      try {
+        Widget.reloadAll()
+      } catch {}
+    } finally {
+      finishIntentExecution()
+    }
+  },
+})
+
+export const CancelPomodoroTimerIntent = AppIntentManager.register<PomodoroAlarmIntentParams>({
+  name: "CancelCalendarPomodoroTimerIntentV1",
+  protocol: AppIntentProtocol.LiveActivityIntent,
+  perform: async (params: PomodoroAlarmIntentParams) => {
+    try {
+      await cancelSessionWithoutSaving()
+      await stopSystemAlarm(params.alarmId)
+      try {
+        Widget.reloadAll()
+      } catch {}
+    } finally {
+      finishIntentExecution()
+    }
   },
 })

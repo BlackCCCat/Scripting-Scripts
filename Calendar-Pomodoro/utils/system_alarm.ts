@@ -2,6 +2,10 @@ import {
   UNLIMITED_ALARM_SYSTEM_SECONDS,
   UNLIMITED_COUNTDOWN_SECONDS,
 } from "../constants"
+import {
+  CancelPomodoroTimerIntent,
+  StopPomodoroTimerIntent,
+} from "../app_intents"
 import type { Task } from "../types"
 
 const ALARM_SOURCE = "calendar-pomodoro"
@@ -94,6 +98,8 @@ function buildCountdownConfiguration(
     duration,
     attributes: buildAlarmAttributes(task, alarmId, options),
     sound: AlarmManager.Sound.default(),
+    stopIntent: StopPomodoroTimerIntent({ alarmId }) as any,
+    secondaryIntent: CancelPomodoroTimerIntent({ alarmId }) as any,
   })
   if (!configuration) throw new Error("AlarmManager 倒计时配置创建失败")
   return configuration
