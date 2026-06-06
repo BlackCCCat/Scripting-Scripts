@@ -14,9 +14,11 @@ import {
   getPreviewPickupsFromStore,
   importAnyDataToStore,
   markPickedInStore,
+  refreshWidgetDataCacheFromStore,
   resetBusinessDataStore,
   unmarkPickedInStore,
 } from "./dataStore"
+import { takeWidgetActions } from "./widgetData"
 
 declare const Storage: {
   get(key: string): any
@@ -128,7 +130,9 @@ export function saveConfig(next: Partial<Config>) {
   merged.autoCleanupPicked = merged.autoCleanupPicked === true
   merged.autoCleanupPreview = merged.autoCleanupPreview === true
   merged.cleanupDays = normalizeCleanupDays(Number(merged.cleanupDays))
-  return Storage.set(CONFIG_KEY, merged)
+  const ok = Storage.set(CONFIG_KEY, merged)
+  void refreshWidgetDataCacheFromStore()
+  return ok
 }
 
 export async function resetConfig() {
@@ -182,6 +186,29 @@ export async function getAllPickupInfo(cfg: Config = loadConfig()): Promise<Pick
 
 export async function getPendingHomeCodes() {
   return getPendingHomeCodesFromStore()
+}
+
+export async function processPendingWidgetActions() {
+  const actions = takeWidgetActions()
+  if (actions.length === 0) return
+
+  for (const action of actions) {
+    if (action.type === "toggle") {
+      const pendingCodes = await getPendingHomeCodesFromStore()
+      if (pendingCodes.includes(action.code)) {
+        await markPickedInStore(action.code)
+      } else {
+        await unmarkPickedInStore(action.code)
+      }
+    } else if (action.type === "markAll") {
+      const pendingCodes = await getPendingHomeCodesFromStore()
+      for (const code of pendingCodes) {
+        await markPickedInStore(code)
+      }
+    }
+  }
+
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function getBusinessDataStats() {

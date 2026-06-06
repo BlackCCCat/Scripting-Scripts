@@ -3,7 +3,7 @@ import type { Color } from "scripting"
 
 import { TogglePickedIntent } from "./app_intents"
 import type { PickupInfo } from "./types"
-import { getHomePickupInfo, loadConfig } from "./utils"
+import { loadWidgetData } from "./widgetData"
 
 function statusTone(item: PickupInfo): Color {
   if (!item.date) return "secondaryLabel"
@@ -84,7 +84,11 @@ function PickupTile(props: {
         <Text
           font={locationFont(props.item, props.compact)}
           fontWeight="semibold"
-          lineLimit={{ min: 2, max: 2, reservesSpace: true }}
+          lineLimit={{
+            min: 2,
+            max: 2,
+            reservesSpace: true,
+          }}
           fixedSize={{ horizontal: false, vertical: true }}
           multilineTextAlignment="leading"
           allowsTightening={true}
@@ -120,7 +124,7 @@ function SmallWidget(props: { items: PickupInfo[] }) {
   }
 
   return (
-    <VStack padding={{ top: 10, leading: 12, bottom: 10, trailing: 12 }} alignment="leading" spacing={4}>
+    <VStack padding={{ top: 8, leading: 12, bottom: 8, trailing: 12 }} alignment="leading" spacing={2}>
       {show.map((item, index) => (
         <PickupTile
           key={`${item.code}-${index}`}
@@ -162,7 +166,7 @@ function CollectionWidget(props: {
   const compact = show.length >= 3
 
   return (
-    <VStack padding={{ top: 10, leading: 12, bottom: 10, trailing: 12 }} alignment="leading" spacing={6}>
+    <VStack padding={{ top: 10, leading: 12, bottom: 10, trailing: 12 }} alignment="leading" spacing={show.length <= 2 ? 4 : 6}>
       {rows.map((row, rowIndex) => (
         <HStack key={`row-${rowIndex}`} spacing={8}>
           {row.map((item, index) => (
@@ -181,18 +185,9 @@ function CollectionWidget(props: {
   )
 }
 
-async function loadData() {
-  const cfg = loadConfig()
-  const items = (await getHomePickupInfo()).filter((item) => !item.picked).slice(0, 8)
-  return {
-    items,
-    showCount: Math.max(1, Math.min(8, cfg.widgetShowCount || 5)),
-  }
-}
-
 async function run() {
   const family = Widget.family
-  const data = await loadData()
+  const data = loadWidgetData()
 
   if (family === "systemSmall") {
     Widget.present(<SmallWidget items={data.items} />)

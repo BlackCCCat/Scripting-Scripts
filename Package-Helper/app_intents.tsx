@@ -1,6 +1,10 @@
 import { AppIntentManager, AppIntentProtocol, Widget } from "scripting"
 
-import { getPendingHomeCodes, markPicked, unmarkPicked } from "./utils"
+import {
+  appendWidgetAction,
+  applyWidgetToggleToCache,
+  clearWidgetCacheItems,
+} from "./widgetData"
 
 function reloadWidgets() {
   try {
@@ -14,12 +18,8 @@ export const TogglePickedIntent = AppIntentManager.register({
   name: "TogglePickedIntent",
   protocol: AppIntentProtocol.AppIntent,
   perform: async (code: string) => {
-    const pendingCodes = await getPendingHomeCodes()
-    if (pendingCodes.includes(code)) {
-      await markPicked(code)
-    } else {
-      await unmarkPicked(code)
-    }
+    appendWidgetAction({ type: "toggle", code, createdAt: Date.now() })
+    applyWidgetToggleToCache(code)
     reloadWidgets()
   },
 })
@@ -28,10 +28,8 @@ export const MarkAllPickedIntent = AppIntentManager.register({
   name: "MarkAllPickedIntent",
   protocol: AppIntentProtocol.AppIntent,
   perform: async (_: void) => {
-    const pendingCodes = await getPendingHomeCodes()
-    for (const code of pendingCodes) {
-      await markPicked(code)
-    }
+    appendWidgetAction({ type: "markAll", createdAt: Date.now() })
+    clearWidgetCacheItems()
     reloadWidgets()
   },
 })

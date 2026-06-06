@@ -2,6 +2,7 @@ import { Path } from "scripting"
 
 import type { Config, ImportedRecord, PickupInfo } from "./types"
 import { buildPickupSnippetText, extractPickupFromText, splitMessages } from "./parser"
+import { saveWidgetData } from "./widgetData"
 
 declare const Storage: {
   get<T>(key: string): T | null
@@ -72,6 +73,11 @@ function currentCleanupSettings() {
     autoCleanupPreview: raw.autoCleanupPreview === true,
     cleanupDays,
   }
+}
+
+function currentWidgetShowCount() {
+  const raw = (Storage.get<RawConfig>(CONFIG_KEY) || {}) as RawConfig
+  return Math.max(1, Math.min(8, Number(raw.widgetShowCount) || 5))
 }
 
 function placeholders(count: number) {
@@ -385,7 +391,9 @@ async function fetchScopedPickups(scope: "home" | "preview"): Promise<PickupInfo
 }
 
 export async function getHomePickupsFromStore() {
-  return fetchScopedPickups("home")
+  const items = await fetchScopedPickups("home")
+  saveWidgetData(items.filter((item) => !item.picked).slice(0, 8), currentWidgetShowCount())
+  return items
 }
 
 export async function getPreviewPickupsFromStore() {
@@ -428,6 +436,7 @@ export async function importAnyDataToStore(data: string) {
   }
 
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
   return changed
 }
 
@@ -442,12 +451,14 @@ export async function markPickedInStore(code: string) {
     [code, Date.now()],
   )
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function unmarkPickedInStore(code: string) {
   await ensureReady()
   await db.execute("DELETE FROM picked_items WHERE code = ?", [code])
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function clearPickedInStore() {
@@ -458,6 +469,7 @@ export async function clearPickedInStore() {
   }
   await db.execute("DELETE FROM picked_items")
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function deleteHomePickupInStore(code: string) {
@@ -465,12 +477,14 @@ export async function deleteHomePickupInStore(code: string) {
   await upsertDeleted("home", code)
   await db.execute("DELETE FROM picked_items WHERE code = ?", [code])
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function deletePreviewPickupInStore(code: string) {
   await ensureReady()
   await upsertDeleted("preview", code)
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function clearPreviewResultsInStore() {
@@ -479,6 +493,7 @@ export async function clearPreviewResultsInStore() {
     await upsertDeleted("preview", item.code)
   }
   await runMaintenance()
+  await refreshWidgetDataCacheFromStore()
 }
 
 export async function resetBusinessDataStore() {
@@ -488,6 +503,7 @@ export async function resetBusinessDataStore() {
     DELETE FROM picked_items;
     DELETE FROM pickups;
   `)
+  saveWidgetData([], currentWidgetShowCount())
   Storage.remove(DATASTORE_MIGRATION_KEY)
   initPromise = null
 }
@@ -495,6 +511,11 @@ export async function resetBusinessDataStore() {
 export async function getPendingHomeCodesFromStore() {
   const items = await getHomePickupsFromStore()
   return items.filter((item) => !item.picked).map((item) => item.code)
+}
+
+export async function refreshWidgetDataCacheFromStore() {
+  const items = await fetchScopedPickups("home")
+  saveWidgetData(items.filter((item) => !item.picked).slice(0, 8), currentWidgetShowCount())
 }
 
 export async function getBusinessDataStatsFromStore() {

@@ -1,7 +1,7 @@
 import { Navigation, Script, Intent } from "scripting"
 
 import { RootTabView } from "./components/RootTabView"
-import { INTENT_DATA_KEY, handleAnyData, safeRefreshWidget } from "./utils"
+import { INTENT_DATA_KEY, handleAnyData, processPendingWidgetActions, safeRefreshWidget } from "./utils"
 
 declare const Storage: {
   get(key: string): any
@@ -44,6 +44,8 @@ function collectIntentTexts(): string[] {
 }
 
 async function run() {
+  await processPendingWidgetActions()
+
   const incomingTexts = collectIntentTexts()
 
   if (incomingTexts.length > 0) {
