@@ -77,6 +77,11 @@ const createTimerActivity = PomodoroLiveActivity;
 // 兼容历史名称，清理残留活动
 const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"];
 
+function sameTaskRows(a: Task[], b: Task[]) {
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => item === b[index]);
+}
+
 function NoteEditorPage(props: { title: string; content: string }) {
   const dismiss = Navigation.useDismiss();
   const [content, setContent] = useState(props.content);
@@ -179,12 +184,34 @@ export function CalendarTimerView() {
     return EditMode?.inactive ? EditMode.inactive() : null;
   });
   const activeTab = useObservable<number>(0);
+  const taskRows = useObservable<Task[]>(() => []);
   const [isEditing, setIsEditing] = useState(false);
+  const tasksRef = useRef<Task[]>([]);
 
   useEffect(() => {
     // 首次进入：加载任务与设置
     void refreshTasks();
     void loadAppSettings();
+  }, []);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+    if (!sameTaskRows(taskRows.value, tasks)) {
+      taskRows.setValue(tasks);
+    }
+  }, [tasks]);
+
+  useEffect(() => {
+    // ForEach.data 会在拖动排序后直接更新 observable；这里把新顺序同步回业务状态和本地存储。
+    const unsubscribe = (taskRows as any).subscribe?.((next: Task[]) => {
+      if (sameTaskRows(next, tasksRef.current)) return;
+      tasksRef.current = next;
+      setTasks(next);
+      void saveTasks(next);
+    });
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -1430,15 +1457,6 @@ export function CalendarTimerView() {
     setNoteDraft(next);
   }
 
-  function moveTasks(indices: number[], newOffset: number) {
-    // 拖动排序：将被拖动元素插入到新位置
-    if (!indices.length) return;
-    const movingItems = indices.map((index) => tasks[index]).filter(Boolean);
-    const next = tasks.filter((_, index) => !indices.includes(index));
-    next.splice(newOffset, 0, ...movingItems);
-    void persistTasks(next);
-  }
-
   function toggleEditMode() {
     const EditMode = (globalThis as any).EditMode;
     if (!EditMode?.active || !EditMode?.inactive) return;
@@ -1706,11 +1724,9 @@ export function CalendarTimerView() {
             >
               {tasks.length ? (
                 <ForEach
-                  count={tasks.length}
-                  onMove={moveTasks}
-                  itemBuilder={(index) => {
-                    const task = tasks[index];
-                    if (!task) return <Text> </Text>;
+                  data={taskRows}
+                  editActions="move"
+                  builder={(task) => {
                     const isActive = activeTaskId === task.id;
                     const isRunning = running && isActive;
                     const isPaused = paused && isActive;
