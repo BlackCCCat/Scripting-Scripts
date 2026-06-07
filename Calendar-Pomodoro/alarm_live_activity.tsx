@@ -60,6 +60,12 @@ function alarmTint(state: AlarmLiveActivityState<PomodoroAlarmMetadata>) {
   return "systemOrange"
 }
 
+function activityTint(state: AlarmLiveActivityState<PomodoroAlarmMetadata>) {
+  return isUnlimited(state)
+    ? { light: "rgba(175,82,222,0.14)", dark: "rgba(42,22,54,0.92)" }
+    : { light: "rgba(255,149,0,0.14)", dark: "rgba(49,31,12,0.92)" }
+}
+
 function AlarmTimerLabel({
   state,
   compact,
@@ -172,7 +178,12 @@ function LockScreenContent(state: AlarmLiveActivityState<PomodoroAlarmMetadata>)
   )
 
   return (
-    <VStack alignment="leading" spacing={14} padding={16}>
+    <VStack
+      alignment="leading"
+      spacing={14}
+      padding={16}
+      activityBackgroundTint={activityTint(state)}
+    >
       <HStack spacing={12}>
         <Image systemName={alarmIconName(state)} foregroundStyle={alarmTint(state)} imageScale="large" />
         <VStack alignment="leading" spacing={2}>
