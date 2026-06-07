@@ -6,6 +6,7 @@ const KEY_PREFERRED_FUEL = "preferredFuel"
 const KEY_SEARCH_RADIUS = "searchRadiusKm"
 const KEY_LOCATION_MODE = "locationMode"
 const KEY_MANUAL_PROVINCE = "manualProvince"
+const KEY_LAST_AUTO_PROVINCE = "lastAutoProvince"
 const PRIVATE_STORAGE = { shared: false }
 
 export type LocationMode = "auto" | "manual"
@@ -55,4 +56,14 @@ export function getManualProvinceName(): string | null {
 
 export function setManualProvinceName(name: string): void {
   Storage.set(KEY_MANUAL_PROVINCE, name, PRIVATE_STORAGE)
+}
+
+/** 最近一次自动定位成功匹配到的省份，供小组件定位失败时兜底使用。 */
+export function getLastAutoProvinceName(): string | null {
+  const v = Storage.get<string>(KEY_LAST_AUTO_PROVINCE, PRIVATE_STORAGE)
+  return typeof v === "string" && v.trim() ? v : null
+}
+
+export function setLastAutoProvinceName(name: string): void {
+  Storage.set(KEY_LAST_AUTO_PROVINCE, name, PRIVATE_STORAGE)
 }

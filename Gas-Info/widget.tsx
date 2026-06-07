@@ -8,7 +8,13 @@ import {
   Widget,
 } from "scripting"
 import { fetchOilPrices, matchProvince } from "./src/service"
-import { getLocationMode, getManualProvinceName, getPreferredFuel } from "./src/settings"
+import {
+  getLastAutoProvinceName,
+  getLocationMode,
+  getManualProvinceName,
+  getPreferredFuel,
+  setLastAutoProvinceName,
+} from "./src/settings"
 import { FUELS, FuelCode, OilPriceData, ProvincePrice, fuelMeta } from "./src/types"
 
 type WidgetData = {
@@ -48,8 +54,17 @@ async function resolveWidgetData(): Promise<WidgetData> {
   }
 
   const locatedProvinceName = await locateProvinceName()
-  const province =
-    matchProvince(data.provinces, locatedProvinceName) ?? data.provinces[0]
+  const locatedProvince = matchProvince(data.provinces, locatedProvinceName)
+  if (locatedProvince) {
+    setLastAutoProvinceName(locatedProvince.province)
+    return { data, province: locatedProvince, preferred }
+  }
+
+  const cachedProvince = matchProvince(
+    data.provinces,
+    getLastAutoProvinceName()
+  )
+  const province = cachedProvince ?? data.provinces[0]
 
   return { data, province, preferred }
 }
@@ -59,7 +74,10 @@ async function locateProvinceName(): Promise<string | null> {
     if (!Location.isAuthorizedForWidgetUpdates) {
       return null
     }
-    const loc = await Location.requestCurrent({ forceRequest: true })
+    const loc =
+      (await Location.requestCurrent({ forceRequest: true }).catch(
+        () => null
+      )) ?? (await Location.requestCurrent().catch(() => null))
     if (!loc) {
       return null
     }

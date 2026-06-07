@@ -23,6 +23,7 @@ import {
   getLocationMode,
   getManualProvinceName,
   LocationMode,
+  setLastAutoProvinceName,
   setLocationMode,
   setManualProvinceName,
 } from "./settings"
@@ -530,9 +531,6 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
     try {
       const result = await fetchOilPrices({ forceRefresh })
       setData(result)
-      if (forceRefresh) {
-        Widget.reloadAll()
-      }
 
       // 定位当前省份
       let provinceName: string | null = null
@@ -550,10 +548,16 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
         // 定位失败，忽略，使用默认省份
       }
 
-      const matched =
-        matchProvince(result.provinces, provinceName) ?? result.provinces[0]
-      setAutoProvince(matched)
-      setLocatedName(provinceName ?? matched.province)
+      const matched = matchProvince(result.provinces, provinceName)
+      const displayProvince = matched ?? result.provinces[0]
+      if (matched) {
+        setLastAutoProvinceName(matched.province)
+      }
+      setAutoProvince(displayProvince)
+      setLocatedName(provinceName ?? displayProvince.province)
+      if (forceRefresh) {
+        Widget.reloadAll()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "油价数据加载失败")
     } finally {
