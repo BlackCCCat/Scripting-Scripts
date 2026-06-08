@@ -1,4 +1,4 @@
-import { Path, Script, fetch } from "scripting"
+import { Path, Script, fetch, type Response } from "scripting"
 import {
   DOWNLOAD_DIR,
   ROOT_DIR,
@@ -19,20 +19,16 @@ type ShellDownloadResult = {
   metadata?: YouTubeMetadata | null
 }
 
-type ExtractedStream = {
-  url?: string | null
-  ext?: string | null
-  format_id?: string | null
-  filesize?: number | null
-  filesize_approx?: number | null
-  http_headers?: Record<string, string>
-}
-
-type YtDlpStreamResult = {
-  exitCode: number
-  output: string
-  stream?: ExtractedStream | null
-  metadata?: YouTubeMetadata | null
+type YtDlpProgress = {
+  status?: string
+  percent?: number | null
+  downloadedBytes?: number
+  totalBytes?: number | null
+  speed?: number | null
+  eta?: number | null
+  fragmentIndex?: number | null
+  fragmentCount?: number | null
+  updatedAt?: number
 }
 
 type HLSDownloadPlan = {
@@ -65,6 +61,8 @@ const SCRIPT_DIR = Script.directory
 const TEMP_DIR = Path.join(ROOT_DIR, "tmp")
 const YTDLP_RUNNER_PATH = Path.join(SCRIPT_DIR, "ytdlp_runner.py")
 const CANCEL_FLAG_PATH = Path.join(TEMP_DIR, "cancel.flag")
+const YTDLP_PROGRESS_PATH = Path.join(TEMP_DIR, "ytdlp-progress.json")
+const YTDLP_FORMAT_SORT = ["vcodec:h264", "lang", "quality", "res", "fps", "hdr:12", "acodec:aac"]
 let ytdlpConfigCounter = 0
 const currentTaskPaths = new Set<string>()
 const currentURLSessionTasks = new Set<URLSessionDownloadTask>()
@@ -100,19 +98,6 @@ function extractYouTubeMetadata(output: string): YouTubeMetadata | null {
   if (!line) return null
   try {
     return JSON.parse(line.slice("MEDIA_DOWNLOADER_METADATA ".length))
-  } catch {
-    return null
-  }
-}
-
-function extractYtDlpStream(output: string): ExtractedStream | null {
-  const line = output
-    .split(/\r?\n/)
-    .map((item) => item.trim())
-    .find((item) => item.startsWith("MEDIA_DOWNLOADER_STREAM "))
-  if (!line) return null
-  try {
-    return JSON.parse(line.slice("MEDIA_DOWNLOADER_STREAM ".length))
   } catch {
     return null
   }
@@ -306,46 +291,59 @@ function buildLocalHLSPlaylist(options: {
   return lines.join("\n")
 }
 
-function startSmoothM3U8UnitProgress(options: {
-  rangeStart: number
-  rangeEnd: number
-  stage: string
-  completedBytes: number
-  onProgress?: DownloadProgressFn
-}) {
-  let stopped = false
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let lastFraction = options.rangeStart
-  const startedAt = Date.now()
-  const rangeWidth = Math.max(0, options.rangeEnd - options.rangeStart)
-  const maxSyntheticFraction = options.rangeStart + rangeWidth * 0.92
+const HLS_MAX_CONCURRENCY = 5
 
-  const tick = () => {
-    if (stopped) return
-    const elapsed = Date.now() - startedAt
-    const inner = Math.min(0.92, 1 - Math.exp(-elapsed / 5500))
-    const nextFraction = Math.min(maxSyntheticFraction, options.rangeStart + rangeWidth * inner)
-    if (nextFraction > lastFraction) {
-      lastFraction = nextFraction
-      options.onProgress?.({
-        fraction: nextFraction,
-        stage: `${options.stage} · ${formatBytes(options.completedBytes)}`,
-      })
+async function fetchSegmentToFile(options: {
+  url: string
+  filePath: string
+  headers: Record<string, string>
+  debugLabel: string
+  isCancelled?: () => boolean
+}): Promise<number> {
+  if (options.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) {
+    throw new Error("下载已取消")
+  }
+
+  await removeIfExists(options.filePath)
+  registerCurrentTaskPath(options.filePath)
+
+  const response = await fetch(options.url, {
+    method: "GET",
+    timeout: 120,
+    debugLabel: options.debugLabel,
+    headers: {
+      ...options.headers,
+      Accept: "*/*",
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`segment download failed: HTTP ${response.status}`)
+  }
+
+  const reader = response.body.getReader()
+  try {
+    while (true) {
+      if (options.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) {
+        await reader.cancel("cancelled")
+        throw new Error("下载已取消")
+      }
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value != null) {
+        FileManager.appendDataSync(options.filePath, value)
+      }
     }
-    timer = setTimeout(tick, 250)
+  } finally {
+    try { reader.releaseLock() } catch {}
   }
 
-  timer = setTimeout(tick, 250)
-
-  return {
-    observe(fraction: number) {
-      if (fraction > lastFraction) lastFraction = fraction
-    },
-    stop() {
-      stopped = true
-      if (timer) clearTimeout(timer)
-    },
+  const written = fileSize(options.filePath)
+  if (written <= 0) {
+    throw new Error(`segment ${options.debugLabel} downloaded 0 bytes`)
   }
+
+  return written
 }
 
 async function downloadHLSPlanAsLocalPlaylist(options: {
@@ -359,79 +357,88 @@ async function downloadHLSPlanAsLocalPlaylist(options: {
   onProgress?: DownloadProgressFn
   isCancelled?: () => boolean
 }): Promise<{ playlistPath: string; bytesWritten: number; segmentCount: number }> {
-  let bytesWritten = 0
+  const headers = {
+    "User-Agent": MOBILE_SAFARI_UA,
+    Referer: options.plan.playlistURL,
+  }
+
   const totalUnits = options.plan.segments.length + (options.plan.initMapURL ? 1 : 0)
   let completedUnits = 0
-  const unitRange = (unitIndex: number) => {
-    const width = totalUnits > 0 ? (options.end - options.start) / totalUnits : 0
-    return {
-      start: options.start + unitIndex * width,
-      end: options.start + (unitIndex + 1) * width,
-    }
-  }
-  const downloadedFileNames: string[] = []
+  let bytesWritten = 0
 
-  const downloadUnit = async (url: string, fileName: string, unitLabel: string) => {
-    if (options.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) {
-      throw new Error("下载已取消")
-    }
-    const filePath = Path.join(options.directory, fileName)
-    const range = unitRange(completedUnits)
-    const displayUnit = Math.min(totalUnits, completedUnits + 1)
-    const stage = `${options.label} ${displayUnit}/${totalUnits}`
-    const smoothProgress = startSmoothM3U8UnitProgress({
-      rangeStart: range.start,
-      rangeEnd: range.end,
-      stage,
-      completedBytes: bytesWritten,
-      onProgress: options.onProgress,
-    })
-    try {
-      await downloadURLWithProgress({
-        url,
-        destination: filePath,
-        headers: {
-          "User-Agent": MOBILE_SAFARI_UA,
-          Referer: options.plan.playlistURL,
-        },
-        start: range.start,
-        end: range.end,
-        stage,
-        onProgress: (progress) => {
-          smoothProgress.observe(progress.fraction)
-          options.onProgress?.(progress)
-        },
-        isCancelled: options.isCancelled,
-      })
-    } finally {
-      smoothProgress.stop()
-    }
-    bytesWritten += fileSize(filePath)
-    completedUnits += 1
+  const reportProgress = () => {
+    const fraction = totalUnits > 0
+      ? options.start + (options.end - options.start) * (completedUnits / totalUnits)
+      : options.start
     options.onProgress?.({
-      fraction: range.end,
-      stage: `${unitLabel} · ${formatBytes(bytesWritten)}`,
+      fraction,
+      stage: `${options.label} ${completedUnits}/${totalUnits} · ${formatBytes(bytesWritten)}`,
     })
   }
 
+  reportProgress()
+
+  // Download init segment first (must complete before regular segments)
   let initFileName: string | undefined
   if (options.plan.initMapURL) {
     initFileName = `${options.prefix}_init${segmentExtension(options.plan.initMapURL)}`
-    await downloadUnit(options.plan.initMapURL, initFileName, `${options.label} init`)
+    const bytes = await fetchSegmentToFile({
+      url: options.plan.initMapURL,
+      filePath: Path.join(options.directory, initFileName),
+      headers,
+      debugLabel: `${options.label}-init`,
+      isCancelled: options.isCancelled,
+    })
+    bytesWritten += bytes
+    completedUnits += 1
+    reportProgress()
   }
 
-  for (let index = 0; index < options.plan.segments.length; index++) {
-    const segment = options.plan.segments[index]
-    const fileName = `${options.prefix}_${String(index).padStart(5, "0")}${segmentExtension(segment.url)}`
-    downloadedFileNames.push(fileName)
-    await downloadUnit(segment.url, fileName, `${options.label} ${index + 1}/${options.plan.segments.length}`)
+  // Pre-compute segment file names
+  const segmentFileNames: string[] = []
+  for (let i = 0; i < options.plan.segments.length; i++) {
+    segmentFileNames.push(
+      `${options.prefix}_${String(i).padStart(5, "0")}${segmentExtension(options.plan.segments[i].url)}`
+    )
   }
 
+  // Download segments with up to 5 concurrent fetch workers
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (true) {
+      if (options.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) {
+        throw new Error("下载已取消")
+      }
+      const index = nextIndex
+      if (index >= options.plan.segments.length) break
+      nextIndex += 1
+
+      const segment = options.plan.segments[index]
+      const bytes = await fetchSegmentToFile({
+        url: segment.url,
+        filePath: Path.join(options.directory, segmentFileNames[index]),
+        headers,
+        debugLabel: `${options.label}-seg-${index}`,
+        isCancelled: options.isCancelled,
+      })
+      bytesWritten += bytes
+      completedUnits += 1
+      reportProgress()
+    }
+  }
+
+  const workerCount = Math.min(HLS_MAX_CONCURRENCY, options.plan.segments.length)
+  if (workerCount > 0) {
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  }
+
+  // Build local m3u8 playlist pointing to downloaded segment files
   const playlistPath = Path.join(options.directory, options.playlistFileName)
   FileManager.writeAsStringSync(playlistPath, buildLocalHLSPlaylist({
     plan: options.plan,
     initFileName,
-    segmentFileNames: downloadedFileNames,
+    segmentFileNames,
   }))
   registerCurrentTaskPath(playlistPath)
 
@@ -445,15 +452,50 @@ export function detectMediaDownloadKind(url: string): MediaDownloadKind {
   return "douyin"
 }
 
+const YTDLP_VERSION_COMMANDS = [
+  "python3 -m yt_dlp --version",
+  commandLine([
+    "python3",
+    "-c",
+    "from yt_dlp.version import __version__; print(__version__)",
+  ]),
+  commandLine([
+    "python3",
+    "-c",
+    "import importlib.metadata as m; print(m.version('yt-dlp'))",
+  ]),
+]
+
+async function runShellWithTimeout(command: string, options: { timeout: number }): Promise<any> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      Shell.run(command, options),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({
+          exitCode: 124,
+          output: `Timed out after ${options.timeout}s`,
+        }), options.timeout * 1000 + 1000)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export async function isYtDlpAvailable(): Promise<boolean> {
-  const result = await Shell.run("python3 -m yt_dlp --version", { timeout: 20 })
-  return result.exitCode === 0
+  return (await getYtDlpVersion()) != null
 }
 
 export async function getYtDlpVersion(): Promise<string | null> {
-  const result = await Shell.run("python3 -m yt_dlp --version", { timeout: 20 })
-  if (result.exitCode !== 0) return null
-  return result.output.trim().split(/\s+/)[0] || null
+  for (const command of YTDLP_VERSION_COMMANDS) {
+    const result = await runShellWithTimeout(command, { timeout: 20 })
+    if (result.exitCode === 0) {
+      const version = result.output.trim().split(/\s+/)[0]
+      if (version) return version
+    }
+  }
+  return null
 }
 
 export async function installOrUpdateYtDlp(): Promise<string> {
@@ -484,6 +526,7 @@ export async function clearDownloadCancelFlag() {
 export async function requestDownloadCancel() {
   await ensureTempDirectory()
   FileManager.writeAsStringSync(CANCEL_FLAG_PATH, String(Date.now()))
+  clearYtDlpProgress()
   cancelBackgroundDownloads()
   for (const task of Array.from(currentURLSessionTasks)) {
     try {
@@ -504,21 +547,11 @@ function writeYtDlpConfig(url: string, format: string, outputTemplate: string, p
   FileManager.writeAsStringSync(configPath, JSON.stringify({
     url,
     format,
+    format_sort: YTDLP_FORMAT_SORT,
     output: outputTemplate,
     paths,
     cancel_flag: CANCEL_FLAG_PATH,
-  }))
-  return configPath
-}
-
-function writeYtDlpExtractConfig(url: string, format: string): string {
-  ytdlpConfigCounter += 1
-  const configPath = Path.join(TEMP_DIR, `ytdlp-extract-${Date.now()}-${ytdlpConfigCounter}.json`)
-  FileManager.writeAsStringSync(configPath, JSON.stringify({
-    mode: "extract",
-    url,
-    format,
-    cancel_flag: CANCEL_FLAG_PATH,
+    progress_path: YTDLP_PROGRESS_PATH,
   }))
   return configPath
 }
@@ -528,9 +561,77 @@ function buildYtDlpRunnerArgs(url: string, format: string, outputTemplate: strin
   return ["python3", YTDLP_RUNNER_PATH, configPath]
 }
 
-function buildYtDlpExtractArgs(url: string, format: string): string[] {
-  const configPath = writeYtDlpExtractConfig(url, format)
-  return ["python3", YTDLP_RUNNER_PATH, configPath]
+function clearYtDlpProgress() {
+  try {
+    if (FileManager.existsSync(YTDLP_PROGRESS_PATH)) FileManager.removeSync(YTDLP_PROGRESS_PATH)
+  } catch {}
+}
+
+function readYtDlpProgress(): YtDlpProgress | null {
+  try {
+    if (!FileManager.existsSync(YTDLP_PROGRESS_PATH)) return null
+    return JSON.parse(FileManager.readAsStringSync(YTDLP_PROGRESS_PATH)) as YtDlpProgress
+  } catch {
+    return null
+  }
+}
+
+function formatEta(seconds?: number | null): string | null {
+  if (seconds == null || seconds < 0 || !Number.isFinite(seconds)) return null
+  const totalSeconds = Math.max(0, Math.round(seconds))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+  return `${minutes}:${String(secs).padStart(2, "0")}`
+}
+
+function startYtDlpProgressPolling(options: {
+  start: number
+  end: number
+  stage: string
+  onProgress?: DownloadProgressFn
+}) {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const tick = () => {
+    if (stopped) return
+    const progress = readYtDlpProgress()
+    if (progress) {
+      const percent = progress.percent ?? null
+      const inner = percent != null
+        ? Math.max(0, Math.min(1, percent / 100))
+        : progress.downloadedBytes
+          ? Math.max(0.02, Math.min(0.96, Math.log2(progress.downloadedBytes / (1024 * 1024) + 1) / 8))
+          : 0
+      const fraction = options.start + (options.end - options.start) * inner
+      const downloaded = progress.downloadedBytes ? formatBytes(progress.downloadedBytes) : null
+      const total = progress.totalBytes ? formatBytes(progress.totalBytes) : null
+      const speed = progress.speed ? `${formatBytes(progress.speed)}/s` : null
+      const eta = formatEta(progress.eta)
+      const fragments = progress.fragmentIndex && progress.fragmentCount
+        ? `frag ${progress.fragmentIndex}/${progress.fragmentCount}`
+        : null
+      const percentText = percent != null ? `${percent.toFixed(1)}%` : null
+      const detail = [
+        percentText,
+        downloaded && total ? `${downloaded} / ${total}` : downloaded,
+        speed,
+        eta ? `ETA ${eta}` : null,
+        fragments,
+      ].filter(Boolean).join(" · ")
+      options.onProgress?.({
+        fraction,
+        stage: detail ? `${options.stage} · ${detail}` : options.stage,
+      })
+    }
+    timer = setTimeout(tick, 500)
+  }
+  timer = setTimeout(tick, 100)
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+  }
 }
 
 function baseNameWithoutExtension(path: string): string {
@@ -545,19 +646,6 @@ function normalizeHeaders(headers: Record<string, string> | undefined): Record<s
     if (typeof value === "string" && value) result[key] = value
   }
   return result
-}
-
-async function extractYouTubeStream(url: string, format: string): Promise<YtDlpStreamResult> {
-  const result = await Shell.run(
-    commandLine(buildYtDlpExtractArgs(url, format)),
-    { timeout: 120 }
-  )
-  return {
-    exitCode: result.exitCode,
-    output: result.output,
-    stream: extractYtDlpStream(result.output),
-    metadata: extractYouTubeMetadata(result.output),
-  }
 }
 
 async function downloadURLWithProgress(options: {
@@ -653,64 +741,51 @@ async function cleanupTempDirectory() {
   } catch {}
 }
 
-async function downloadSingleFileMp4(url: string, log: DownloadLogFn | undefined): Promise<ShellDownloadResult> {
+async function runYtDlpDownloadWithProgress(options: {
+  args: string[]
+  start: number
+  end: number
+  stage: string
+  onProgress?: DownloadProgressFn
+}): Promise<ShellExecutionResult> {
+  clearYtDlpProgress()
+  const stopPolling = startYtDlpProgressPolling({
+    start: options.start,
+    end: options.end,
+    stage: options.stage,
+    onProgress: options.onProgress,
+  })
+  try {
+    return await Shell.run(commandLine(options.args), { timeout: 7200 })
+  } finally {
+    stopPolling()
+    clearYtDlpProgress()
+  }
+}
+
+async function downloadSingleFileMp4(url: string, options: {
+  onProgress?: DownloadProgressFn
+  onLog?: DownloadLogFn
+}): Promise<ShellDownloadResult> {
+  const log = options.onLog
   log?.("高质量音视频分流失败，回退下载单文件 mp4。")
-  const result = await Shell.run(
-    commandLine(buildYtDlpRunnerArgs(
+  const result = await runYtDlpDownloadWithProgress({
+    args: buildYtDlpRunnerArgs(
       url,
       "b[ext=mp4][vcodec^=avc1]/b[ext=mp4]/best",
       "%(title).120B [%(id)s].%(ext)s",
       DOWNLOAD_DIR
-    )),
-    { timeout: 7200 }
-  )
+    ),
+    start: 0.22,
+    end: 0.94,
+    stage: "正在下载 YouTube 视频",
+    onProgress: options.onProgress,
+  })
   return {
     exitCode: result.exitCode,
     output: result.output,
     paths: extractDownloadedPaths(result.output).filter((path) => FileManager.existsSync(path)),
     metadata: extractYouTubeMetadata(result.output),
-  }
-}
-
-async function downloadSingleYouTubeStream(url: string, options: {
-  onProgress?: DownloadProgressFn
-  onLog?: DownloadLogFn
-  isCancelled?: () => boolean
-}): Promise<ShellDownloadResult> {
-  const report = (fraction: number, stage: string) => options.onProgress?.({ fraction, stage })
-  const log = options.onLog
-
-  report(0.18, "正在解析 YouTube 单文件视频流")
-  log?.("高质量音视频分流失败，回退解析单文件 mp4。")
-  const streamResult = await extractYouTubeStream(
-    url,
-    "b[ext=mp4][vcodec^=avc1]/b[ext=mp4]/best"
-  )
-  if (streamResult.exitCode !== 0 || !streamResult.stream?.url) {
-    return downloadSingleFileMp4(url, log)
-  }
-
-  const title = streamResult.metadata?.title || "youtube_video"
-  const id = streamResult.metadata?.id ? ` [${streamResult.metadata.id}]` : ""
-  const ext = streamResult.stream.ext || "mp4"
-  const finalPath = uniqueFilePath(DOWNLOAD_DIR, `${sanitizeFileName(`${title}${id}`)}.${ext}`)
-  registerCurrentTaskPath(finalPath)
-  await downloadURLWithProgress({
-    url: streamResult.stream.url,
-    destination: finalPath,
-    headers: streamResult.stream.http_headers,
-    start: 0.22,
-    end: 0.94,
-    stage: "正在下载 YouTube 视频",
-    onProgress: options.onProgress,
-    isCancelled: options.isCancelled,
-  })
-
-  return {
-    exitCode: FileManager.existsSync(finalPath) ? 0 : 1,
-    output: streamResult.output,
-    paths: FileManager.existsSync(finalPath) ? [finalPath] : [],
-    metadata: streamResult.metadata,
   }
 }
 
@@ -726,69 +801,71 @@ async function downloadHighQualityYouTube(url: string, options: {
   await ensureTempDirectory()
   await cleanupTempDirectory()
 
-  report(0.18, "正在解析 YouTube 视频流")
-  log?.("开始解析 YouTube 视频流。")
+  report(0.18, "正在下载 YouTube 视频流")
+  log?.("开始下载 YouTube 视频流。")
   throwIfCancelled()
-  const videoResult = await extractYouTubeStream(
-    url,
-    "bv*[ext=mp4][vcodec^=avc1]/bestvideo[ext=mp4][vcodec^=avc1]/bv*[ext=mp4]/bestvideo[ext=mp4]"
-  )
+  const videoResultRaw = await runYtDlpDownloadWithProgress({
+    args: buildYtDlpRunnerArgs(
+      url,
+      "bv*[ext=mp4][vcodec^=avc1]/bestvideo[ext=mp4][vcodec^=avc1]/bv*[ext=mp4]/bestvideo[ext=mp4]",
+      "%(title).120B [%(id)s].video.%(ext)s",
+      TEMP_DIR
+    ),
+    start: 0.18,
+    end: 0.5,
+    stage: "正在下载 YouTube 视频流",
+    onProgress: options.onProgress,
+  })
+  const videoResult = {
+    exitCode: videoResultRaw.exitCode,
+    output: videoResultRaw.output,
+    metadata: extractYouTubeMetadata(videoResultRaw.output),
+    paths: extractDownloadedPaths(videoResultRaw.output).filter((path) => FileManager.existsSync(path)),
+  }
   const videoMetadata = videoResult.metadata
   if (videoResult.exitCode === 130 || FileManager.existsSync(CANCEL_FLAG_PATH)) {
     throw new Error("下载已取消")
   }
-  if (videoResult.exitCode !== 0 || !videoResult.stream?.url) {
+  const videoPath = videoResult.paths.find((path) => Path.basename(path).includes(".video.")) || videoResult.paths.find((path) => [".mp4", ".m4v", ".mov", ".mkv", ".webm"].includes(Path.extname(path).toLowerCase()))
+  if (videoResult.exitCode !== 0 || !videoPath) {
     log?.(`YouTube 视频流下载失败：${compactLog(videoResult.output, 900)}`)
-    return downloadSingleYouTubeStream(url, options)
+    return downloadSingleFileMp4(url, options)
   }
-
-  const baseTitle = sanitizeFileName(`${videoMetadata?.title || "youtube_video"}${videoMetadata?.id ? ` [${videoMetadata.id}]` : ""}`)
-  const videoExt = videoResult.stream.ext || "mp4"
-  const videoPath = uniqueFilePath(TEMP_DIR, `${baseTitle}.video.${videoExt}`)
   registerCurrentTaskPath(videoPath)
-  report(0.22, "正在下载 YouTube 视频流")
-  log?.("开始下载 YouTube 视频流。")
-  await downloadURLWithProgress({
-    url: videoResult.stream.url,
-    destination: videoPath,
-    headers: videoResult.stream.http_headers,
-    start: 0.22,
-    end: 0.5,
-    stage: "正在下载 YouTube 视频流",
-    onProgress: options.onProgress,
-    isCancelled: options.isCancelled,
-  })
   throwIfCancelled()
 
-  report(0.52, "正在解析 YouTube 音频流")
-  log?.("开始解析 YouTube 音频流。")
-  const audioResult = await extractYouTubeStream(url, "ba[ext=m4a]/bestaudio[ext=m4a]/bestaudio")
+  report(0.52, "正在下载 YouTube 音频流")
+  log?.("开始下载 YouTube 音频流。")
+  const audioResultRaw = await runYtDlpDownloadWithProgress({
+    args: buildYtDlpRunnerArgs(
+      url,
+      "ba[ext=m4a]/bestaudio[ext=m4a]/bestaudio",
+      "%(title).120B [%(id)s].audio.%(ext)s",
+      TEMP_DIR
+    ),
+    start: 0.52,
+    end: 0.78,
+    stage: "正在下载 YouTube 音频流",
+    onProgress: options.onProgress,
+  })
+  const audioResult = {
+    exitCode: audioResultRaw.exitCode,
+    output: audioResultRaw.output,
+    metadata: extractYouTubeMetadata(audioResultRaw.output),
+    paths: extractDownloadedPaths(audioResultRaw.output).filter((path) => FileManager.existsSync(path)),
+  }
   const audioMetadata = audioResult.metadata
   if (audioResult.exitCode === 130 || FileManager.existsSync(CANCEL_FLAG_PATH)) {
     await removeIfExists(videoPath)
     throw new Error("下载已取消")
   }
-  if (audioResult.exitCode !== 0 || !audioResult.stream?.url) {
+  const audioPath = audioResult.paths.find((path) => Path.basename(path).includes(".audio.")) || audioResult.paths.find((path) => [".m4a", ".aac", ".opus"].includes(Path.extname(path).toLowerCase()))
+  if (audioResult.exitCode !== 0 || !audioPath) {
     await removeIfExists(videoPath)
     log?.(`YouTube 音频流下载失败：${compactLog(audioResult.output, 900)}`)
-    return downloadSingleYouTubeStream(url, options)
+    return downloadSingleFileMp4(url, options)
   }
-
-  const audioExt = audioResult.stream.ext || "m4a"
-  const audioPath = uniqueFilePath(TEMP_DIR, `${baseTitle}.audio.${audioExt}`)
   registerCurrentTaskPath(audioPath)
-  report(0.56, "正在下载 YouTube 音频流")
-  log?.("开始下载 YouTube 音频流。")
-  await downloadURLWithProgress({
-    url: audioResult.stream.url,
-    destination: audioPath,
-    headers: audioResult.stream.http_headers,
-    start: 0.56,
-    end: 0.78,
-    stage: "正在下载 YouTube 音频流",
-    onProgress: options.onProgress,
-    isCancelled: options.isCancelled,
-  })
   throwIfCancelled()
 
   const videoStem = baseNameWithoutExtension(videoPath).replace(/\.video$/, "")
@@ -824,18 +901,29 @@ async function downloadYouTube(
     onProgress?: DownloadProgressFn
     onLog?: DownloadLogFn
     isCancelled?: () => boolean
+    ytDlpReady?: boolean | null
+    onYtDlpStatus?: (ready: boolean, version: string | null) => void
   }
 ): Promise<DownloadSuccess> {
   const report = (fraction: number, stage: string) => options?.onProgress?.({ fraction, stage })
   const log = (message: string) => options?.onLog?.(message)
 
-  report(0.04, "正在检查 yt-dlp")
   log("识别为 YouTube 链接，切换到 yt-dlp 下载器。")
   await clearDownloadCancelFlag()
-  if (!(await isYtDlpAvailable())) {
-    report(0.08, "正在安装 yt-dlp")
-    log("未检测到 yt-dlp，开始自动安装。")
-    await installOrUpdateYtDlp()
+  if (options?.ytDlpReady === true) {
+    report(0.06, "正在准备 YouTube 下载")
+  } else {
+    report(0.04, "正在检查 yt-dlp")
+    const version = await getYtDlpVersion()
+    if (version) {
+      options?.onYtDlpStatus?.(true, version)
+    } else {
+      options?.onYtDlpStatus?.(false, null)
+      report(0.08, "正在安装 yt-dlp")
+      log("未检测到 yt-dlp，开始自动安装。")
+      await installOrUpdateYtDlp()
+      options?.onYtDlpStatus?.(true, await getYtDlpVersion())
+    }
   }
 
   report(0.16, "正在准备 YouTube 下载")
@@ -1040,6 +1128,23 @@ async function downloadM3U8(
 
   report(0.12, "正在通过 ffmpeg 下载 m3u8")
   log("切换到 ffmpeg 下载器。")
+
+  let smoothStopped = false
+  let smoothTimer: ReturnType<typeof setTimeout> | null = null
+  const smoothStartedAt = Date.now()
+  const smoothTick = () => {
+    if (smoothStopped || options?.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) return
+    const elapsed = Date.now() - smoothStartedAt
+    const inner = Math.min(0.95, 1 - Math.exp(-elapsed / 90000))
+    const fraction = 0.12 + (0.94 - 0.12) * inner
+    options?.onProgress?.({
+      fraction,
+      stage: `正在通过 ffmpeg 下载 m3u8 · ${Math.round(fraction * 100)}%`,
+    })
+    smoothTimer = setTimeout(smoothTick, 500)
+  }
+  smoothTimer = setTimeout(smoothTick, 500)
+
   const baseCommand = [
       "ffmpeg",
       "-nostdin",
@@ -1064,6 +1169,9 @@ async function downloadM3U8(
     commandLine(baseCommand),
     { timeout: 7200 }
   )
+
+  smoothStopped = true
+  if (smoothTimer) clearTimeout(smoothTimer)
 
   if (result.exitCode === 130 || FileManager.existsSync(CANCEL_FLAG_PATH)) {
     await removeIfExists(filePath)
@@ -1121,6 +1229,8 @@ export async function downloadMedia(
     onProgress?: DownloadProgressFn
     onLog?: DownloadLogFn
     isCancelled?: () => boolean
+    ytDlpReady?: boolean | null
+    onYtDlpStatus?: (ready: boolean, version: string | null) => void
   }
 ): Promise<DownloadSuccess> {
   if (options?.isCancelled?.()) throw new Error("下载已取消")

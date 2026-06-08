@@ -160,6 +160,15 @@ async function runIntentDownload(url: string) {
     const logs: string[] = []
     const download = await downloadMedia(url, {
       preferNoWatermark: preferences.preferNoWatermark,
+      ytDlpReady: preferences.ytDlpReady,
+      onYtDlpStatus: (ready, version) => {
+        persistPreferences({
+          ...getPreferences(),
+          ytDlpReady: ready,
+          ytDlpVersion: version,
+          ytDlpCheckedAt: new Date().toISOString(),
+        })
+      },
       onLog: (message: string) => {
         logs.push(message)
       },
@@ -350,6 +359,14 @@ function AddButtonCluster(props: {
   )
 }
 
+function ytDlpStatusText(preferences: Preferences, t: ReturnType<typeof getI18n>): string {
+  if (preferences.ytDlpReady === true) {
+    return preferences.ytDlpVersion ? `${t.ytDlpReady}：${preferences.ytDlpVersion}` : t.ytDlpReady
+  }
+  if (preferences.ytDlpReady === false) return t.ytDlpMissing
+  return t.ytDlpNotChecked
+}
+
 function HistoryRow(props: {
   item: HistoryRecord
   onRefresh: () => Promise<void>
@@ -494,6 +511,7 @@ function View() {
   const [ytDlpStatus, setYtDlpStatus] = useState("")
   const [ytDlpBusy, setYtDlpBusy] = useState(false)
   const ytDlpCheckingRef = useRef(false)
+  const downloadRunIdRef = useRef(0)
   const t = getI18n(preferences.language)
 
   const refreshHistory = async () => {
@@ -504,6 +522,17 @@ function View() {
   const updatePreferences = (next: Preferences) => {
     setPreferences(next)
     persistPreferences(next)
+  }
+
+  const updateYtDlpPreference = (ready: boolean, version: string | null) => {
+    const next = {
+      ...getPreferences(),
+      ytDlpReady: ready,
+      ytDlpVersion: version,
+      ytDlpCheckedAt: new Date().toISOString(),
+    }
+    updatePreferences(next)
+    setYtDlpStatus(ytDlpStatusText(next, getI18n(next.language)))
   }
 
   const appendLog = (message: string) => {
@@ -541,6 +570,12 @@ function View() {
       latestStatusRef.current = t.ready
     }
   }, [preferences.language])
+
+  useEffect(() => {
+    if (!ytDlpBusy) {
+      setYtDlpStatus(ytDlpStatusText(preferences, t))
+    }
+  }, [preferences.language, preferences.ytDlpReady, preferences.ytDlpVersion])
 
   useEffect(() => {
     if (!loading) return
@@ -618,6 +653,8 @@ function View() {
     }
 
     setLoading(true)
+    const runId = downloadRunIdRef.current + 1
+    downloadRunIdRef.current = runId
     cancelRequestedRef.current = false
     await clearDownloadCancelFlag()
     setDownloadLogs([])
@@ -633,15 +670,21 @@ function View() {
     try {
       const download = await downloadMedia(url, {
         preferNoWatermark: preferences.preferNoWatermark,
+        ytDlpReady: preferences.ytDlpReady,
+        onYtDlpStatus: updateYtDlpPreference,
         isCancelled: () => cancelRequestedRef.current,
         onProgress: (progress: DownloadProgress) => {
+          if (downloadRunIdRef.current !== runId || cancelRequestedRef.current) return
           latestProgressRef.current = progress
           latestStatusRef.current = progress.stage
           setDownloadProgress({ ...progress })
           setStatus(progress.stage)
         },
-        onLog: appendLog,
+        onLog: (message: string) => {
+          if (downloadRunIdRef.current === runId && !cancelRequestedRef.current) appendLog(message)
+        },
       })
+      if (downloadRunIdRef.current !== runId || cancelRequestedRef.current) return
       appendLog(`下载成功，命中策略：${download.matchedCandidateLabel}`)
       latestProgressRef.current = { fraction: 0.96, stage: t.writingHistory }
       latestStatusRef.current = t.writingHistory
@@ -662,11 +705,14 @@ function View() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (cancelRequestedRef.current || message.includes("取消") || message.toLowerCase().includes("cancel")) {
-        appendLog("下载已取消")
-        latestStatusRef.current = t.ready
-        setStatus(t.ready)
+        if (downloadRunIdRef.current === runId) {
+          appendLog(t.canceled)
+          latestStatusRef.current = t.ready
+          setStatus(t.ready)
+        }
         return
       }
+      if (downloadRunIdRef.current !== runId) return
       appendLog(`下载失败：${message}`)
       latestStatusRef.current = `${t.downloadFailed}：${message}`
       setStatus(latestStatusRef.current)
@@ -675,15 +721,18 @@ function View() {
         message,
       })
     } finally {
-      setLoading(false)
-      cancelRequestedRef.current = false
-      await clearDownloadCancelFlag()
+      if (downloadRunIdRef.current === runId) {
+        setLoading(false)
+        cancelRequestedRef.current = false
+        await clearDownloadCancelFlag()
+      }
     }
   }
 
   const cancelDownload = async () => {
     if (!loading) return
     cancelRequestedRef.current = true
+    downloadRunIdRef.current += 1
     setShowAddActions(false)
     setLoading(false)
     setInputURL("")
@@ -691,7 +740,7 @@ function View() {
     latestStatusRef.current = t.ready
     setDownloadProgress(latestProgressRef.current)
     setStatus(latestStatusRef.current)
-    appendLog("已请求强制取消本次下载。")
+    appendLog(t.cancelRequested)
     await requestDownloadCancel()
     void (async () => {
       await sleep(1500)
@@ -773,7 +822,7 @@ function View() {
     setYtDlpStatus(t.checkingYtDlp)
     try {
       const version = await getYtDlpVersion()
-      setYtDlpStatus(version ? `${t.ytDlpReady}：${version}` : t.ytDlpMissing)
+      updateYtDlpPreference(Boolean(version), version)
     } catch (error) {
       setYtDlpStatus(`${t.downloadFailed}：${error instanceof Error ? error.message : String(error)}`)
     } finally {
@@ -788,7 +837,8 @@ function View() {
     try {
       await installOrUpdateYtDlp()
       const version = await getYtDlpVersion()
-      setYtDlpStatus(version ? `${t.ytDlpUpdated}：${version}` : t.ytDlpUpdated)
+      updateYtDlpPreference(Boolean(version), version)
+      setYtDlpStatus(version ? `${t.ytDlpUpdated}：${version}` : t.ytDlpMissing)
     } catch (error) {
       setYtDlpStatus(`${t.downloadFailed}：${error instanceof Error ? error.message : String(error)}`)
     } finally {
@@ -796,9 +846,6 @@ function View() {
     }
   }
 
-  useEffect(() => {
-    void checkYtDlp()
-  }, [preferences.language])
 
   const openSavedFiles = async () => {
     await ensureDownloadDirectories()
@@ -936,7 +983,7 @@ function View() {
         <Section title={t.tools}>
           <HStack spacing={8}>
             {ytDlpBusy ? <ProgressView /> : null}
-            <Text foregroundStyle="secondaryLabel">{ytDlpStatus || t.checkingYtDlp}</Text>
+            <Text foregroundStyle="secondaryLabel">{ytDlpStatus || ytDlpStatusText(preferences, t)}</Text>
             <Spacer />
           </HStack>
           <Button title={t.checkYtDlp} systemImage="checkmark.circle" action={() => void checkYtDlp()} />

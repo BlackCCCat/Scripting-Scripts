@@ -5,14 +5,23 @@ export type Preferences = {
   defaultSaveMode: SaveMode
   preferNoWatermark: boolean
   language: LanguageMode
+  ytDlpReady: boolean | null
+  ytDlpVersion: string | null
+  ytDlpCheckedAt: string | null
+  ytDlpDetectionVersion: number
 }
 
 export const PREFS_KEY = "preferences"
+export const YTDLP_DETECTION_VERSION = 2
 
 export const DEFAULT_PREFERENCES: Preferences = {
   defaultSaveMode: "ask",
   preferNoWatermark: true,
   language: "system",
+  ytDlpReady: null,
+  ytDlpVersion: null,
+  ytDlpCheckedAt: null,
+  ytDlpDetectionVersion: YTDLP_DETECTION_VERSION,
 }
 
 export function getPreferences(): Preferences {
@@ -25,10 +34,17 @@ export function getPreferences(): Preferences {
     Storage.remove(PREFS_KEY, { shared: true })
   }
 
-  return {
+  const next = {
     ...DEFAULT_PREFERENCES,
     ...(saved || sharedSaved || {}),
   }
+  if ((saved || sharedSaved)?.ytDlpReady === false && (saved || sharedSaved)?.ytDlpDetectionVersion !== YTDLP_DETECTION_VERSION) {
+    next.ytDlpReady = null
+    next.ytDlpVersion = null
+    next.ytDlpCheckedAt = null
+  }
+  next.ytDlpDetectionVersion = YTDLP_DETECTION_VERSION
+  return next
 }
 
 export function persistPreferences(next: Preferences) {

@@ -57,18 +57,6 @@ def print_metadata(info, fallback_url):
     print("MEDIA_DOWNLOADER_METADATA " + json.dumps(metadata, ensure_ascii=False))
 
 
-def print_stream(info):
-    stream = {
-        "url": info.get("url"),
-        "ext": info.get("ext"),
-        "format_id": info.get("format_id"),
-        "filesize": info.get("filesize"),
-        "filesize_approx": info.get("filesize_approx"),
-        "http_headers": info.get("http_headers") or {},
-    }
-    print("MEDIA_DOWNLOADER_STREAM " + json.dumps(stream, ensure_ascii=False))
-
-
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("Missing config path")
@@ -79,8 +67,43 @@ def main():
     started_at = time.time()
     finished_paths = []
     cancel_flag = config.get("cancel_flag")
+    progress_path = config.get("progress_path")
+
+    def write_progress(status):
+        if not progress_path:
+            return
+        downloaded = status.get("downloaded_bytes") or 0
+        total = status.get("total_bytes") or status.get("total_bytes_estimate")
+        fragment_index = status.get("fragment_index")
+        fragment_count = status.get("fragment_count")
+        percent = None
+        if total:
+            percent = max(0, min(100, downloaded * 100 / total))
+        elif fragment_index and fragment_count:
+            percent = max(0, min(100, fragment_index * 100 / fragment_count))
+        elif status.get("_percent_str"):
+            try:
+                percent = float(str(status.get("_percent_str")).strip().replace("%", ""))
+            except Exception:
+                percent = None
+        payload = {
+            "status": status.get("status"),
+            "percent": percent,
+            "downloadedBytes": downloaded,
+            "totalBytes": total,
+            "speed": status.get("speed"),
+            "eta": status.get("eta"),
+            "fragmentIndex": fragment_index,
+            "fragmentCount": fragment_count,
+            "updatedAt": time.time(),
+        }
+        tmp_path = progress_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as file:
+            json.dump(payload, file)
+        os.replace(tmp_path, progress_path)
 
     def progress_hook(status):
+        write_progress(status)
         if cancel_flag and os.path.exists(cancel_flag):
             raise DownloadCancelled("Download canceled")
         if status.get("status") != "finished":
@@ -91,24 +114,11 @@ def main():
 
     options = {
         "format": config["format"],
+        "format_sort": config.get("format_sort") or [],
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
     }
-
-    if config.get("mode") == "extract":
-        try:
-            with YoutubeDL(options) as ydl:
-                info = ydl.extract_info(config["url"], download=False)
-        except BaseException:
-            if cancel_flag and os.path.exists(cancel_flag):
-                print("MEDIA_DOWNLOADER_CANCELLED Download canceled")
-                raise SystemExit(130)
-            raise
-
-        print_metadata(info, config["url"])
-        print_stream(info)
-        return
 
     options.update({
         "outtmpl": config["output"],

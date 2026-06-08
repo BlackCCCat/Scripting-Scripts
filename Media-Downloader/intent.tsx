@@ -20,7 +20,7 @@ import { type DownloadProgress } from "./services/douyin"
 import { postDownloadAction } from "./services/file-actions"
 import { initDatabase, insertHistory } from "./services/history"
 import { downloadMedia } from "./services/media"
-import { getPreferences } from "./services/preferences"
+import { getPreferences, persistPreferences } from "./services/preferences"
 import { extractFirstURL } from "./utils/common"
 import { getI18n, localizeRuntimeText, resolveLanguage } from "./utils/i18n"
 
@@ -133,6 +133,15 @@ function IntentDownloadView(props: {
 
         const download = await downloadMedia(props.url, {
           preferNoWatermark: preferences.preferNoWatermark,
+          ytDlpReady: preferences.ytDlpReady,
+          onYtDlpStatus: (ready, version) => {
+            persistPreferences({
+              ...getPreferences(),
+              ytDlpReady: ready,
+              ytDlpVersion: version,
+              ytDlpCheckedAt: new Date().toISOString(),
+            })
+          },
           onProgress: (nextProgress: DownloadProgress) => {
             latestProgressRef.current = nextProgress
             latestStatusRef.current = nextProgress.stage
