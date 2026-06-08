@@ -1,0 +1,36 @@
+{
+  "localizedNames": {
+    "zh": "媒体下载",
+    "en": "Media Downloader"
+  },
+  "iconImage": "",
+  "color": "rgba(30, 144, 255, 1)",
+  "contributors": [
+    {
+      "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts",
+      "name": "BlackCCCat",
+      "email": null
+    }
+  ],
+  "author": {
+    "name": "OpenAI Assistant",
+    "email": "",
+    "homepage": null
+  },
+  "icon": "square.and.arrow.down",
+  "entry": "index.tsx",
+  "name": "Media Downloader",
+  "intentInputTypes": ["URLs", "Text"],
+  "version": "",
+  "localizedDescriptions": {
+    "en": "Receive Douyin, YouTube, or m3u8 links, download media with the matching downloader, and save to Photos or export to Files.",
+    "zh": "从分享菜单接收抖音、YouTube 或 m3u8 链接，自动选择对应下载器下载媒体，可保存到相册或导出到文件。"
+  },
+  "runInApp": true,
+  "description": "从分享菜单接收抖音、YouTube 或 m3u8 链接，自动选择对应下载器下载媒体，可保存到相册或导出到文件。",
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Media-Downloader.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  }
+}
