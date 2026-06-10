@@ -52,6 +52,8 @@ const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "Scripting", value: "scripting" },
 ]
 
+const SCHEME_OPTIONS: AppConfig["schemeEdition"][] = ["base", "pro", "pure"]
+
 const PRO_KEY_LABELS: Record<ProSchemeKey, string> = {
   moqi: "moqi-墨奇",
   flypy: "flypy-小鹤",
@@ -73,7 +75,7 @@ const RESET_STORAGE_KEYS = [
 
 function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
   const edition = meta?.scheme?.schemeEdition
-  if (edition !== "base" && edition !== "pro") return undefined
+  if (!SCHEME_OPTIONS.includes(edition)) return undefined
   const keyRaw = String(meta?.scheme?.proSchemeKey ?? "").toLowerCase()
   const key = (PRO_KEYS as string[]).includes(keyRaw) ? (keyRaw as ProSchemeKey) : fallback.proSchemeKey
   return {
@@ -154,8 +156,10 @@ export function SettingsView(props: {
   // ✅ 用 number 承载 Picker 值（与你示例一致）
   // 0=CNB 1=GitHub
   const [releaseIdx, setReleaseIdx] = useState<number>(initialCfg.releaseSource === "github" ? 1 : 0)
-  // 0=base 1=pro
-  const [schemeIdx, setSchemeIdx] = useState<number>(initialCfg.schemeEdition === "pro" ? 1 : 0)
+  const [schemeIdx, setSchemeIdx] = useState<number>(() => {
+    const i = SCHEME_OPTIONS.indexOf(initialCfg.schemeEdition)
+    return i >= 0 ? i : 0
+  })
   // pro key index
   const [proKeyIdx, setProKeyIdx] = useState<number>(() => {
     const i = PRO_KEYS.indexOf(initialCfg.proSchemeKey)
@@ -174,7 +178,7 @@ export function SettingsView(props: {
       return {
         ...c,
         releaseSource: releaseIdx === 1 ? "github" : "cnb",
-        schemeEdition: schemeIdx === 1 ? "pro" : "base",
+        schemeEdition: SCHEME_OPTIONS[Math.max(0, Math.min(SCHEME_OPTIONS.length - 1, schemeIdx))],
         proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
         inputMethod: isBuiltinScripting ? "scripting" : inputMethod,
         useBuiltinScriptingPath: isBuiltinScripting ? true : (inputMethod === "scripting" ? c.useBuiltinScriptingPath : false),
@@ -201,7 +205,8 @@ export function SettingsView(props: {
         : latest
     setCfg(normalizedLatest)
     setReleaseIdx(normalizedLatest.releaseSource === "github" ? 1 : 0)
-    setSchemeIdx(normalizedLatest.schemeEdition === "pro" ? 1 : 0)
+    const schemeIndex = SCHEME_OPTIONS.indexOf(normalizedLatest.schemeEdition)
+    setSchemeIdx(schemeIndex >= 0 ? schemeIndex : 0)
     const i = PRO_KEYS.indexOf(normalizedLatest.proSchemeKey)
     setProKeyIdx(i >= 0 ? i : 0)
     const im = INPUT_METHODS.findIndex((m) => m.value === normalizedLatest.inputMethod)
@@ -327,7 +332,8 @@ export function SettingsView(props: {
       base.inputMethod !== next.inputMethod
     if (!changed) return base
 
-    setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
+    const schemeIndex = SCHEME_OPTIONS.indexOf(next.schemeEdition)
+    setSchemeIdx(schemeIndex >= 0 ? schemeIndex : 0)
     const proIdx = PRO_KEYS.indexOf(next.proSchemeKey)
     setProKeyIdx(proIdx >= 0 ? proIdx : 0)
     setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
@@ -438,7 +444,7 @@ export function SettingsView(props: {
   async function saveAndClose() {
     let fixed: AppConfig = {
       ...cfg,
-      // base 时 proKey 也可以保留，不影响；若你想 base 时清空也可以在这里处理
+      schemeEdition: SCHEME_OPTIONS[Math.max(0, Math.min(SCHEME_OPTIONS.length - 1, schemeIdx))],
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
       inputMethod:
         cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
@@ -499,7 +505,8 @@ export function SettingsView(props: {
       const next: AppConfig = { ...DEFAULT_CONFIG }
       setCfg(next)
       setReleaseIdx(next.releaseSource === "github" ? 1 : 0)
-      setSchemeIdx(next.schemeEdition === "pro" ? 1 : 0)
+      const schemeIndex = SCHEME_OPTIONS.indexOf(next.schemeEdition)
+      setSchemeIdx(schemeIndex >= 0 ? schemeIndex : 0)
       setProKeyIdx(PRO_KEYS.indexOf(next.proSchemeKey))
       setInputIdx(INPUT_METHODS.findIndex((m) => m.value === next.inputMethod))
       props.onDone?.(next)
@@ -523,7 +530,7 @@ export function SettingsView(props: {
 
   // 供 Picker 渲染用的文本数组（与你示例一致：Text tag={index}）
   const releaseLabels = useMemo<string[]>(() => ["CNB", "GitHub"], [])
-  const schemeLabels = useMemo<string[]>(() => ["base", "pro"], [])
+  const schemeLabels = useMemo<string[]>(() => SCHEME_OPTIONS.slice(), [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
   const useBuiltinScriptingPath = cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK || (cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath)
 
@@ -662,7 +669,7 @@ export function SettingsView(props: {
           ))}
         </Picker>
 
-        {schemeIdx === 1 ? (
+        {SCHEME_OPTIONS[Math.max(0, Math.min(SCHEME_OPTIONS.length - 1, schemeIdx))] === "pro" ? (
           <Picker
             title={"Pro 辅助码"}
             pickerStyle="menu"

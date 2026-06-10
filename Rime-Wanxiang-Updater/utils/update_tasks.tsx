@@ -270,11 +270,14 @@ async function fetchLatestAssetFromCnb(args: {
 
 function dictPattern(cfg: AppConfig): string {
   if (cfg.schemeEdition === "base") return "*base*dicts*.zip"
+  if (cfg.schemeEdition === "pure") return "pure-dicts.zip"
   return `*${cfg.proSchemeKey}*dicts.zip`
 }
 
 function schemePattern(cfg: AppConfig): string {
-  return cfg.schemeEdition === "base" ? "*base.zip" : `*${cfg.proSchemeKey}*fuzhu.zip`
+  if (cfg.schemeEdition === "base") return "*base.zip"
+  if (cfg.schemeEdition === "pure") return "rime-wanxiang-pure.zip"
+  return `*${cfg.proSchemeKey}*fuzhu.zip`
 }
 
 async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise<RemoteAsset | undefined> {

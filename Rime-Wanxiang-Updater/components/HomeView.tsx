@@ -99,7 +99,9 @@ function pctFromFraction(f?: number) {
 }
 
 function selectedSchemeFromConfig(cfg: AppConfig): string {
-  return cfg.schemeEdition === "base" ? "base" : `pro (${cfg.proSchemeKey})`;
+  if (cfg.schemeEdition === "base") return "base";
+  if (cfg.schemeEdition === "pure") return "pure";
+  return `pro (${cfg.proSchemeKey})`;
 }
 
 function normalizeMetaScheme(
@@ -119,6 +121,8 @@ function normalizeMetaScheme(
     metaScheme.selectedScheme ??
     (edition === "base"
       ? "base"
+      : edition === "pure"
+        ? "pure"
       : edition === "pro"
         ? `pro (${validProKey ?? fallback.proSchemeKey})`
         : selectedSchemeFromConfig(fallback));

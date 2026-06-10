@@ -63,13 +63,15 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
 }
 
 function formatSchemeLabel(metaScheme: MetaBundle["scheme"], fallback: AppConfig) {
-  if (!metaScheme) return fallback.schemeEdition === "base" ? "base" : `pro(${fallback.proSchemeKey})`
+  if (!metaScheme) {
+    if (fallback.schemeEdition === "base") return "base"
+    if (fallback.schemeEdition === "pure") return "pure"
+    return `pro(${fallback.proSchemeKey})`
+  }
   if (metaScheme.selectedScheme) return metaScheme.selectedScheme.replace(" ", "")
-  return metaScheme.schemeEdition === "base"
-    ? "base"
-    : metaScheme.proSchemeKey
-      ? `pro(${metaScheme.proSchemeKey})`
-      : "pro"
+  if (metaScheme.schemeEdition === "base") return "base"
+  if (metaScheme.schemeEdition === "pure") return "pure"
+  return metaScheme.proSchemeKey ? `pro(${metaScheme.proSchemeKey})` : "pro"
 }
 
 function releaseSourceLabel(source: AppConfig["releaseSource"]) {

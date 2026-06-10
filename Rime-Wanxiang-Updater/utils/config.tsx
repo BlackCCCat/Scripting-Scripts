@@ -2,7 +2,7 @@
 import { Runtime } from "./runtime"
 
 export type ReleaseSource = "cnb" | "github"
-export type SchemeEdition = "base" | "pro"
+export type SchemeEdition = "base" | "pro" | "pure"
 export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou" | "shyplus" | "wx"
 export type InputMethod = "hamster" | "hamster3" | "scripting"
 export type HomeSectionKey = "local" | "remote" | "notes" | "actions" | "status"
