@@ -81,7 +81,7 @@ jobs:
             folder="${dir%/}"
 
             # Skip metadata, build output, and source folders.
-            if [[ "$folder" == ".github" || "$folder" == "dist" || "$folder" == "src" ]]; then
+            if [[ "$folder" == ".github" || "$folder" == "dist" || "$folder" == "src" || "$folder" == "Archive" ]]; then
               continue
             fi
 
