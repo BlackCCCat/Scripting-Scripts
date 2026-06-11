@@ -97,7 +97,7 @@ function buildCountdownConfiguration(
   const configuration = AlarmManager.Configuration.timer({
     duration,
     attributes: buildAlarmAttributes(task, alarmId, options),
-    sound: AlarmManager.Sound.default(),
+    sound: task.unlimited ? null : AlarmManager.Sound.default(),
     stopIntent: StopPomodoroTimerIntent({ alarmId }) as any,
     secondaryIntent: CancelPomodoroTimerIntent({ alarmId }) as any,
   })

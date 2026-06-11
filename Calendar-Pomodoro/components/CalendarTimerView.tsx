@@ -343,13 +343,7 @@ export function CalendarTimerView() {
       }
       void (async () => {
         const persisted = await loadSession();
-        if (!persisted) {
-          resetTimerState();
-          return;
-        }
-        if (alarm.state === "alerting" && task.unlimited) {
-          await restartAlarmForCurrentSession({ silent: true });
-        }
+        if (!persisted) resetTimerState();
       })();
       if (alarm.state === "paused" && runningRef.current) {
         void pauseTimer({ skipAlarmPause: true });
