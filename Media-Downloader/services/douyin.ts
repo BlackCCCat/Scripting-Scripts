@@ -508,6 +508,39 @@ async function cancelResponseBody(response: Response) {
   } catch {}
 }
 
+async function waitForInitialWebViewLoad(webView: WebViewController, log?: DownloadLogFn): Promise<void> {
+  let waitSettled = false
+  const loadPromise = webView.waitForLoad()
+    .then(() => {
+      waitSettled = true
+      return true
+    })
+    .catch((error: unknown) => {
+      waitSettled = true
+      log?.(`页面首屏加载等待异常，继续解析：${error instanceof Error ? error.message : String(error)}`)
+      return false
+    })
+
+  const loaded = await Promise.race([
+    loadPromise,
+    sleep(8000).then(() => false),
+  ])
+
+  if (loaded) {
+    log?.("页面首屏加载完成，等待脚本注入稳定…")
+    return
+  }
+
+  if (!waitSettled) {
+    try {
+      const readyState = await webView.evaluateJavaScript<string>("document.readyState")
+      log?.(`页面首屏加载等待超时，当前 readyState=${readyState || "unknown"}，继续读取已加载数据。`)
+    } catch {
+      log?.("页面首屏加载等待超时，继续读取已加载数据。")
+    }
+  }
+}
+
 async function downloadImageBatch(options: {
   sourceURL: string
   extracted: ExtractedInfo
@@ -636,8 +669,7 @@ export async function extractFromWebView(
     await webView.loadURL(url)
 
     report?.({ fraction: 0.1, stage: "正在等待页面首屏加载" })
-    await webView.waitForLoad()
-    log?.("页面首屏加载完成，等待脚本注入稳定…")
+    await waitForInitialWebViewLoad(webView, log)
     await sleep(2500)
 
     report?.({ fraction: 0.14, stage: "正在尝试激活视频节点" })
