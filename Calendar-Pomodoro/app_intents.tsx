@@ -29,9 +29,10 @@ async function stopSystemAlarm(alarmId: string) {
   try {
     const alarms = await AlarmManager.alarms()
     const alarm = alarms.find((item) => item.id === alarmId)
-    if (alarm?.state === "countdown" || alarm?.state === "paused" || alarm?.state === "alerting") {
-      await AlarmManager.stop(alarmId)
-      return
+    if (alarm?.state === "alerting") {
+      try {
+        await AlarmManager.stop(alarmId)
+      } catch {}
     }
     await AlarmManager.cancel(alarmId)
   } catch {
