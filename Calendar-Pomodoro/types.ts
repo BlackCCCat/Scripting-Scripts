@@ -8,10 +8,8 @@ export type Task = {
   calendarId: string
   // 关联日历名称（用于展示）
   calendarTitle: string
-  // 历史兼容字段：现在所有任务都通过 AlarmManager 倒计时运行
+  // 是否使用倒计时
   useCountdown?: boolean
-  // 是否为不限时任务（内部使用系统可接受的倒计时承载）
-  unlimited?: boolean
   // 倒计时总秒数
   countdownSeconds?: number
   // 是否使用通知
@@ -34,8 +32,6 @@ export type TimerActivityState = {
   to: number
   // 是否倒计时
   countsDown: boolean
-  // 是否为不限时任务（用于选择无穷图标）
-  unlimited?: boolean
   // 暂停时刻（用于暂停显示）
   pauseTime?: number
 }

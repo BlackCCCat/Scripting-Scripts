@@ -28,12 +28,11 @@ import {
   Script,
 } from "scripting";
 
-// 业务常量（倒计时/通知选项、不限时展示窗口）
+// 业务常量（倒计时/通知选项、正计时窗口）
 import {
   COUNTDOWN_OPTIONS,
   COUNT_UP_WINDOW_MS,
   NOTIFICATION_INTERVAL_OPTIONS,
-  UNLIMITED_COUNTDOWN_SECONDS,
 } from "../constants";
 // Live Activity UI 注册器
 import { PomodoroLiveActivity } from "../live_activity";
@@ -57,14 +56,6 @@ import {
 } from "../utils/session";
 // 时间格式化工具
 import { formatDateTime, formatDuration } from "../utils/time";
-// AlarmManager 倒计时（系统通知中心/锁屏控制）
-import {
-  cancelPomodoroAlarm,
-  pausePomodoroAlarm,
-  resumePomodoroAlarm,
-  startPomodoroAlarm,
-  stopPomodoroAlarm,
-} from "../utils/system_alarm";
 // 任务新增/编辑页面
 import { TaskEditView } from "./TaskEditView";
 // 任务统计页面
@@ -76,11 +67,6 @@ import { OverallReportView } from "./OverallReportView";
 const createTimerActivity = PomodoroLiveActivity;
 // 兼容历史名称，清理残留活动
 const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"];
-
-function sameTaskRows(a: Task[], b: Task[]) {
-  if (a.length !== b.length) return false;
-  return a.every((item, index) => item === b[index]);
-}
 
 function NoteEditorPage(props: { title: string; content: string }) {
   const dismiss = Navigation.useDismiss();
@@ -141,7 +127,6 @@ export function CalendarTimerView() {
   const [completedSegments, setCompletedSegments] = useState<
     TimerSessionSegment[]
   >([]);
-  const [alarmId, setAlarmId] = useState<string | null>(null);
   // 运行/暂停/保存状态
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -170,9 +155,6 @@ export function CalendarTimerView() {
   const runningRef = useRef(false);
   const pausedRef = useRef(false);
   const completedSegmentsRef = useRef<TimerSessionSegment[]>([]);
-  const alarmIdRef = useRef<string | null>(null);
-  const ignoredAlarmRemovalIdsRef = useRef<Set<string>>(new Set());
-  const alarmRefreshInProgressRef = useRef(false);
   const staleRefreshAtRef = useRef(0);
   const stoppingRef = useRef(false);
   const noteSaveTimerRef = useRef<number | null>(null);
@@ -184,34 +166,12 @@ export function CalendarTimerView() {
     return EditMode?.inactive ? EditMode.inactive() : null;
   });
   const activeTab = useObservable<number>(0);
-  const taskRows = useObservable<Task[]>(() => []);
   const [isEditing, setIsEditing] = useState(false);
-  const tasksRef = useRef<Task[]>([]);
 
   useEffect(() => {
     // 首次进入：加载任务与设置
     void refreshTasks();
     void loadAppSettings();
-  }, []);
-
-  useEffect(() => {
-    tasksRef.current = tasks;
-    if (!sameTaskRows(taskRows.value, tasks)) {
-      taskRows.setValue(tasks);
-    }
-  }, [tasks]);
-
-  useEffect(() => {
-    // ForEach.data 会在拖动排序后直接更新 observable；这里把新顺序同步回业务状态和本地存储。
-    const unsubscribe = (taskRows as any).subscribe?.((next: Task[]) => {
-      if (sameTaskRows(next, tasksRef.current)) return;
-      tasksRef.current = next;
-      setTasks(next);
-      void saveTasks(next);
-    });
-    return () => {
-      if (typeof unsubscribe === "function") unsubscribe();
-    };
   }, []);
 
   useEffect(() => {
@@ -237,7 +197,6 @@ export function CalendarTimerView() {
     runningRef.current = running;
     pausedRef.current = paused;
     completedSegmentsRef.current = completedSegments;
-    alarmIdRef.current = alarmId;
   }, [
     activeTask,
     sessionStartAt,
@@ -246,16 +205,19 @@ export function CalendarTimerView() {
     running,
     paused,
     completedSegments,
-    alarmId,
   ]);
 
-  // 所有任务都使用 AlarmManager 倒计时；不限时任务用稳定承载时长运行，界面仍显示已专注时长。
-  const isUnlimited = Boolean(activeTask?.unlimited);
-  const countdownTotalMs =
-    (activeTask?.countdownSeconds ?? UNLIMITED_COUNTDOWN_SECONDS) * 1000;
-  const displayMs = isUnlimited
-    ? elapsedMs
-    : Math.max(0, countdownTotalMs - elapsedMs);
+  // 当前任务的计时模式
+  const isCountdown = !!(
+    activeTask?.useCountdown && (activeTask.countdownSeconds ?? 0) > 0
+  );
+  const countdownTotalMs = isCountdown
+    ? (activeTask?.countdownSeconds ?? 0) * 1000
+    : 0;
+  // 倒计时显示剩余；正计时显示已过
+  const displayMs = isCountdown
+    ? Math.max(0, countdownTotalMs - elapsedMs)
+    : elapsedMs;
   const timerText = useMemo(() => formatDuration(displayMs), [displayMs]);
 
   useEffect(() => {
@@ -318,46 +280,6 @@ export function CalendarTimerView() {
   }, [running]);
 
   useEffect(() => {
-    // 同步系统倒计时通知里的暂停/继续按钮，避免通知中心操作后脚本内计时继续累加。
-    if (!AlarmManager.isAvailable) return;
-    const listener = (alarms: AlarmManager.Alarm[]) => {
-      const currentAlarmId = alarmIdRef.current;
-      const task = activeTaskRef.current;
-      if (!currentAlarmId || !task) return;
-      const alarm = alarms.find((item) => item.id === currentAlarmId);
-      if (!alarm) {
-        if (alarmRefreshInProgressRef.current) return;
-        if (ignoredAlarmRemovalIdsRef.current.has(currentAlarmId)) {
-          ignoredAlarmRemovalIdsRef.current.delete(currentAlarmId);
-          return;
-        }
-        void (async () => {
-          const persisted = await loadSession();
-          if (!persisted) {
-            resetTimerState();
-          } else {
-            await cancelExternalSession(task);
-          }
-        })();
-        return;
-      }
-      void (async () => {
-        const persisted = await loadSession();
-        if (!persisted) resetTimerState();
-      })();
-      if (alarm.state === "paused" && runningRef.current) {
-        void pauseTimer({ skipAlarmPause: true });
-      } else if (alarm.state === "countdown" && pausedRef.current) {
-        void startTask(task, { skipAlarmResume: true });
-      }
-    };
-    AlarmManager.addAlarmUpdateListener(listener);
-    return () => {
-      AlarmManager.removeAlarmUpdateListener(listener);
-    };
-  }, []);
-
-  useEffect(() => {
     // 计时器刷新逻辑：真实计时 + 整秒对齐刷新
     if (!running || !segmentStartAt) {
       clearTimer();
@@ -372,7 +294,7 @@ export function CalendarTimerView() {
       const ms = accumulatedMs + (Date.now() - segmentStartAt.getTime());
       setElapsedMs(ms);
       // 倒计时到期自动结束
-      if (!isUnlimited && countdownTotalMs > 0 && ms >= countdownTotalMs) {
+      if (isCountdown && countdownTotalMs > 0 && ms >= countdownTotalMs) {
         void stopTimer({ auto: true });
         return;
       }
@@ -393,7 +315,7 @@ export function CalendarTimerView() {
     running,
     segmentStartAt,
     accumulatedMs,
-    isUnlimited,
+    isCountdown,
     countdownTotalMs,
     activeTaskId,
   ]);
@@ -404,132 +326,6 @@ export function CalendarTimerView() {
       clearTimeout(timerIdRef.current);
       timerIdRef.current = null;
     }
-  }
-
-  function ignoreNextAlarmRemoval(id?: string | null) {
-    if (!id) return;
-    ignoredAlarmRemovalIdsRef.current.add(id);
-    setTimeout(() => {
-      ignoredAlarmRemovalIdsRef.current.delete(id);
-    }, 3000);
-  }
-
-  function currentElapsed(now = new Date()) {
-    const segmentElapsed =
-      running && segmentStartAt ? now.getTime() - segmentStartAt.getTime() : 0;
-    return accumulatedMs + Math.max(0, segmentElapsed);
-  }
-
-  function clearTaskNoteDraft(taskId: string) {
-    setTasks((prev) => {
-      const next = prev.map((t) =>
-        t.id === taskId ? { ...t, noteDraft: "" } : t,
-      );
-      void saveTasks(next);
-      return next;
-    });
-  }
-
-  async function cancelExternalSession(task: Task) {
-    // 通知中心点“取消”使用 AlarmKit 内置 stop action；这里负责同步脚本状态。
-    await clearNotifications();
-    await persistSessionState(null);
-    clearTaskNoteDraft(task.id);
-    resetTimerState();
-  }
-
-  async function restartAlarmForCurrentSession(options?: { silent?: boolean }) {
-    const task = activeTaskRef.current;
-    const sessionStart = sessionStartAtRef.current;
-    if (!task || !sessionStart) return null;
-
-    const now = new Date();
-    const segmentStart = segmentStartAtRef.current;
-    const elapsed =
-      accumulatedMsRef.current +
-      Math.max(0, runningRef.current && segmentStart ? now.getTime() - segmentStart.getTime() : 0);
-
-    let durationSeconds: number | undefined;
-    if (!task.unlimited) {
-      const totalSeconds = task.countdownSeconds ?? 0;
-      durationSeconds = Math.ceil(Math.max(0, totalSeconds * 1000 - elapsed) / 1000);
-      if (durationSeconds <= 0) {
-        void stopTimer({ auto: true });
-        return null;
-      }
-    }
-
-    const oldAlarmId = alarmIdRef.current;
-    alarmRefreshInProgressRef.current = true;
-    ignoreNextAlarmRemoval(oldAlarmId);
-    await cancelPomodoroAlarm(oldAlarmId);
-    try {
-      const nextAlarmId = await startPomodoroAlarm(task, {
-        durationSeconds,
-        startedAtMs: sessionStart.getTime(),
-      });
-      alarmIdRef.current = nextAlarmId;
-      setAlarmId(nextAlarmId);
-      await persistSessionState({
-        taskId: task.id,
-        sessionStartAt: sessionStart.getTime(),
-        segmentStartAt:
-          runningRef.current && segmentStart ? segmentStart.getTime() : undefined,
-        accumulatedMs: accumulatedMsRef.current,
-        segments: completedSegmentsRef.current,
-        running: runningRef.current,
-        paused: pausedRef.current,
-        activityId: activityRef.current?.activityId,
-        alarmId: nextAlarmId ?? undefined,
-      });
-      return nextAlarmId;
-    } catch (e: any) {
-      alarmIdRef.current = null;
-      setAlarmId(null);
-      await persistSessionState({
-        taskId: task.id,
-        sessionStartAt: sessionStart.getTime(),
-        segmentStartAt:
-          runningRef.current && segmentStart ? segmentStart.getTime() : undefined,
-        accumulatedMs: accumulatedMsRef.current,
-        segments: completedSegmentsRef.current,
-        running: runningRef.current,
-        paused: pausedRef.current,
-        activityId: activityRef.current?.activityId,
-      });
-      if (!options?.silent) {
-        await Dialog.alert({ message: `系统倒计时刷新失败：${String(e?.message ?? e)}` });
-      }
-      return null;
-    } finally {
-      setTimeout(() => {
-        alarmRefreshInProgressRef.current = false;
-      }, 1500);
-    }
-  }
-
-  function resetTimerState() {
-    // 外部 AppIntent（通知中心取消/停止）可能已经清理会话；回到 app 时只重置 UI，不退出脚本。
-    setActiveTaskId(null);
-    setActiveCalendar(null);
-    setSessionStartAt(null);
-    setSegmentStartAt(null);
-    setAccumulatedMs(0);
-    setElapsedMs(0);
-    setCompletedSegments([]);
-    setAlarmId(null);
-    setRunning(false);
-    setPaused(false);
-    setNoteDraft("");
-    activeTaskRef.current = null;
-    sessionStartAtRef.current = null;
-    segmentStartAtRef.current = null;
-    accumulatedMsRef.current = 0;
-    runningRef.current = false;
-    pausedRef.current = false;
-    completedSegmentsRef.current = [];
-    alarmIdRef.current = null;
-    clearTimer();
   }
 
   function buildCurrentSessionSnapshot(now = new Date()): TimerSession | null {
@@ -553,7 +349,6 @@ export function CalendarTimerView() {
       running: isRunning,
       paused: pausedRef.current,
       activityId: activityRef.current?.activityId,
-      alarmId: alarmIdRef.current ?? undefined,
     };
   }
 
@@ -578,23 +373,18 @@ export function CalendarTimerView() {
 
     const removeResume = Script.onResume((details) => {
       void (async () => {
+        if (!details?.resumeFromMinimized) return;
+
         const task = activeTaskRef.current;
         const snapshot = buildCurrentSessionSnapshot();
-        const persisted = await loadSession();
-        if (!persisted) {
-          resetTimerState();
-          return;
-        }
-        if (details?.resumeFromMinimized && task && snapshot) {
+        if (task && snapshot) {
           await persistSessionState(snapshot);
-          if (activityRef.current?.started) {
-            await updateLiveActivity(
-              task,
-              new Date(),
-              snapshot.accumulatedMs,
-              snapshot.paused ? new Date() : undefined,
-            );
-          }
+          await updateLiveActivity(
+            task,
+            new Date(),
+            snapshot.accumulatedMs,
+            snapshot.paused ? new Date() : undefined,
+          );
           return;
         }
 
@@ -652,7 +442,7 @@ export function CalendarTimerView() {
       if (!session || (!session.running && !session.paused)) {
         await endActivities(activities, null);
         await clearSession();
-        resetTimerState();
+        setCompletedSegments([]);
         return;
       }
 
@@ -661,20 +451,8 @@ export function CalendarTimerView() {
       if (!task) {
         await clearSession();
         await endActivities(activities, null);
-        resetTimerState();
+        setCompletedSegments([]);
         return;
-      }
-
-      if (session.alarmId && AlarmManager.isAvailable) {
-        const alarms = await AlarmManager.alarms();
-        const hasAlarm = alarms.some((alarm) => alarm.id === session.alarmId);
-        if (!hasAlarm) {
-          clearTaskNoteDraft(task.id);
-          await clearSession();
-          await endActivities(activities, null);
-          resetTimerState();
-          return;
-        }
       }
 
       const now = new Date();
@@ -695,18 +473,11 @@ export function CalendarTimerView() {
       setRunning(session.running);
       setPaused(session.paused);
       setSegmentStartAt(session.running ? segmentStart : null);
-      setAlarmId(session.alarmId ?? null);
 
       const calendar = await resolveCalendar(task);
       if (calendar) setActiveCalendar(calendar);
 
-      // 使用 AlarmManager Live Activity 时，不再启动旧的普通 Live Activity，避免出现两个灵动岛。
-      if (session.alarmId) {
-        await endActivities(activities, task);
-        return;
-      }
-
-      // 保留当前会话对应的普通 Live Activity，其他残留的全部结束
+      // 保留当前会话对应的 Live Activity，其他残留的全部结束
       let keepActivity: LiveActivity<TimerActivityState> | null = null;
       let keepId = session.activityId;
       if (!keepId && activities.length) {
@@ -739,10 +510,10 @@ export function CalendarTimerView() {
         activityReadyRef.current = false;
       }
 
-      if (!session.alarmId && (session.running || session.paused)) {
+      if (session.running || session.paused) {
         const activityId = await startLiveActivity(task, now, elapsed);
         if (activityId) {
-          await saveSession({ ...session, activityId, alarmId: session.alarmId });
+          await saveSession({ ...session, activityId });
         }
       }
     } catch {
@@ -962,10 +733,9 @@ export function CalendarTimerView() {
     elapsed: number,
     pausedAt?: Date,
   ): TimerActivityState {
-    // 生成 Live Activity 状态：限时显示剩余时间，不限时显示已专注时长。
-    const countdownSeconds =
-      task.countdownSeconds ?? UNLIMITED_COUNTDOWN_SECONDS;
-    if (!task.unlimited) {
+    // 生成 Live Activity 的状态（正计时/倒计时两套）
+    const countdownSeconds = task.countdownSeconds ?? 0;
+    if (task.useCountdown && countdownSeconds > 0) {
       const remaining = Math.max(0, countdownSeconds * 1000 - elapsed);
       const base: TimerActivityState = {
         title: task.name,
@@ -973,7 +743,6 @@ export function CalendarTimerView() {
         from: now.getTime(),
         to: now.getTime() + remaining,
         countsDown: true,
-        unlimited: false,
       };
       return pausedAt ? { ...base, pauseTime: pausedAt.getTime() } : base;
     }
@@ -984,7 +753,6 @@ export function CalendarTimerView() {
       from,
       to: from + COUNT_UP_WINDOW_MS,
       countsDown: false,
-      unlimited: true,
     };
     return pausedAt ? { ...base, pauseTime: pausedAt.getTime() } : base;
   }
@@ -1081,7 +849,6 @@ export function CalendarTimerView() {
     pausedAt?: Date,
   ) {
     // 更新 Live Activity 状态（暂停/继续/计时）
-    if (alarmIdRef.current && !activityRef.current) return;
     const activity = await ensureLiveActivity();
     if (!activity) return;
     if (!activityReadyRef.current) {
@@ -1103,7 +870,6 @@ export function CalendarTimerView() {
     if (!ok) {
       activityRef.current = null;
       activityReadyRef.current = false;
-      if (alarmIdRef.current) return;
       const activityId = await startLiveActivity(task, now, elapsed);
       if (activityId && sessionStartAt) {
         await persistSessionState({
@@ -1116,7 +882,6 @@ export function CalendarTimerView() {
           running,
           paused,
           activityId,
-          alarmId: alarmIdRef.current ?? undefined,
         });
       }
     }
@@ -1147,7 +912,7 @@ export function CalendarTimerView() {
     activityReadyRef.current = false;
   }
 
-  async function startTask(task: Task, options?: { skipAlarmResume?: boolean }) {
+  async function startTask(task: Task) {
     // 已经在计时当前任务则忽略
     if (running && activeTaskId === task.id) return;
 
@@ -1170,11 +935,8 @@ export function CalendarTimerView() {
         activityRef.current?.activityId;
       if (activityRef.current?.started) {
         await updateLiveActivity(task, resumeAt, accumulatedMs);
-      } else if (!alarmId) {
+      } else {
         activityId = await startLiveActivity(task, resumeAt, accumulatedMs);
-      }
-      if (!options?.skipAlarmResume) {
-        await resumePomodoroAlarm(alarmId);
       }
       await persistSessionState({
         taskId: task.id,
@@ -1185,7 +947,6 @@ export function CalendarTimerView() {
         running: true,
         paused: false,
         activityId: activityId ?? undefined,
-        alarmId: alarmId ?? undefined,
       });
       return;
     }
@@ -1193,28 +954,13 @@ export function CalendarTimerView() {
     // 校验日历
     const calendar = await resolveCalendar(task);
     if (!calendar) return;
-    if ((task.countdownSeconds ?? 0) <= 0) {
+    if (task.useCountdown && (task.countdownSeconds ?? 0) <= 0) {
       await Dialog.alert({ message: "倒计时时长无效" });
       return;
     }
 
-    const start = new Date();
-    // 先创建系统倒计时。失败时不进入计时状态，避免脚本假启动但通知中心/灵动岛没有对应活动。
-    let nextAlarmId: string | null = null;
-    try {
-      nextAlarmId = await startPomodoroAlarm(task, {
-        startedAtMs: start.getTime(),
-      });
-    } catch (e: any) {
-      await Dialog.alert({ message: `系统倒计时启动失败：${String(e?.message ?? e)}` });
-      return;
-    }
-    if (!nextAlarmId) {
-      await Dialog.alert({ message: "系统倒计时不可用，未开始计时。" });
-      return;
-    }
-
     // 启动新会话
+    const start = new Date();
     setActiveTaskId(task.id);
     setActiveCalendar(calendar);
     setSessionStartAt(start);
@@ -1222,14 +968,12 @@ export function CalendarTimerView() {
     setAccumulatedMs(0);
     setElapsedMs(0);
     setCompletedSegments([]);
-    setAlarmId(null);
     setRunning(true);
     setPaused(false);
 
-    // AlarmManager 通知中心倒计时、旧版重复提醒与 Live Activity
-    alarmIdRef.current = nextAlarmId;
-    setAlarmId(nextAlarmId);
+    // 通知与 Live Activity
     await scheduleNotifications(task);
+    const activityId = await startLiveActivity(task, start, 0);
     await persistSessionState({
       taskId: task.id,
       sessionStartAt: start.getTime(),
@@ -1238,11 +982,11 @@ export function CalendarTimerView() {
       segments: [],
       running: true,
       paused: false,
-      alarmId: nextAlarmId ?? undefined,
+      activityId: activityId ?? undefined,
     });
   }
 
-  async function pauseTimer(options?: { skipAlarmPause?: boolean }) {
+  async function pauseTimer() {
     // 暂停当前计时
     if (!running || !segmentStartAt) return;
     const now = new Date();
@@ -1260,13 +1004,8 @@ export function CalendarTimerView() {
     setRunning(false);
     setPaused(true);
     await clearNotifications();
-    if (!options?.skipAlarmPause) {
-      await pausePomodoroAlarm(alarmId);
-    }
     if (activeTask) {
-      if (activityRef.current?.started) {
-        await updateLiveActivity(activeTask, now, total, now);
-      }
+      await updateLiveActivity(activeTask, now, total, now);
       if (sessionStartAt) {
         await persistSessionState({
           taskId: activeTask.id,
@@ -1277,7 +1016,6 @@ export function CalendarTimerView() {
           running: false,
           paused: true,
           activityId: activityRef.current?.activityId,
-          alarmId: alarmId ?? undefined,
         });
       }
     }
@@ -1298,10 +1036,7 @@ export function CalendarTimerView() {
     setAccumulatedMs(0);
     setElapsedMs(0);
     setCompletedSegments([]);
-    setAlarmId(null);
     await clearNotifications();
-    ignoreNextAlarmRemoval(alarmId);
-    await cancelPomodoroAlarm(alarmId);
     await endLiveActivity(activeTask, now, total);
     await persistSessionState(null);
 
@@ -1329,7 +1064,7 @@ export function CalendarTimerView() {
       running && segmentStartAt ? nowMs - segmentStartAt.getTime() : 0;
     const rawTotal = accumulatedMs + Math.max(0, segmentElapsed);
     let total = rawTotal;
-    if (!isUnlimited && countdownTotalMs > 0) {
+    if (isCountdown && countdownTotalMs > 0) {
       total = Math.min(total, countdownTotalMs);
     }
     const overflowMs = Math.max(0, rawTotal - total);
@@ -1416,8 +1151,6 @@ export function CalendarTimerView() {
     // 清理 Live Activity
     await endLiveActivity(activeTask, now, total);
     await persistSessionState(null);
-    ignoreNextAlarmRemoval(alarmId);
-    await stopPomodoroAlarm(alarmId);
 
     // 清空该任务的笔记草稿
     setTasks((prev) => {
@@ -1434,7 +1167,6 @@ export function CalendarTimerView() {
     setAccumulatedMs(0);
     setElapsedMs(0);
     setCompletedSegments([]);
-    setAlarmId(null);
     stoppingRef.current = false;
   }
 
@@ -1451,6 +1183,15 @@ export function CalendarTimerView() {
     setNoteDraft(next);
   }
 
+  function moveTasks(indices: number[], newOffset: number) {
+    // 拖动排序：将被拖动元素插入到新位置
+    if (!indices.length) return;
+    const movingItems = indices.map((index) => tasks[index]).filter(Boolean);
+    const next = tasks.filter((_, index) => !indices.includes(index));
+    next.splice(newOffset, 0, ...movingItems);
+    void persistTasks(next);
+  }
+
   function toggleEditMode() {
     const EditMode = (globalThis as any).EditMode;
     if (!EditMode?.active || !EditMode?.inactive) return;
@@ -1460,7 +1201,7 @@ export function CalendarTimerView() {
   }
 
   async function refreshLiveActivityManually() {
-    // 手动刷新通知中心/灵动岛：重建 AlarmManager timer，并同步当前会话。
+    // 手动刷新 Live Activity（用于修复偶发的 UI 卡住/遮罩）
     const now = new Date();
     if (!activeTask || !sessionStartAt) {
       const activities = await collectLiveActivities();
@@ -1468,18 +1209,19 @@ export function CalendarTimerView() {
       await persistSessionState(null);
       return;
     }
-    const nextAlarmId = await restartAlarmForCurrentSession();
-    if (nextAlarmId) return;
-
-    // 仅在旧 Live Activity fallback 存在时刷新旧活动。
-    const elapsed = currentElapsed(now);
-    if (activityRef.current?.started && !alarmId) {
+    const segmentElapsed =
+      running && segmentStartAt ? now.getTime() - segmentStartAt.getTime() : 0;
+    const elapsed = accumulatedMs + Math.max(0, segmentElapsed);
+    let activityId = activityRef.current?.activityId ?? null;
+    if (activityRef.current?.started) {
       await updateLiveActivity(
         activeTask,
         now,
         elapsed,
         paused ? now : undefined,
       );
+    } else {
+      activityId = await startLiveActivity(activeTask, now, elapsed);
     }
     await persistSessionState({
       taskId: activeTask.id,
@@ -1490,8 +1232,7 @@ export function CalendarTimerView() {
       segments: completedSegments,
       running,
       paused,
-      activityId: activityRef.current?.activityId,
-      alarmId: alarmId ?? undefined,
+      activityId: activityId ?? undefined,
     });
   }
 
@@ -1592,7 +1333,7 @@ export function CalendarTimerView() {
                       <Text font="headline">{activeTask.name}</Text>
                       <Text foregroundStyle="secondaryLabel">
                         {activeTask.calendarTitle}
-                        {isUnlimited ? " · 不限时" : " · 专注倒计时"}
+                        {isCountdown ? " · 倒计时" : " · 正计时"}
                       </Text>
                     </VStack>
                     <Spacer />
@@ -1718,30 +1459,33 @@ export function CalendarTimerView() {
             >
               {tasks.length ? (
                 <ForEach
-                  data={taskRows}
-                  editActions="move"
-                  builder={(task) => {
+                  count={tasks.length}
+                  onMove={moveTasks}
+                  itemBuilder={(index) => {
+                    const task = tasks[index];
+                    if (!task) return <Text> </Text>;
                     const isActive = activeTaskId === task.id;
                     const isRunning = running && isActive;
                     const isPaused = paused && isActive;
                     const actionTitle = isPaused ? "继续" : "开始";
-                    const countdownSeconds =
-                      task.countdownSeconds ?? UNLIMITED_COUNTDOWN_SECONDS;
-                    const countdownLabel = task.unlimited
-                      ? ""
-                      : (COUNTDOWN_OPTIONS.find(
+                    const countdownSeconds = task.countdownSeconds ?? 0;
+                    const countdownLabel = task.useCountdown
+                      ? (COUNTDOWN_OPTIONS.find(
                           (opt) => opt.seconds === countdownSeconds,
-                        )?.label ?? "专注倒计时");
+                        )?.label ?? "倒计时")
+                      : "";
                     const notifyLabel = task.useNotification
                       ? (NOTIFICATION_INTERVAL_OPTIONS.find(
                           (opt) =>
                             opt.minutes === task.notificationIntervalMinutes,
                         )?.label ?? "通知")
                       : "";
-                    const iconName = task.unlimited ? "infinity" : "timer";
-                    const iconColor = task.unlimited
-                      ? "systemPurple"
-                      : "systemOrange";
+                    const isCountdownTask =
+                      task.useCountdown && countdownSeconds > 0;
+                    const iconName = isCountdownTask ? "restart" : "play";
+                    const iconColor = isCountdownTask
+                      ? "systemBlue"
+                      : "systemGreen";
                     return (
                       <VStack
                         key={task.id}

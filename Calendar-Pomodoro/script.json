@@ -23,7 +23,7 @@
     "es": ""
   },
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Calendar-Pomodoro.zip",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Calendar-Pomodoro.zip",
     "hash": "",
     "autoUpdateInterval": 86400
   },
@@ -31,13 +31,13 @@
   "author": {
     "email": null,
     "name": "BlackCCCat",
-    "homepage": "https:\/\/github.com\/BlackCCCat"
+    "homepage": "https://github.com/BlackCCCat"
   },
   "icon": "calendar.badge.clock",
   "intentInputTypes": [],
-  "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/CalendarTomatoLogger.PNG",
+  "iconImage": "https://raw.githubusercontent.com/BlackCCCat/Scripting-Scripts/refs/heads/main/src/CalendarTomatoLogger.PNG",
   "name": "Calendar Pomodoro",
   "color": "rgba(252, 124, 93,1)",
-  "version": "",
+  "version": "2.7.9",
   "description": ""
 }

@@ -21,11 +21,7 @@ import {
 } from "scripting"
 
 // 倒计时与通知的预设选项
-import {
-  COUNTDOWN_OPTIONS,
-  NOTIFICATION_INTERVAL_OPTIONS,
-  UNLIMITED_COUNTDOWN_SECONDS,
-} from "../constants"
+import { COUNTDOWN_OPTIONS, NOTIFICATION_INTERVAL_OPTIONS } from "../constants"
 // 任务类型
 import type { Task } from "../types"
 // 读取/保存本地设置（用于记住日历账户选择）
@@ -80,18 +76,13 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const selectionInitRef = useRef(false)
   const initialSourceInjectedRef = useRef(false)
-  // 计时选项：所有任务都使用倒计时；不限时任务用系统可接受的最长稳定档位承载。
-  const [unlimited, setUnlimited] = useState(() => {
-    if (!props.initial) return false
-    if (typeof props.initial?.unlimited === "boolean") return props.initial.unlimited
-    return !Boolean(props.initial?.useCountdown ?? false)
-  })
+  // 计时选项
+  const [useCountdown, setUseCountdown] = useState(Boolean(props.initial?.useCountdown ?? false))
   const [useNotification, setUseNotification] = useState(
     Boolean(props.initial?.useNotification ?? false)
   )
   const [countdownIdx, setCountdownIdx] = useState(() => {
-    const initialSeconds =
-      props.initial?.unlimited ? 0 : props.initial?.countdownSeconds ?? 0
+    const initialSeconds = props.initial?.countdownSeconds ?? 0
     const idx = COUNTDOWN_OPTIONS.findIndex((opt) => opt.seconds === initialSeconds)
     return idx >= 0 ? idx : 0
   })
@@ -255,9 +246,7 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       return
     }
     // UI 选择转换为最终保存的任务字段
-    const countdown = unlimited
-      ? UNLIMITED_COUNTDOWN_SECONDS
-      : COUNTDOWN_OPTIONS[countdownIdx]?.seconds ?? COUNTDOWN_OPTIONS[0]?.seconds ?? 5 * 60
+    const countdown = useCountdown ? COUNTDOWN_OPTIONS[countdownIdx]?.seconds ?? 0 : 0
     const notificationMinutes = useNotification
       ? NOTIFICATION_INTERVAL_OPTIONS[notificationIdx]?.minutes ?? 0
       : 0
@@ -266,8 +255,7 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       name: trimmedName,
       calendarId: picked.identifier,
       calendarTitle: picked.title,
-      useCountdown: true,
-      unlimited,
+      useCountdown: useCountdown,
       countdownSeconds: countdown,
       useNotification: useNotification,
       notificationIntervalMinutes: notificationMinutes,
@@ -374,27 +362,22 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                 ))}
               </Picker>
             ) : null}
-            {/* 所有任务都使用倒计时；不限时任务隐藏具体时间选择。 */}
+            {/* 倒计时开关与时长 */}
             <Toggle
-              value={unlimited}
+              value={useCountdown}
               onChanged={(v: boolean) => {
                 HapticFeedback.heavyImpact()
-                setUnlimited(v)
+                setUseCountdown(v)
               }}
             >
-              <Text>不限时</Text>
+              <Text>使用倒计时</Text>
             </Toggle>
-            {unlimited ? (
-              <Text foregroundStyle="secondaryLabel">不限时任务将用系统倒计时承载，并按正计时展示</Text>
-            ) : (
+            {useCountdown ? (
               <Picker
                 title="倒计时"
                 pickerStyle="wheel"
                 value={countdownIdx}
-                onChanged={(idx: number) => {
-                  HapticFeedback.heavyImpact()
-                  setCountdownIdx(idx)
-                }}
+                onChanged={(idx: number) => setCountdownIdx(idx)}
               >
                 {COUNTDOWN_OPTIONS.map((opt, idx) => (
                   <Text key={`${opt.label}-${idx}`} tag={idx}>
@@ -402,7 +385,7 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                   </Text>
                 ))}
               </Picker>
-            )}
+            ) : null}
           </Section>
 
           {/* 操作区：保存/取消 */}
