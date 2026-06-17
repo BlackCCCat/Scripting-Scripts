@@ -96,6 +96,11 @@ type RimeNotificationToast = {
   text: string;
 };
 
+type RefreshOptions = {
+  suppressCommit?: boolean;
+  suppressInlineMarkedText?: boolean;
+};
+
 const NOTIFIED_RIME_OPTIONS = new Set([
   "ascii_mode",
   "full_shape",
@@ -215,6 +220,7 @@ function KeyboardContent(props: {
     Date.now() +
       LETTER_LONG_PRESS_LAYER_GRACE_MS,
   );
+  const suppressSchemaMenuInlineRef = useRef(false);
   const rimeSetupStartedRef = useRef(false);
   const disposedRef = useRef(false);
   const metrics = keyboardMetrics(
@@ -329,8 +335,12 @@ function KeyboardContent(props: {
     }
   }
 
-  function updateMarkedText(ctx: Rime.Context | null, committed: boolean) {
-    if (!settings.inlinePreedit || committed || !ctx?.preedit) {
+  function updateMarkedText(
+    ctx: Rime.Context | null,
+    committed: boolean,
+    forceUnmark = false,
+  ) {
+    if (forceUnmark || !settings.inlinePreedit || committed || !ctx?.preedit) {
       try {
         CustomKeyboard.unmarkText();
       } catch {}
@@ -354,13 +364,18 @@ function KeyboardContent(props: {
     return safeCursor;
   }
 
-  function refresh(session = sessionRef.current) {
+  function refresh(session = sessionRef.current, options: RefreshOptions = {}) {
     if (!session) return;
     const ctx = session.context;
     const menu = ctx?.menu;
     const commit = session.commit;
-    if (commit) insertTextReplacingSelectAll(commit);
-    updateMarkedText(ctx, Boolean(commit));
+    if (commit && !options.suppressCommit) insertTextReplacingSelectAll(commit);
+    updateMarkedText(
+      ctx,
+      Boolean(commit),
+      Boolean(options.suppressInlineMarkedText) ||
+        suppressSchemaMenuInlineRef.current,
+    );
     const nextPreedit = ctx?.preedit ?? "";
     const nextCursor = displayedPreeditCursor(
       nextPreedit,
@@ -378,6 +393,7 @@ function KeyboardContent(props: {
     });
     if (!nextPreedit) setBackslashWrapMode(false);
     if (!nextPreedit) {
+      suppressSchemaMenuInlineRef.current = false;
       setCandidateExpanded(false);
       setExpandedCandidates([]);
       setExpandedBatchHasMore(false);
@@ -996,12 +1012,16 @@ function KeyboardContent(props: {
     if (!consumed && fallback) insertTextReplacingSelectAll(fallback);
   }
 
-  function processKeyWithModifiers(keyCode: number, modifiers: number) {
+  function processKeyWithModifiers(
+    keyCode: number,
+    modifiers: number,
+    refreshOptions: RefreshOptions = {},
+  ) {
     clearSelectAllStateForExternalAction();
     const s = sessionRef.current;
     if (!s) return;
     s.processKey(keyCode, modifiers);
-    refresh(s);
+    refresh(s, refreshOptions);
   }
 
   function processRimeKeySpec(action: string): boolean {
@@ -1729,7 +1749,11 @@ function KeyboardContent(props: {
   }
 
   function openRimeSchemaMenu() {
-    processKeyWithModifiers("`".charCodeAt(0), MOD_CONTROL);
+    suppressSchemaMenuInlineRef.current = true;
+    processKeyWithModifiers("`".charCodeAt(0), MOD_CONTROL, {
+      suppressCommit: true,
+      suppressInlineMarkedText: true,
+    });
   }
 
   function candidateComment(candidate: Rime.Candidate): string {
