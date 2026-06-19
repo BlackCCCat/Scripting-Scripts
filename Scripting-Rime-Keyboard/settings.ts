@@ -52,6 +52,7 @@ export type RimeKeyboardSettings = {
   composingFunctionRowEnabled: boolean;
   composingFunctionWrapDisplayEnabled: boolean;
   showHintSymbols: boolean;
+  uppercaseLetterLabels: boolean;
   showWanxiangLabel: boolean;
   spaceLabel: string;
   inlinePreedit: boolean;
@@ -452,6 +453,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   composingFunctionRowEnabled: true,
   composingFunctionWrapDisplayEnabled: true,
   showHintSymbols: true,
+  uppercaseLetterLabels: false,
   showWanxiangLabel: true,
   spaceLabel: "万象",
   inlinePreedit: true,
@@ -855,6 +857,9 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     showHintSymbols: typeof raw?.showHintSymbols === "boolean"
       ? raw.showHintSymbols
       : true,
+    uppercaseLetterLabels: typeof raw?.uppercaseLetterLabels === "boolean"
+      ? raw.uppercaseLetterLabels
+      : false,
     showWanxiangLabel: typeof raw?.showWanxiangLabel === "boolean"
       ? raw.showWanxiangLabel
       : true,

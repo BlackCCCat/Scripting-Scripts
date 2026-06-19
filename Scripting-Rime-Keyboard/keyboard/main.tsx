@@ -3108,12 +3108,14 @@ function KeyboardContent(props: {
                           id={ch}
                           label={backslashWrapMode
                             ? BACKSLASH_SYMBOLS[ch]
-                            : shifted || capsLocked
+                            : shifted || capsLocked ||
+                                settings.uppercaseLetterLabels
                             ? ch.toUpperCase()
                             : ch}
                           labelFontSize={backslashWrapMode
                             ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
-                            : shifted || capsLocked
+                            : shifted || capsLocked ||
+                                settings.uppercaseLetterLabels
                             ? 24
                             : 27}
                           topLeft={!backslashWrapMode &&

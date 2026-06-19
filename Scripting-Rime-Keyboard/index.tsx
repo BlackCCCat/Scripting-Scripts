@@ -1116,11 +1116,17 @@ function SettingsView() {
               patchSettings({ showHintSymbols: value })}
           />
           <Toggle
+            title="字母按键大写显示"
+            systemImage="textformat.size.larger"
+            value={settings.uppercaseLetterLabels}
+            onChanged={(value) =>
+              patchSettings({ uppercaseLetterLabels: value })}
+          />
+          <Toggle
             title="空格显示自定义内容"
             systemImage="space"
             value={settings.showWanxiangLabel}
-            onChanged={(value) =>
-              patchSettings({ showWanxiangLabel: value })}
+            onChanged={(value) => patchSettings({ showWanxiangLabel: value })}
           />
           {settings.showWanxiangLabel
             ? (
@@ -1717,9 +1723,9 @@ function SettingsView() {
     );
   }
 
-  function renderInputBehaviorPage() {
+  function renderInputFeedbackPage() {
     return (
-      <List navigationTitle="输入行为" navigationBarTitleDisplayMode="inline">
+      <List navigationTitle="输入反馈" navigationBarTitleDisplayMode="inline">
         <Section>
           <Toggle
             title="显示功能行"
@@ -2426,8 +2432,8 @@ function SettingsView() {
             destination={renderCandidatePage()}
           />
           <NavigationLink
-            title="输入行为"
-            destination={renderInputBehaviorPage()}
+            title="输入反馈"
+            destination={renderInputFeedbackPage()}
           />
         </Section>
         <Section header={<Text>按键行为</Text>}>
