@@ -7,8 +7,6 @@ import {
   Navigation,
   NavigationStack,
   Script,
-  Tab,
-  TabView,
   Rectangle,
   RoundedRectangle,
   Section,
@@ -38,6 +36,7 @@ import {
   PRO_KEYS,
 } from "../utils/config";
 import { SettingsView } from "./SettingsView";
+import { AdaptiveHomeTabView } from "./AdaptiveHomeTabView";
 import { loadMetaAsync, type MetaBundle } from "../utils/meta";
 import {
   detectRimeDir,
@@ -312,9 +311,7 @@ type HomeSessionState = {
   logs: LogEntry[];
 };
 
-const EDITOR_TAB = 0;
 const MAIN_TAB = 1;
-const SETTINGS_TAB = 2;
 
 type FileBrowserEntry = {
   name: string;
@@ -2277,17 +2274,10 @@ export function HomeView() {
         actions: alert.actions,
       }}
     >
-      <TabView
+      <AdaptiveHomeTabView
         selection={activeTab as any}
-        tint="systemBlue"
-        tabViewStyle="sidebarAdaptable"
-        tabBarMinimizeBehavior="onScrollDown"
-      >
-        <Tab title="文件" systemImage="folder.fill" value={EDITOR_TAB}>
-          {renderEditorTab()}
-        </Tab>
-
-        <Tab title="主页" systemImage="house.fill" value={MAIN_TAB}>
+        editor={renderEditorTab()}
+        main={
           <NavigationStack>
             <List
               navigationTitle={"万象工具"}
@@ -2300,9 +2290,8 @@ export function HomeView() {
               {cfg.homeSectionOrder.map(renderSection)}
             </List>
           </NavigationStack>
-        </Tab>
-
-        <Tab title="设置" systemImage="gearshape" value={SETTINGS_TAB}>
+        }
+        settings={
           <NavigationStack>
             <SettingsView
               initial={cfg}
@@ -2316,8 +2305,8 @@ export function HomeView() {
               }}
             />
           </NavigationStack>
-        </Tab>
-      </TabView>
+        }
+      />
     </VStack>
   );
 }
