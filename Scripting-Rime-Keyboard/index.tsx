@@ -275,6 +275,8 @@ const KEY_COLOR_GROUPS: Array<{
   },
 ];
 
+const LETTER_KEY_COLOR_GROUP = KEY_COLOR_GROUPS[0];
+
 function SettingHint({ children }: { children: any }) {
   return <Text font="caption" foregroundStyle="secondaryLabel">{children}
   </Text>;
@@ -1497,17 +1499,14 @@ function SettingsView() {
               </Section>
 
               <Section header={<Text>角标颜色 · 单键覆盖</Text>}>
-                {KEY_COLOR_GROUPS.map((group) => (
-                  <NavigationLink
-                    key={"hint-color-link-" + group.title}
-                    title={group.title}
-                    destination={renderKeyColorPage(
-                      "keyHintColors",
-                      group,
-                      "角标颜色",
-                    )}
-                  />
-                ))}
+                <NavigationLink
+                  title={LETTER_KEY_COLOR_GROUP.title}
+                  destination={renderKeyColorPage(
+                    "keyHintColors",
+                    LETTER_KEY_COLOR_GROUP,
+                    "角标颜色",
+                  )}
+                />
               </Section>
             </>
           )
