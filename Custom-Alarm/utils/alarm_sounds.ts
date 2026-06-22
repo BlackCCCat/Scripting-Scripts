@@ -11,6 +11,10 @@ export function soundsDirectoryPath(): string {
   )
 }
 
+export function soundFilePath(name: string): string {
+  return Path.join(soundsDirectoryPath(), Path.basename(name))
+}
+
 function getFileManager(): any {
   return (globalThis as any).FileManager
 }
@@ -112,7 +116,7 @@ export async function deleteSoundFile(name: string): Promise<void> {
   const fileName = Path.basename(name).trim()
   if (!fileName || !isSupportedSoundFileName(fileName)) return
 
-  const filePath = Path.join(soundsDirectoryPath(), fileName)
+  const filePath = soundFilePath(fileName)
   if (await fileManager.exists(filePath)) {
     await fileManager.remove(filePath)
   }

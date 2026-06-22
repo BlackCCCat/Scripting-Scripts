@@ -11,6 +11,7 @@ import {
   Text,
   VStack,
   useEffect,
+  useRef,
   useState,
 } from "scripting"
 
@@ -20,6 +21,7 @@ import {
   importSoundFile,
   renameSoundFile,
   soundDisplayName,
+  soundFilePath,
   soundSymbolName,
   soundsDirectoryPath,
 } from "../utils/alarm_sounds"
@@ -32,7 +34,42 @@ export function SoundSettingsView(props: {
 }) {
   const dismiss = Navigation.useDismiss()
   const [sounds, setSounds] = useState<string[]>(props.sounds)
+  const [playingSound, setPlayingSound] = useState<string | null>(null)
+  const playingSoundRef = useRef<string | null>(null)
+  const [player] = useState(() => new AVPlayer())
   const visibleSounds = sounds.filter((sound) => sound !== DEFAULT_SOUND_NAME)
+
+  function updatePlayingSound(sound: string | null) {
+    playingSoundRef.current = sound
+    setPlayingSound(sound)
+  }
+
+  function stopPreview() {
+    player.stop()
+    updatePlayingSound(null)
+  }
+
+  function togglePreview(sound: string) {
+    if (playingSoundRef.current === sound) {
+      stopPreview()
+      return
+    }
+
+    player.stop()
+    updatePlayingSound(sound)
+    player.onReadyToPlay = () => {
+      if (playingSoundRef.current !== sound) return
+      if (!player.play()) {
+        updatePlayingSound(null)
+        void Dialog.alert({ message: "无法播放该声音文件。" })
+      }
+    }
+
+    if (!player.setSource(soundFilePath(sound))) {
+      updatePlayingSound(null)
+      void Dialog.alert({ message: "无法读取该声音文件。" })
+    }
+  }
 
   async function refreshSounds() {
     const nextSounds = await props.onRefresh()
@@ -84,6 +121,7 @@ export function SoundSettingsView(props: {
     if (nextName == null) return
 
     try {
+      if (playingSoundRef.current === sound) stopPreview()
       const renamedSound = await renameSoundFile(sound, nextName)
       if (renamedSound !== sound) {
         setSounds((current) => current.map((item) => (item === sound ? renamedSound : item)))
@@ -102,6 +140,7 @@ export function SoundSettingsView(props: {
     if (!ok) return
 
     try {
+      if (playingSoundRef.current === sound) stopPreview()
       await deleteSoundFile(sound)
       setSounds((current) => current.filter((item) => item !== sound))
       props.onSoundDeleted?.(sound)
@@ -111,7 +150,17 @@ export function SoundSettingsView(props: {
   }
 
   useEffect(() => {
+    player.onEnded = () => updatePlayingSound(null)
+    player.onError = (message: string) => {
+      updatePlayingSound(null)
+      void Dialog.alert({ message: message || "声音播放失败。" })
+    }
     void refreshSounds()
+    return () => {
+      player.stop()
+      player.dispose()
+      playingSoundRef.current = null
+    }
   }, [])
 
   return (
@@ -125,7 +174,10 @@ export function SoundSettingsView(props: {
             <Button
               title=""
               systemImage="xmark"
-              action={() => dismiss()}
+              action={() => {
+                stopPreview()
+                dismiss()
+              }}
             />
           ),
           topBarTrailing: (
@@ -176,6 +228,13 @@ export function SoundSettingsView(props: {
                   <Text>{soundDisplayName(sound)}</Text>
                   <Spacer />
                   <Text foregroundStyle="secondaryLabel">{Path.extname(sound).toUpperCase().replace(".", "")}</Text>
+                  <Button
+                    title=""
+                    systemImage={playingSound === sound ? "stop.circle.fill" : "play.circle.fill"}
+                    buttonStyle="plain"
+                    tint={playingSound === sound ? "systemRed" : "accentColor"}
+                    action={() => togglePreview(sound)}
+                  />
                 </HStack>
               </VStack>
             ))
