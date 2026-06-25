@@ -39,6 +39,8 @@ import {
   FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS,
   HAPTIC_LEVEL_MAX,
   HAPTIC_LEVEL_MIN,
+  KEY_VISUAL_INSET_MAX,
+  KEY_VISUAL_INSET_MIN,
   KEYBOARD_HEIGHT_MAX,
   KEYBOARD_HEIGHT_MIN,
   type KeyColorPair,
@@ -1124,6 +1126,37 @@ function SettingsView() {
             onChanged={(value) =>
               patchSettings({ uppercaseLetterLabels: value })}
           />
+          <VStack alignment="leading" spacing={8}>
+            <HStack>
+              <Text>按钮间距</Text>
+              <Text
+                font="subheadline"
+                foregroundStyle="secondaryLabel"
+                frame={{
+                  maxWidth: "infinity" as any,
+                  alignment: "trailing" as any,
+                }}
+              >
+                {settings.keyVisualInset.toFixed(2)} pt
+              </Text>
+            </HStack>
+            <Slider
+              min={KEY_VISUAL_INSET_MIN}
+              max={KEY_VISUAL_INSET_MAX}
+              step={0.01}
+              value={settings.keyVisualInset}
+              onChanged={(value) =>
+                patchSettings({
+                  keyVisualInset: Number(value),
+                })}
+              label={<Text>按钮间距</Text>}
+              minValueLabel={<Text>{KEY_VISUAL_INSET_MIN}</Text>}
+              maxValueLabel={<Text>{KEY_VISUAL_INSET_MAX}</Text>}
+            />
+            <SettingHint>
+              仅缩小按键显示区域，实际点按区域和键盘布局保持不变。
+            </SettingHint>
+          </VStack>
           <Toggle
             title="空格显示自定义内容"
             systemImage="space"

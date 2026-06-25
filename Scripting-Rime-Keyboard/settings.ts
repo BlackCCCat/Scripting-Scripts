@@ -53,6 +53,7 @@ export type RimeKeyboardSettings = {
   composingFunctionWrapDisplayEnabled: boolean;
   showHintSymbols: boolean;
   uppercaseLetterLabels: boolean;
+  keyVisualInset: number;
   showWanxiangLabel: boolean;
   spaceLabel: string;
   inlinePreedit: boolean;
@@ -454,6 +455,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   composingFunctionWrapDisplayEnabled: true,
   showHintSymbols: true,
   uppercaseLetterLabels: false,
+  keyVisualInset: 0,
   showWanxiangLabel: true,
   spaceLabel: "万象",
   inlinePreedit: true,
@@ -519,6 +521,8 @@ export const KEYBOARD_HEIGHT_MIN = 286;
 export const KEYBOARD_HEIGHT_MAX = 390;
 export const CANDIDATE_BAR_HEIGHT_MIN = 34;
 export const CANDIDATE_BAR_HEIGHT_MAX = 56;
+export const KEY_VISUAL_INSET_MIN = 0;
+export const KEY_VISUAL_INSET_MAX = 4;
 export const LETTER_LONG_PRESS_DURATION_MIN = 360;
 export const LETTER_LONG_PRESS_DURATION_MAX = 900;
 export const SWIPE_TRIGGER_DISTANCE_MIN = 40;
@@ -860,6 +864,13 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     uppercaseLetterLabels: typeof raw?.uppercaseLetterLabels === "boolean"
       ? raw.uppercaseLetterLabels
       : false,
+    keyVisualInset: clampDecimalNumber(
+      raw?.keyVisualInset,
+      DEFAULT_RIME_KEYBOARD_SETTINGS.keyVisualInset,
+      KEY_VISUAL_INSET_MIN,
+      KEY_VISUAL_INSET_MAX,
+      2,
+    ),
     showWanxiangLabel: typeof raw?.showWanxiangLabel === "boolean"
       ? raw.showWanxiangLabel
       : true,

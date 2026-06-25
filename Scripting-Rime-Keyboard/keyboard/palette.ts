@@ -68,6 +68,7 @@ export function paletteFor(
     return {
       nativeKeyStyle,
       nativeToolbarStyle: nativeKeyStyle && settings.useNativeToolbarStyle,
+      keyVisualInset: settings.keyVisualInset,
       usesCustomColors,
       keyBg: usesCustomColors ? settings.keyColors.normal.dark : "#5f6064",
       enterBg: usesCustomColors ? settings.keyColors.enter.dark : "#5f6064",
@@ -90,6 +91,7 @@ export function paletteFor(
     return {
       nativeKeyStyle,
       nativeToolbarStyle: nativeKeyStyle && settings.useNativeToolbarStyle,
+      keyVisualInset: settings.keyVisualInset,
       usesCustomColors,
       keyBg: usesCustomColors ? settings.keyColors.normal.light : "#ffffff",
       enterBg: usesCustomColors ? settings.keyColors.enter.light : "#ffffff",
@@ -111,6 +113,7 @@ export function paletteFor(
   return {
     nativeKeyStyle,
     nativeToolbarStyle: nativeKeyStyle && settings.useNativeToolbarStyle,
+    keyVisualInset: settings.keyVisualInset,
     usesCustomColors,
     keyBg: usesCustomColors
       ? settings.keyColors.normal[customColorScheme]

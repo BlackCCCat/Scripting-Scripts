@@ -96,6 +96,11 @@ type RimeNotificationToast = {
   text: string;
 };
 
+type LetterLongPressPopup = {
+  key: string;
+  selected: "lower" | "upper";
+};
+
 type RefreshOptions = {
   suppressCommit?: boolean;
   suppressInlineMarkedText?: boolean;
@@ -125,12 +130,16 @@ function stopGlobalRepeatingDelete() {
 export function KeyboardView() {
   return (
     <GeometryReader>
-      {(proxy) => (
-        <KeyboardContent
-          availableHeight={Number(proxy.size.height || 0) || undefined}
-          availableWidth={Number(proxy.size.width || 0) || undefined}
-        />
-      )}
+      {(proxy) => {
+        const height = Number(proxy.size.height || 0) || undefined;
+        const width = Number(proxy.size.width || 0) || undefined;
+        return (
+          <KeyboardContent
+            availableHeight={height}
+            availableWidth={width}
+          />
+        );
+      }}
     </GeometryReader>
   );
 }
@@ -171,6 +180,9 @@ function KeyboardContent(props: {
   } = rimeState;
   const [shifted, setShifted] = useState(false);
   const [capsLocked, setCapsLocked] = useState(false);
+  const [letterLongPressPopup, setLetterLongPressPopupState] = useState<
+    LetterLongPressPopup | null
+  >(null);
   const [symbolLayer, setSymbolLayer] = useState(false);
   const [backslashWrapMode, setBackslashWrapMode] = useState(false);
   const [rimeReady, setRimeReady] = useState(false);
@@ -186,6 +198,7 @@ function KeyboardContent(props: {
   const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
     () => new Set(),
   );
+
   const [schemas, setSchemas] = useState<Rime.Schema[]>([]);
   const lastShiftTapRef = useRef(0);
   const deletedTextRef = useRef("");
@@ -204,6 +217,7 @@ function KeyboardContent(props: {
   const schemasRef = useRef<Rime.Schema[]>([]);
   const rimeOptionStateRef = useRef<Record<string, boolean>>({});
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
+  const letterLongPressPopupRef = useRef<LetterLongPressPopup | null>(null);
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowGestureMachineRef = useRef(new Map<string, any>());
@@ -585,6 +599,7 @@ function KeyboardContent(props: {
       clearTimeout(timer);
     }
     pressedReleaseTimersRef.current.clear();
+    setLetterLongPressPopup(null);
     if (pressedKeyIdsRef.current.size === 0) return;
     pressedKeyIdsRef.current = new Set();
     setPressedKeyIds(new Set());
@@ -603,6 +618,38 @@ function KeyboardContent(props: {
 
   function isPressed(id: string) {
     return pressedKeyIds.has(id);
+  }
+
+  function setLetterLongPressPopup(next: LetterLongPressPopup | null) {
+    letterLongPressPopupRef.current = next;
+    setLetterLongPressPopupState(next);
+  }
+
+  function updateLetterLongPressSelection(ch: string, details: any) {
+    const current = letterLongPressPopupRef.current;
+    if (!current || current.key !== ch) return;
+    const locationX = Number(details?.location?.x ?? 0);
+    const startX = Number(details?.startLocation?.x ?? metrics.letterWidth / 2);
+    const selected = locationX < startX ? "lower" : "upper";
+    if (current.selected === selected) return;
+    setLetterLongPressPopup({ key: ch, selected });
+  }
+
+  function pressLiteralLetter(ch: string) {
+    if (ascii) {
+      insertTextReplacingSelectAll(ch);
+      return;
+    }
+    processKey(ch.charCodeAt(0), ch, true);
+    if (backslashWrapMode) setBackslashWrapMode(false);
+  }
+
+  function finishLetterLongPress(ch: string) {
+    const current = letterLongPressPopupRef.current;
+    const selected = current?.key === ch ? current.selected : "upper";
+    setLetterLongPressPopup(null);
+    if (selected === "lower") pressLiteralLetter(ch);
+    else pressUppercaseLetter(ch);
   }
 
   function suppressLetterLongPress(
@@ -640,6 +687,9 @@ function KeyboardContent(props: {
   function endKeyTouch(id: string) {
     if (id === "backspace" || id === "numeric-backspace") {
       stopRepeatingBackspace();
+    }
+    if (letterLongPressPopupRef.current?.key === id) {
+      setLetterLongPressPopup(null);
     }
     playReleaseFeedback();
     setKeyPressed(id, false);
@@ -2888,6 +2938,7 @@ function KeyboardContent(props: {
                                 labelFontSize={24}
                                 passive
                                 active={isPressed(`numeric-${value}`)}
+                                popupLabel={value}
                                 onPress={() =>
                                   runWithFeedback(() =>
                                     pressNumericDigit(value)
@@ -2934,6 +2985,7 @@ function KeyboardContent(props: {
                           labelFontSize={24}
                           passive
                           active={isPressed("numeric-0")}
+                          popupLabel="0"
                           onPress={() =>
                             runWithFeedback(() => pressNumericDigit("0"))}
                         />
@@ -3071,6 +3123,7 @@ function KeyboardContent(props: {
                         width: metrics.width,
                         height: rowTouch.touchHeight,
                       }}
+                      zIndex={10 + rowIndex}
                     >
                       {rowIndex === 2
                         ? (
@@ -3102,62 +3155,94 @@ function KeyboardContent(props: {
                           />
                         )
                         : null}
-                      {row.map((ch, index) => (
-                        <KeyFace
-                          key={ch}
-                          id={ch}
-                          label={backslashWrapMode
-                            ? BACKSLASH_SYMBOLS[ch]
-                            : shifted || capsLocked ||
-                                settings.uppercaseLetterLabels
-                            ? ch.toUpperCase()
-                            : ch}
-                          labelFontSize={backslashWrapMode
-                            ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
-                            : shifted || capsLocked ||
-                                settings.uppercaseLetterLabels
-                            ? 24
-                            : 27}
-                          topLeft={!backslashWrapMode &&
-                              settings.showHintSymbols &&
-                              !settings.letterSwipeUpSymbols[ch]
-                            ? settings.letterSwipeUp[ch]
-                            : undefined}
-                          topLeftImage={!backslashWrapMode &&
-                              settings.showHintSymbols
-                            ? settings.letterSwipeUpSymbols[ch] || undefined
-                            : undefined}
-                          topRight={!backslashWrapMode &&
-                              settings.showHintSymbols &&
-                              !settings.letterSwipeDownSymbols[ch]
-                            ? settings.letterSwipeDown[ch]
-                            : undefined}
-                          topRightImage={!backslashWrapMode &&
-                              settings.showHintSymbols
-                            ? settings.letterSwipeDownSymbols[ch] || undefined
-                            : undefined}
-                          palette={palette}
-                          width={metrics.letterWidth}
-                          height={metrics.keyHeight}
-                          touchWidth={letterTouchWidth(index)}
-                          touchHeight={rowTouch.touchHeight}
-                          visualOffsetX={letterVisualOffset(index)}
-                          visualOffsetY={rowTouch.visualOffsetY}
-                          active={isPressed(ch)}
-                          onPress={() => pressLetter(ch)}
-                          onTouchStart={() => beginKeyTouch(ch)}
-                          onTouchEnd={() => endKeyTouch(ch)}
-                          onLongPress={() => {
-                            holdKeyPressedUntilRelease(ch);
-                            pressUppercaseLetter(ch);
-                          }}
-                          longPressEnabled={letterLongPressEnabled}
-                          longPressDuration={settings.letterLongPressDuration}
-                          onSwipeUp={() => runLetterSwipe("up", ch)}
-                          onSwipeDown={() => runLetterSwipe("down", ch)}
-                          swipeTriggerDistance={currentSwipeTriggerDistance}
-                        />
-                      ))}
+                      {row.map((ch, index) => {
+                        const letterLabel = backslashWrapMode
+                          ? BACKSLASH_SYMBOLS[ch]
+                          : shifted || capsLocked ||
+                              settings.uppercaseLetterLabels
+                          ? ch.toUpperCase()
+                          : ch;
+                        const swipeUpImage = !backslashWrapMode &&
+                            settings.showHintSymbols
+                          ? settings.letterSwipeUpSymbols[ch] || undefined
+                          : undefined;
+                        const swipeUpLabel = !backslashWrapMode &&
+                            settings.showHintSymbols && !swipeUpImage
+                          ? settings.letterSwipeUp[ch]
+                          : undefined;
+                        const swipeDownImage = !backslashWrapMode &&
+                            settings.showHintSymbols
+                          ? settings.letterSwipeDownSymbols[ch] || undefined
+                          : undefined;
+                        const swipeDownLabel = !backslashWrapMode &&
+                            settings.showHintSymbols && !swipeDownImage
+                          ? settings.letterSwipeDown[ch]
+                          : undefined;
+                        return (
+                          <KeyFace
+                            key={ch}
+                            id={ch}
+                            label={letterLabel}
+                            labelFontSize={backslashWrapMode
+                              ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
+                              : shifted || capsLocked ||
+                                  settings.uppercaseLetterLabels
+                              ? 24
+                              : 27}
+                            topLeft={swipeUpLabel}
+                            topLeftImage={swipeUpImage}
+                            topRight={swipeDownLabel}
+                            topRightImage={swipeDownImage}
+                            palette={palette}
+                            width={metrics.letterWidth}
+                            height={metrics.keyHeight}
+                            touchWidth={letterTouchWidth(index)}
+                            touchHeight={rowTouch.touchHeight}
+                            visualOffsetX={letterVisualOffset(index)}
+                            visualOffsetY={rowTouch.visualOffsetY}
+                            active={isPressed(ch)}
+                            popupLabel={letterLongPressPopup?.key === ch
+                              ? undefined
+                              : letterLabel}
+                            popupSwipeUpLabel={swipeUpLabel}
+                            popupSwipeUpImage={swipeUpImage}
+                            popupSwipeDownLabel={swipeDownLabel}
+                            popupSwipeDownImage={swipeDownImage}
+                            popupOptions={letterLongPressPopup?.key === ch
+                              ? [
+                                {
+                                  label: ch,
+                                  selected:
+                                    letterLongPressPopup.selected === "lower",
+                                },
+                                {
+                                  label: ch.toUpperCase(),
+                                  selected:
+                                    letterLongPressPopup.selected === "upper",
+                                },
+                              ]
+                              : undefined}
+                            onPress={() => pressLetter(ch)}
+                            onTouchStart={() => beginKeyTouch(ch)}
+                            onTouchEnd={() => endKeyTouch(ch)}
+                            onLongPress={() => {
+                              setLetterLongPressPopup({
+                                key: ch,
+                                selected: "upper",
+                              });
+                              holdKeyPressedUntilRelease(ch);
+                            }}
+                            onLongPressMove={(details) =>
+                              updateLetterLongPressSelection(ch, details)}
+                            onLongPressEnd={() => finishLetterLongPress(ch)}
+                            longPressEnabled={letterLongPressEnabled}
+                            longPressDuration={settings.letterLongPressDuration}
+                            onSwipeUp={() => runLetterSwipe("up", ch)}
+                            onSwipeDown={() => runLetterSwipe("down", ch)}
+                            swipeTriggerDistance={currentSwipeTriggerDistance}
+                          />
+                        );
+                      })}
                       {rowIndex === 2
                         ? (
                           <KeyFace
