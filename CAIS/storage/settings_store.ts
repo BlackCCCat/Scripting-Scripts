@@ -67,6 +67,8 @@ function sanitizeSettings(raw: any): CaisSettings {
     monitorIntervalMs: Math.max(100, Math.min(10000, monitorIntervalMs || DEFAULT_CAIS_SETTINGS.monitorIntervalMs)),
     duplicatePolicy: raw?.duplicatePolicy === "skip" ? "skip" : "bump",
     maxItems: Math.max(50, Math.min(800, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
+    iCloudSync: Boolean(raw?.iCloudSync ?? DEFAULT_CAIS_SETTINGS.iCloudSync),
+    iCloudSyncImages: Boolean(raw?.iCloudSyncImages ?? DEFAULT_CAIS_SETTINGS.iCloudSyncImages),
     appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
     keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? defaultKeyboardNativeGlassEffect()),

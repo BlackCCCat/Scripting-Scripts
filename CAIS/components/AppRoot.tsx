@@ -42,6 +42,7 @@ import {
 import { initializeDatabase } from "../storage/database"
 import { readClipDataVersion } from "../storage/change_signal"
 import { loadSettings, saveSettings } from "../storage/settings_store"
+import { applyICloudSyncSettings } from "../storage/icloud_sync"
 import { formatDateTime, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
@@ -272,7 +273,6 @@ export function AppRoot() {
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
-  const [addCustomActionToken, setAddCustomActionToken] = useState(0)
   const [query, setQuery] = useState("")
   const settingsRef = useRef(settings)
   const queryRef = useRef(query)
@@ -467,11 +467,23 @@ export function AppRoot() {
     setClipboardGroups(nextClipboardGroups)
   }
 
-  function updateSettings(nextSettings: CaisSettings) {
-    const next = saveSettings(nextSettings)
-    settingsRef.current = next
-    setSettings(next)
-    void refresh(true, next)
+  async function updateSettings(nextSettings: CaisSettings) {
+    const previous = settingsRef.current
+    const needsStorageMigration =
+      previous.iCloudSync !== nextSettings.iCloudSync ||
+      previous.iCloudSyncImages !== nextSettings.iCloudSyncImages
+    try {
+      if (needsStorageMigration) await applyICloudSyncSettings(previous, nextSettings)
+      const next = saveSettings(nextSettings)
+      settingsRef.current = next
+      setSettings(next)
+      void refresh(true, next)
+    } catch (error: any) {
+      await Dialog.alert({
+        title: "iCloud 同步失败",
+        message: String(error?.message ?? error ?? "数据迁移失败"),
+      })
+    }
   }
 
   function clearToastHideTimer() {
@@ -1042,16 +1054,6 @@ export function AppRoot() {
     )
   }
 
-  function settingsTrailingToolbar() {
-    return (
-      <Button
-        title=""
-        systemImage="plus"
-        action={withHaptic(() => setAddCustomActionToken((v) => v + 1))}
-      />
-    )
-  }
-
   function searchPanel() {
     return (
       <VStack
@@ -1179,9 +1181,7 @@ export function AppRoot() {
               onChanged={updateSettings}
               onClearFavorites={() => void requestClear("favorites")}
               onClearClipboard={(range) => void requestClear(range)}
-              addActionToken={addCustomActionToken}
               leadingToolbar={toolbarLeading()}
-              trailingToolbar={settingsTrailingToolbar()}
             />
           </VStack>
         </NavigationStack>

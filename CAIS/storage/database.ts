@@ -58,6 +58,11 @@ export async function openCaisDatabase(): Promise<DB> {
   return cachedDb
 }
 
+export function resetDatabaseConnection() {
+  cachedDb = null
+  initialized = false
+}
+
 async function ensureSchema(db: DB): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS clips (

@@ -47,6 +47,8 @@ export type CaisSettings = {
   monitorIntervalMs: number
   duplicatePolicy: DuplicatePolicy
   maxItems: number
+  iCloudSync: boolean
+  iCloudSyncImages: boolean
   appContentLineLimit: number
   keyboardShowTitle: boolean
   keyboardNativeGlassEffect: boolean
@@ -104,6 +106,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   monitorIntervalMs: 200,
   duplicatePolicy: "bump",
   maxItems: 800,
+  iCloudSync: false,
+  iCloudSyncImages: false,
   appContentLineLimit: 3,
   keyboardShowTitle: true,
   keyboardNativeGlassEffect: true,

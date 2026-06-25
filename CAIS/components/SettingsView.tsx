@@ -3,6 +3,7 @@ import {
   ForEach,
   Form,
   HStack,
+  Image,
   Menu,
   Navigation,
   NavigationStack,
@@ -13,7 +14,6 @@ import {
   Text,
   TextField,
   Toggle,
-  useEffect,
   useState,
 } from "scripting";
 
@@ -308,16 +308,10 @@ export function SettingsView(props: {
   onChanged: (settings: CaisSettings) => void;
   onClearFavorites?: () => void;
   onClearClipboard?: (range: ClipboardClearRange) => void;
-  addActionToken?: number;
   leadingToolbar?: any;
   trailingToolbar?: any;
 }) {
   const settings = props.value;
-
-  useEffect(() => {
-    if (!props.addActionToken) return;
-    void presentCustomActionEditor();
-  }, [props.addActionToken]);
 
   function update(next: Partial<CaisSettings>) {
     props.onChanged({ ...settings, ...next });
@@ -458,6 +452,28 @@ export function SettingsView(props: {
       }}
     >
       <Section header={<Text>数据管理</Text>}>
+        <Toggle
+          value={settings.iCloudSync}
+          onChanged={(iCloudSync: boolean) => update({ iCloudSync })}
+          toggleStyle="switch"
+        >
+          <HStack>
+            <Image systemName="icloud" foregroundStyle="systemBlue" />
+            <Text>iCloud 同步</Text>
+          </HStack>
+        </Toggle>
+        {settings.iCloudSync ? (
+          <Toggle
+            value={settings.iCloudSyncImages}
+            onChanged={(iCloudSyncImages: boolean) => update({ iCloudSyncImages })}
+            toggleStyle="switch"
+          >
+            <HStack>
+              <Image systemName="photo" foregroundStyle="systemGreen" />
+              <Text>同步图片</Text>
+            </HStack>
+          </Toggle>
+        ) : null}
         <Button
           title="清空收藏数据"
           systemImage="star.slash"
@@ -713,8 +729,13 @@ export function SettingsView(props: {
             onMove={reorderCustomActions}
           />
         ) : (
-          <Text foregroundStyle="secondaryLabel">点击右上角添加自定义功能</Text>
+          <Text foregroundStyle="secondaryLabel">暂无自定义功能</Text>
         )}
+        <Button
+          title="添加自定义功能"
+          systemImage="plus"
+          action={() => void presentCustomActionEditor()}
+        />
       </Section>
     </Form>
   );

@@ -1,3 +1,5 @@
+import { loadSettings } from "./settings_store"
+
 const APP_DIR_NAME = "CAIS"
 const IMAGE_DIR_NAME = "images"
 
@@ -6,7 +8,11 @@ function joinPath(base: string, name: string): string {
   return base.endsWith("/") ? `${base}${name}` : `${base}/${name}`
 }
 
-export function appRootDirectory(): string {
+function fileManager(): any {
+  return (globalThis as any).FileManager
+}
+
+export function localAppRootDirectory(): string {
   const fm = (globalThis as any).FileManager
   const base =
     fm?.appGroupDocumentsDirectory ||
@@ -16,12 +22,52 @@ export function appRootDirectory(): string {
   return joinPath(base, APP_DIR_NAME)
 }
 
+export function iCloudAppRootDirectory(): string {
+  const fm = fileManager()
+  return joinPath(fm?.iCloudDocumentsDirectory || "", APP_DIR_NAME)
+}
+
+export function isICloudAvailable(): boolean {
+  const fm = fileManager()
+  return Boolean(fm?.isiCloudEnabled && fm?.iCloudDocumentsDirectory)
+}
+
+function useICloudDatabase(): boolean {
+  const settings = loadSettings()
+  return Boolean(settings.iCloudSync && isICloudAvailable())
+}
+
+function useICloudImages(): boolean {
+  const settings = loadSettings()
+  return Boolean(settings.iCloudSync && settings.iCloudSyncImages && isICloudAvailable())
+}
+
+export function appRootDirectory(): string {
+  return useICloudDatabase() ? iCloudAppRootDirectory() : localAppRootDirectory()
+}
+
 export function databasePath(): string {
   return joinPath(appRootDirectory(), "cais.sqlite")
 }
 
+export function localDatabasePath(): string {
+  return joinPath(localAppRootDirectory(), "cais.sqlite")
+}
+
+export function iCloudDatabasePath(): string {
+  return joinPath(iCloudAppRootDirectory(), "cais.sqlite")
+}
+
 export function imageDirectory(): string {
-  return joinPath(appRootDirectory(), IMAGE_DIR_NAME)
+  return joinPath(useICloudImages() ? iCloudAppRootDirectory() : localAppRootDirectory(), IMAGE_DIR_NAME)
+}
+
+export function localImageDirectory(): string {
+  return joinPath(localAppRootDirectory(), IMAGE_DIR_NAME)
+}
+
+export function iCloudImageDirectory(): string {
+  return joinPath(iCloudAppRootDirectory(), IMAGE_DIR_NAME)
 }
 
 export function imagePathForId(id: string): string {
