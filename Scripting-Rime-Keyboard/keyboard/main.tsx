@@ -2572,7 +2572,6 @@ function KeyboardContent(props: {
   function renderRimeNotificationToast() {
     if (!rimeNotificationToast) return null;
     const cornerRadius = 8;
-    const isErrorToast = rimeNotificationToast.text.startsWith("JS错误");
     return (
       <HStack
         key={rimeNotificationToast.id}
@@ -2580,12 +2579,8 @@ function KeyboardContent(props: {
         allowsHitTesting={false}
         padding={{ horizontal: 12 }}
         frame={{
-          maxWidth: isErrorToast
-            ? Math.max(180, metrics.width - 16)
-            : Math.min(180, metrics.width - 16),
-          height: isErrorToast
-            ? metrics.candidateButtonHeight * 1.65
-            : metrics.candidateButtonHeight,
+          maxWidth: Math.min(180, metrics.width - 16),
+          height: metrics.candidateButtonHeight,
         }}
         background={(palette.nativeKeyStyle
           ? palette.usesCustomColors
@@ -2608,7 +2603,7 @@ function KeyboardContent(props: {
       >
         <Text
           font={Math.max(13, metrics.candidateFontSize - 2)}
-          lineLimit={isErrorToast ? 2 : 1}
+          lineLimit={1}
           minScaleFactor={0.75}
           foregroundStyle={palette.primary as any}
         >

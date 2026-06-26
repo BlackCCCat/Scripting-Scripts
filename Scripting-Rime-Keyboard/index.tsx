@@ -1,7 +1,6 @@
 import {
   Button,
   ColorPicker,
-  EditButton,
   ForEach,
   HStack,
   Image,
@@ -17,6 +16,8 @@ import {
   Text,
   TextField,
   Toggle,
+  useObservable,
+  useRef,
   useState,
   VStack,
 } from "scripting";
@@ -304,7 +305,21 @@ function LabeledTextField(props: {
   titleWidth?: number;
   titleSymbol?: string;
   onChanged: (value: string) => void;
+  draftKey?: string;
+  onDraftChanged?: (key: string, value: string) => void;
 }) {
+  const [draftValue, setDraftValue] = useState(props.value);
+  const value = props.draftKey ? draftValue : props.value;
+
+  function handleChanged(next: string) {
+    if (props.draftKey) {
+      setDraftValue(next);
+      props.onDraftChanged?.(props.draftKey, next);
+      return;
+    }
+    props.onChanged(next);
+  }
+
   return (
     <HStack
       spacing={10}
@@ -326,9 +341,9 @@ function LabeledTextField(props: {
       </HStack>
       <TextField
         title=""
-        value={props.value}
+        value={value}
         prompt={props.prompt ?? ""}
-        onChanged={props.onChanged}
+        onChanged={handleChanged}
         frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
       />
     </HStack>
@@ -395,7 +410,31 @@ function SwipeConfigRow(props: {
   onActionChanged: (value: string) => void;
   onSymbolChanged: (value: string) => void;
   onModeChanged: (value: ActionSendMode) => void;
+  actionDraftKey?: string;
+  symbolDraftKey?: string;
+  onDraftChanged?: (key: string, value: string) => void;
 }) {
+  const [actionDraft, setActionDraft] = useState(props.action);
+  const [symbolDraft, setSymbolDraft] = useState(props.symbol);
+
+  function handleActionChanged(next: string) {
+    if (props.actionDraftKey) {
+      setActionDraft(next);
+      props.onDraftChanged?.(props.actionDraftKey, next);
+      return;
+    }
+    props.onActionChanged(next);
+  }
+
+  function handleSymbolChanged(next: string) {
+    if (props.symbolDraftKey) {
+      setSymbolDraft(next);
+      props.onDraftChanged?.(props.symbolDraftKey, next);
+      return;
+    }
+    props.onSymbolChanged(next);
+  }
+
   return (
     <VStack
       alignment="leading"
@@ -413,9 +452,9 @@ function SwipeConfigRow(props: {
         </Text>
         <TextField
           title=""
-          value={props.action}
+          value={props.actionDraftKey ? actionDraft : props.action}
           prompt="发送内容"
-          onChanged={props.onActionChanged}
+          onChanged={handleActionChanged}
         />
       </HStack>
       <Picker
@@ -440,9 +479,9 @@ function SwipeConfigRow(props: {
         </HStack>
         <TextField
           title=""
-          value={props.symbol}
+          value={props.symbolDraftKey ? symbolDraft : props.symbol}
           prompt="SF Symbol，可留空"
-          onChanged={props.onSymbolChanged}
+          onChanged={handleSymbolChanged}
         />
       </HStack>
     </VStack>
@@ -524,6 +563,8 @@ function ActionConfigRow(props: {
   mode: ActionSendMode;
   onActionChanged: (value: string) => void;
   onModeChanged: (value: ActionSendMode) => void;
+  actionDraftKey?: string;
+  onDraftChanged?: (key: string, value: string) => void;
 }) {
   return (
     <VStack
@@ -536,6 +577,8 @@ function ActionConfigRow(props: {
         value={props.action}
         titleWidth={126}
         onChanged={props.onActionChanged}
+        draftKey={props.actionDraftKey}
+        onDraftChanged={props.onDraftChanged}
       />
       <Picker
         title="发送方式"
@@ -558,6 +601,9 @@ function CandidateMenuActionRow(props: {
   onNameChanged: (value: string) => void;
   onActionChanged: (value: string) => void;
   onClear: () => void;
+  nameDraftKey?: string;
+  actionDraftKey?: string;
+  onDraftChanged?: (key: string, value: string) => void;
 }) {
   return (
     <VStack
@@ -579,12 +625,16 @@ function CandidateMenuActionRow(props: {
         value={props.item.name}
         titleWidth={54}
         onChanged={props.onNameChanged}
+        draftKey={props.nameDraftKey}
+        onDraftChanged={props.onDraftChanged}
       />
       <LabeledTextField
         title="动作"
         value={props.item.action}
         titleWidth={54}
         onChanged={props.onActionChanged}
+        draftKey={props.actionDraftKey}
+        onDraftChanged={props.onDraftChanged}
       />
     </VStack>
   );
@@ -608,7 +658,21 @@ function SFSymbolInputRow(props: {
   title: string;
   value: string;
   onChanged: (value: string) => void;
+  draftKey?: string;
+  onDraftChanged?: (key: string, value: string) => void;
 }) {
+  const [draftValue, setDraftValue] = useState(props.value);
+  const value = props.draftKey ? draftValue : props.value;
+
+  function handleChanged(next: string) {
+    if (props.draftKey) {
+      setDraftValue(next);
+      props.onDraftChanged?.(props.draftKey, next);
+      return;
+    }
+    props.onChanged(next);
+  }
+
   return (
     <HStack
       spacing={10}
@@ -616,13 +680,13 @@ function SFSymbolInputRow(props: {
     >
       <HStack spacing={6} frame={{ width: 116, alignment: "leading" as any }}>
         <Text lineLimit={1}>{props.title}</Text>
-        {props.value ? <Image systemName={props.value} font="body" /> : null}
+        {value ? <Image systemName={value} font="body" /> : null}
       </HStack>
       <TextField
         title=""
-        value={props.value}
+        value={value}
         prompt=""
-        onChanged={props.onChanged}
+        onChanged={handleChanged}
         frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
       />
     </HStack>
@@ -699,6 +763,11 @@ function FunctionSwipeConfigRow(props: {
   onUpModeChanged: (value: ActionSendMode) => void;
   onDownActionChanged: (value: string) => void;
   onDownModeChanged: (value: ActionSendMode) => void;
+  pressActionDraftKey?: string;
+  symbolDraftKey?: string;
+  upActionDraftKey?: string;
+  downActionDraftKey?: string;
+  onDraftChanged?: (key: string, value: string) => void;
 }) {
   return (
     <VStack
@@ -722,6 +791,8 @@ function FunctionSwipeConfigRow(props: {
               value={props.pressAction}
               titleWidth={78}
               onChanged={(value) => props.onPressActionChanged?.(value)}
+              draftKey={props.pressActionDraftKey}
+              onDraftChanged={props.onDraftChanged}
             />
             <Picker
               title="点击发送"
@@ -747,6 +818,8 @@ function FunctionSwipeConfigRow(props: {
             titleWidth={78}
             titleSymbol={props.symbol}
             onChanged={(value) => props.onSymbolChanged?.(value)}
+            draftKey={props.symbolDraftKey}
+            onDraftChanged={props.onDraftChanged}
           />
         )
         : null}
@@ -755,6 +828,8 @@ function FunctionSwipeConfigRow(props: {
         value={props.upAction}
         titleWidth={78}
         onChanged={props.onUpActionChanged}
+        draftKey={props.upActionDraftKey}
+        onDraftChanged={props.onDraftChanged}
       />
       <Picker
         title="上划发送"
@@ -772,6 +847,8 @@ function FunctionSwipeConfigRow(props: {
         value={props.downAction}
         titleWidth={78}
         onChanged={props.onDownActionChanged}
+        draftKey={props.downActionDraftKey}
+        onDraftChanged={props.onDraftChanged}
       />
       <Picker
         title="下划发送"
@@ -792,6 +869,12 @@ function SettingsView() {
   const [settings, setSettings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
   );
+  const pendingTextDraftsRef = useRef<Record<string, string>>({});
+  const [showSavedToast, setShowSavedToast] = useState(false);
+  const functionOrderEditMode = useObservable(() => EditMode.inactive());
+  const toolbarEditMode = useObservable(() => EditMode.inactive());
+  const [functionOrderEditing, setFunctionOrderEditing] = useState(false);
+  const [toolbarEditing, setToolbarEditing] = useState(false);
 
   function customThemeFlag(
     settingKey: "keyColors" | "keyFontColors" | "keyHintColors",
@@ -818,6 +901,83 @@ function SettingsView() {
   function patchSettings(patch: Partial<RimeKeyboardSettings>) {
     updateSettings({ ...settings, ...patch });
   }
+
+  function recordTextDraft(key: string, value: string) {
+    pendingTextDraftsRef.current[key] = value;
+  }
+
+  function clonePathValue(value: any) {
+    if (Array.isArray(value)) return [...value];
+    if (value != null && typeof value === "object") return { ...value };
+    return {};
+  }
+
+  function applyTextDrafts(base: RimeKeyboardSettings) {
+    const drafts = pendingTextDraftsRef.current;
+    const entries = Object.entries(drafts);
+    if (entries.length === 0) return base;
+    const next = { ...base } as any;
+    for (const [path, value] of entries) {
+      const parts = path.split(".");
+      let cursor = next;
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        const part = parts[index];
+        cursor[part] = clonePathValue(cursor[part]);
+        cursor = cursor[part];
+      }
+      cursor[parts[parts.length - 1]] = value;
+    }
+    return next as RimeKeyboardSettings;
+  }
+
+  function saveTextDrafts() {
+    const next = applyTextDrafts(settings);
+    pendingTextDraftsRef.current = {};
+    updateSettings(next);
+    setShowSavedToast(false);
+    setTimeout(() => setShowSavedToast(true), 20);
+  }
+
+  function textInputToolbar(extra?: any) {
+    return {
+      topBarTrailing: (
+        <HStack spacing={12}>
+          {extra}
+          <Button
+            title="保存"
+            systemImage="checkmark.circle"
+            action={saveTextDrafts}
+          />
+        </HStack>
+      ),
+    };
+  }
+
+  function editModeButton(
+    isEditing: boolean,
+    setEditing: (value: boolean) => void,
+    editMode: any,
+  ) {
+    return (
+      <Button
+        title=""
+        systemImage={isEditing ? "checkmark.circle" : "pencil.circle"}
+        action={() => {
+          const next = !isEditing;
+          setEditing(next);
+          editMode.setValue(next ? EditMode.active() : EditMode.inactive());
+        }}
+      />
+    );
+  }
+
+  const savedToast = {
+    isPresented: showSavedToast,
+    onChanged: setShowSavedToast,
+    message: "设置已保存",
+    duration: 1.2,
+    position: "bottom" as const,
+  };
 
   function setFunctionRowVisible(value: boolean) {
     const next: RimeKeyboardSettings = {
@@ -1072,7 +1232,12 @@ function SettingsView() {
 
   function renderAppearancePage() {
     return (
-      <List navigationTitle="键盘外观" navigationBarTitleDisplayMode="inline">
+      <List
+        navigationTitle="键盘外观"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
+      >
         <Section header={<Text>基础外观</Text>}>
           <Picker
             title="主题"
@@ -1129,8 +1294,7 @@ function SettingsView() {
             title="显示字母角标"
             systemImage="textformat.123"
             value={settings.showHintSymbols}
-            onChanged={(value) =>
-              patchSettings({ showHintSymbols: value })}
+            onChanged={(value) => patchSettings({ showHintSymbols: value })}
           />
           <Toggle
             title="字母按键大写显示"
@@ -1183,6 +1347,8 @@ function SettingsView() {
                 value={settings.spaceLabel}
                 prompt="万象"
                 onChanged={(value) => patchSettings({ spaceLabel: value })}
+                draftKey="spaceLabel"
+                onDraftChanged={recordTextDraft}
               />
             )
             : null}
@@ -1635,6 +1801,8 @@ function SettingsView() {
       <List
         navigationTitle="候选与预编辑"
         navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
       >
         <Section header={<Text>候选栏</Text>}>
           <VStack alignment="leading" spacing={8}>
@@ -1743,6 +1911,9 @@ function SettingsView() {
                     onActionChanged={(value) =>
                       patchCandidateMenuAction(index, { action: value })}
                     onClear={() => clearCandidateMenuAction(index)}
+                    nameDraftKey={`candidateMenuActions.${index}.name`}
+                    actionDraftKey={`candidateMenuActions.${index}.action`}
+                    onDraftChanged={recordTextDraft}
                   />
                 );
               })}
@@ -1926,7 +2097,12 @@ function SettingsView() {
 
   function renderShiftPage() {
     return (
-      <List navigationTitle="Shift 行为" navigationBarTitleDisplayMode="inline">
+      <List
+        navigationTitle="Shift 行为"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
+      >
         <Section>
           <Toggle
             title="预编辑时使用包裹键"
@@ -1943,6 +2119,8 @@ function SettingsView() {
               patchSettings({ shiftComposingKey: value })}
             onModeChanged={(value) =>
               patchSettings({ shiftComposingKeyMode: value })}
+            actionDraftKey="shiftComposingKey"
+            onDraftChanged={recordTextDraft}
           />
           <ActionConfigRow
             title="预编辑上划动作"
@@ -1952,14 +2130,17 @@ function SettingsView() {
               patchSettings({ shiftComposingSwipeUp: value })}
             onModeChanged={(value) =>
               patchSettings({ shiftComposingSwipeUpMode: value })}
+            actionDraftKey="shiftComposingSwipeUp"
+            onDraftChanged={recordTextDraft}
           />
           <LabeledTextField
             title="预编辑图标"
             value={settings.shiftComposingIcon}
             prompt="SF Symbol"
             titleSymbol={settings.shiftComposingIcon}
-            onChanged={(value) =>
-              patchSettings({ shiftComposingIcon: value })}
+            onChanged={(value) => patchSettings({ shiftComposingIcon: value })}
+            draftKey="shiftComposingIcon"
+            onDraftChanged={recordTextDraft}
           />
         </Section>
       </List>
@@ -1971,6 +2152,8 @@ function SettingsView() {
       <List
         navigationTitle="中英键预编辑行为"
         navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
       >
         <Section>
           <Toggle
@@ -1988,6 +2171,8 @@ function SettingsView() {
               patchSettings({ modeComposingAction: value })}
             onModeChanged={(value) =>
               patchSettings({ modeComposingActionMode: value })}
+            actionDraftKey="modeComposingAction"
+            onDraftChanged={recordTextDraft}
           />
           <ActionConfigRow
             title="上划动作"
@@ -1997,6 +2182,8 @@ function SettingsView() {
               patchSettings({ modeComposingSwipeUp: value })}
             onModeChanged={(value) =>
               patchSettings({ modeComposingSwipeUpMode: value })}
+            actionDraftKey="modeComposingSwipeUp"
+            onDraftChanged={recordTextDraft}
           />
           <ActionConfigRow
             title="下划动作"
@@ -2006,6 +2193,8 @@ function SettingsView() {
               patchSettings({ modeComposingSwipeDown: value })}
             onModeChanged={(value) =>
               patchSettings({ modeComposingSwipeDownMode: value })}
+            actionDraftKey="modeComposingSwipeDown"
+            onDraftChanged={recordTextDraft}
           />
           <LabeledTextField
             title="显示图标"
@@ -2013,6 +2202,8 @@ function SettingsView() {
             prompt="lightbulb"
             titleSymbol={settings.modeComposingIcon}
             onChanged={(value) => patchSettings({ modeComposingIcon: value })}
+            draftKey="modeComposingIcon"
+            onDraftChanged={recordTextDraft}
           />
         </Section>
       </List>
@@ -2021,7 +2212,12 @@ function SettingsView() {
 
   function renderBackspacePage() {
     return (
-      <List navigationTitle="删除键行为" navigationBarTitleDisplayMode="inline">
+      <List
+        navigationTitle="删除键行为"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
+      >
         <Section
           footer={
             <SettingHint>
@@ -2037,6 +2233,8 @@ function SettingsView() {
               patchSettings({ backspaceSwipeLeft: value })}
             onModeChanged={(value) =>
               patchSettings({ backspaceSwipeLeftMode: value })}
+            actionDraftKey="backspaceSwipeLeft"
+            onDraftChanged={recordTextDraft}
           />
           <ActionConfigRow
             title="上划动作"
@@ -2046,6 +2244,8 @@ function SettingsView() {
               patchSettings({ backspaceSwipeUp: value })}
             onModeChanged={(value) =>
               patchSettings({ backspaceSwipeUpMode: value })}
+            actionDraftKey="backspaceSwipeUp"
+            onDraftChanged={recordTextDraft}
           />
           <ActionConfigRow
             title="预编辑上划"
@@ -2055,6 +2255,8 @@ function SettingsView() {
               patchSettings({ backspaceComposingSwipeUp: value })}
             onModeChanged={(value) =>
               patchSettings({ backspaceComposingSwipeUpMode: value })}
+            actionDraftKey="backspaceComposingSwipeUp"
+            onDraftChanged={recordTextDraft}
           />
           <ActionConfigRow
             title="下划动作"
@@ -2064,6 +2266,8 @@ function SettingsView() {
               patchSettings({ backspaceSwipeDown: value })}
             onModeChanged={(value) =>
               patchSettings({ backspaceSwipeDownMode: value })}
+            actionDraftKey="backspaceSwipeDown"
+            onDraftChanged={recordTextDraft}
           />
         </Section>
       </List>
@@ -2072,7 +2276,12 @@ function SettingsView() {
 
   function renderNumericPage() {
     return (
-      <List navigationTitle="数字键盘" navigationBarTitleDisplayMode="inline">
+      <List
+        navigationTitle="数字键盘"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
+      >
         <Section
           footer={
             <SettingHint>
@@ -2086,6 +2295,8 @@ function SettingsView() {
             prompt="V"
             onChanged={(value) =>
               patchSettings({ numericEqualsSwipeUp: value })}
+            draftKey="numericEqualsSwipeUp"
+            onDraftChanged={recordTextDraft}
           />
         </Section>
       </List>
@@ -2098,6 +2309,8 @@ function SettingsView() {
       <List
         navigationTitle={isUp ? "字母上划" : "字母下划"}
         navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
       >
         <Section
           footer={isUp
@@ -2140,6 +2353,13 @@ function SettingsView() {
                   key,
                   value,
                 )}
+              actionDraftKey={`${
+                isUp ? "letterSwipeUp" : "letterSwipeDown"
+              }.${key}`}
+              symbolDraftKey={`${
+                isUp ? "letterSwipeUpSymbols" : "letterSwipeDownSymbols"
+              }.${key}`}
+              onDraftChanged={recordTextDraft}
             />
           ))}
         </Section>
@@ -2153,6 +2373,8 @@ function SettingsView() {
       <List
         navigationTitle={composing ? "功能键 · 预编辑" : "功能键 · 无预编辑"}
         navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
       >
         {composing
           ? (
@@ -2256,6 +2478,21 @@ function SettingsView() {
                   key,
                   value,
                 )}
+              pressActionDraftKey={`${
+                composing ? "composingFunctionPress" : "idleFunctionPress"
+              }.${key}`}
+              symbolDraftKey={`${
+                composing ? "composingFunctionSymbols" : "idleFunctionSymbols"
+              }.${key}`}
+              upActionDraftKey={`${
+                composing ? "composingFunctionSwipeUp" : "idleFunctionSwipeUp"
+              }.${key}`}
+              downActionDraftKey={`${
+                composing
+                  ? "composingFunctionSwipeDown"
+                  : "idleFunctionSwipeDown"
+              }.${key}`}
+              onDraftChanged={recordTextDraft}
             />
           ))}
         </Section>
@@ -2268,7 +2505,14 @@ function SettingsView() {
       <List
         navigationTitle="功能行排序"
         navigationBarTitleDisplayMode="inline"
-        toolbar={{ topBarTrailing: <EditButton /> }}
+        environments={{ editMode: functionOrderEditMode }}
+        toolbar={{
+          topBarTrailing: editModeButton(
+            functionOrderEditing,
+            setFunctionOrderEditing,
+            functionOrderEditMode,
+          ),
+        }}
       >
         <Section
           header={<Text>无预编辑</Text>}
@@ -2338,6 +2582,8 @@ function SettingsView() {
       <List
         navigationTitle={`左侧按钮 ${index + 1}`}
         navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
       >
         <Section
           footer={
@@ -2357,6 +2603,8 @@ function SettingsView() {
             titleWidth={86}
             onChanged={(value) =>
               patchToolbarButton(props.id, { symbol: value })}
+            draftKey={`toolbarLeftButtons.${index}.symbol`}
+            onDraftChanged={recordTextDraft}
           />
           <SFSymbolPreviewRow symbol={item.symbol} />
           <LabeledTextField
@@ -2365,6 +2613,8 @@ function SettingsView() {
             titleWidth={86}
             onChanged={(value) =>
               patchToolbarButton(props.id, { action: value })}
+            draftKey={`toolbarLeftButtons.${index}.action`}
+            onDraftChanged={recordTextDraft}
           />
         </Section>
         <Section>
@@ -2387,7 +2637,11 @@ function SettingsView() {
       <List
         navigationTitle="工具栏"
         navigationBarTitleDisplayMode="inline"
-        toolbar={{ topBarTrailing: <EditButton /> }}
+        environments={{ editMode: toolbarEditMode }}
+        toolbar={textInputToolbar(
+          editModeButton(toolbarEditing, setToolbarEditing, toolbarEditMode),
+        )}
+        toast={savedToast}
       >
         <Section
           header={<Text>左侧按钮</Text>}
@@ -2443,11 +2697,15 @@ function SettingsView() {
             value={settings.toolbarDismissSymbol}
             onChanged={(value) =>
               patchSettings({ toolbarDismissSymbol: value })}
+            draftKey="toolbarDismissSymbol"
+            onDraftChanged={recordTextDraft}
           />
           <SFSymbolInputRow
             title="展开图标"
             value={settings.toolbarExpandSymbol}
             onChanged={(value) => patchSettings({ toolbarExpandSymbol: value })}
+            draftKey="toolbarExpandSymbol"
+            onDraftChanged={recordTextDraft}
           />
         </Section>
       </List>
