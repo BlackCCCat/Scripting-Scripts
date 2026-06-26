@@ -624,10 +624,16 @@ function ClipTileMenu(props: {
       await Safari.openURL(result.url)
       return
     }
+    if (result.kind === "none") {
+      props.onStatus(result.message ?? "没有返回内容")
+      return
+    }
     if (result.kind === "text") {
+      const copied = result.writeToClipboard === true
+      if (copied) await Pasteboard.setString(result.text)
       insertKeyboardText(result.text)
       const saved = await saveMenuResult(result, source)
-      props.onStatus(saved ? "已上屏并保存" : "已上屏")
+      props.onStatus(saved ? (copied ? "已复制、上屏并保存" : "已上屏并保存") : (copied ? "已复制并上屏" : "已上屏"))
       return
     }
     if (result.kind === "texts") {
@@ -670,7 +676,7 @@ function ClipTileMenu(props: {
       return
     }
     try {
-      await handleMenuResult(applyCustomMenuAction(action, source), source)
+      await handleMenuResult(await applyCustomMenuAction(action, source), source)
     } catch (error: any) {
       props.onStatus(String(error?.message ?? error ?? "自定义功能执行失败"))
     }

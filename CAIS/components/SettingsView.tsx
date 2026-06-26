@@ -27,8 +27,10 @@ import type {
 import { makeId } from "../utils/common";
 import {
   JAVASCRIPT_ACTION_EXAMPLE,
-  runJavaScriptTransform,
+  NETWORK_REQUEST_EXAMPLE,
   validateRegexPattern,
+  validateJavaScriptTransform,
+  validateNetworkRequest,
   validateRuntimeTemplate,
 } from "../utils/custom_action";
 
@@ -44,7 +46,7 @@ const CLIPBOARD_CLEAR_OPTIONS: Array<{ range: ClipboardClearRange; title: string
 const APP_CONTENT_LINE_MIN = 1;
 const APP_CONTENT_LINE_MAX = 12;
 const JAVASCRIPT_HELP = [
-  "函数名必须是 transform，只接收一个文本参数 text，需返回 { text }。",
+  "函数名必须是 transform，只接收一个文本参数 text，返回文本或 { text }。",
   "trim(): 移除首尾空白",
   "replace(a, b): 替换内容，可配合正则使用",
   "match(regexp): 获取匹配结果",
@@ -53,6 +55,12 @@ const JAVASCRIPT_HELP = [
   "toUpperCase(): 转为大写",
   "toLowerCase(): 转为小写",
   "slice(start, end): 截取字符串",
+].join("\n");
+const NETWORK_REQUEST_HELP = [
+  "函数名必须是 request，只接收一个文本参数 text，可使用 await fetch(...)。",
+  '当前内容可直接用 text，也可在字符串中写 "{{text}}"。',
+  "返回文本或 { text }。",
+  "返回内容为空时不会写入剪贴板，也不会保存新记录。",
 ].join("\n");
 
 const BUILTIN_ACTIONS: Array<{
@@ -89,6 +97,7 @@ function customActionModeIndex(mode: KeyboardCustomActionMode): number {
   if (mode === "regexExtract") return 1;
   if (mode === "regexRemove") return 2;
   if (mode === "javascript") return 3;
+  if (mode === "networkRequest") return 4;
   return 0;
 }
 
@@ -96,6 +105,7 @@ function customActionModeFromIndex(index: number): KeyboardCustomActionMode {
   if (index === 1) return "regexExtract";
   if (index === 2) return "regexRemove";
   if (index === 3) return "javascript";
+  if (index === 4) return "networkRequest";
   return "template";
 }
 
@@ -113,7 +123,10 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
     Boolean(props.action?.regexRemoveAll ?? true),
   );
   const [script, setScript] = useState(
-    props.action?.script ?? JAVASCRIPT_ACTION_EXAMPLE,
+    props.action?.script ?? (props.action?.mode === "networkRequest" ? NETWORK_REQUEST_EXAMPLE : JAVASCRIPT_ACTION_EXAMPLE),
+  );
+  const [writeToClipboard, setWriteToClipboard] = useState(
+    Boolean(props.action?.writeToClipboard ?? true),
   );
 
   async function save() {
@@ -127,6 +140,10 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
     }
     if (mode === "template" && !fixedTemplate) {
       await Dialog.alert({ message: "请输入模板内容" });
+      return;
+    }
+    if (mode === "networkRequest" && !fixedScript) {
+      await Dialog.alert({ message: "请输入网络请求脚本" });
       return;
     }
     if ((mode === "regexExtract" || mode === "regexRemove") && !fixedRegex) {
@@ -158,12 +175,21 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
       }
     }
     if (mode === "javascript") {
-      try {
-        runJavaScriptTransform(fixedScript, "示例文本");
-      } catch (error: any) {
+      const scriptError = validateJavaScriptTransform(fixedScript);
+      if (scriptError) {
         await Dialog.alert({
           title: "JavaScript 错误",
-          message: String(error?.message ?? error ?? "JavaScript 函数无效"),
+          message: scriptError,
+        });
+        return;
+      }
+    }
+    if (mode === "networkRequest") {
+      const scriptError = validateNetworkRequest(fixedScript);
+      if (scriptError) {
+        await Dialog.alert({
+          title: "网络请求错误",
+          message: scriptError,
         });
         return;
       }
@@ -175,7 +201,8 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
       template: mode === "template" ? fixedTemplate : "",
       regex: mode === "regexExtract" || mode === "regexRemove" ? fixedRegex : "",
       regexRemoveAll: mode === "regexRemove" ? regexRemoveAll : false,
-      script: mode === "javascript" ? fixedScript : "",
+      script: mode === "javascript" || mode === "networkRequest" ? fixedScript : "",
+      writeToClipboard: mode === "networkRequest" ? writeToClipboard : true,
       enabled: props.action?.enabled ?? true,
     });
   }
@@ -206,14 +233,21 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
             title="类型"
             pickerStyle="menu"
             value={customActionModeIndex(mode)}
-            onChanged={(index: number) =>
-              setMode(customActionModeFromIndex(index))
-            }
+            onChanged={(index: number) => {
+              const nextMode = customActionModeFromIndex(index);
+              if (nextMode === "networkRequest" && script === JAVASCRIPT_ACTION_EXAMPLE) {
+                setScript(NETWORK_REQUEST_EXAMPLE);
+              } else if (nextMode === "javascript" && script === NETWORK_REQUEST_EXAMPLE) {
+                setScript(JAVASCRIPT_ACTION_EXAMPLE);
+              }
+              setMode(nextMode);
+            }}
           >
             <Text tag={0}>模板替换</Text>
             <Text tag={1}>正则提取</Text>
             <Text tag={2}>正则删除</Text>
             <Text tag={3}>JavaScript 转换</Text>
+            <Text tag={4}>网络请求</Text>
           </Picker>
         </Section>
 
@@ -260,6 +294,31 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
               }}
               onChanged={setScript}
             />
+          </Section>
+        ) : mode === "networkRequest" ? (
+          <Section
+            header={<Text>网络请求</Text>}
+            footer={<Text>{NETWORK_REQUEST_HELP}</Text>}
+          >
+            <TextField
+              title=""
+              value={script}
+              prompt={NETWORK_REQUEST_EXAMPLE}
+              axis="vertical"
+              frame={{
+                minHeight: 170,
+                maxWidth: "infinity",
+                alignment: "topLeading" as any,
+              }}
+              onChanged={setScript}
+            />
+            <Toggle
+              value={writeToClipboard}
+              onChanged={(value: boolean) => setWriteToClipboard(value)}
+              toggleStyle="switch"
+            >
+              <Text>结果写入剪贴板</Text>
+            </Toggle>
           </Section>
         ) : (
           <Section

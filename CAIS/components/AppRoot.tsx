@@ -709,6 +709,10 @@ export function AppRoot() {
       await Safari.openURL(result.url)
       return
     }
+    if (result.kind === "none") {
+      showToast(result.message ?? "没有返回内容")
+      return
+    }
     if (result.kind === "texts") {
       const saved = await saveTransformedResult(result, source)
       showToast(saved ? `已拆分保存 ${saved} 条` : "没有新的拆分结果")
@@ -716,7 +720,12 @@ export function AppRoot() {
       return
     }
     if (result.kind === "text") {
-      await writeTextToPasteboard(result.text)
+      const shouldCopy = result.writeToClipboard !== false
+      if (shouldCopy) await writeTextToPasteboard(result.text)
+      const saved = await saveTransformedResult(result, source)
+      showToast(saved ? (shouldCopy ? "已复制并保存" : "已保存") : (shouldCopy ? "已复制" : "已完成"))
+      await refresh()
+      return
     } else {
       await writeImageToPasteboard(result.image)
     }
@@ -751,7 +760,7 @@ export function AppRoot() {
     }
     try {
       const source = await itemSource(item)
-      const result = applyCustomMenuAction(action, source)
+      const result = await applyCustomMenuAction(action, source)
       if (!result) {
         showToast("当前条目不支持该自定义功能")
         return

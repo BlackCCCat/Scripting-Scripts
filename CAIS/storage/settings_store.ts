@@ -12,6 +12,7 @@ function sanitizeCustomActionMode(value: any): KeyboardCustomAction["mode"] {
   if (value === "regex" || value === "regexExtract") return "regexExtract"
   if (value === "regexRemove") return "regexRemove"
   if (value === "javascript") return "javascript"
+  if (value === "networkRequest") return "networkRequest"
   return "template"
 }
 
@@ -52,11 +53,12 @@ function sanitizeSettings(raw: any): CaisSettings {
         regex: String(item?.regex ?? ""),
         regexRemoveAll: Boolean(item?.regexRemoveAll ?? false),
         script: String(item?.script ?? ""),
+        writeToClipboard: Boolean(item?.writeToClipboard ?? true),
         enabled: Boolean(item?.enabled ?? true),
       }))
       .filter((item: KeyboardCustomAction) => item.title && (
         item.mode === "template" ? item.template :
-        item.mode === "javascript" ? item.script :
+        item.mode === "javascript" || item.mode === "networkRequest" ? item.script :
         item.regex
       ))
       .slice(0, 12)

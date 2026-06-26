@@ -73,7 +73,7 @@ export type KeyboardMenuBuiltinAction =
   | "chineseAmount"
   | "openUrl"
 
-export type KeyboardCustomActionMode = "template" | "regexExtract" | "regexRemove" | "javascript"
+export type KeyboardCustomActionMode = "template" | "regexExtract" | "regexRemove" | "javascript" | "networkRequest"
 
 export type KeyboardCustomAction = {
   id: string
@@ -83,6 +83,7 @@ export type KeyboardCustomAction = {
   regex?: string
   regexRemoveAll?: boolean
   script?: string
+  writeToClipboard?: boolean
   enabled: boolean
 }
 

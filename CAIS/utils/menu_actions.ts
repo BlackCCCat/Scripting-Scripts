@@ -3,7 +3,7 @@ import type {
   KeyboardCustomAction,
   KeyboardMenuBuiltinAction,
 } from "../types"
-import { arabicNumberToChineseAmount, makeRegex, runJavaScriptTransform } from "./custom_action"
+import { arabicNumberToChineseAmount, makeRegex, runJavaScriptTransform, runNetworkRequest } from "./custom_action"
 import { renderRuntimeTemplate } from "./template"
 
 export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
@@ -20,10 +20,11 @@ export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
 ]
 
 export type MenuActionResult =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; writeToClipboard?: boolean }
   | { kind: "texts"; texts: string[] }
   | { kind: "image"; image: UIImage }
   | { kind: "openUrl"; url: string }
+  | { kind: "none"; message?: string }
 
 export function getOrderedMenuBuiltins(settings: CaisSettings): KeyboardMenuBuiltinAction[] {
   const order = settings.keyboardMenu.builtinOrder?.filter(
@@ -87,6 +88,7 @@ export function customActionSystemImage(action: KeyboardCustomAction): string {
   if (action.mode === "regexExtract") return "text.magnifyingglass"
   if (action.mode === "regexRemove") return "text.badge.minus"
   if (action.mode === "javascript") return "curlybraces"
+  if (action.mode === "networkRequest") return "network"
   return "wand.and.stars"
 }
 
@@ -155,7 +157,7 @@ export function applyBuiltinMenuAction(options: {
   }
 }
 
-export function applyCustomMenuAction(action: KeyboardCustomAction, source: string): MenuActionResult | null {
+export async function applyCustomMenuAction(action: KeyboardCustomAction, source: string): Promise<MenuActionResult | null> {
   if (action.mode === "regexExtract" || action.mode === "regexRemove") {
     const pattern = String(action.regex ?? "").trim()
     if (!pattern) throw new Error("正则表达式为空")
@@ -169,6 +171,11 @@ export function applyCustomMenuAction(action: KeyboardCustomAction, source: stri
   if (action.mode === "javascript") {
     const result = runJavaScriptTransform(String(action.script ?? ""), source)
     return { kind: "text", text: result.text }
+  }
+  if (action.mode === "networkRequest") {
+    const result = await runNetworkRequest(String(action.script ?? ""), source)
+    if (!result?.text) return { kind: "none", message: "没有返回内容" }
+    return { kind: "text", text: result.text, writeToClipboard: action.writeToClipboard }
   }
   return { kind: "text", text: renderRuntimeTemplate(action.template, source) }
 }

@@ -1,3 +1,5 @@
+import { runtimeTemplateVariables } from "./template"
+
 const TEMPLATE_KEYS = ["text", "date", "time", "datetime", "timestamp"]
 const MAX_TRANSFORM_TEXT_LENGTH = 10000
 const CN_DIGITS = ["零", "壹", "贰", "叁", "肆", "伍", "陆", "柒", "捌", "玖"]
@@ -12,6 +14,12 @@ export const JAVASCRIPT_ACTION_EXAMPLE = `function transform(text) {
   return {
     text: text.trim()
   }
+}`
+
+export const NETWORK_REQUEST_EXAMPLE = `async function request(text) {
+  const apiKey = "{{text}}"
+  const res = await fetch(\`https://example.com?key=\${encodeURIComponent(apiKey)}\`)
+  return await res.text()
 }`
 
 function parseRegexPattern(pattern: string): { source: string; flags: string } {
@@ -61,19 +69,47 @@ export function validateRuntimeTemplate(template: string): string | null {
   return null
 }
 
-export function runJavaScriptTransform(code: string, text: string): JavaScriptTransformResult {
+function createJavaScriptTransform(code: string): (text: string) => unknown {
   const body = code.trim()
   if (!body) throw new Error("请输入 JavaScript 函数")
   const factory = new Function(`"use strict";\n${body}\nreturn typeof transform === "function" ? transform : null`)
   const transform = factory() as ((text: string) => unknown) | null
   if (!transform) throw new Error("请定义名为 transform 的函数")
   if (transform.length > 1) throw new Error("transform 只能声明一个参数 text")
+  return transform
+}
+
+export function validateJavaScriptTransform(code: string): string | null {
+  try {
+    const transform = createJavaScriptTransform(code)
+    const raw = transform("示例文本")
+    if (raw && typeof (raw as any).then === "function") {
+      throw new Error("JavaScript 转换不支持 async/Promise；网络请求请使用“网络请求”类型")
+    }
+    if (typeof raw === "string") return null
+    if (!raw || typeof raw !== "object" || !("text" in raw)) {
+      throw new Error("transform 必须返回文本或对象，例如 return { text }")
+    }
+    return null
+  } catch (error: any) {
+    return String(error?.message ?? error ?? "JavaScript 函数无效")
+  }
+}
+
+export function runJavaScriptTransform(code: string, text: string): JavaScriptTransformResult {
+  const transform = createJavaScriptTransform(code)
   const raw = transform(text)
   if (raw && typeof (raw as any).then === "function") {
-    throw new Error("暂不支持 async/Promise，请返回普通对象")
+    throw new Error("JavaScript 转换不支持 async/Promise；网络请求请使用“网络请求”类型")
   }
   if (!raw || typeof raw !== "object") {
-    throw new Error("transform 必须返回对象，例如 return { text }")
+    if (typeof raw === "string") {
+      if (raw.length > MAX_TRANSFORM_TEXT_LENGTH) {
+        throw new Error(`返回文本不能超过 ${MAX_TRANSFORM_TEXT_LENGTH} 字`)
+      }
+      return { text: raw }
+    }
+    throw new Error("transform 必须返回文本或对象，例如 return { text }")
   }
   const result = raw as JavaScriptTransformResult
   if (!("text" in result)) {
@@ -84,6 +120,62 @@ export function runJavaScriptTransform(code: string, text: string): JavaScriptTr
     throw new Error(`返回文本不能超过 ${MAX_TRANSFORM_TEXT_LENGTH} 字`)
   }
   return output
+}
+
+function createNetworkRequest(code: string): (text: string) => unknown {
+  const body = code.trim()
+  if (!body) throw new Error("请输入网络请求脚本")
+  const factory = new Function(
+    "fetch",
+    "console",
+    `"use strict";\n${body}\nreturn typeof request === "function" ? request : null`
+  )
+  const request = factory((globalThis as any).fetch, console) as ((text: string) => unknown) | null
+  if (!request) throw new Error("请定义名为 request 的函数")
+  if (request.length > 1) throw new Error("request 只能声明一个参数 text")
+  return request
+}
+
+function escapeJavaScriptStringContent(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/'/g, "\\'")
+    .replace(/`/g, "\\`")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
+}
+
+function renderNetworkScriptTemplate(code: string, text: string): string {
+  const values = { ...runtimeTemplateVariables(), text }
+  return code.replace(/\{\{(text|date|time|datetime|timestamp)\}\}/g, (_match, key: keyof typeof values) => {
+    return escapeJavaScriptStringContent(values[key] ?? "")
+  })
+}
+
+export function validateNetworkRequest(code: string): string | null {
+  try {
+    createNetworkRequest(code)
+    return null
+  } catch (error: any) {
+    return String(error?.message ?? error ?? "网络请求脚本无效")
+  }
+}
+
+export async function runNetworkRequest(code: string, text: string): Promise<JavaScriptTransformResult | null> {
+  const request = createNetworkRequest(renderNetworkScriptTemplate(code, text))
+  const raw = await request(text)
+  if (raw == null) return null
+  const resultText = typeof raw === "object" && "text" in (raw as any)
+    ? String((raw as JavaScriptTransformResult).text ?? "")
+    : String(raw)
+  if (!resultText) return null
+  if (resultText.length > MAX_TRANSFORM_TEXT_LENGTH) {
+    throw new Error(`返回文本不能超过 ${MAX_TRANSFORM_TEXT_LENGTH} 字`)
+  }
+  return { text: resultText }
 }
 
 function sectionToChinese(section: string): string {
