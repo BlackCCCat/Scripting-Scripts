@@ -114,6 +114,12 @@ const NOTIFIED_RIME_OPTIONS = new Set([
 ]);
 const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
 const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
+const TOOLBAR_TEMPLATE_CLIPBOARD = "{clipboard}";
+const LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD = "{{clipboard}}";
+const AsyncFunction = Object.getPrototypeOf(async function () {})
+  .constructor as new (
+    ...args: string[]
+  ) => (...args: unknown[]) => Promise<unknown>;
 
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
@@ -2445,6 +2451,69 @@ function KeyboardContent(props: {
     });
   }
 
+  async function readToolbarClipboard() {
+    try {
+      return await Pasteboard.getString() ?? "";
+    } catch (error) {
+      console.error(
+        "[Scripting Rime Keyboard] Failed to read clipboard",
+        error,
+      );
+      return "";
+    }
+  }
+
+  function expandToolbarScriptTemplate(source: string, clipboard: string) {
+    if (
+      !source.includes(TOOLBAR_TEMPLATE_CLIPBOARD) &&
+      !source.includes(LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD)
+    ) {
+      return source;
+    }
+    return source.replaceAll(
+      TOOLBAR_TEMPLATE_CLIPBOARD,
+      JSON.stringify(clipboard),
+    ).replaceAll(
+      LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD,
+      JSON.stringify(clipboard),
+    );
+  }
+
+  function toolbarScriptContext(clipboard: string) {
+    return {
+      clipboard,
+      preedit,
+      candidates: candidates.map((candidate) => ({
+        text: candidate.text,
+        comment: candidateComment(candidate),
+      })),
+      openURL,
+      runScript: runToolbarScript,
+      switchKeyboard: switchKeyboardScript,
+      dismissKeyboard: () => CustomKeyboard.dismiss(),
+      keyboardHome: pressCandidateHomeButton,
+      runAction: runToolbarAction,
+      insertText: (text: unknown) =>
+        insertTextReplacingSelectAll(String(text ?? "")),
+    };
+  }
+
+  async function runToolbarInlineScript(source: string) {
+    const clipboard = await readToolbarClipboard();
+    const script = expandToolbarScriptTemplate(source, clipboard);
+    const run = new AsyncFunction(
+      "ctx",
+      "fetch",
+      "console",
+      `"use strict";\n${script}`,
+    );
+    try {
+      await run(toolbarScriptContext(clipboard), fetch, console);
+    } catch (error) {
+      console.error("[Scripting Rime Keyboard] Toolbar JS failed", error);
+    }
+  }
+
   function runToolbarAction(action: string) {
     const value = action.trim();
     if (!value) return;
@@ -2466,6 +2535,10 @@ function KeyboardContent(props: {
     }
     if (value.startsWith("script:")) {
       runToolbarScript(value.slice("script:".length));
+      return;
+    }
+    if (value.startsWith("js:")) {
+      void runToolbarInlineScript(value.slice("js:".length));
       return;
     }
     if (value.startsWith("keyboard:")) {

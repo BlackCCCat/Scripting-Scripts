@@ -164,6 +164,18 @@ const COMMAND_REFERENCE_GROUPS: Array<{
       { command: "https://example.com", description: "用 Safari 打开网页" },
       { command: "url:https://example.com", description: "用 Safari 打开网页" },
       { command: "script:脚本名", description: "运行指定 Scripting 脚本" },
+      {
+        command: 'js:await fetch("https://example.com")',
+        description: "执行简单 JS 脚本",
+      },
+      {
+        command: "js:ctx.insertText(await (await fetch(url)).text())",
+        description: "在 JS 脚本中手动将结果上屏",
+      },
+      {
+        command: "{clipboard}",
+        description: "在 js: 脚本中替换为当前剪切板文本",
+      },
     ],
   },
   {
@@ -2332,7 +2344,9 @@ function SettingsView() {
               动作支持{" "}
               {"{keyboardHome}"}、{"{keyboardSettings}"}、{"{schemaMenu}"}、{"{dismissKeyboard}"}，
               也支持 keyboard:脚本名、https:// 链接、url:https:// 链接，以及
-              script:脚本名。
+              script:脚本名、js:脚本。js: 脚本中可使用 ctx.clipboard 或模板变量
+              {" "}
+              {"{clipboard}"}；需要上屏时请手动调用 ctx.insertText(text)。
             </SettingHint>
           }
         >
