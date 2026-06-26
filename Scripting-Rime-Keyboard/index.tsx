@@ -169,7 +169,8 @@ const COMMAND_REFERENCE_GROUPS: Array<{
         description: "执行简单 JS 脚本",
       },
       {
-        command: "js:ctx.insertText(await (await fetch(url)).text())",
+        command:
+          'js:const r = await fetch("https://example.com"); ctx.insertText(await r.text())',
         description: "在 JS 脚本中手动将结果上屏",
       },
       {

@@ -116,10 +116,9 @@ const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
 const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
 const TOOLBAR_TEMPLATE_CLIPBOARD = "{clipboard}";
 const LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD = "{{clipboard}}";
-const AsyncFunction = Object.getPrototypeOf(async function () {})
-  .constructor as new (
-    ...args: string[]
-  ) => (...args: unknown[]) => Promise<unknown>;
+const ToolbarScriptFunction = Function as unknown as new (
+  ...args: string[]
+) => (...args: unknown[]) => Promise<unknown>;
 
 function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteToken += 1;
@@ -2487,30 +2486,39 @@ function KeyboardContent(props: {
         text: candidate.text,
         comment: candidateComment(candidate),
       })),
-      openURL,
+      openURL: openToolbarURL,
       runScript: runToolbarScript,
       switchKeyboard: switchKeyboardScript,
       dismissKeyboard: () => CustomKeyboard.dismiss(),
       keyboardHome: pressCandidateHomeButton,
       runAction: runToolbarAction,
-      insertText: (text: unknown) =>
-        insertTextReplacingSelectAll(String(text ?? "")),
+      insertText: (text: unknown) => {
+        const value = String(text ?? "");
+        if (!value) return;
+        Thread.runInMain(() => insertTextReplacingSelectAll(value));
+      },
     };
   }
 
   async function runToolbarInlineScript(source: string) {
     const clipboard = await readToolbarClipboard();
     const script = expandToolbarScriptTemplate(source, clipboard);
-    const run = new AsyncFunction(
-      "ctx",
-      "fetch",
-      "console",
-      `"use strict";\n${script}`,
-    );
     try {
+      const run = new ToolbarScriptFunction(
+        "ctx",
+        "fetch",
+        "console",
+        `"use strict";\nreturn (async () => {\n${script}\n})();`,
+      );
       await run(toolbarScriptContext(clipboard), fetch, console);
     } catch (error) {
       console.error("[Scripting Rime Keyboard] Toolbar JS failed", error);
+      const message = error instanceof Error && error.message
+        ? `${error.name}: ${error.message}`
+        : String(error);
+      showRimeNotificationToast(
+        `JS错误：${message.replace(/\s+/g, " ").slice(0, 160)}`,
+      );
     }
   }
 
@@ -2564,6 +2572,7 @@ function KeyboardContent(props: {
   function renderRimeNotificationToast() {
     if (!rimeNotificationToast) return null;
     const cornerRadius = 8;
+    const isErrorToast = rimeNotificationToast.text.startsWith("JS错误");
     return (
       <HStack
         key={rimeNotificationToast.id}
@@ -2571,8 +2580,12 @@ function KeyboardContent(props: {
         allowsHitTesting={false}
         padding={{ horizontal: 12 }}
         frame={{
-          maxWidth: Math.min(180, metrics.width - 16),
-          height: metrics.candidateButtonHeight,
+          maxWidth: isErrorToast
+            ? Math.max(180, metrics.width - 16)
+            : Math.min(180, metrics.width - 16),
+          height: isErrorToast
+            ? metrics.candidateButtonHeight * 1.65
+            : metrics.candidateButtonHeight,
         }}
         background={(palette.nativeKeyStyle
           ? palette.usesCustomColors
@@ -2595,7 +2608,7 @@ function KeyboardContent(props: {
       >
         <Text
           font={Math.max(13, metrics.candidateFontSize - 2)}
-          lineLimit={1}
+          lineLimit={isErrorToast ? 2 : 1}
           minScaleFactor={0.75}
           foregroundStyle={palette.primary as any}
         >
