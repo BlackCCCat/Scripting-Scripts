@@ -2780,7 +2780,17 @@ function KeyboardContent(props: {
                       height: metrics.candidateBarHeight,
                     }}
                   >
-                    <HStack spacing={5} buttonStyle="plain">
+                    <HStack
+                      spacing={5}
+                      buttonStyle="plain"
+                      frame={{
+                        minWidth: candidateBarWidth,
+                        height: metrics.candidateBarHeight,
+                        alignment: "leading" as any,
+                      }}
+                      background={"rgba(0,0,0,0.001)" as any}
+                      contentShape="rect"
+                    >
                       {candidates.map((candidate, idx) => (
                         <CandidateButton
                           key={`${pageNo}-${idx}-${candidate.text}`}
