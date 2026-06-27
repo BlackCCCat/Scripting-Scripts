@@ -2511,6 +2511,7 @@ function KeyboardContent(props: {
         `"use strict";\nreturn (async () => {\n${script}\n})();`,
       );
       await run(toolbarScriptContext(clipboard), fetch, console);
+      showRimeNotificationToast("JS执行成功");
     } catch (error) {
       console.error("[Scripting Rime Keyboard] Toolbar JS failed", error);
       const message = error instanceof Error && error.message
