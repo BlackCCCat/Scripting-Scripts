@@ -1,10 +1,10 @@
 import {
   Button,
   Divider,
+  Group,
   HStack,
   Image,
   List,
-  LongPressGesture,
   Menu,
   NavigationStack,
   Path,
@@ -139,12 +139,47 @@ function compactSelectionOrders(sources: SourceItem[]): SourceItem[] {
   }))
 }
 
+function getImportedPdfSources(sources: SourceItem[]): SourceItem[] {
+  return sources.filter((source) => source.kind === "pdf")
+}
+
+function getImportedPdfFilePaths(sources: SourceItem[]): string[] {
+  const paths = new Set<string>()
+  for (const source of sources) {
+    if (source.kind !== "pdf") continue
+    if (source.originalPath) {
+      paths.add(source.originalPath)
+      continue
+    }
+    for (const page of source.pages) {
+      if (page.kind === "pdf" || page.kind === "pdf-whole") {
+        paths.add(page.pdfPath)
+      }
+    }
+  }
+  return [...paths]
+}
+
+function removeSourcesByPdfPaths(sources: SourceItem[], pdfPaths: Set<string>): SourceItem[] {
+  return compactSelectionOrders(
+    sources.filter((source) => {
+      if (source.kind !== "pdf") return true
+      if (source.originalPath && pdfPaths.has(source.originalPath)) return false
+      return !source.pages.some((page) =>
+        (page.kind === "pdf" || page.kind === "pdf-whole") && pdfPaths.has(page.pdfPath)
+      )
+    })
+  )
+}
+
 export function PDFHelperView() {
   const [sources, setSources] = useState<SourceItem[]>([])
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
   const [processing, setProcessing] = useState<boolean>(false)
 
   const selectedPages = useMemo(() => getSelectedPages(sources), [sources])
+  const importedPdfSources = useMemo(() => getImportedPdfSources(sources), [sources])
+  const importedPdfFilePaths = useMemo(() => getImportedPdfFilePaths(sources), [sources])
   const selectedImageCount = useMemo(
     () => selectedPages.filter((page) => page.kind === "image").length,
     [selectedPages]
@@ -293,17 +328,62 @@ export function PDFHelperView() {
     )
   }, [canDeleteSelected, selectedPages.length])
 
-  const deleteAll = useCallback(async () => {
-    if (isBusy || sources.length === 0) return
+  const deleteImportedPdfs = useCallback(async () => {
+    if (isBusy || importedPdfSources.length === 0) return
     const ok = await Dialog.confirm({
-      title: "删除全部",
-      message: `确定删除当前全部 ${sources.reduce((sum, source) => sum + source.pages.length, 0)} 个项目吗？`,
-      confirmLabel: "删除全部",
+      title: "删除已导入的 PDF",
+      message: `确定删除当前已导入的 ${importedPdfSources.length} 个 PDF 项吗？`,
+      confirmLabel: "删除",
       cancelLabel: "取消",
     })
     if (!ok) return
-    setSources([])
-  }, [isBusy, sources])
+    setSources((prev) => compactSelectionOrders(prev.filter((source) => source.kind !== "pdf")))
+  }, [importedPdfSources.length, isBusy])
+
+  const deleteImportedPdfFiles = useCallback(async () => {
+    if (isBusy || importedPdfFilePaths.length === 0) return
+    const ok = await Dialog.confirm({
+      title: "删除源 PDF 文件",
+      message: `确定删除当前已导入项目对应的 ${importedPdfFilePaths.length} 个源 PDF 文件吗？此操作不可恢复。`,
+      confirmLabel: "删除文件",
+      cancelLabel: "取消",
+    })
+    if (!ok) return
+
+    const removedPaths = new Set<string>()
+    const failedPaths: string[] = []
+
+    for (const pdfPath of importedPdfFilePaths) {
+      try {
+        const exists = await FileManager.exists(pdfPath)
+        if (!exists) {
+          removedPaths.add(pdfPath)
+          continue
+        }
+        await FileManager.remove(pdfPath)
+        removedPaths.add(pdfPath)
+      } catch {
+        failedPaths.push(pdfPath)
+      }
+    }
+
+    if (removedPaths.size > 0) {
+      setSources((prev) => removeSourcesByPdfPaths(prev, removedPaths))
+    }
+
+    if (failedPaths.length > 0) {
+      await Dialog.alert({
+        title: "部分删除失败",
+        message: `已删除 ${removedPaths.size} 个文件，失败 ${failedPaths.length} 个。\n${failedPaths.join("\n")}`,
+      })
+      return
+    }
+
+    await Dialog.alert({
+      title: "删除完成",
+      message: `已删除 ${removedPaths.size} 个源 PDF 文件`,
+    })
+  }, [importedPdfFilePaths, isBusy])
 
   const runConvert = useCallback(async () => {
     if (!canConvert) return
@@ -357,20 +437,32 @@ export function PDFHelperView() {
             <ZStack
               frame={{ width: 28, height: 28, alignment: "center" }}
               background={"rgba(0,0,0,0.001)"}
+              contextMenu={{
+                menuItems: (
+                  <Group>
+                    <Button
+                      title="删除已导入的 PDF"
+                      role="destructive"
+                      disabled={isBusy || importedPdfSources.length === 0}
+                      action={() => void deleteImportedPdfs()}
+                    />
+                    <Button
+                      title="删除对应源 PDF 文件"
+                      role="destructive"
+                      disabled={isBusy || importedPdfFilePaths.length === 0}
+                      action={() => void deleteImportedPdfFiles()}
+                    />
+                  </Group>
+                ),
+              }}
               onTapGesture={() => {
                 if (deleteButtonDisabled) return
                 if (canDeleteSelected) {
                   void deleteSelected()
                   return
                 }
-                void Dialog.alert({ message: "请先选择要删除的项目，或长按删除全部" })
+                void Dialog.alert({ message: "请先选择要删除的项目，或长按打开删除菜单" })
               }}
-              gesture={
-                LongPressGesture({ minDuration: 600 }).onEnded(() => {
-                  if (deleteButtonDisabled) return
-                  void deleteAll()
-                })
-              }
             >
               <Image
                 systemName="trash"
