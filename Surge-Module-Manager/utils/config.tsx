@@ -4,6 +4,7 @@ export type AppConfig = {
   categories: string[]
   linkPatternsText: string
   downloadConcurrency: number
+  iCloudMetadataSync: boolean
   remoteHost: string
   remotePort: string
   remotePassword: string
@@ -17,6 +18,7 @@ const DEFAULT_CONFIG: AppConfig = {
   categories: [],
   linkPatternsText: "#!url=",
   downloadConcurrency: 3,
+  iCloudMetadataSync: false,
   remoteHost: "http://127.0.0.1",
   remotePort: "6171",
   remotePassword: "",
@@ -52,6 +54,7 @@ export function loadConfig(): AppConfig {
     const baseBookmarkName = String(obj?.baseBookmarkName ?? "").trim()
     const linkPatternsText = String(obj?.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText)
     const downloadConcurrency = normalizeDownloadConcurrency(obj?.downloadConcurrency)
+    const iCloudMetadataSync = !!obj?.iCloudMetadataSync
     const remoteHost = String(obj?.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost
     const remotePort = String(obj?.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort
     const remotePassword = String(obj?.remotePassword ?? "")
@@ -63,6 +66,7 @@ export function loadConfig(): AppConfig {
       baseBookmarkName,
       linkPatternsText,
       downloadConcurrency,
+      iCloudMetadataSync,
       remoteHost,
       remotePort,
       remotePassword,
@@ -80,6 +84,7 @@ export function saveConfig(cfg: AppConfig): void {
     categories: normalizeCategories(cfg.categories ?? []),
     linkPatternsText: String(cfg.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText),
     downloadConcurrency: normalizeDownloadConcurrency(cfg.downloadConcurrency),
+    iCloudMetadataSync: !!cfg.iCloudMetadataSync,
     remoteHost: String(cfg.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost,
     remotePort: String(cfg.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort,
     remotePassword: String(cfg.remotePassword ?? ""),

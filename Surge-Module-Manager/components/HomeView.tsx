@@ -42,6 +42,7 @@ import {
   getModuleRemoteName,
   setRemoteModuleEnabled,
 } from "../utils/remote_control"
+import { autoExportMetadataToICloud } from "../utils/metadata_sync"
 
 export function HomeView() {
   const withButtonHaptic = (action: () => void | Promise<void>) => () => {
@@ -115,6 +116,10 @@ export function HomeView() {
       setModules([])
       setStage(String(e?.message ?? e))
     }
+  }
+
+  async function syncMetadataIfNeeded() {
+    await autoExportMetadataToICloud(loadConfig())
   }
 
   useEffect(() => {
@@ -227,6 +232,7 @@ export function HomeView() {
         }
       }
       await refreshModules()
+      await syncMetadataIfNeeded()
     } catch (e: any) {
       setStage(`添加失败：${String(e?.message ?? e)}`)
     } finally {
@@ -299,6 +305,7 @@ export function HomeView() {
         })
       }
       await refreshModules()
+      await syncMetadataIfNeeded()
       setStage("修改完成")
     } catch (e: any) {
       setStage(`修改失败：${String(e?.message ?? e)}`)
@@ -345,6 +352,7 @@ export function HomeView() {
     try {
       await removeModuleFile(target)
       await refreshModules()
+      await syncMetadataIfNeeded()
       setStage("删除完成")
     } catch (e: any) {
       setStage(`删除失败：${String(e?.message ?? e)}`)
@@ -423,6 +431,9 @@ export function HomeView() {
         })
       } else {
         setStage(`下载完成：${okCount}/${total}`)
+      }
+      if (okCount > 0) {
+        await syncMetadataIfNeeded()
       }
     } catch (e: any) {
       const msg = String(e?.message ?? e)

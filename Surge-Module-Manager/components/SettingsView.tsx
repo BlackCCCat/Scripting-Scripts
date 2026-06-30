@@ -7,6 +7,7 @@ import {
   Section,
   Text,
   TextField,
+  Toggle,
   VStack,
   HStack,
   Spacer,
@@ -22,6 +23,13 @@ import {
   type AppConfig,
 } from "../utils/config"
 import { countModulesByCategory, loadCategoriesFromModules, renameCategoryInModules } from "../utils/storage"
+import {
+  exportMetadataToICloud,
+  exportMetadataWithDocumentPicker,
+  importMetadataFromFile,
+  iCloudMetadataAvailable,
+  removeICloudMetadataFile,
+} from "../utils/metadata_sync"
 
 function PlainRowButton(props: { title: string; onPress: () => void }) {
   return (
@@ -54,6 +62,7 @@ export function SettingsView(props: {
   const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>([])
   const [bookmarkIdx, setBookmarkIdx] = useState<number>(0)
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
+  const [metadataAction, setMetadataAction] = useState<"" | "export" | "import">("")
   const concurrencyOptions = Array.from({ length: 10 }, (_, idx) => idx + 1)
 
   useEffect(() => {
@@ -221,10 +230,88 @@ function deleteCategoryAt(indices: number[]) {
   async function saveAndClose() {
     try {
       saveConfig(cfg)
+      if (cfg.iCloudMetadataSync) {
+        await exportMetadataToICloud()
+      }
       props.onDone?.(cfg)
       dismiss()
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) })
+    }
+  }
+
+  async function exportMetadataAction() {
+    if (metadataAction) return
+    setMetadataAction("export")
+    try {
+      if (cfg.iCloudMetadataSync && !iCloudMetadataAvailable()) {
+        await Dialog.alert({ message: "iCloud 不可用，请先确认已登录 iCloud 并允许 Scripting 使用 iCloud" })
+        return
+      }
+      saveConfig(cfg)
+      const result = cfg.iCloudMetadataSync
+        ? await exportMetadataToICloud()
+        : await exportMetadataWithDocumentPicker()
+      await Dialog.alert({
+        title: "导出完成",
+        message: `已导出 ${result.count} 个远程模块元数据\n${result.path}`,
+      })
+    } catch (e: any) {
+      if (String(e?.message ?? e) === "未选择导出位置") return
+      await Dialog.alert({ title: "导出失败", message: String(e?.message ?? e) })
+    } finally {
+      setMetadataAction("")
+    }
+  }
+
+  async function setICloudMetadataSync(value: boolean) {
+    HapticFeedback.heavyImpact()
+    setCfg((c) => ({ ...c, iCloudMetadataSync: value }))
+    if (value) return
+
+    try {
+      await removeICloudMetadataFile()
+    } catch (e: any) {
+      await Dialog.alert({
+        title: "清理 iCloud 元数据失败",
+        message: String(e?.message ?? e),
+      })
+    }
+  }
+
+  async function importMetadataAction() {
+    if (metadataAction) return
+    setMetadataAction("import")
+    try {
+      const picker: any = (globalThis as any).DocumentPicker
+      if (!picker?.pickFiles) {
+        await Dialog.alert({ message: "DocumentPicker.pickFiles 不可用，无法选择元数据文件" })
+        return
+      }
+      const files = await picker.pickFiles({
+        types: ["public.json", "public.text", "public.plain-text"],
+        allowsMultipleSelection: false,
+        shouldShowFileExtensions: true,
+      })
+      const filePath = Array.isArray(files) ? files[0] : undefined
+      if (!filePath) return
+
+      const result = await importMetadataFromFile(filePath, cfg)
+      setCfg(result.config)
+      props.onDone?.(result.config)
+      await refreshCounts(result.config)
+      await Dialog.alert({
+        title: "导入完成",
+        message:
+          `扫描 ${result.scanned} 个模块元数据\n` +
+          `新建 ${result.created} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个\n` +
+          `新增分类 ${result.categoriesAdded} 个\n` +
+          `${result.path}`,
+      })
+    } catch (e: any) {
+      await Dialog.alert({ title: "导入失败", message: String(e?.message ?? e) })
+    } finally {
+      setMetadataAction("")
     }
   }
 
@@ -323,6 +410,23 @@ function deleteCategoryAt(indices: number[]) {
                 </Text>
               ))}
             </Picker>
+          </Section>
+
+          <Section
+            header={<Text>iCloud 元数据同步</Text>}
+            footer={(
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                开启自动同步时，导出会写入 iCloud 默认元数据文件；关闭时，导出会让你选择保存位置，并清理 iCloud 默认元数据文件。导入时可从 Files 选择 JSON 文件。仅同步模块名称、链接、分类、相对目录和链接格式。
+              </Text>
+            )}
+          >
+            <Toggle
+              title="自动同步"
+              value={cfg.iCloudMetadataSync}
+              onChanged={(value: boolean) => void setICloudMetadataSync(value)}
+            />
+            <PlainRowButton title={metadataAction === "export" ? "导出中…" : "导出模块信息"} onPress={exportMetadataAction} />
+            <PlainRowButton title={metadataAction === "import" ? "导入中…" : "导入模块信息"} onPress={importMetadataAction} />
           </Section>
 
           <Section header={<Text>分类列表</Text>}>
