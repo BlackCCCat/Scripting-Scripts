@@ -189,6 +189,7 @@ function ClipContentEditorView(props: {
           controller={controller}
           scriptName="CAIS"
           showAccessoryView
+          searchEnabled
         />
       </VStack>
     </NavigationStack>
