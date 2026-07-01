@@ -4,9 +4,9 @@ import {
   HStack,
   Image,
   List,
+  Menu,
   Navigation,
   NavigationStack,
-  Picker,
   ProgressView,
   Section,
   Spacer,
@@ -44,6 +44,70 @@ import {
 } from "../utils/remote_control"
 import { autoExportMetadataToICloud } from "../utils/metadata_sync"
 
+function ModuleIcon(props: { module: ModuleInfo }) {
+  const [failed, setFailed] = useState(false)
+  const isRemote = !!props.module.link
+  const fallbackName = isRemote ? "icloud.and.arrow.down.fill" : "puzzlepiece.extension.fill"
+  const fallbackColor = isRemote ? "systemBlue" : "systemOrange"
+  const frame = { width: 30, height: 30 }
+  const iconShape = { type: "rect", cornerRadius: 7 } as any
+
+  const fallback = (
+    <Image
+      systemName={fallbackName}
+      font={24}
+      foregroundStyle={fallbackColor}
+      frame={frame}
+    />
+  )
+
+  if (props.module.icon && !failed) {
+    return (
+      <Image
+        imageUrl={props.module.icon}
+        placeholder={fallback}
+        onError={() => setFailed(true)}
+        resizable
+        interpolation="high"
+        clipShape={iconShape}
+        frame={frame}
+      />
+    )
+  }
+
+  return fallback
+}
+
+function FilterMenu(props: {
+  value: string
+  options: string[]
+  onSelect: (value: string) => void
+}) {
+  return (
+    <Menu
+      label={(
+        <HStack spacing={3} frame={{ width: 96, alignment: "trailing" }}>
+          <Text lineLimit={1} truncationMode="tail" foregroundStyle="accentColor">
+            {props.value}
+          </Text>
+          <Image systemName="chevron.down" font={10} foregroundStyle="accentColor" />
+        </HStack>
+      )}
+    >
+      {props.options.map((item, idx) => (
+        <Button
+          key={`${item}-${idx}`}
+          title={item}
+          action={() => {
+            HapticFeedback.heavyImpact()
+            props.onSelect(item)
+          }}
+        />
+      ))}
+    </Menu>
+  )
+}
+
 export function HomeView() {
   const withButtonHaptic = (action: () => void | Promise<void>) => () => {
     HapticFeedback.mediumImpact()
@@ -60,7 +124,6 @@ export function HomeView() {
   const [togglingModuleNames, setTogglingModuleNames] = useState<Set<string>>(new Set())
   const categories = cfg.categories ?? []
   const filterOptions = ["全部", ...categories]
-  const filterIdx = Math.max(0, filterOptions.indexOf(filterCategory))
   const baseDir = resolvedBaseDir || cfg.baseDir
   const dirOptions = useMemo(() => {
     const set = new Set<string>()
@@ -559,45 +622,25 @@ export function HomeView() {
 
         <Section
           header={(
-            <HStack>
-              <Text>
+            <HStack frame={{ maxWidth: "infinity" }}>
+              <Text lineLimit={1} truncationMode="tail" layoutPriority={1}>
                 {filteredModules.length > 0
                   ? `模块列表(${filteredModules.length})`
                   : "模块列表"}
               </Text>
               <Spacer />
               {dirOptions.length > 1 ? (
-                <Picker
-                  title="子文件夹"
-                  pickerStyle="menu"
-                  value={Math.max(0, dirOptions.indexOf(filterDir))}
-                  onChanged={(idx: number) => {
-                    HapticFeedback.heavyImpact()
-                    setFilterDir(dirOptions[idx] ?? "全部")
-                  }}
-                >
-                  {dirOptions.map((d, idx) => (
-                    <Text key={`${d}-${idx}`} tag={idx}>
-                      {d}
-                    </Text>
-                  ))}
-                </Picker>
+                <FilterMenu
+                  value={filterDir}
+                  options={dirOptions}
+                  onSelect={(value) => setFilterDir(value)}
+                />
               ) : null}
-              <Picker
-                title="筛选分类"
-                pickerStyle="menu"
-                value={filterIdx}
-                onChanged={(idx: number) => {
-                  HapticFeedback.heavyImpact()
-                  setFilterCategory(filterOptions[idx] ?? "全部")
-                }}
-              >
-                {filterOptions.map((c, idx) => (
-                  <Text key={`${c}-${idx}`} tag={idx}>
-                    {c}
-                  </Text>
-                ))}
-              </Picker>
+              <FilterMenu
+                value={filterCategory}
+                options={filterOptions}
+                onSelect={(value) => setFilterCategory(value)}
+              />
             </HStack>
           )}
         >
@@ -637,7 +680,8 @@ export function HomeView() {
                       ],
                     }}
                   >
-                    <HStack>
+                    <HStack spacing={10}>
+                      <ModuleIcon module={m} />
                       <VStack alignment="leading" spacing={3}>
                         <Text font="headline">{m.name}</Text>
                         {m.category ? (

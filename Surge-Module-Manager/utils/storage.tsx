@@ -6,6 +6,7 @@ export type ModuleInfo = {
   link: string
   surgeName?: string
   category?: string
+  icon?: string
   filePath?: string
   saveDir?: string
   isLocal?: boolean
@@ -166,6 +167,16 @@ function parseTag(content: string, key: string): string | undefined {
   return m?.[1]?.trim()
 }
 
+function parseIcon(content: string): string | undefined {
+  const lines = String(content ?? "").split(/\r?\n/g)
+  for (const raw of lines) {
+    const m = raw.match(/^\s*#\s*!?\s*icon\s*(?:=|\s)\s*(.+)$/i)
+    const value = m?.[1]?.trim()
+    if (value) return value
+  }
+  return undefined
+}
+
 function getLinkPrefixes(): string[] {
   const cfg = loadConfig()
   const raw = String(cfg.linkPatternsText ?? "").split(/\r?\n/g)
@@ -246,7 +257,8 @@ export async function loadModules(): Promise<ModuleInfo[]> {
     if (!link && !isLocal) continue
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
     const surgeName = parseTag(text, "name") ?? undefined
-    modules.push({ name, link, surgeName, category, filePath: path, isLocal })
+    const icon = parseTag(text, "icon") ?? parseIcon(text)
+    modules.push({ name, link, surgeName, category, icon, filePath: path, isLocal })
   }
   return modules
 }
@@ -354,7 +366,7 @@ function upsertLink(content: string, prefixes: string[], value?: string): string
 
 export async function updateModuleMetadata(
   target: ModuleInfo | string,
-  info: { link?: string; category?: string; local?: boolean }
+  info: { link?: string; category?: string; icon?: string; local?: boolean }
 ) {
   const fm = fmOrThrow()
   const path = resolveModulePath(target)
@@ -363,6 +375,9 @@ export async function updateModuleMetadata(
   let content = String(raw ?? "")
   content = upsertLink(content, getLinkPrefixes(), info.link)
   content = upsertTag(content, "category", info.category)
+  if (info.icon !== undefined) {
+    content = upsertTag(content, "icon", info.icon)
+  }
   if (info.local !== undefined) {
     content = upsertTag(content, "local", info.local ? "true" : "")
   }
