@@ -18,6 +18,7 @@ import {
   useEffect,
   useRef,
   useState,
+  ScrollView,
 } from "scripting"
 import { PhotoCardStack } from "./components/PhotoCardStack"
 import {
@@ -88,6 +89,20 @@ function App() {
   const [isEditingPhoto, setIsEditingPhoto] = useState(false)
   const [message, setMessage] = useState("")
   const [showToast, setShowToast] = useState(false)
+  const [showManagementSheet, setShowManagementSheet] = useState(false)
+  const [hiddenAlbumIds, setHiddenAlbumIds] = useState<string[]>(() => {
+    return Storage.get<string[]>("hiddenAlbumIds") ?? []
+  })
+
+  function toggleAlbumVisibility(albumId: string) {
+    setHiddenAlbumIds(prev => {
+      const next = prev.includes(albumId)
+        ? prev.filter(id => id !== albumId)
+        : [...prev, albumId]
+      Storage.set("hiddenAlbumIds", next)
+      return next
+    })
+  }
   const loadingImageIdsRef = useRef<Set<string>>(new Set())
 
   const currentItem = items[currentIndex]
@@ -528,6 +543,94 @@ function App() {
     }
   }
 
+  async function handleCreateAlbum() {
+    const title = await Dialog.prompt({
+      title: "新建相簿",
+      placeholder: "请输入新相簿名称",
+      confirmLabel: "创建",
+      cancelLabel: "取消",
+    })
+    if (!title || !title.trim()) return
+
+    try {
+      const newAlbum = await Photos.createAlbum(title.trim())
+      if (newAlbum) {
+        toast(`相簿「${title}」创建成功。`)
+        await loadAlbums()
+      } else {
+        toast("相簿创建失败。")
+      }
+    } catch (error) {
+      console.error(error)
+      toast("相簿创建失败，请稍后重试。")
+    }
+  }
+
+  async function handleRenameAlbum(album: AlbumOption) {
+    const newTitle = await Dialog.prompt({
+      title: "重命名相簿",
+      placeholder: "请输入新的相簿名称",
+      defaultValue: album.title,
+      confirmLabel: "重命名",
+      cancelLabel: "取消",
+    })
+
+    if (!newTitle || !newTitle.trim() || newTitle.trim() === album.title) return
+
+    setIsEditingPhoto(true)
+    try {
+      const newCollection = await Photos.createAlbum(newTitle.trim())
+      if (!newCollection) {
+        toast("创建新相簿失败。")
+        setIsEditingPhoto(false)
+        return
+      }
+
+      const assets = await album.collection.fetchAssets()
+      if (assets.length > 0) {
+        await newCollection.addAssets(assets)
+      }
+
+      const ok = await Photos.deleteAlbums([album.collection])
+      if (ok) {
+        toast(`相簿已重命名为「${newTitle}」。`)
+        await loadAlbums()
+      } else {
+        await Photos.deleteAlbums([newCollection])
+        toast("已取消重命名。")
+      }
+    } catch (error) {
+      console.error(error)
+      toast("重命名失败，请稍后重试。")
+    } finally {
+      setIsEditingPhoto(false)
+    }
+  }
+
+  async function handleDeleteAlbum(album: AlbumOption) {
+    const confirmed = await Dialog.confirm({
+      title: "删除相簿",
+      message: `确定要删除相簿「${album.title}」吗？该相簿内的图片不会被删除。`,
+      cancelLabel: "取消",
+      confirmLabel: "删除",
+    })
+
+    if (!confirmed) return
+
+    try {
+      const ok = await Photos.deleteAlbums([album.collection])
+      if (ok) {
+        toast(`相簿「${album.title}」已删除。`)
+        await loadAlbums()
+      } else {
+        toast("删除相簿失败。")
+      }
+    } catch (error) {
+      console.error(error)
+      toast("删除相簿失败，请稍后重试。")
+    }
+  }
+
   function handleDragChanged(value: any) {
     if (isThrowing || isDeleting || isEditingPhoto || !currentItem) return
 
@@ -637,23 +740,139 @@ function App() {
   }
 
   function renderAlbumMenuItems() {
+    const visibleAlbums = targetAlbums.filter(album => !hiddenAlbumIds.includes(album.id))
+
     return (
       <Group>
-        {targetAlbums.length === 0 ? (
-          <Button
-            title="没有可写入的用户相簿"
-            systemImage="exclamationmark.circle"
-            action={() => toast("没有可写入的用户相簿。")}
-          />
-        ) : targetAlbums.map(album => (
+        {visibleAlbums.map(album => (
           <Button
             key={album.id}
             title={album.title}
-            systemImage="rectangle.stack.badge.plus"
+            systemImage="rectangle.stack"
             action={() => void moveCurrentToAlbum(album)}
           />
         ))}
+
+        {visibleAlbums.length === 0 ? (
+          <Button
+            title="暂无快捷相簿"
+            systemImage="folder.badge.minus"
+            action={() => toast("请在下方「管理相簿」中启用相簿。")}
+          />
+        ) : null}
+
+        <Button
+          title="管理相簿..."
+          systemImage="gearshape"
+          action={() => setShowManagementSheet(true)}
+        />
       </Group>
+    )
+  }
+
+  function renderAlbumManagementSheetContent() {
+    return (
+      <NavigationStack background="systemGroupedBackground">
+        <VStack
+          spacing={16}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding={16}
+          background="systemGroupedBackground"
+          navigationTitle="管理相簿"
+          navigationBarTitleDisplayMode="inline"
+          toolbar={
+            <Toolbar>
+              <ToolbarItem placement="topBarLeading">
+                <Button
+                  title="新建"
+                  systemImage="folder.badge.plus"
+                  action={() => void handleCreateAlbum()}
+                />
+              </ToolbarItem>
+              <ToolbarItem placement="topBarTrailing">
+                <Button
+                  title="完成"
+                  action={() => setShowManagementSheet(false)}
+                />
+              </ToolbarItem>
+            </Toolbar>
+          }
+        >
+          {targetAlbums.length === 0 ? (
+            <VStack spacing={12} padding={40} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" }}>
+              <Image systemName="folder" font={32} foregroundStyle="tertiaryLabel" />
+              <Text font={14} foregroundStyle="secondaryLabel">
+                暂无相簿
+              </Text>
+            </VStack>
+          ) : (
+            <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+              <VStack spacing={12} frame={{ maxWidth: "infinity" }}>
+                {targetAlbums.map(album => {
+                  const isHidden = hiddenAlbumIds.includes(album.id)
+                  return (
+                    <HStack
+                      key={album.id}
+                      spacing={12}
+                      padding={12}
+                      background="secondarySystemGroupedBackground"
+                      clipShape={{ type: "rect", cornerRadius: 14 }}
+                      frame={{ maxWidth: "infinity" }}
+                    >
+                      <Image
+                        systemName={isHidden ? "eye.slash" : "rectangle.stack"}
+                        font={16}
+                        foregroundStyle={isHidden ? "secondaryLabel" : "systemBlue"}
+                      />
+                      
+                      <Text font={16} fontWeight="semibold" foregroundStyle={isHidden ? "secondaryLabel" : "label"} lineLimit={1}>
+                        {album.title}
+                      </Text>
+                      
+                      <Spacer />
+                      
+                      <HStack spacing={16}>
+                        <Button
+                          action={() => toggleAlbumVisibility(album.id)}
+                          buttonStyle="plain"
+                        >
+                          <Image
+                            systemName={isHidden ? "eye.slash.fill" : "eye.fill"}
+                            font={18}
+                            foregroundStyle={isHidden ? "secondaryLabel" : "systemBlue"}
+                          />
+                        </Button>
+                        
+                        <Button
+                          action={() => void handleRenameAlbum(album)}
+                          buttonStyle="plain"
+                        >
+                          <Image
+                            systemName="pencil"
+                            font={18}
+                            foregroundStyle="systemOrange"
+                          />
+                        </Button>
+                        
+                        <Button
+                          action={() => void handleDeleteAlbum(album)}
+                          buttonStyle="plain"
+                        >
+                          <Image
+                            systemName="trash"
+                            font={18}
+                            foregroundStyle="systemRed"
+                          />
+                        </Button>
+                      </HStack>
+                    </HStack>
+                  )
+                })}
+              </VStack>
+            </ScrollView>
+          )}
+        </VStack>
+      </NavigationStack>
     )
   }
 
@@ -921,6 +1140,11 @@ function App() {
         ignoresSafeArea={{ edges: "bottom" }}
         navigationTitle="整理照片"
         navigationBarTitleDisplayMode="inline"
+        sheet={{
+          isPresented: showManagementSheet,
+          onChanged: setShowManagementSheet,
+          content: renderAlbumManagementSheetContent()
+        }}
         toolbar={
           <Toolbar>
             <ToolbarItem placement="topBarLeading">
