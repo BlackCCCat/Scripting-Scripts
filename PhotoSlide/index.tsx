@@ -82,6 +82,7 @@ function App() {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [undoStack, setUndoStack] = useState<UndoAction[]>([])
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([])
+  const [deletedPhotoIds, setDeletedPhotoIds] = useState<string[]>([])
   const [dragOffset, setDragOffset] = useState<PointOffset>(initialOffset)
   const [cardScale, setCardScale] = useState(1)
   const [cardOpacity, setCardOpacity] = useState(1)
@@ -113,11 +114,12 @@ function App() {
   }
   const loadingImageIdsRef = useRef<Set<string>>(new Set())
   const allSourceAssetsRef = useRef<PHAsset[]>([])
+  const unavailablePhotoIds = [...deletedPhotoIds, ...pendingDeleteIds]
 
   function findPreviousActiveIndex(
     fromIndex: number,
     currentSkipped = skippedPhotoIds,
-    currentDeleted = pendingDeleteIds
+    currentDeleted = unavailablePhotoIds
   ): number {
     for (let i = fromIndex - 1; i >= 0; i--) {
       const id = items[i].id
@@ -140,7 +142,7 @@ function App() {
   function findNextActiveIndex(
     fromIndex: number,
     currentSkipped = skippedPhotoIds,
-    currentDeleted = pendingDeleteIds
+    currentDeleted = unavailablePhotoIds
   ): number {
     for (let i = fromIndex + 1; i < items.length; i++) {
       const id = items[i].id
@@ -174,14 +176,17 @@ function App() {
 
   const skippedCount = allSourceAssetsRef.current.filter(asset =>
     skippedPhotoIds.includes(asset.localIdentifier) &&
-    !pendingDeleteIds.includes(asset.localIdentifier)
+    !unavailablePhotoIds.includes(asset.localIdentifier)
   ).length
 
   const remainingCount = showSkippedOnly
-    ? Math.max(items.length - currentIndex, 0)
+    ? allSourceAssetsRef.current.filter(asset =>
+        skippedPhotoIds.includes(asset.localIdentifier) &&
+        !unavailablePhotoIds.includes(asset.localIdentifier)
+      ).length
     : allSourceAssetsRef.current.filter(asset =>
         !skippedPhotoIds.includes(asset.localIdentifier) &&
-        !pendingDeleteIds.includes(asset.localIdentifier)
+        !unavailablePhotoIds.includes(asset.localIdentifier)
       ).length
   const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto
   const isEmpty = !isLoading && items.length === 0
@@ -192,7 +197,7 @@ function App() {
 
     for (let i = 0; i < items.length; i++) {
       const id = items[i].id
-      const isDeleted = pendingDeleteIds.includes(id)
+      const isDeleted = unavailablePhotoIds.includes(id)
       if (isDeleted) continue
 
       const isSkipped = skippedPhotoIds.includes(id)
@@ -206,7 +211,7 @@ function App() {
       }
     }
 
-    const isCurrentActive = currentItem && !pendingDeleteIds.includes(currentItem.id) &&
+    const isCurrentActive = currentItem && !unavailablePhotoIds.includes(currentItem.id) &&
       (showSkippedOnly ? skippedPhotoIds.includes(currentItem.id) : !skippedPhotoIds.includes(currentItem.id))
     
     const displayIndex = isCurrentActive ? currentActiveDisplayIndex + 1 : currentActiveDisplayIndex
@@ -363,7 +368,7 @@ function App() {
       allSourceAssetsRef.current = assets
 
       const filteredAssets = assets.filter(asset => {
-        const isPendingDelete = pendingDeleteIds.includes(asset.localIdentifier)
+        const isPendingDelete = unavailablePhotoIds.includes(asset.localIdentifier)
         const isSkipped = skippedPhotoIds.includes(asset.localIdentifier)
 
         if (isPendingDelete) return false
@@ -382,6 +387,7 @@ function App() {
       setCurrentIndex(0)
       setUndoStack([])
       setPendingDeleteIds([])
+      setDeletedPhotoIds([])
       resetCardState()
       setIsLoading(false)
 
@@ -413,6 +419,7 @@ function App() {
   function selectSource(source: PhotoSource) {
     setSelectedSource(source)
     setPendingDeleteIds([])
+    setDeletedPhotoIds([])
     setUndoStack([])
     resetCardState()
   }
@@ -470,7 +477,10 @@ function App() {
     }])
 
     resetCardState()
-    setCurrentIndex(findNextActiveIndex(currentIndex, skippedPhotoIds, updatedDeleted))
+    setCurrentIndex(findNextActiveIndex(currentIndex, skippedPhotoIds, [
+      ...deletedPhotoIds,
+      ...updatedDeleted,
+    ]))
     setIsThrowing(false)
   }
 
@@ -632,6 +642,7 @@ function App() {
       const assets = await Photos.fetchAssets(idsToDelete)
       if (assets.length === 0) {
         setPendingDeleteIds([])
+        setDeletedPhotoIds(ids => [...new Set([...ids, ...idsToDelete])])
         setUndoStack([])
         toast("待删除照片已不存在。")
         setIsDeleting(false)
@@ -646,6 +657,10 @@ function App() {
       }
 
       const deletedSet = new Set(idsToDelete)
+      allSourceAssetsRef.current = allSourceAssetsRef.current.filter(
+        asset => !deletedSet.has(asset.localIdentifier)
+      )
+      setDeletedPhotoIds(ids => [...new Set([...ids, ...idsToDelete])])
 
       setSkippedPhotoIds(prev => {
         const next = prev.filter(id => !deletedSet.has(id))
@@ -653,11 +668,6 @@ function App() {
         return next
       })
 
-      setItems(list => {
-        const filtered = list.filter(item => !deletedSet.has(item.id))
-        setCurrentIndex(index => Math.min(index, Math.max(filtered.length - 1, 0)))
-        return filtered
-      })
       setPendingDeleteIds([])
       setUndoStack([])
       toast(`已删除 ${idsToDelete.length} 张照片。`)
