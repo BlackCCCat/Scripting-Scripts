@@ -27,6 +27,7 @@ import {
   cardHeight,
   cardWidth,
   screenWidth,
+  screenHeight,
   skipTargetOffset,
 } from "./constants"
 import type { AlbumOption, PhotoItem, PhotoSource, PointOffset } from "./types"
@@ -90,6 +91,10 @@ function App() {
   const [message, setMessage] = useState("")
   const [showToast, setShowToast] = useState(false)
   const [showManagementSheet, setShowManagementSheet] = useState(false)
+  const [showSkippedOnly, setShowSkippedOnly] = useState(false)
+  const [skippedPhotoIds, setSkippedPhotoIds] = useState<string[]>(() => {
+    return Storage.get<string[]>("skippedPhotoIds") ?? []
+  })
   const [hiddenAlbumIds, setHiddenAlbumIds] = useState<string[]>(() => {
     return Storage.get<string[]>("hiddenAlbumIds") ?? []
   })
@@ -104,6 +109,7 @@ function App() {
     })
   }
   const loadingImageIdsRef = useRef<Set<string>>(new Set())
+  const allSourceAssetsRef = useRef<PHAsset[]>([])
 
   const currentItem = items[currentIndex]
   const nextItem = items[currentIndex + 1]
@@ -116,7 +122,18 @@ function App() {
       ? selectedAlbum?.title ?? "相簿"
       : "全部照片"
   const targetAlbums = albums.filter(album => album.collection.type === "album")
-  const remainingCount = Math.max(items.length - currentIndex, 0)
+
+  const skippedCount = allSourceAssetsRef.current.filter(asset =>
+    skippedPhotoIds.includes(asset.localIdentifier) &&
+    !pendingDeleteIds.includes(asset.localIdentifier)
+  ).length
+
+  const remainingCount = showSkippedOnly
+    ? Math.max(items.length - currentIndex, 0)
+    : allSourceAssetsRef.current.filter(asset =>
+        !skippedPhotoIds.includes(asset.localIdentifier) &&
+        !pendingDeleteIds.includes(asset.localIdentifier)
+      ).length
   const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto
   const isEmpty = !isLoading && items.length === 0
   const isFinished = !isLoading && items.length > 0 && currentIndex >= items.length
@@ -183,6 +200,8 @@ function App() {
     const validIndexes = indexes.filter(index => index >= 0 && index < sourceItems.length)
     if (validIndexes.length === 0) return
 
+    const imageScale = Math.min(Device.screen.scale, 2)
+
     for (const index of validIndexes) {
       const item = sourceItems[index]
       if (!item || item.image || loadingImageIdsRef.current.has(item.id)) continue
@@ -191,10 +210,10 @@ function App() {
       let image: UIImage | null = null
       try {
         image = await item.asset.requestImage({
-          targetWidth: Math.round(cardWidth * Device.screen.scale),
-          targetHeight: Math.round(cardHeight * Device.screen.scale),
+          targetWidth: Math.round(cardWidth * imageScale),
+          targetHeight: Math.round(cardHeight * imageScale),
           contentMode: "aspectFill",
-          deliveryMode: "opportunistic",
+          deliveryMode: "highQualityFormat",
           allowNetworkAccess: true,
         })
       } catch (error) {
@@ -260,7 +279,22 @@ function App() {
       }
 
       const assets = await fetchAssetsForSource(source)
-      const photoItems = buildPhotoItems(assets)
+      allSourceAssetsRef.current = assets
+
+      const filteredAssets = assets.filter(asset => {
+        const isPendingDelete = pendingDeleteIds.includes(asset.localIdentifier)
+        const isSkipped = skippedPhotoIds.includes(asset.localIdentifier)
+
+        if (isPendingDelete) return false
+
+        if (showSkippedOnly) {
+          return isSkipped
+        } else {
+          return !isSkipped
+        }
+      })
+
+      const photoItems = buildPhotoItems(filteredAssets)
 
       loadingImageIdsRef.current.clear()
       setItems(photoItems)
@@ -284,7 +318,7 @@ function App() {
 
   useEffect(() => {
     loadPhotos(selectedSource)
-  }, [sourceKey(selectedSource), dateFilterKey])
+  }, [sourceKey(selectedSource), dateFilterKey, showSkippedOnly])
 
   useEffect(() => {
     loadImagesForIndexes(items, [currentIndex, currentIndex + 1, currentIndex + 2])
@@ -356,12 +390,66 @@ function App() {
     setIsThrowing(false)
   }
 
-  async function skipCurrentPhoto(dir: "left" | "right") {
+  async function skipCurrentPhoto(dir: "down") {
     if (!currentItem || isThrowing || isDeleting || isEditingPhoto) return
 
     setIsThrowing(true)
 
-    const targetX = dir === "left" ? -screenWidth * 1.1 : screenWidth * 1.1
+    const targetY = screenHeight * 1.1
+
+    await withAnimation(
+      Animation.easeOut(0.26),
+      () => {
+        setDragOffset({ x: 0, y: targetY })
+        setCardScale(0.92)
+        setCardOpacity(0)
+      }
+    )
+
+    setSkippedPhotoIds(prev => {
+      const next = prev.includes(currentItem.id) ? prev : [...prev, currentItem.id]
+      Storage.set("skippedPhotoIds", next)
+      return next
+    })
+
+    resetCardState()
+    setCurrentIndex(index => index + 1)
+    setIsThrowing(false)
+  }
+
+  async function unskipCurrentPhoto(dir: "down") {
+    if (!currentItem || isThrowing || isDeleting || isEditingPhoto) return
+
+    setIsThrowing(true)
+
+    const targetY = screenHeight * 1.1
+
+    await withAnimation(
+      Animation.easeOut(0.26),
+      () => {
+        setDragOffset({ x: 0, y: targetY })
+        setCardScale(0.92)
+        setCardOpacity(0)
+      }
+    )
+
+    setSkippedPhotoIds(prev => {
+      const next = prev.filter(id => id !== currentItem.id)
+      Storage.set("skippedPhotoIds", next)
+      return next
+    })
+
+    resetCardState()
+    setCurrentIndex(index => index + 1)
+    setIsThrowing(false)
+  }
+
+  async function browseNextPhoto(dir: "left") {
+    if (!currentItem || isThrowing || isDeleting || isEditingPhoto) return
+
+    setIsThrowing(true)
+
+    const targetX = -screenWidth * 1.1
 
     await withAnimation(
       Animation.easeOut(0.26),
@@ -386,6 +474,11 @@ function App() {
     if (prevItem) {
       setPendingDeleteIds(ids => ids.filter(id => id !== prevItem.id))
       setUndoStack(stack => stack.filter(item => item.id !== prevItem.id))
+      setSkippedPhotoIds(prev => {
+        const next = prev.filter(id => id !== prevItem.id)
+        Storage.set("skippedPhotoIds", next)
+        return next
+      })
     }
 
     setIsThrowing(true)
@@ -461,6 +554,12 @@ function App() {
 
       const deletedSet = new Set(idsToDelete)
 
+      setSkippedPhotoIds(prev => {
+        const next = prev.filter(id => !deletedSet.has(id))
+        Storage.set("skippedPhotoIds", next)
+        return next
+      })
+
       setItems(list => {
         const filtered = list.filter(item => !deletedSet.has(item.id))
         setCurrentIndex(index => Math.min(index, Math.max(filtered.length - 1, 0)))
@@ -532,6 +631,12 @@ function App() {
       } else {
         setCurrentIndex(index => index + 1)
       }
+
+      setSkippedPhotoIds(prev => {
+        const next = prev.includes(currentItem.id) ? prev : [...prev, currentItem.id]
+        Storage.set("skippedPhotoIds", next)
+        return next
+      })
 
       resetCardState()
       toast(`已移动到「${targetAlbum.title}」。`)
@@ -660,7 +765,7 @@ function App() {
 
       if (shouldHorizontal) {
         if (xDiff < 0) {
-          skipCurrentPhoto("left")
+          void browseNextPhoto("left")
         } else {
           void goBackToPreviousPhoto()
         }
@@ -668,12 +773,20 @@ function App() {
         resetDrag()
       }
     } else {
-      const shouldDelete =
+      const shouldVertical =
         Math.abs(yDiff) > SWIPE_THRESHOLD ||
         Math.abs(predY) > SWIPE_THRESHOLD * 1.35
 
-      if (shouldDelete) {
-        throwCurrentToTrash()
+      if (shouldVertical) {
+        if (yDiff < 0) {
+          throwCurrentToTrash()
+        } else {
+          if (showSkippedOnly) {
+            void unskipCurrentPhoto("down")
+          } else {
+            void skipCurrentPhoto("down")
+          }
+        }
       } else {
         resetDrag()
       }
@@ -732,6 +845,25 @@ function App() {
   function renderToolbarActions() {
     return (
       <HStack spacing={8}>
+        <Button
+          action={() => setShowSkippedOnly(prev => !prev)}
+          disabled={isLoading}
+          glassEffect
+        >
+          <HStack spacing={5}>
+            <Image
+              systemName={showSkippedOnly ? "arrow.right.circle.fill" : "arrow.right.circle"}
+              renderingMode="template"
+              foregroundStyle={showSkippedOnly ? "systemOrange" : "systemBlue"}
+            />
+            {skippedCount > 0 ? (
+              <Text font={14} fontWeight="semibold" foregroundStyle={showSkippedOnly ? "systemOrange" : "label"}>
+                {skippedCount}
+              </Text>
+            ) : null}
+          </HStack>
+        </Button>
+
         <Button action={() => deletePendingPhotos()} disabled={isDeleting} glassEffect>
           {renderTrashLabel()}
         </Button>

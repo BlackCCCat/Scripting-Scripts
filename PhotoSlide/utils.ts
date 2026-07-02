@@ -62,18 +62,29 @@ export function interactiveMotion(translation: PointOffset): CardMotion {
       opacity: Math.max(0.7, 1 - progress * 0.3),
     }
   } else {
-    // Vertical deleting (up/down)
     const progress = Math.min(1, absY / 240)
-    // Pull towards the trash target slightly to give visual hint
-    const targetX = trashTargetOffset.x
-    const targetY = trashTargetOffset.y
-    return {
-      offset: {
-        x: x * 0.08 + targetX * progress * 0.3,
-        y: y + (targetY - y) * progress * 0.2,
-      },
-      scale: Math.max(0.7, 1 - progress * 0.3),
-      opacity: Math.max(0.6, 1 - progress * 0.4),
+    if (y < 0) {
+      // Vertical deleting (up) - pull towards the trash target (top-right)
+      const targetX = trashTargetOffset.x
+      const targetY = trashTargetOffset.y
+      return {
+        offset: {
+          x: x * 0.08 + targetX * progress * 0.3,
+          y: y + (targetY - y) * progress * 0.2,
+        },
+        scale: Math.max(0.7, 1 - progress * 0.3),
+        opacity: Math.max(0.6, 1 - progress * 0.4),
+      }
+    } else {
+      // Vertical skipping (down) - follow the finger straight down
+      return {
+        offset: {
+          x: x * 0.08,
+          y: y,
+        },
+        scale: Math.max(0.92, 1 - progress * 0.08),
+        opacity: Math.max(0.7, 1 - progress * 0.3),
+      }
     }
   }
 }
