@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
   ScrollView,
+  Markdown,
 } from "scripting"
 import { PhotoCardStack } from "./components/PhotoCardStack"
 import {
@@ -91,6 +92,7 @@ function App() {
   const [message, setMessage] = useState("")
   const [showToast, setShowToast] = useState(false)
   const [showManagementSheet, setShowManagementSheet] = useState(false)
+  const [showInstructions, setShowInstructions] = useState(false)
   const [showSkippedOnly, setShowSkippedOnly] = useState(false)
   const [skippedPhotoIds, setSkippedPhotoIds] = useState<string[]>(() => {
     return Storage.get<string[]>("skippedPhotoIds") ?? []
@@ -111,8 +113,54 @@ function App() {
   const loadingImageIdsRef = useRef<Set<string>>(new Set())
   const allSourceAssetsRef = useRef<PHAsset[]>([])
 
+  function findPreviousActiveIndex(
+    fromIndex: number,
+    currentSkipped = skippedPhotoIds,
+    currentDeleted = pendingDeleteIds
+  ): number {
+    for (let i = fromIndex - 1; i >= 0; i--) {
+      const id = items[i].id
+      const isDeleted = currentDeleted.includes(id)
+      if (isDeleted) continue
+
+      if (showSkippedOnly) {
+        if (currentSkipped.includes(id)) {
+          return i
+        }
+      } else {
+        if (!currentSkipped.includes(id)) {
+          return i
+        }
+      }
+    }
+    return -1
+  }
+
+  function findNextActiveIndex(
+    fromIndex: number,
+    currentSkipped = skippedPhotoIds,
+    currentDeleted = pendingDeleteIds
+  ): number {
+    for (let i = fromIndex + 1; i < items.length; i++) {
+      const id = items[i].id
+      const isDeleted = currentDeleted.includes(id)
+      if (isDeleted) continue
+
+      if (showSkippedOnly) {
+        if (currentSkipped.includes(id)) {
+          return i
+        }
+      } else {
+        if (!currentSkipped.includes(id)) {
+          return i
+        }
+      }
+    }
+    return items.length
+  }
+
   const currentItem = items[currentIndex]
-  const nextItem = items[currentIndex + 1]
+  const nextItem = items[findNextActiveIndex(currentIndex)]
   const selectedAlbum = selectedSource.kind === "album"
     ? albums.find(album => album.id === selectedSource.albumId)
     : undefined
@@ -137,11 +185,43 @@ function App() {
   const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto
   const isEmpty = !isLoading && items.length === 0
   const isFinished = !isLoading && items.length > 0 && currentIndex >= items.length
+  const getProgressStats = () => {
+    let currentActiveDisplayIndex = 0
+    let totalActiveCount = 0
+
+    for (let i = 0; i < items.length; i++) {
+      const id = items[i].id
+      const isDeleted = pendingDeleteIds.includes(id)
+      if (isDeleted) continue
+
+      const isSkipped = skippedPhotoIds.includes(id)
+      const isActive = showSkippedOnly ? isSkipped : !isSkipped
+
+      if (isActive) {
+        totalActiveCount++
+        if (i < currentIndex) {
+          currentActiveDisplayIndex++
+        }
+      }
+    }
+
+    const isCurrentActive = currentItem && !pendingDeleteIds.includes(currentItem.id) &&
+      (showSkippedOnly ? skippedPhotoIds.includes(currentItem.id) : !skippedPhotoIds.includes(currentItem.id))
+    
+    const displayIndex = isCurrentActive ? currentActiveDisplayIndex + 1 : currentActiveDisplayIndex
+
+    return {
+      displayIndex,
+      total: totalActiveCount
+    }
+  }
+
+  const activeStats = getProgressStats()
   const progressText = isLoading
     ? "正在读取照片…"
     : isFinished
       ? "本组照片已浏览完"
-      : `${Math.min(currentIndex + 1, items.length)} / ${items.length}`
+      : `${activeStats.displayIndex} / ${activeStats.total}`
   const dateFilterKey = dateFilterEnabled
     ? `${startOfDay(dateFilterStart)}-${endOfDay(dateFilterEnd)}`
     : "all-dates"
@@ -360,6 +440,8 @@ function App() {
     setShowDateFilter(false)
   }
 
+
+
   async function throwCurrentToTrash() {
     if (!currentItem || isThrowing || isDeleting || isEditingPhoto) return
 
@@ -375,10 +457,11 @@ function App() {
       }
     )
 
-    setPendingDeleteIds(ids => {
-      if (ids.includes(currentItem.id)) return ids
-      return [...ids, currentItem.id]
-    })
+    const updatedDeleted = pendingDeleteIds.includes(currentItem.id)
+      ? pendingDeleteIds
+      : [...pendingDeleteIds, currentItem.id]
+    setPendingDeleteIds(updatedDeleted)
+
     setUndoStack(stack => [...stack, {
       kind: "queueDelete",
       id: currentItem.id,
@@ -386,7 +469,7 @@ function App() {
     }])
 
     resetCardState()
-    setCurrentIndex(index => index + 1)
+    setCurrentIndex(findNextActiveIndex(currentIndex, skippedPhotoIds, updatedDeleted))
     setIsThrowing(false)
   }
 
@@ -412,8 +495,17 @@ function App() {
       return next
     })
 
+    setUndoStack(stack => [...stack, {
+      kind: "skip",
+      id: currentItem.id,
+      index: currentIndex,
+    }])
+
     resetCardState()
-    setCurrentIndex(index => index + 1)
+    const nextSkipped = skippedPhotoIds.includes(currentItem.id)
+      ? skippedPhotoIds
+      : [...skippedPhotoIds, currentItem.id]
+    setCurrentIndex(findNextActiveIndex(currentIndex, nextSkipped))
     setIsThrowing(false)
   }
 
@@ -440,7 +532,8 @@ function App() {
     })
 
     resetCardState()
-    setCurrentIndex(index => index + 1)
+    const nextSkipped = skippedPhotoIds.filter(id => id !== currentItem.id)
+    setCurrentIndex(findNextActiveIndex(currentIndex, nextSkipped))
     setIsThrowing(false)
   }
 
@@ -461,24 +554,17 @@ function App() {
     )
 
     resetCardState()
-    setCurrentIndex(index => index + 1)
+    setCurrentIndex(findNextActiveIndex(currentIndex))
     setIsThrowing(false)
   }
 
   async function goBackToPreviousPhoto() {
-    if (currentIndex === 0 || isBusy) return
+    if (isBusy) return
 
-    const prevIndex = currentIndex - 1
-    const prevItem = items[prevIndex]
-
-    if (prevItem) {
-      setPendingDeleteIds(ids => ids.filter(id => id !== prevItem.id))
-      setUndoStack(stack => stack.filter(item => item.id !== prevItem.id))
-      setSkippedPhotoIds(prev => {
-        const next = prev.filter(id => id !== prevItem.id)
-        Storage.set("skippedPhotoIds", next)
-        return next
-      })
+    const prevIndex = findPreviousActiveIndex(currentIndex)
+    if (prevIndex < 0) {
+      toast("前面没有更多照片了。")
+      return
     }
 
     setIsThrowing(true)
@@ -517,6 +603,12 @@ function App() {
 
     if (undoAction.kind === "queueDelete") {
       setPendingDeleteIds(ids => ids.filter(id => id !== undoAction.id))
+    } else if (undoAction.kind === "skip") {
+      setSkippedPhotoIds(prev => {
+        const next = prev.filter(id => id !== undoAction.id)
+        Storage.set("skippedPhotoIds", next)
+        return next
+      })
     }
 
     resetCardState()
@@ -1008,6 +1100,79 @@ function App() {
     )
   }
 
+  function renderInstructionsSheetContent() {
+    const mdContent = `
+# 📸 PhotoSlide 照片整理助手
+
+欢迎使用 **PhotoSlide** 照片整理脚本！该脚本旨在为您提供极其高效、流畅的照片筛选与归类体验。
+
+---
+
+## 👆 手势操作指南
+
+在主界面中，您可以直接在照片上进行滑动来执行不同操作：
+
+* **上滑 ⬆️**：**加入垃圾箱（待删除）**
+  * 照片会飞入右上角的垃圾桶中，暂时放入待删除队列。
+* **下滑 ⬇️**：**标记为跳过（已阅）**
+  * **正常模式下**：标记为已跳过，照片会向下滑出，并保存到已跳过名单中（下次运行脚本时**自动过滤**，不再重复显示）。
+  * **已跳过查阅模式下**：向下滑动可**取消跳过（还原）**，将照片重设为未整理状态。
+* **左滑 ⬅️**：**浏览下一张**
+  * 仅做临时切换，**不会**标记为已跳过，下次运行仍会显示。
+* **右滑 ➡️**：**返回上一张**
+  * 临时退回上一步浏览的照片，便于反复比对。
+
+---
+
+## 🛠 功能按钮说明
+
+### 📂 相簿整理（左下角按钮）
+* **单击**：弹出快捷相簿列表，点击目标相册即可**一键移动照片**并自动收起。
+* **管理相簿**（列表底部）：点击进入专属管理页，在这里您可以：
+  * 新增、重命名或删除相册（删除相册仅删除分类，图片不会丢失）。
+  * 点击眼睛图标，设置哪些相册**在快捷菜单中显示或隐藏**。
+
+### 🕒 日期筛选（顶部中间按钮）
+* 点击可按日期范围筛选照片，筛选状态下会自动隐藏头部多余信息，保持界面专注。
+
+### 🔄 撤销操作（底部中央按钮）
+* 支持**撤销删除**和**撤销跳过**。点击它可一步步退回您刚刚整理的照片。
+
+### 🗑 待删除队列（右上角按钮）
+* 显示当前加入垃圾箱的待删除照片数。点击后会弹出系统对话框，确认后**批量彻底删除**。
+
+### 👁 查看跳过照片（右上角按钮左侧）
+* 显示当前相册/筛选下跳过的照片数。**点击它可以切换至“已跳过”列表**进行重审，再次点击切换回原列表。
+`
+
+    return (
+      <NavigationStack background="systemGroupedBackground">
+        <VStack
+          spacing={16}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding={16}
+          background="systemGroupedBackground"
+          navigationTitle="操作说明"
+          navigationBarTitleDisplayMode="inline"
+          toolbar={
+            <Toolbar>
+              <ToolbarItem placement="topBarTrailing">
+                <Button
+                  title="完成"
+                  action={() => setShowInstructions(false)}
+                />
+              </ToolbarItem>
+            </Toolbar>
+          }
+        >
+          <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }} background="clear">
+            <Markdown content={mdContent} theme="basic" background="clear" />
+          </ScrollView>
+        </VStack>
+      </NavigationStack>
+    )
+  }
+
   function renderAlbumContextButton() {
     return (
       <Menu
@@ -1265,7 +1430,13 @@ function App() {
   }
 
   return (
-    <NavigationStack>
+    <NavigationStack
+      sheet={{
+        isPresented: showInstructions,
+        onChanged: setShowInstructions,
+        content: renderInstructionsSheetContent()
+      }}
+    >
       <ZStack
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         background="systemBackground"
@@ -1280,7 +1451,10 @@ function App() {
         toolbar={
           <Toolbar>
             <ToolbarItem placement="topBarLeading">
-              <Button title="" systemImage="xmark" action={dismiss} glassEffect />
+              <HStack spacing={8}>
+                <Button title="" systemImage="xmark" action={dismiss} glassEffect />
+                <Button title="" systemImage="info.circle" action={() => setShowInstructions(true)} glassEffect />
+              </HStack>
             </ToolbarItem>
             <ToolbarItem placement="principal">
               <Text font={17} fontWeight="semibold" foregroundStyle="label">
