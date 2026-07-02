@@ -1,0 +1,1019 @@
+import {
+  Script,
+  Navigation,
+  NavigationStack,
+  ZStack,
+  VStack,
+  HStack,
+  Group,
+  Spacer,
+  Text,
+  Image,
+  Button,
+  Menu,
+  DatePicker,
+  ProgressView,
+  Toolbar,
+  ToolbarItem,
+  useEffect,
+  useRef,
+  useState,
+} from "scripting"
+import { PhotoCardStack } from "./components/PhotoCardStack"
+import {
+  FETCH_LIMIT,
+  SWIPE_THRESHOLD,
+  cardHeight,
+  cardWidth,
+  screenWidth,
+  skipTargetOffset,
+} from "./constants"
+import type { AlbumOption, PhotoItem, PhotoSource, PointOffset } from "./types"
+import { formatDate, interactiveMotion, trashFlightMotion } from "./utils"
+
+const initialOffset: PointOffset = { x: 0, y: 0 }
+const allPhotosSource: PhotoSource = { kind: "all" }
+const screenshotsSource: PhotoSource = { kind: "screenshots" }
+const dayInMilliseconds = 24 * 60 * 60 * 1000
+
+type UndoAction = {
+  kind: "skip" | "queueDelete"
+  id: string
+  index: number
+}
+
+function sourceKey(source: PhotoSource): string {
+  if (source.kind === "album") return `album:${source.albumId ?? ""}`
+  return source.kind
+}
+
+function startOfDay(timestamp: number): number {
+  const date = new Date(timestamp)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+function endOfDay(timestamp: number): number {
+  const date = new Date(timestamp)
+  date.setHours(23, 59, 59, 999)
+  return date.getTime()
+}
+
+
+function App() {
+  const dismiss = Navigation.useDismiss()
+  const today = startOfDay(Date.now())
+  const defaultStartDate = today - 30 * dayInMilliseconds
+
+
+  const [items, setItems] = useState<PhotoItem[]>([])
+  const [albums, setAlbums] = useState<AlbumOption[]>([])
+  const [selectedSource, setSelectedSource] = useState<PhotoSource>(allPhotosSource)
+  const [showDateFilter, setShowDateFilter] = useState(false)
+  const [dateFilterEnabled, setDateFilterEnabled] = useState(false)
+  const [dateFilterStart, setDateFilterStart] = useState(defaultStartDate)
+  const [dateFilterEnd, setDateFilterEnd] = useState(today)
+  const [draftDateStart, setDraftDateStart] = useState(defaultStartDate)
+  const [draftDateEnd, setDraftDateEnd] = useState(today)
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [undoStack, setUndoStack] = useState<UndoAction[]>([])
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([])
+  const [dragOffset, setDragOffset] = useState<PointOffset>(initialOffset)
+  const [cardScale, setCardScale] = useState(1)
+  const [cardOpacity, setCardOpacity] = useState(1)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingAlbums, setIsLoadingAlbums] = useState(false)
+  const [isThrowing, setIsThrowing] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isEditingPhoto, setIsEditingPhoto] = useState(false)
+  const [message, setMessage] = useState("")
+  const [showToast, setShowToast] = useState(false)
+  const loadingImageIdsRef = useRef<Set<string>>(new Set())
+
+  const currentItem = items[currentIndex]
+  const nextItem = items[currentIndex + 1]
+  const selectedAlbum = selectedSource.kind === "album"
+    ? albums.find(album => album.id === selectedSource.albumId)
+    : undefined
+  const selectedSourceTitle = selectedSource.kind === "screenshots"
+    ? "截图"
+    : selectedSource.kind === "album"
+      ? selectedAlbum?.title ?? "相簿"
+      : "全部照片"
+  const targetAlbums = albums.filter(album => album.collection.type === "album")
+  const remainingCount = Math.max(items.length - currentIndex, 0)
+  const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto
+  const isEmpty = !isLoading && items.length === 0
+  const isFinished = !isLoading && items.length > 0 && currentIndex >= items.length
+  const progressText = isLoading
+    ? "正在读取照片…"
+    : isFinished
+      ? "本组照片已浏览完"
+      : `${Math.min(currentIndex + 1, items.length)} / ${items.length}`
+  const dateFilterKey = dateFilterEnabled
+    ? `${startOfDay(dateFilterStart)}-${endOfDay(dateFilterEnd)}`
+    : "all-dates"
+
+  function toast(text: string) {
+    setMessage(text)
+    setShowToast(true)
+  }
+
+  function resetCardState() {
+    setDragOffset(initialOffset)
+    setCardScale(1)
+    setCardOpacity(1)
+  }
+
+  function buildPhotoItems(assets: PHAsset[]): PhotoItem[] {
+    return assets.map(asset => ({
+      id: asset.localIdentifier,
+      asset,
+      image: null,
+      loading: false,
+    }))
+  }
+
+  async function loadAlbums() {
+    setIsLoadingAlbums(true)
+
+    try {
+      const collections = await Photos.fetchAlbums()
+      const options = collections
+        .filter(collection => collection.title || collection.estimatedAssetCount > 0)
+        .map<AlbumOption>(collection => ({
+          id: collection.localIdentifier,
+          title: collection.title ?? collection.subtype,
+          subtitle: collection.type === "smartAlbum" ? "智能相簿" : "用户相簿",
+          count: Math.max(collection.estimatedAssetCount, 0),
+          collection,
+        }))
+        .sort((left, right) => {
+          if (left.collection.type !== right.collection.type) {
+            return left.collection.type === "album" ? -1 : 1
+          }
+          return left.title.localeCompare(right.title)
+        })
+
+      setAlbums(options)
+    } catch (error) {
+      console.error(error)
+      toast("读取相簿失败，仍可整理全部照片。")
+    } finally {
+      setIsLoadingAlbums(false)
+    }
+  }
+
+  async function loadImagesForIndexes(sourceItems: PhotoItem[], indexes: number[]) {
+    const validIndexes = indexes.filter(index => index >= 0 && index < sourceItems.length)
+    if (validIndexes.length === 0) return
+
+    for (const index of validIndexes) {
+      const item = sourceItems[index]
+      if (!item || item.image || loadingImageIdsRef.current.has(item.id)) continue
+      loadingImageIdsRef.current.add(item.id)
+
+      let image: UIImage | null = null
+      try {
+        image = await item.asset.requestImage({
+          targetWidth: Math.round(cardWidth * Device.screen.scale),
+          targetHeight: Math.round(cardHeight * Device.screen.scale),
+          contentMode: "aspectFill",
+          deliveryMode: "opportunistic",
+          allowNetworkAccess: true,
+        })
+      } catch (error) {
+        console.error(error)
+      } finally {
+        loadingImageIdsRef.current.delete(item.id)
+      }
+
+      if (!image) continue
+
+      setItems(list => {
+        const current = list[index]
+        if (!current || current.id !== item.id) return list
+
+        const copy = [...list]
+        copy[index] = {
+          ...current,
+          image,
+          loading: false,
+        }
+        return copy
+      })
+    }
+  }
+
+  async function fetchAssetsForSource(source: PhotoSource): Promise<PHAsset[]> {
+    const options: PHFetchOptions = {
+      mediaType: "image",
+      sortBy: "creationDate",
+      ascending: false,
+      limit: FETCH_LIMIT,
+      createdAfter: dateFilterEnabled ? startOfDay(dateFilterStart) : undefined,
+      createdBefore: dateFilterEnabled ? endOfDay(dateFilterEnd) : undefined,
+    }
+
+    if (source.kind === "screenshots") {
+      return Photos.fetchAssets({
+        ...options,
+        mediaSubtypes: ["photoScreenshot"],
+      })
+    }
+
+    if (source.kind === "album" && source.albumId) {
+      const album = albums.find(item => item.id === source.albumId)
+      if (album) return album.collection.fetchAssets(options)
+
+      const collection = await Photos.fetchAlbum(source.albumId)
+      return collection ? collection.fetchAssets(options) : []
+    }
+
+    return Photos.fetchAssets(options)
+  }
+
+  async function loadPhotos(source = selectedSource) {
+    setIsLoading(true)
+
+    try {
+      const status = Photos.authorizationStatus("readWrite")
+      if (status === "denied" || status === "restricted") {
+        toast("没有照片访问权限，请在系统设置中允许访问照片。")
+        setIsLoading(false)
+        return
+      }
+
+      const assets = await fetchAssetsForSource(source)
+      const photoItems = buildPhotoItems(assets)
+
+      loadingImageIdsRef.current.clear()
+      setItems(photoItems)
+      setCurrentIndex(0)
+      setUndoStack([])
+      setPendingDeleteIds([])
+      resetCardState()
+      setIsLoading(false)
+
+      await loadImagesForIndexes(photoItems, [0, 1])
+    } catch (error) {
+      console.error(error)
+      setIsLoading(false)
+      toast("读取照片失败，请稍后重试。")
+    }
+  }
+
+  useEffect(() => {
+    loadAlbums()
+  }, [])
+
+  useEffect(() => {
+    loadPhotos(selectedSource)
+  }, [sourceKey(selectedSource), dateFilterKey])
+
+  useEffect(() => {
+    loadImagesForIndexes(items, [currentIndex, currentIndex + 1, currentIndex + 2])
+  }, [currentIndex])
+
+  async function refreshCurrentView() {
+    await loadAlbums()
+    await loadPhotos(selectedSource)
+  }
+
+  function selectSource(source: PhotoSource) {
+    setSelectedSource(source)
+    setPendingDeleteIds([])
+    setUndoStack([])
+    resetCardState()
+  }
+
+  function applyDateFilter() {
+    const start = startOfDay(draftDateStart)
+    const end = endOfDay(draftDateEnd)
+
+    if (start > end) {
+      toast("开始日期不能晚于结束日期。")
+      return
+    }
+
+    setDateFilterStart(start)
+    setDateFilterEnd(end)
+    setDateFilterEnabled(true)
+    setUndoStack([])
+    setShowDateFilter(false)
+  }
+
+  function clearDateFilter() {
+    setDateFilterEnabled(false)
+    setUndoStack([])
+    setDraftDateStart(defaultStartDate)
+    setDraftDateEnd(today)
+    setShowDateFilter(false)
+  }
+
+  async function throwCurrentToTrash() {
+    if (!currentItem || isThrowing || isDeleting || isEditingPhoto) return
+
+    setIsThrowing(true)
+
+    const flight = trashFlightMotion(dragOffset)
+    await withAnimation(
+      Animation.easeIn(0.44),
+      () => {
+        setDragOffset(flight.offset)
+        setCardScale(flight.scale)
+        setCardOpacity(flight.opacity)
+      }
+    )
+
+    setPendingDeleteIds(ids => {
+      if (ids.includes(currentItem.id)) return ids
+      return [...ids, currentItem.id]
+    })
+    setUndoStack(stack => [...stack, {
+      kind: "queueDelete",
+      id: currentItem.id,
+      index: currentIndex,
+    }])
+
+    resetCardState()
+    setCurrentIndex(index => index + 1)
+    setIsThrowing(false)
+  }
+
+  async function skipCurrentPhoto(dir: "left" | "right") {
+    if (!currentItem || isThrowing || isDeleting || isEditingPhoto) return
+
+    setIsThrowing(true)
+
+    const targetX = dir === "left" ? -screenWidth * 1.1 : screenWidth * 1.1
+
+    await withAnimation(
+      Animation.easeOut(0.26),
+      () => {
+        setDragOffset({ x: targetX, y: 0 })
+        setCardScale(0.92)
+        setCardOpacity(0)
+      }
+    )
+
+    resetCardState()
+    setCurrentIndex(index => index + 1)
+    setIsThrowing(false)
+  }
+
+  async function goBackToPreviousPhoto() {
+    if (currentIndex === 0 || isBusy) return
+
+    const prevIndex = currentIndex - 1
+    const prevItem = items[prevIndex]
+
+    if (prevItem) {
+      setPendingDeleteIds(ids => ids.filter(id => id !== prevItem.id))
+      setUndoStack(stack => stack.filter(item => item.id !== prevItem.id))
+    }
+
+    setIsThrowing(true)
+    setDragOffset({ x: -screenWidth * 1.1, y: 0 })
+    setCardScale(0.92)
+    setCardOpacity(0)
+    setCurrentIndex(prevIndex)
+
+    await withAnimation(
+      Animation.spring({ response: 0.32, dampingFraction: 0.8 }),
+      () => {
+        setDragOffset({ x: 0, y: 0 })
+        setCardScale(1)
+        setCardOpacity(1)
+      }
+    )
+
+    setIsThrowing(false)
+  }
+
+  function resetDrag() {
+    withAnimation(Animation.spring({ response: 0.28, dampingFraction: 0.82 }), resetCardState)
+  }
+
+  function undoLastSwipe() {
+    if (undoStack.length === 0 || isBusy) return
+
+    const undoAction = undoStack[undoStack.length - 1]
+
+    const targetIndex = items.findIndex(item => item.id === undoAction.id)
+    if (targetIndex < 0) {
+      setUndoStack(stack => stack.slice(0, -1))
+      toast("上一张照片已不在当前列表中。")
+      return
+    }
+
+    if (undoAction.kind === "queueDelete") {
+      setPendingDeleteIds(ids => ids.filter(id => id !== undoAction.id))
+    }
+
+    resetCardState()
+    setCurrentIndex(targetIndex)
+    setUndoStack(stack => stack.slice(0, -1))
+  }
+
+  async function deletePendingPhotos() {
+    if (isDeleting) return
+
+    if (pendingDeleteIds.length === 0) {
+      toast("暂无待删除照片，先右滑图片加入垃圾箱。")
+      return
+    }
+
+    setIsDeleting(true)
+
+    try {
+      const idsToDelete = [...pendingDeleteIds]
+      const assets = await Photos.fetchAssets(idsToDelete)
+      if (assets.length === 0) {
+        setPendingDeleteIds([])
+        setUndoStack([])
+        toast("待删除照片已不存在。")
+        setIsDeleting(false)
+        return
+      }
+
+      const ok = await Photos.deleteAssets(assets)
+      if (!ok) {
+        toast("已取消删除，待删除队列仍保留。")
+        setIsDeleting(false)
+        return
+      }
+
+      const deletedSet = new Set(idsToDelete)
+
+      setItems(list => {
+        const filtered = list.filter(item => !deletedSet.has(item.id))
+        setCurrentIndex(index => Math.min(index, Math.max(filtered.length - 1, 0)))
+        return filtered
+      })
+      setPendingDeleteIds([])
+      setUndoStack([])
+      toast(`已删除 ${idsToDelete.length} 张照片。`)
+    } catch (error) {
+      console.error(error)
+      toast("删除失败，请稍后重试。")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  async function toggleFavoriteForCurrent() {
+    if (!currentItem || isBusy) return
+
+    setIsEditingPhoto(true)
+
+    try {
+      const nextFavorite = !currentItem.asset.isFavorite
+      const ok = await currentItem.asset.setFavorite(nextFavorite)
+      if (!ok) {
+        toast("收藏标记未变更。")
+        return
+      }
+
+      const refreshed = await Photos.fetchAsset(currentItem.id)
+      setItems(list => list.map(item => item.id === currentItem.id
+        ? { ...item, asset: refreshed ?? item.asset }
+        : item
+      ))
+      toast(nextFavorite ? "已标记为收藏。" : "已取消收藏。")
+    } catch (error) {
+      console.error(error)
+      toast("修改收藏标记失败。")
+    } finally {
+      setIsEditingPhoto(false)
+    }
+  }
+
+  async function moveCurrentToAlbum(targetAlbum: AlbumOption) {
+    if (!currentItem || isBusy) return
+
+    setIsEditingPhoto(true)
+
+    try {
+      const ok = await targetAlbum.collection.addAssets([currentItem.asset])
+      if (!ok) {
+        toast("加入目标相簿失败，可能不是可编辑相簿。")
+        return
+      }
+
+      const sourceAlbum = selectedSource.kind === "album"
+        ? albums.find(album => album.id === selectedSource.albumId)
+        : undefined
+      const shouldRemoveFromSource = Boolean(
+        sourceAlbum &&
+        sourceAlbum.id !== targetAlbum.id &&
+        sourceAlbum.collection.type === "album"
+      )
+
+      if (sourceAlbum && shouldRemoveFromSource) {
+        await sourceAlbum.collection.removeAssets([currentItem.asset])
+        setItems(list => list.filter(item => item.id !== currentItem.id))
+        setPendingDeleteIds(ids => ids.filter(id => id !== currentItem.id))
+      } else {
+        setCurrentIndex(index => index + 1)
+      }
+
+      resetCardState()
+      toast(`已移动到「${targetAlbum.title}」。`)
+    } catch (error) {
+      console.error(error)
+      toast("移动照片失败。")
+    } finally {
+      setIsEditingPhoto(false)
+    }
+  }
+
+  function handleDragChanged(value: any) {
+    if (isThrowing || isDeleting || isEditingPhoto || !currentItem) return
+
+    const motion = interactiveMotion({
+      x: value.translation.width,
+      y: value.translation.height,
+    })
+    setDragOffset(motion.offset)
+    setCardScale(motion.scale)
+    setCardOpacity(motion.opacity)
+  }
+
+  function handleDragEnded(value: any) {
+    if (isThrowing || isDeleting || isEditingPhoto || !currentItem) return
+
+    const xDiff = value.translation.width
+    const yDiff = value.translation.height
+    const predX = value.predictedEndTranslation.width
+    const predY = value.predictedEndTranslation.height
+
+    const isHorizontal = Math.abs(xDiff) > Math.abs(yDiff)
+
+    if (isHorizontal) {
+      const shouldHorizontal =
+        Math.abs(xDiff) > SWIPE_THRESHOLD ||
+        Math.abs(predX) > SWIPE_THRESHOLD * 1.35
+
+      if (shouldHorizontal) {
+        if (xDiff < 0) {
+          skipCurrentPhoto("left")
+        } else {
+          void goBackToPreviousPhoto()
+        }
+      } else {
+        resetDrag()
+      }
+    } else {
+      const shouldDelete =
+        Math.abs(yDiff) > SWIPE_THRESHOLD ||
+        Math.abs(predY) > SWIPE_THRESHOLD * 1.35
+
+      if (shouldDelete) {
+        throwCurrentToTrash()
+      } else {
+        resetDrag()
+      }
+    }
+  }
+
+  function renderTrashLabel() {
+    return (
+      <HStack spacing={5}>
+        <Image
+          systemName={pendingDeleteIds.length > 0 ? "trash.fill" : "trash"}
+          renderingMode="template"
+          foregroundStyle={pendingDeleteIds.length > 0 ? "systemRed" : "systemBlue"}
+        />
+        {pendingDeleteIds.length > 0 ? (
+          <Text font={14} fontWeight="semibold" foregroundStyle="systemRed">
+            {pendingDeleteIds.length}
+          </Text>
+        ) : null}
+      </HStack>
+    )
+  }
+
+  function renderIconButton({
+    systemImage,
+    action,
+    disabled = false,
+    foregroundStyle = "systemBlue",
+    contextMenu,
+    size = 44,
+  }: {
+    systemImage: string
+    action: () => void
+    disabled?: boolean
+    foregroundStyle?: any
+    contextMenu?: any
+    size?: number
+  }) {
+    return (
+      <Button
+        action={action}
+        disabled={disabled}
+        buttonStyle="plain"
+        frame={{ width: size, height: size }}
+        contextMenu={contextMenu}
+      >
+        <Image
+          systemName={systemImage}
+          font={22}
+          foregroundStyle={disabled ? "tertiaryLabel" : foregroundStyle}
+        />
+      </Button>
+    )
+  }
+
+  function renderToolbarActions() {
+    return (
+      <HStack spacing={8}>
+        <Button action={() => deletePendingPhotos()} disabled={isDeleting} glassEffect>
+          {renderTrashLabel()}
+        </Button>
+      </HStack>
+    )
+  }
+
+  function renderAlbumMenuItems() {
+    return (
+      <Group>
+        {targetAlbums.length === 0 ? (
+          <Button
+            title="没有可写入的用户相簿"
+            systemImage="exclamationmark.circle"
+            action={() => toast("没有可写入的用户相簿。")}
+          />
+        ) : targetAlbums.map(album => (
+          <Button
+            key={album.id}
+            title={album.title}
+            systemImage="rectangle.stack.badge.plus"
+            action={() => void moveCurrentToAlbum(album)}
+          />
+        ))}
+      </Group>
+    )
+  }
+
+  function renderAlbumContextButton() {
+    return (
+      <Menu
+        label={
+          <Image
+            systemName="rectangle.stack.badge.plus"
+            font={22}
+            foregroundStyle={!currentItem || isBusy ? "tertiaryLabel" : "systemBlue"}
+          />
+        }
+        buttonStyle="plain"
+        frame={{ width: 44, height: 44 }}
+        disabled={!currentItem || isBusy}
+      >
+        {renderAlbumMenuItems()}
+      </Menu>
+    )
+  }
+
+  function renderSourceMenu(title: string, systemImage?: string) {
+    return (
+      <Menu
+        label={
+          <Image
+            systemName={systemImage ?? "rectangle.stack"}
+            font={22}
+            foregroundStyle="systemBlue"
+          />
+        }
+        buttonStyle="plain"
+        frame={{ width: 44, height: 44 }}
+      >
+        {renderSourceMenuItems()}
+      </Menu>
+    )
+  }
+
+  function renderSourceMenuItems() {
+    const allSelected = selectedSource.kind === "all"
+    const screenshotsSelected = selectedSource.kind === "screenshots"
+
+    return (
+      <Group>
+        <Button
+          title={`${allSelected ? "✓ " : ""}全部照片`}
+          systemImage="photo.on.rectangle"
+          action={() => selectSource(allPhotosSource)}
+        />
+        <Button
+          title={`${screenshotsSelected ? "✓ " : ""}截图`}
+          systemImage="camera.viewfinder"
+          action={() => selectSource(screenshotsSource)}
+        />
+        <Menu title="相簿" systemImage="rectangle.stack">
+          {albums.length === 0 ? (
+            <Button
+              title={isLoadingAlbums ? "正在读取相簿" : "没有相簿"}
+              systemImage="hourglass"
+              action={() => void loadAlbums()}
+            />
+          ) : albums.map(album => (
+            <Button
+              key={album.id}
+              title={`${selectedSource.albumId === album.id ? "✓ " : ""}${album.title} · ${album.count}`}
+              systemImage={album.collection.type === "smartAlbum" ? "sparkles.rectangle.stack" : "rectangle.stack"}
+              action={() => selectSource({ kind: "album", albumId: album.id })}
+            />
+          ))}
+        </Menu>
+        <Button
+          title="刷新相簿"
+          systemImage="arrow.clockwise"
+          action={() => void loadAlbums()}
+        />
+      </Group>
+    )
+  }
+
+  function renderMetric(label: string, value: string, color: any = "secondaryLabel") {
+    return (
+      <VStack alignment="leading" spacing={2}>
+        <Text font={11} foregroundStyle="tertiaryLabel">
+          {label}
+        </Text>
+        <Text font={15} fontWeight="semibold" foregroundStyle={color}>
+          {value}
+        </Text>
+      </VStack>
+    )
+  }
+
+  function formatDay(timestamp: number): string {
+    const date = new Date(timestamp)
+    const year = date.getFullYear()
+    const month = `${date.getMonth() + 1}`.padStart(2, "0")
+    const day = `${date.getDate()}`.padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  function renderDateFilterPanel() {
+    return (
+      <HStack
+        spacing={12}
+        frame={{ maxWidth: "infinity", height: 44 }}
+        padding={{ vertical: 2 }}
+      >
+        <DatePicker
+          title=""
+          value={draftDateStart}
+          onChanged={setDraftDateStart}
+          displayedComponents={["date"]}
+          datePickerStyle="compact"
+          frame={{ width: 110, height: 32 }}
+        />
+        <Image
+          systemName="arrow.right"
+          imageScale="small"
+          foregroundStyle="tertiaryLabel"
+        />
+        <DatePicker
+          title=""
+          value={draftDateEnd}
+          onChanged={setDraftDateEnd}
+          displayedComponents={["date"]}
+          datePickerStyle="compact"
+          frame={{ width: 110, height: 32 }}
+        />
+        <Spacer />
+        <HStack spacing={16}>
+          {renderIconButton({
+            systemImage: "xmark.circle",
+            action: clearDateFilter,
+          })}
+          {renderIconButton({
+            systemImage: "checkmark.circle",
+            action: applyDateFilter,
+          })}
+        </HStack>
+      </HStack>
+    )
+  }
+
+  function renderPhotoInfo() {
+    if (!currentItem || isFinished) return null
+
+    const asset = currentItem.asset
+    const subtypeText = asset.mediaSubtypes.includes("photoScreenshot")
+      ? "截图"
+      : asset.mediaSubtypes.includes("photoLive")
+        ? "Live"
+        : "照片"
+
+    return (
+      <VStack spacing={1} alignment="center">
+        <Text font={10} foregroundStyle="secondaryLabel" lineLimit={1}>
+          {formatDate(asset.creationDate)}
+        </Text>
+        <Text font={10} foregroundStyle="tertiaryLabel" lineLimit={1}>
+          {asset.pixelWidth}×{asset.pixelHeight}
+        </Text>
+        <Text font={10} foregroundStyle={asset.isFavorite ? "systemYellow" : "tertiaryLabel"} lineLimit={1}>
+          {asset.isFavorite ? "★ 已收藏" : subtypeText}
+        </Text>
+      </VStack>
+    )
+  }
+
+  function renderHeader() {
+    return (
+      <VStack
+        alignment="leading"
+        spacing={5}
+        frame={{ maxWidth: "infinity", height: 96 }}
+        padding={{ horizontal: 2, vertical: 2 }}
+        contextMenu={{
+          menuItems: renderSourceMenuItems(),
+        }}
+      >
+        {showDateFilter ? (
+          <VStack frame={{ maxWidth: "infinity", height: 92 }}>
+            <Spacer />
+            {renderDateFilterPanel()}
+            <Spacer />
+          </VStack>
+        ) : (
+          <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity" }}>
+            <HStack spacing={10} frame={{ maxWidth: "infinity" }}>
+              <VStack alignment="leading" spacing={3}>
+                <Text font={12} foregroundStyle="secondaryLabel">
+                  当前范围
+                </Text>
+                <Text font={18} fontWeight="bold" foregroundStyle="label">
+                  {selectedSourceTitle}
+                </Text>
+              </VStack>
+              <Spacer />
+              <HStack spacing={16}>
+                {renderSourceMenu("", "rectangle.stack")}
+                {renderIconButton({
+                  systemImage: dateFilterEnabled ? "calendar.badge.clock" : "calendar",
+                  action: () => setShowDateFilter(visible => !visible),
+                  foregroundStyle: "systemBlue",
+                })}
+              </HStack>
+            </HStack>
+
+            <HStack spacing={12} frame={{ maxWidth: "infinity" }}>
+              {renderMetric("进度", progressText, "label")}
+              {renderMetric("剩余", `${remainingCount}`)}
+              {renderMetric("待删除", `${pendingDeleteIds.length}`, pendingDeleteIds.length > 0 ? "systemRed" : "secondaryLabel")}
+              {dateFilterEnabled ? renderMetric("日期", "已筛选", "systemBlue") : null}
+            </HStack>
+          </VStack>
+        )}
+        <Spacer />
+      </VStack>
+    )
+  }
+
+  function renderActionBar() {
+    return (
+      <HStack
+        alignment="center"
+        frame={{ maxWidth: cardWidth, height: 56 }}
+        padding={{ horizontal: 8, bottom: 6 }}
+      >
+        <HStack spacing={16}>
+          {renderIconButton({
+            systemImage: currentItem?.asset.isFavorite ? "star.slash" : "star",
+            action: () => void toggleFavoriteForCurrent(),
+            disabled: !currentItem || isBusy,
+            foregroundStyle: currentItem?.asset.isFavorite ? "systemYellow" : "systemBlue",
+          })}
+          {renderAlbumContextButton()}
+        </HStack>
+
+        <Spacer />
+        {renderPhotoInfo()}
+        <Spacer />
+
+        <HStack spacing={16}>
+          {renderIconButton({
+            systemImage: "arrow.uturn.backward",
+            action: undoLastSwipe,
+            disabled: undoStack.length === 0 || isBusy,
+          })}
+          {renderIconButton({
+            systemImage: "arrow.clockwise",
+            action: () => void refreshCurrentView(),
+            disabled: isBusy,
+          })}
+        </HStack>
+      </HStack>
+    )
+  }
+
+  return (
+    <NavigationStack>
+      <ZStack
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        background="systemBackground"
+        ignoresSafeArea={{ edges: "bottom" }}
+        navigationTitle="整理照片"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={
+          <Toolbar>
+            <ToolbarItem placement="topBarLeading">
+              <Button title="" systemImage="xmark" action={dismiss} glassEffect />
+            </ToolbarItem>
+            <ToolbarItem placement="principal">
+              <Text font={17} fontWeight="semibold" foregroundStyle="label">
+                整理照片
+              </Text>
+            </ToolbarItem>
+            <ToolbarItem placement="topBarTrailing">
+              {renderToolbarActions()}
+            </ToolbarItem>
+          </Toolbar>
+        }
+        toast={{
+          message,
+          isPresented: showToast,
+          onChanged: setShowToast,
+          position: "bottom",
+        }}
+      >
+        <VStack
+          spacing={2}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding={{ horizontal: 12, top: 16, bottom: 6 }}
+        >
+          {renderHeader()}
+
+          <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+            {isLoading ? (
+              <VStack spacing={12}>
+                <ProgressView />
+                <Text font={15} foregroundStyle="secondaryLabel">正在载入照片索引</Text>
+                <Text font={12} foregroundStyle="tertiaryLabel">只会懒加载当前附近图片</Text>
+              </VStack>
+            ) : isEmpty ? (
+              <VStack spacing={12} padding={28}>
+                <Image systemName="photo.on.rectangle.angled" imageScale="large" foregroundStyle="secondaryLabel" />
+                <Text font={20} fontWeight="semibold" foregroundStyle="label">
+                  没有找到照片
+                </Text>
+                <Text font={14} foregroundStyle="secondaryLabel" multilineTextAlignment="center">
+                  当前范围没有可整理的图片，切换到全部照片、截图或其他相簿再试。
+                </Text>
+              </VStack>
+            ) : isFinished ? (
+              <VStack spacing={14} padding={28}>
+                <Image systemName="checkmark.circle.fill" imageScale="large" foregroundStyle="systemGreen" />
+                <Text font={22} fontWeight="bold" foregroundStyle="label">
+                  浏览完成
+                </Text>
+                <Text font={14} foregroundStyle="secondaryLabel" multilineTextAlignment="center">
+                  已放入垃圾箱 {pendingDeleteIds.length} 张。点击右上角垃圾箱可统一删除。
+                </Text>
+                {renderIconButton({
+                  systemImage: "arrow.clockwise",
+                  action: () => void loadPhotos(),
+                })}
+              </VStack>
+            ) : currentItem ? (
+              <VStack spacing={12} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+                <PhotoCardStack
+                  currentItem={currentItem}
+                  nextItem={nextItem}
+                  dragOffset={dragOffset}
+                  cardScale={cardScale}
+                  cardOpacity={cardOpacity}
+                  onDragChanged={handleDragChanged}
+                  onDragEnded={handleDragEnded}
+                />
+                {renderActionBar()}
+                <Spacer />
+              </VStack>
+            ) : (
+              <VStack spacing={12}>
+                <ProgressView />
+                <Text font={15} foregroundStyle="secondaryLabel">正在准备图片…</Text>
+              </VStack>
+            )}
+          </ZStack>
+        </VStack>
+      </ZStack>
+    </NavigationStack>
+  )
+}
+
+async function run() {
+  await Navigation.present({
+    element: <App />,
+    modalPresentationStyle: "fullScreen",
+  })
+  Script.exit()
+}
+
+run()

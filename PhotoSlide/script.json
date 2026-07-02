@@ -1,0 +1,45 @@
+{
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/PhotoSlide.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "contributors": [],
+  "version": "",
+  "intentInputTypes": [],
+  "author": {
+    "name": "BlackCCCat",
+    "homepage": "https://github.com/BlackCCCat",
+    "email": null
+  },
+  "permissions": ["photos"],
+  "color": "rgba(230, 190, 1,1)",
+  "description": "卡片式照片整理工具，支持全部照片、相簿和截图筛选，左右滑切换照片，上下滑待删、收藏标记和移动到相簿。",
+  "runInApp": true,
+  "name": "PhotoSlide",
+  "icon": "photo.on.rectangle",
+  "localizedNames": {
+    "zh": "",
+    "es": "",
+    "en": "",
+    "ja": "",
+    "ru": "",
+    "it": "",
+    "fr": "",
+    "de": "",
+    "pt": ""
+  },
+  "iconImage": null,
+  "entry": "index.tsx",
+  "localizedDescriptions": {
+    "ja": "",
+    "es": "",
+    "pt": "",
+    "fr": "",
+    "en": "A card-style photo cleanup tool with all-photo, album, and screenshot filters. Swipe left or right to switch between photos, swipe up or down to queue deletion, mark favorites, and move photos into albums.",
+    "it": "",
+    "de": "",
+    "zh": "卡片式照片整理工具，支持全部照片、相簿和截图筛选，左右滑切换照片，上下滑待删、收藏标记和移动到相簿。",
+    "ru": ""
+  }
+}
