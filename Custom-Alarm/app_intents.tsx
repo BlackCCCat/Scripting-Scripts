@@ -201,6 +201,9 @@ function buildAlertAttributes(
       logicalAlarmId,
       snoozeMinutes: String(snoozeMinutes),
     },
+    liveActivity: {
+      name: "CustomAlarmActivity",
+    },
   })
 
   if (!attributes) throw new Error("闹钟属性创建失败")
@@ -287,6 +290,9 @@ function buildSnoozeCountdownConfiguration(
       source: "custom-alarm-snooze",
       logicalAlarmId: params.logicalAlarmId,
       snoozeMinutes: String(params.snoozeMinutes),
+    },
+    liveActivity: {
+      name: "CustomAlarmActivity",
     },
   })
   if (!attributes) throw new Error("推迟闹钟属性创建失败")

@@ -195,6 +195,9 @@ function buildAttributes(
       source: "custom-alarm",
       logicalAlarmId,
     },
+    liveActivity: {
+      name: "CustomAlarmActivity",
+    },
   })
 
   if (!attributes) throw new Error("闹钟展示属性创建失败")
