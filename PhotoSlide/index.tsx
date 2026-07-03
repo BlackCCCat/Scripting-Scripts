@@ -40,10 +40,25 @@ const allPhotosSource: PhotoSource = { kind: "all" }
 const screenshotsSource: PhotoSource = { kind: "screenshots" }
 const dayInMilliseconds = 24 * 60 * 60 * 1000
 
-type UndoAction = {
-  kind: "skip" | "queueDelete"
+type UndoAction =
+  | {
+      kind: "skip" | "queueDelete"
+      id: string
+      index: number
+    }
+  | {
+      kind: "albumMove"
+      id: string
+      index: number
+      targetAlbumId: string
+      sourceAlbumId?: string
+      removedFromSource: boolean
+      wasSkipped: boolean
+    }
+
+type AlbumMoveHiddenRecord = {
   id: string
-  index: number
+  targetAlbumId: string
 }
 
 function sourceKey(source: PhotoSource): string {
@@ -99,6 +114,9 @@ function App() {
   const [skippedPhotoIds, setSkippedPhotoIds] = useState<string[]>(() => {
     return Storage.get<string[]>("skippedPhotoIds") ?? []
   })
+  const [albumMoveHiddenRecords, setAlbumMoveHiddenRecords] = useState<AlbumMoveHiddenRecord[]>(() => {
+    return Storage.get<AlbumMoveHiddenRecord[]>("albumMoveHiddenRecords") ?? []
+  })
   const [hiddenAlbumIds, setHiddenAlbumIds] = useState<string[]>(() => {
     return Storage.get<string[]>("hiddenAlbumIds") ?? []
   })
@@ -112,6 +130,30 @@ function App() {
       return next
     })
   }
+
+  function addAlbumMoveHiddenRecord(id: string, targetAlbumId: string) {
+    setAlbumMoveHiddenRecords(prev => {
+      const exists = prev.some(record =>
+        record.id === id &&
+        record.targetAlbumId === targetAlbumId
+      )
+      const next = exists ? prev : [...prev, { id, targetAlbumId }]
+      Storage.set("albumMoveHiddenRecords", next)
+      return next
+    })
+  }
+
+  function removeAlbumMoveHiddenRecord(id: string, targetAlbumId?: string) {
+    setAlbumMoveHiddenRecords(prev => {
+      const next = prev.filter(record => {
+        if (record.id !== id) return true
+        return targetAlbumId ? record.targetAlbumId !== targetAlbumId : false
+      })
+      Storage.set("albumMoveHiddenRecords", next)
+      return next
+    })
+  }
+
   const loadingImageIdsRef = useRef<Set<string>>(new Set())
   const allSourceAssetsRef = useRef<PHAsset[]>([])
   const unavailablePhotoIds = [...deletedPhotoIds, ...pendingDeleteIds]
@@ -252,6 +294,64 @@ function App() {
     }))
   }
 
+  async function syncAlbumMoveHiddenState(currentSkippedIds = skippedPhotoIds) {
+    if (albumMoveHiddenRecords.length === 0) return currentSkippedIds
+
+    const validRecords: AlbumMoveHiddenRecord[] = []
+    const groupedRecords = new Map<string, AlbumMoveHiddenRecord[]>()
+
+    for (const record of albumMoveHiddenRecords) {
+      const records = groupedRecords.get(record.targetAlbumId) ?? []
+      records.push(record)
+      groupedRecords.set(record.targetAlbumId, records)
+    }
+
+    for (const [albumId, records] of groupedRecords) {
+      try {
+        const collection = await findAlbumCollection(albumId)
+        if (!collection) continue
+
+        const albumAssets = await collection.fetchAssets({
+          mediaType: "image",
+          limit: FETCH_LIMIT,
+        })
+        const albumAssetIds = new Set(albumAssets.map(asset => asset.localIdentifier))
+
+        for (const record of records) {
+          if (albumAssetIds.has(record.id)) {
+            validRecords.push(record)
+          }
+        }
+      } catch (error) {
+        console.error(error)
+        validRecords.push(...records)
+      }
+    }
+
+    const validHiddenIds = new Set(validRecords.map(record => record.id))
+    const staleHiddenIds = new Set(
+      albumMoveHiddenRecords
+        .filter(record => !validHiddenIds.has(record.id))
+        .map(record => record.id)
+    )
+
+    const nextSkippedIds = staleHiddenIds.size > 0
+      ? currentSkippedIds.filter(id => !staleHiddenIds.has(id))
+      : currentSkippedIds
+
+    if (validRecords.length !== albumMoveHiddenRecords.length) {
+      Storage.set("albumMoveHiddenRecords", validRecords)
+      setAlbumMoveHiddenRecords(validRecords)
+    }
+
+    if (nextSkippedIds.length !== currentSkippedIds.length) {
+      Storage.set("skippedPhotoIds", nextSkippedIds)
+      setSkippedPhotoIds(nextSkippedIds)
+    }
+
+    return nextSkippedIds
+  }
+
   async function loadAlbums() {
     setIsLoadingAlbums(true)
 
@@ -298,7 +398,7 @@ function App() {
         image = await item.asset.requestImage({
           targetWidth: Math.round(cardWidth * imageScale),
           targetHeight: Math.round(cardHeight * imageScale),
-          contentMode: "aspectFill",
+          contentMode: "aspectFit",
           deliveryMode: "highQualityFormat",
           allowNetworkAccess: true,
         })
@@ -366,10 +466,11 @@ function App() {
 
       const assets = await fetchAssetsForSource(source)
       allSourceAssetsRef.current = assets
+      const syncedSkippedPhotoIds = await syncAlbumMoveHiddenState(skippedPhotoIds)
 
       const filteredAssets = assets.filter(asset => {
         const isPendingDelete = unavailablePhotoIds.includes(asset.localIdentifier)
-        const isSkipped = skippedPhotoIds.includes(asset.localIdentifier)
+        const isSkipped = syncedSkippedPhotoIds.includes(asset.localIdentifier)
 
         if (isPendingDelete) return false
 
@@ -385,9 +486,6 @@ function App() {
       loadingImageIdsRef.current.clear()
       setItems(photoItems)
       setCurrentIndex(0)
-      setUndoStack([])
-      setPendingDeleteIds([])
-      setDeletedPhotoIds([])
       resetCardState()
       setIsLoading(false)
 
@@ -418,9 +516,6 @@ function App() {
 
   function selectSource(source: PhotoSource) {
     setSelectedSource(source)
-    setPendingDeleteIds([])
-    setDeletedPhotoIds([])
-    setUndoStack([])
     resetCardState()
   }
 
@@ -436,13 +531,11 @@ function App() {
     setDateFilterStart(start)
     setDateFilterEnd(end)
     setDateFilterEnabled(true)
-    setUndoStack([])
     setShowDateFilter(false)
   }
 
   function clearDateFilter() {
     setDateFilterEnabled(false)
-    setUndoStack([])
     setDraftDateStart(defaultStartDate)
     setDraftDateEnd(today)
     setShowDateFilter(false)
@@ -600,17 +693,150 @@ function App() {
     withAnimation(Animation.spring({ response: 0.28, dampingFraction: 0.82 }), resetCardState)
   }
 
-  function undoLastSwipe() {
+  async function findAlbumCollection(albumId?: string): Promise<PHAssetCollection | null> {
+    if (!albumId) return null
+    const knownAlbum = albums.find(album => album.id === albumId)
+    if (knownAlbum) return knownAlbum.collection
+    return Photos.fetchAlbum(albumId)
+  }
+
+  async function undoAlbumMove(undoAction: Extract<UndoAction, { kind: "albumMove" }>) {
+    setIsEditingPhoto(true)
+
+    try {
+      const existingItem = items.find(item => item.id === undoAction.id)
+      const asset = existingItem?.asset ?? await Photos.fetchAsset(undoAction.id)
+      if (!asset) {
+        setUndoStack(stack => stack.slice(0, -1))
+        toast("照片已不存在，无法撤销相簿操作。")
+        return
+      }
+
+      const targetIsOriginalSource =
+        undoAction.sourceAlbumId === undoAction.targetAlbumId &&
+        !undoAction.removedFromSource
+
+      if (!targetIsOriginalSource) {
+        const targetCollection = await findAlbumCollection(undoAction.targetAlbumId)
+        if (!targetCollection) {
+          toast("找不到目标相簿，无法撤销。")
+          return
+        }
+
+        const removedFromTarget = await targetCollection.removeAssets([asset])
+        if (!removedFromTarget) {
+          toast("无法从目标相簿移除，撤销失败。")
+          return
+        }
+      }
+
+      if (undoAction.removedFromSource) {
+        const sourceCollection = await findAlbumCollection(undoAction.sourceAlbumId)
+        if (sourceCollection) {
+          await sourceCollection.addAssets([asset])
+        }
+      }
+
+      if (!undoAction.wasSkipped) {
+        removeAlbumMoveHiddenRecord(undoAction.id, undoAction.targetAlbumId)
+        setSkippedPhotoIds(prev => {
+          const next = prev.filter(id => id !== undoAction.id)
+          Storage.set("skippedPhotoIds", next)
+          return next
+        })
+      }
+
+      const willBeSkippedAfterUndo = undoAction.wasSkipped
+      const isActiveInCurrentMode = showSkippedOnly
+        ? willBeSkippedAfterUndo
+        : !willBeSkippedAfterUndo
+      const currentSourceIsTargetAlbum =
+        selectedSource.kind === "album" &&
+        selectedSource.albumId === undoAction.targetAlbumId &&
+        !targetIsOriginalSource
+      const currentSourceIsRestoredSourceAlbum =
+        selectedSource.kind === "album" &&
+        selectedSource.albumId === undoAction.sourceAlbumId &&
+        undoAction.removedFromSource
+      const currentSourceCanContainAsset =
+        selectedSource.kind === "all" ||
+        (selectedSource.kind === "screenshots" && asset.mediaSubtypes.includes("photoScreenshot")) ||
+        currentSourceIsRestoredSourceAlbum ||
+        (
+          selectedSource.kind === "album" &&
+          selectedSource.albumId === undoAction.targetAlbumId &&
+          targetIsOriginalSource
+        )
+      const shouldShowInCurrentList = currentSourceCanContainAsset && isActiveInCurrentMode
+
+      if (currentSourceIsTargetAlbum) {
+        allSourceAssetsRef.current = allSourceAssetsRef.current.filter(
+          sourceAsset => sourceAsset.localIdentifier !== undoAction.id
+        )
+        setItems(list => {
+          const next = list.filter(item => item.id !== undoAction.id)
+          setCurrentIndex(index => Math.min(index, Math.max(next.length - 1, 0)))
+          return next
+        })
+      } else if (
+        currentSourceIsRestoredSourceAlbum &&
+        !allSourceAssetsRef.current.some(sourceAsset => sourceAsset.localIdentifier === undoAction.id)
+      ) {
+        allSourceAssetsRef.current = [
+          ...allSourceAssetsRef.current.slice(0, Math.min(undoAction.index, allSourceAssetsRef.current.length)),
+          asset,
+          ...allSourceAssetsRef.current.slice(Math.min(undoAction.index, allSourceAssetsRef.current.length)),
+        ]
+      }
+
+      const currentListIndex = items.findIndex(item => item.id === undoAction.id)
+      if (currentListIndex < 0 && shouldShowInCurrentList) {
+        const restoredItem: PhotoItem = {
+          id: undoAction.id,
+          asset,
+          image: null,
+          loading: false,
+        }
+        setItems(list => {
+          if (list.some(item => item.id === undoAction.id)) return list
+          const insertIndex = Math.min(undoAction.index, list.length)
+          return [
+            ...list.slice(0, insertIndex),
+            restoredItem,
+            ...list.slice(insertIndex),
+          ]
+        })
+      }
+
+      resetCardState()
+      if (!currentSourceIsTargetAlbum) {
+        if (currentListIndex >= 0 && shouldShowInCurrentList) {
+          setCurrentIndex(currentListIndex)
+        } else if (currentListIndex < 0 && shouldShowInCurrentList) {
+          setCurrentIndex(Math.min(undoAction.index, items.length))
+        }
+      }
+      setUndoStack(stack => stack.slice(0, -1))
+      toast("已撤销相簿操作。")
+    } catch (error) {
+      console.error(error)
+      toast("撤销相簿操作失败。")
+    } finally {
+      setIsEditingPhoto(false)
+    }
+  }
+
+  async function undoLastSwipe() {
     if (undoStack.length === 0 || isBusy) return
 
     const undoAction = undoStack[undoStack.length - 1]
 
-    const targetIndex = items.findIndex(item => item.id === undoAction.id)
-    if (targetIndex < 0) {
-      setUndoStack(stack => stack.slice(0, -1))
-      toast("上一张照片已不在当前列表中。")
+    if (undoAction.kind === "albumMove") {
+      await undoAlbumMove(undoAction)
       return
     }
+
+    const targetIndex = items.findIndex(item => item.id === undoAction.id)
 
     if (undoAction.kind === "queueDelete") {
       setPendingDeleteIds(ids => ids.filter(id => id !== undoAction.id))
@@ -623,8 +849,13 @@ function App() {
     }
 
     resetCardState()
-    setCurrentIndex(targetIndex)
+    if (targetIndex >= 0) {
+      setCurrentIndex(targetIndex)
+    }
     setUndoStack(stack => stack.slice(0, -1))
+    if (targetIndex < 0) {
+      toast("已撤销，当前筛选中不显示这张照片。")
+    }
   }
 
   async function deletePendingPhotos() {
@@ -643,7 +874,7 @@ function App() {
       if (assets.length === 0) {
         setPendingDeleteIds([])
         setDeletedPhotoIds(ids => [...new Set([...ids, ...idsToDelete])])
-        setUndoStack([])
+        setUndoStack(stack => stack.filter(action => !idsToDelete.includes(action.id)))
         toast("待删除照片已不存在。")
         setIsDeleting(false)
         return
@@ -669,7 +900,7 @@ function App() {
       })
 
       setPendingDeleteIds([])
-      setUndoStack([])
+      setUndoStack(stack => stack.filter(action => !idsToDelete.includes(action.id)))
       toast(`已删除 ${idsToDelete.length} 张照片。`)
     } catch (error) {
       console.error(error)
@@ -712,6 +943,7 @@ function App() {
     setIsEditingPhoto(true)
 
     try {
+      const wasSkipped = skippedPhotoIds.includes(currentItem.id)
       const ok = await targetAlbum.collection.addAssets([currentItem.asset])
       if (!ok) {
         toast("加入目标相簿失败，可能不是可编辑相簿。")
@@ -726,13 +958,31 @@ function App() {
         sourceAlbum.id !== targetAlbum.id &&
         sourceAlbum.collection.type === "album"
       )
+      let removedFromSource = false
 
       if (sourceAlbum && shouldRemoveFromSource) {
-        await sourceAlbum.collection.removeAssets([currentItem.asset])
-        setItems(list => list.filter(item => item.id !== currentItem.id))
-        setPendingDeleteIds(ids => ids.filter(id => id !== currentItem.id))
+        const removed = await sourceAlbum.collection.removeAssets([currentItem.asset])
+        removedFromSource = removed !== false
+        if (removedFromSource) {
+          setItems(list => list.filter(item => item.id !== currentItem.id))
+          setPendingDeleteIds(ids => ids.filter(id => id !== currentItem.id))
+        }
       } else {
         setCurrentIndex(index => index + 1)
+      }
+
+      setUndoStack(stack => [...stack, {
+        kind: "albumMove",
+        id: currentItem.id,
+        index: currentIndex,
+        targetAlbumId: targetAlbum.id,
+        sourceAlbumId: sourceAlbum?.id,
+        removedFromSource,
+        wasSkipped,
+      }])
+
+      if (!wasSkipped) {
+        addAlbumMoveHiddenRecord(currentItem.id, targetAlbum.id)
       }
 
       setSkippedPhotoIds(prev => {

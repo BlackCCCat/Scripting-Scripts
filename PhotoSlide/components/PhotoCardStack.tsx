@@ -50,7 +50,7 @@ function PhotoImageCard({
         <Image
           image={image}
           resizable
-          scaleToFill
+          scaleToFit
           frame={{ width: cardWidth, height: cardHeight }}
           clipShape={{ type: "rect", cornerRadius: CARD_CORNER_RADIUS, style: "continuous" }}
           allowsHitTesting={false}
