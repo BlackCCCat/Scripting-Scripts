@@ -1,0 +1,45 @@
+{
+  "contributors": [],
+  "version": "",
+  "localizedNames": {
+    "fr": "",
+    "pt": "",
+    "ru": "",
+    "zh": "",
+    "en": "",
+    "ja": "",
+    "de": "",
+    "es": "",
+    "it": ""
+  },
+  "name": "WLOC 虚拟定位",
+  "color": "rgba(52, 199, 89,1)",
+  "entry": "index.tsx",
+  "permissions": null,
+  "author": {
+    "name": "BlackCCCat",
+    "email": null,
+    "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts"
+  },
+  "localizedDescriptions": {
+    "fr": "",
+    "pt": "",
+    "ru": "",
+    "zh": "",
+    "en": "",
+    "ja": "",
+    "de": "",
+    "es": "",
+    "it": ""
+  },
+  "intentInputTypes": [],
+  "description": null,
+  "iconImage": null,
+  "icon": "location.fill.viewfinder",
+  "runInApp": false,
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/WLOC-Helper.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  }
+}
