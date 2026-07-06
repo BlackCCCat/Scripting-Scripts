@@ -18,6 +18,7 @@ import {
   TimerIntervalLabel,
   VStack,
 } from "scripting"
+import { StopCustomAlarmIntent } from "./app_intents"
 
 function dateValue(value: Date | number | string | null | undefined) {
   if (value instanceof Date) return value
@@ -170,6 +171,26 @@ function AlarmControlButtons({ state }: { state: AlarmLiveActivityState }) {
   )
 }
 
+function StopAlarmButton({ state }: { state: AlarmLiveActivityState }) {
+  const logicalAlarmId = state.metadata.logicalAlarmId
+  if (!logicalAlarmId) {
+    return <ActionButton action={state.actions.stop} fallbackImage="xmark" role="destructive" title="关闭" />
+  }
+
+  return (
+    <Button
+      intent={StopCustomAlarmIntent({
+        alarmId: state.alarmID,
+        logicalAlarmId,
+      })}
+      role="destructive"
+      controlSize="small"
+    >
+      <Label title="关闭" systemImage="xmark" />
+    </Button>
+  )
+}
+
 function LockScreenView(state: AlarmLiveActivityState) {
   const tint: Color = state.tintColor ?? "#FF9500"
   const isCountingDown = state.mode === "countdown" && state.countdown != null
@@ -225,7 +246,7 @@ function LockScreenView(state: AlarmLiveActivityState) {
       <HStack spacing={8}>
         <AlarmControlButtons state={state} />
         <Spacer />
-        <ActionButton action={state.actions.stop} fallbackImage="xmark" role="destructive" title="关闭" />
+        <StopAlarmButton state={state} />
       </HStack>
     </VStack>
   )
@@ -271,7 +292,7 @@ AlarmLiveActivity.register("CustomAlarmActivity", state => {
         <HStack spacing={8}>
           <AlarmControlButtons state={state} />
           <Spacer />
-          <ActionButton action={state.actions.stop} fallbackImage="xmark" role="destructive" title="关闭" />
+          <StopAlarmButton state={state} />
         </HStack>
       </LiveActivityUIExpandedBottom>
     </LiveActivityUI>
