@@ -1,7 +1,7 @@
 // 持久化存储层：基于 Scripting 的 Storage API（全局命名空间），
-// 封装收藏位置、应用设置、当前生效坐标缓存三类数据。
+// 封装收藏位置和应用设置，并清理旧版生效坐标缓存。
 
-import type { AppSettings, FavoriteLocation, ActiveLocation } from "../types";
+import type { AppSettings, FavoriteLocation } from "../types";
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from "../constants";
 
 // ── 收藏位置 ───────────────────────────────────────────────────────
@@ -55,15 +55,9 @@ export function saveSettings(settings: AppSettings): boolean {
   return Storage.set(STORAGE_KEYS.settings, settings);
 }
 
-// ── 当前生效坐标缓存 ─────────────────────────────────────────────────
+// ── 旧版当前生效坐标缓存清理 ───────────────────────────────────────────
 
-// 读取本地缓存的设备生效坐标（上次成功 save/query 的结果）
-export function loadActiveCache(): ActiveLocation | null {
-  return Storage.get<ActiveLocation>(STORAGE_KEYS.activeCache);
-}
-
-// 写入生效坐标缓存
-export function saveActiveCache(loc: ActiveLocation | null): void {
-  if (loc == null) Storage.remove(STORAGE_KEYS.activeCache);
-  else Storage.set(STORAGE_KEYS.activeCache, loc);
+// 当前生效坐标必须来自 WLOC 模块查询结果，不能使用脚本本地缓存兜底。
+export function clearActiveCache(): void {
+  Storage.remove(STORAGE_KEYS.activeCache);
 }

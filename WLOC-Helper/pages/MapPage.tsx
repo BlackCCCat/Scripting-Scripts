@@ -20,7 +20,7 @@ import {
 } from "scripting";
 import type { AppSettings, Coordinate, ActiveLocation, MapLayerId } from "../types";
 import { DEFAULT_SPAN } from "../constants";
-import { loadActiveCache, saveActiveCache } from "../utils/storage";
+import { clearActiveCache } from "../utils/storage";
 import { queryDevice } from "../api/deviceApi";
 
 // 从 MapCameraPosition 中提取中心坐标
@@ -53,17 +53,7 @@ export function MapPage({
   onCoordChange,
   onActiveLocChange,
 }: MapPageProps) {
-  const initialActive = loadActiveCache();
-
-  // 相机位置：有缓存坐标则用缓存，否则 automatic
-  const cameraPosition = useObservable<MapCameraPosition>(
-    initialActive
-      ? MapCameraPosition.region({
-          center: { latitude: initialActive.latitude, longitude: initialActive.longitude },
-          span: { latitudeDelta: DEFAULT_SPAN.latitudeDelta, longitudeDelta: DEFAULT_SPAN.longitudeDelta },
-        })
-      : MapCameraPosition.automatic(),
-  );
+  const cameraPosition = useObservable<MapCameraPosition>(MapCameraPosition.automatic());
 
 
 
@@ -82,9 +72,8 @@ export function MapPage({
 
   // 轮询：检测手势平移带来的坐标变化
   useEffect(() => {
-    const cached = initialActive;
-    let lastLat = cached?.latitude ?? 0;
-    let lastLng = cached?.longitude ?? 0;
+    let lastLat = 0;
+    let lastLng = 0;
     let stopped = false;
 
     function poll() {
@@ -127,39 +116,30 @@ export function MapPage({
     return () => mapSelection.unsubscribe(cb);
   }, []);
 
-  // 启动时：缓存坐标 → 查询设备 → GPS 定位
+  // 启动时：查询设备持久化坐标 → GPS 定位。当前生效坐标只以 WLOC 模块查询结果为准。
   useEffect(() => {
     (async () => {
-      // 1. 使用缓存坐标
-      const cached = initialActive;
-      if (cached) {
-        onActiveLocChange(cached);
-        moveCameraTo(cached.latitude, cached.longitude);
-        onCoordChange(cached.latitude, cached.longitude);
-      }
+      clearActiveCache();
 
-      // 2. 查询设备生效坐标
       try {
         const loc = await queryDevice(settings.saveApi);
         onActiveLocChange(loc);
-        saveActiveCache(loc);
         if (loc) {
           moveCameraTo(loc.latitude, loc.longitude);
           onCoordChange(loc.latitude, loc.longitude);
           return;
         }
-      } catch {}
-
-      // 3. 无保存坐标时尝试 GPS 定位
-      if (!cached) {
-        try {
-          const gps = await Location.requestCurrent({ forceRequest: true });
-          if (gps) {
-            moveCameraTo(gps.latitude, gps.longitude);
-            onCoordChange(gps.latitude, gps.longitude);
-          }
-        } catch {}
+      } catch {
+        onActiveLocChange(null);
       }
+
+      try {
+        const gps = await Location.requestCurrent({ forceRequest: true });
+        if (gps) {
+          moveCameraTo(gps.latitude, gps.longitude);
+          onCoordChange(gps.latitude, gps.longitude);
+        }
+      } catch {}
     })();
   }, []);
 

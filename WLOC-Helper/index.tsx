@@ -1000,7 +1000,6 @@ function App() {
             <HStack
               spacing={6}
               padding={{ vertical: 8, leading: 12, trailing: 12 }}
-              glassEffect={{ type: "rect", cornerRadius: 14 }}
             >
               <Text font="caption" foregroundStyle="secondaryLabel">致谢：</Text>
               <Text font="caption" foregroundStyle="systemBlue">Yu9191/wloc</Text>
@@ -1020,7 +1019,7 @@ function App() {
             {renderProxyModuleControl()}
             <Spacer />
             <Button action={handleOpenLocationSettings}>
-              <Image systemName="apple.logo" foregroundStyle="systemBlue" font="title3" />
+              <Image systemName="gearshape" foregroundStyle="systemBlue" font="title3" />
             </Button>
           </HStack>
 
@@ -1039,16 +1038,16 @@ function App() {
             </Text>
           </HStack>
 
-          <HStack spacing={12} frame={{ maxWidth: "infinity" }}>
+          <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
             <Button
               action={handleSave}
               frame={{ maxWidth: "infinity" }}
               background={{ style: "systemBlue", shape: "capsule" }}
               tint="white"
             >
-              <HStack spacing={6} padding={{ vertical: 10, leading: 16, trailing: 20 }}>
-                <Image systemName="square.and.arrow.down" font="subheadline" />
-                <Text font="subheadline" fontWeight="medium">
+              <HStack spacing={4} padding={{ vertical: 9, leading: 10, trailing: 10 }}>
+                <Image systemName="square.and.arrow.down" font="caption" />
+                <Text font="caption" fontWeight="medium" lineLimit={1} allowsTightening>
                   储存到设备
                 </Text>
               </HStack>
@@ -1063,10 +1062,25 @@ function App() {
               background={{ style: isCurrentCoordFavorited() ? "systemGray" : "systemOrange", shape: "capsule" }}
               tint="white"
             >
-              <HStack spacing={6} padding={{ vertical: 10, leading: 16, trailing: 20 }}>
-                <Image systemName={isCurrentCoordFavorited() ? "star.slash" : "star"} font="subheadline" />
-                <Text font="subheadline" fontWeight="medium">
+              <HStack spacing={4} padding={{ vertical: 9, leading: 10, trailing: 10 }}>
+                <Image systemName={isCurrentCoordFavorited() ? "star.slash" : "star"} font="caption" />
+                <Text font="caption" fontWeight="medium" lineLimit={1} allowsTightening>
                   {isCurrentCoordFavorited() ? "取消收藏" : "收藏"}
+                </Text>
+              </HStack>
+            </Button>
+            <Button
+              action={handleClear}
+              disabled={!loc}
+              frame={{ maxWidth: "infinity" }}
+              background={{ style: "systemRed", shape: "capsule" }}
+              tint="white"
+              opacity={loc ? 1 : 0.45}
+            >
+              <HStack spacing={4} padding={{ vertical: 9, leading: 10, trailing: 10 }}>
+                <Image systemName="trash" font="caption" />
+                <Text font="caption" fontWeight="medium" lineLimit={1} allowsTightening>
+                  移除定位
                 </Text>
               </HStack>
             </Button>
@@ -1079,10 +1093,6 @@ function App() {
                 <Text font="subheadline" foregroundStyle="systemGreen">
                   经度 {loc.longitude.toFixed(6)} 纬度 {loc.latitude.toFixed(6)} {loc.accuracy ? `精度 ${loc.accuracy}m` : ""}
                 </Text>
-                <Spacer />
-                <Button action={handleClear}>
-                  <Image systemName="trash" foregroundStyle="systemRed" font="subheadline" />
-                </Button>
               </>
             ) : (
               <>
