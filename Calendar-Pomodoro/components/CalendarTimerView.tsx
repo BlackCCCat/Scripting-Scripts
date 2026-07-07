@@ -1260,6 +1260,11 @@ export function CalendarTimerView() {
       : sessionStartAt
         ? "已停止"
         : "未开始";
+  const currentTaskTitle = activeTask?.name ?? "未选择";
+  const currentCalendarTitle = activeTask?.calendarTitle ?? "未选择";
+  const currentTimerSubtitle = activeTask
+    ? `${currentCalendarTitle}${isCountdown ? " · 倒计时" : " · 正计时"}`
+    : currentCalendarTitle;
   const iconPalette = {
     note: {
       light: "systemBlue",
@@ -1326,122 +1331,114 @@ export function CalendarTimerView() {
             }}
           >
             <Section header={<Text>当前计时</Text>}>
-              {activeTask ? (
-                <VStack spacing={10}>
-                  <HStack alignment="top">
-                    <VStack alignment="leading" spacing={2}>
-                      <Text font="headline">{activeTask.name}</Text>
-                      <Text foregroundStyle="secondaryLabel">
-                        {activeTask.calendarTitle}
-                        {isCountdown ? " · 倒计时" : " · 正计时"}
-                      </Text>
-                    </VStack>
-                    <Spacer />
-                    <Text foregroundStyle="secondaryLabel">{statusText}</Text>
-                  </HStack>
-
-                  <VStack spacing={4} alignment="center">
-                    <Text font="largeTitle" monospacedDigit>
-                      {timerText}
+              <VStack spacing={10}>
+                <HStack alignment="top">
+                  <VStack alignment="leading" spacing={2}>
+                    <Text font="headline">{currentTaskTitle}</Text>
+                    <Text foregroundStyle="secondaryLabel">
+                      {currentTimerSubtitle}
                     </Text>
-                    {sessionStartAt ? (
-                      <Text font="caption" foregroundStyle="secondaryLabel">
-                        开始时间：{formatDateTime(sessionStartAt)}
-                      </Text>
-                    ) : null}
                   </VStack>
+                  <Spacer />
+                  <Text foregroundStyle="secondaryLabel">{statusText}</Text>
+                </HStack>
 
-                  <HStack
-                    spacing={12}
-                    frame={{ maxWidth: "infinity", alignment: "center" as any }}
-                  >
-                    <Button
-                      buttonStyle="plain"
-                      disabled={saving || !sessionStartAt}
-                      action={withButtonHaptic(openNoteEditor)}
-                    >
-                      <VStack
-                        frame={{
-                          width: 56,
-                          height: 44,
-                          alignment: "center" as any,
-                        }}
-                      >
-                        <Image
-                          systemName="square.and.pencil"
-                          foregroundStyle={iconPalette.note}
-                          imageScale="large"
-                        />
-                      </VStack>
-                    </Button>
-                    <Button
-                      buttonStyle="plain"
-                      disabled={(!running && !paused) || saving}
-                      action={withButtonHaptic(cancelTimer)}
-                    >
-                      <VStack
-                        frame={{
-                          width: 56,
-                          height: 44,
-                          alignment: "center" as any,
-                        }}
-                      >
-                        <Image
-                          systemName="xmark"
-                          foregroundStyle={iconPalette.cancel}
-                          imageScale="large"
-                        />
-                      </VStack>
-                    </Button>
-                    <Button
-                      buttonStyle="plain"
-                      disabled={saving || (!running && !paused)}
-                      action={withButtonHaptic(() =>
-                        paused ? startTask(activeTask) : pauseTimer(),
-                      )}
-                    >
-                      <VStack
-                        frame={{
-                          width: 56,
-                          height: 44,
-                          alignment: "center" as any,
-                        }}
-                      >
-                        <Image
-                          systemName={paused ? "play.fill" : "pause.fill"}
-                          foregroundStyle={
-                            paused ? iconPalette.play : iconPalette.pause
-                          }
-                          imageScale="large"
-                        />
-                      </VStack>
-                    </Button>
-                    <Button
-                      buttonStyle="plain"
-                      disabled={(!running && !paused) || saving}
-                      action={withButtonHaptic(() => stopTimer())}
-                    >
-                      <VStack
-                        frame={{
-                          width: 56,
-                          height: 44,
-                          alignment: "center" as any,
-                        }}
-                      >
-                        <Image
-                          systemName="stop.fill"
-                          foregroundStyle={iconPalette.stop}
-                          imageScale="large"
-                        />
-                      </VStack>
-                    </Button>
-                  </HStack>
+                <VStack spacing={4} alignment="center">
+                  <Text font="largeTitle" monospacedDigit>
+                    {timerText}
+                  </Text>
+                  <Text font="caption" foregroundStyle="secondaryLabel">
+                    开始时间：{sessionStartAt ? formatDateTime(sessionStartAt) : "--"}
+                  </Text>
                 </VStack>
-              ) : (
-                <Text foregroundStyle="secondaryLabel">
-                  还没有选择任务，请在下方点击开始。
-                </Text>
-              )}
+
+                <HStack
+                  spacing={12}
+                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
+                >
+                  <Button
+                    buttonStyle="plain"
+                    disabled={!activeTask || saving || !sessionStartAt}
+                    action={withButtonHaptic(openNoteEditor)}
+                  >
+                    <VStack
+                      frame={{
+                        width: 56,
+                        height: 44,
+                        alignment: "center" as any,
+                      }}
+                    >
+                      <Image
+                        systemName="square.and.pencil"
+                        foregroundStyle={iconPalette.note}
+                        imageScale="large"
+                      />
+                    </VStack>
+                  </Button>
+                  <Button
+                    buttonStyle="plain"
+                    disabled={!activeTask || (!running && !paused) || saving}
+                    action={withButtonHaptic(cancelTimer)}
+                  >
+                    <VStack
+                      frame={{
+                        width: 56,
+                        height: 44,
+                        alignment: "center" as any,
+                      }}
+                    >
+                      <Image
+                        systemName="xmark"
+                        foregroundStyle={iconPalette.cancel}
+                        imageScale="large"
+                      />
+                    </VStack>
+                  </Button>
+                  <Button
+                    buttonStyle="plain"
+                    disabled={!activeTask || saving || (!running && !paused)}
+                    action={withButtonHaptic(() => {
+                      if (!activeTask) return;
+                      return paused ? startTask(activeTask) : pauseTimer();
+                    })}
+                  >
+                    <VStack
+                      frame={{
+                        width: 56,
+                        height: 44,
+                        alignment: "center" as any,
+                      }}
+                    >
+                      <Image
+                        systemName={paused ? "play.fill" : "pause.fill"}
+                        foregroundStyle={
+                          paused ? iconPalette.play : iconPalette.pause
+                        }
+                        imageScale="large"
+                      />
+                    </VStack>
+                  </Button>
+                  <Button
+                    buttonStyle="plain"
+                    disabled={!activeTask || (!running && !paused) || saving}
+                    action={withButtonHaptic(() => stopTimer())}
+                  >
+                    <VStack
+                      frame={{
+                        width: 56,
+                        height: 44,
+                        alignment: "center" as any,
+                      }}
+                    >
+                      <Image
+                        systemName="stop.fill"
+                        foregroundStyle={iconPalette.stop}
+                        imageScale="large"
+                      />
+                    </VStack>
+                  </Button>
+                </HStack>
+              </VStack>
             </Section>
 
             <Section
