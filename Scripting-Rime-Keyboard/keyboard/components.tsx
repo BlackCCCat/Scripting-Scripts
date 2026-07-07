@@ -159,14 +159,16 @@ export function candidateButtonNaturalWidth(params: {
   commentFontSize: number;
   expanded?: boolean;
 }) {
+  const displayText = firstDisplayLine(params.text);
+  const displayComment = firstDisplayLine(params.comment);
   const textFontSize = params.candidateFontSize * (params.expanded ? 1.08 : 1);
   const textWidth = estimatedTextWidth(
-    params.text,
+    displayText,
     textFontSize,
     params.candidateFontSize * (params.expanded ? 0.68 : 0.54),
   );
-  const commentLine = params.comment.length > 0
-    ? `${params.index + 1} ${params.comment}`
+  const commentLine = displayComment.length > 0
+    ? `${params.index + 1} ${displayComment}`
     : params.showIndex === false
     ? ""
     : `${params.index + 1}`;
@@ -185,6 +187,14 @@ export function candidateButtonNaturalWidth(params: {
     Math.max(minWidth, textWidth, commentWidth) +
       CANDIDATE_LEADING_PADDING + CANDIDATE_TRAILING_PADDING,
   );
+}
+
+function firstDisplayLine(value: string) {
+  if (!value.includes("\n") && !value.includes("\r")) return value;
+  const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const firstLine = lines[0] ?? "";
+  if (firstLine.length > 0) return firstLine;
+  return lines.find((line) => line.trim().length > 0) ?? "";
 }
 
 export function KeyFace(props: {
@@ -763,7 +773,8 @@ export function CandidateButton(props: {
   contextMenu?: any;
   onPress: () => void;
 }) {
-  const comment = props.comment ?? "";
+  const displayText = firstDisplayLine(props.candidate.text);
+  const comment = firstDisplayLine(props.comment ?? "");
   const showIndex = props.showIndex ?? true;
   const showComment = comment.length > 0;
   const candidateFontSize = props.candidateFontSize ?? 19;
@@ -846,7 +857,7 @@ export function CandidateButton(props: {
             alignment: "leading" as any,
           }}
         >
-          {props.candidate.text}
+          {displayText}
         </Text>
         {commentLine
           ? (
