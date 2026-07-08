@@ -11,6 +11,7 @@ import {
   ScrollViewReader,
   Text,
   useEffect,
+  useMemo,
   useRef,
   useState,
   VStack,
@@ -80,6 +81,12 @@ const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
 const LETTER_LONG_PRESS_LAYER_GRACE_MS = 900;
 const EXIT_ACTION_FEEDBACK_DELAY = 90;
+const NUMERIC_DIGIT_ROWS = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+];
+const NUMERIC_BOTTOM_ROW = ["ABC", "0", "space"];
 
 type ExpandedCandidateItem = {
   candidate: Rime.Candidate;
@@ -227,9 +234,12 @@ function KeyboardContent(props: {
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowGestureMachineRef = useRef(new Map<string, any>());
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
+  const hitTargetActionsRef = useRef<Record<string, any>>({});
   const spaceCursorDragXRef = useRef<number | null>(null);
   const preeditScrollProxyRef = useRef<any>(null);
   const candidateScrollProxyRef = useRef<any>(null);
+  const preeditScrollTimerRef = useRef<any>(null);
+  const candidateScrollTimerRef = useRef<any>(null);
   const lastPressFeedbackAtRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
@@ -283,6 +293,12 @@ function KeyboardContent(props: {
       }
       if (rimeNotificationFlushTimerRef.current != null) {
         clearTimeout(rimeNotificationFlushTimerRef.current);
+      }
+      if (preeditScrollTimerRef.current != null) {
+        clearTimeout(preeditScrollTimerRef.current);
+      }
+      if (candidateScrollTimerRef.current != null) {
+        clearTimeout(candidateScrollTimerRef.current);
       }
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
       CustomKeyboard.removeListener(
@@ -1913,11 +1929,14 @@ function KeyboardContent(props: {
     metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
   );
   const highlightedCandidate = candidates[highlightedIdx];
+  const highlightedCandidateComment = highlightedCandidate
+    ? candidateComment(highlightedCandidate)
+    : "";
   const highlightedCandidateWidth =
     highlightedCandidate && candidateBarWidth > 0
       ? candidateButtonNaturalWidth({
         text: highlightedCandidate.text,
-        comment: candidateComment(highlightedCandidate),
+        comment: highlightedCandidateComment,
         index: highlightedIdx,
         showIndex: settings.showCandidateComment,
         candidateFontSize: metrics.candidateFontSize,
@@ -1933,9 +1952,6 @@ function KeyboardContent(props: {
     : highlightedIdx === 0
     ? "leading"
     : "center";
-  const candidateScrollSignature = candidates.map((candidate, index) =>
-    `${index}:${candidate.text}:${candidateComment(candidate)}`
-  ).join("|");
   const candidateRightButtonImage =
     effectiveCandidateRightButtonMode === "expand"
       ? candidateExpanded ? "chevron.up.circle" : settings.toolbarExpandSymbol
@@ -1959,8 +1975,13 @@ function KeyboardContent(props: {
     bodyRowSpacing * 3;
 
   useEffect(() => {
+    if (preeditScrollTimerRef.current != null) {
+      clearTimeout(preeditScrollTimerRef.current);
+      preeditScrollTimerRef.current = null;
+    }
     if (!showsPreeditRow || preedit.length === 0) return;
-    setTimeout(() => {
+    preeditScrollTimerRef.current = setTimeout(() => {
+      preeditScrollTimerRef.current = null;
       preeditScrollProxyRef.current?.scrollTo(
         preeditScrollTargetKey,
         "trailing",
@@ -1974,8 +1995,13 @@ function KeyboardContent(props: {
   ]);
 
   useEffect(() => {
+    if (candidateScrollTimerRef.current != null) {
+      clearTimeout(candidateScrollTimerRef.current);
+      candidateScrollTimerRef.current = null;
+    }
     if (!candidateAutoScrollKey) return;
-    setTimeout(() => {
+    candidateScrollTimerRef.current = setTimeout(() => {
+      candidateScrollTimerRef.current = null;
       candidateScrollProxyRef.current?.scrollTo(
         candidateAutoScrollKey,
         candidateAutoScrollAnchor,
@@ -1984,8 +2010,8 @@ function KeyboardContent(props: {
   }, [
     candidateAutoScrollAnchor,
     candidateAutoScrollKey,
-    candidateScrollSignature,
     candidateBarWidth,
+    highlightedCandidateWidth,
   ]);
   const expandedPanelHeight = normalKeyboardBodyHeight;
 
@@ -2030,9 +2056,11 @@ function KeyboardContent(props: {
     return settings.composingFunctionOrder.map((key, index) => ({
       id: composingFunctionViewId(key),
       ...frame(index),
-      onPress: () => runComposingFunctionPress(key),
-      onSwipeUp: () => runComposingFunctionSwipe("up", key),
-      onSwipeDown: () => runComposingFunctionSwipe("down", key),
+      onPress: () => hitTargetActionsRef.current.runComposingFunctionPress(key),
+      onSwipeUp: () =>
+        hitTargetActionsRef.current.runComposingFunctionSwipe("up", key),
+      onSwipeDown: () =>
+        hitTargetActionsRef.current.runComposingFunctionSwipe("down", key),
     }));
   }
 
@@ -2043,20 +2071,22 @@ function KeyboardContent(props: {
     return settings.idleFunctionOrder.map((key, index) => ({
       id: idleFunctionViewId(key),
       ...frame(index),
-      onPress: () => runIdleFunctionPress(key),
+      onPress: () => hitTargetActionsRef.current.runIdleFunctionPress(key),
       onLongPress: key === "left"
-        ? () => startRepeatingCursorMove(-1)
+        ? () => hitTargetActionsRef.current.startRepeatingCursorMove(-1)
         : key === "right"
-        ? () => startRepeatingCursorMove(1)
+        ? () => hitTargetActionsRef.current.startRepeatingCursorMove(1)
         : undefined,
       onLongPressEnd: key === "left" || key === "right"
-        ? stopRepeatingCursorMove
+        ? () => hitTargetActionsRef.current.stopRepeatingCursorMove()
         : undefined,
       longPressDuration: key === "left" || key === "right"
         ? CURSOR_REPEAT_DURATION
         : undefined,
-      onSwipeUp: () => runIdleFunctionSwipe("up", key),
-      onSwipeDown: () => runIdleFunctionSwipe("down", key),
+      onSwipeUp: () =>
+        hitTargetActionsRef.current.runIdleFunctionSwipe("up", key),
+      onSwipeDown: () =>
+        hitTargetActionsRef.current.runIdleFunctionSwipe("down", key),
     }));
   }
 
@@ -2134,15 +2164,15 @@ function KeyboardContent(props: {
         id: "next-keyboard",
         x,
         width: bottomSplitButtonWidth,
-        onPress: () => CustomKeyboard.nextKeyboard(),
+        onPress: () => hitTargetActionsRef.current.nextKeyboard(),
       });
       x += bottomSplitButtonWidth + KEY_SPACING;
       targets.push({
         id: "numbers",
         x,
         width: bottomSplitButtonWidth,
-        onPress: toggleSymbolLayer,
-        onSwipeUp: () => pressSymbol("`"),
+        onPress: () => hitTargetActionsRef.current.toggleSymbolLayer(),
+        onSwipeUp: () => hitTargetActionsRef.current.pressBacktick(),
       });
       x += bottomSplitButtonWidth + KEY_SPACING;
     } else {
@@ -2150,8 +2180,8 @@ function KeyboardContent(props: {
         id: "numbers",
         x,
         width: metrics.bottom.numbers,
-        onPress: toggleSymbolLayer,
-        onSwipeUp: () => pressSymbol("`"),
+        onPress: () => hitTargetActionsRef.current.toggleSymbolLayer(),
+        onSwipeUp: () => hitTargetActionsRef.current.pressBacktick(),
       });
       x += metrics.bottom.numbers + KEY_SPACING;
     }
@@ -2159,15 +2189,15 @@ function KeyboardContent(props: {
       id: "comma",
       x,
       width: metrics.bottom.comma,
-      onPress: () => pressRimePunctuation(","),
-      onSwipeUp: () => pressRimePunctuation("."),
+      onPress: () => hitTargetActionsRef.current.pressComma(),
+      onSwipeUp: () => hitTargetActionsRef.current.pressPeriod(),
     });
     x += metrics.bottom.comma + KEY_SPACING;
     targets.push({
       id: "space",
       x,
       width: metrics.bottom.space,
-      onPress: pressSpace,
+      onPress: () => hitTargetActionsRef.current.pressSpace(),
       onLongPress: () => {
         spaceCursorDragXRef.current = null;
       },
@@ -2175,13 +2205,13 @@ function KeyboardContent(props: {
         spaceCursorDragXRef.current = null;
       },
       onSwipeUp: canSpaceSwipeCandidate("2")
-        ? () => processSpaceSwipeCandidate("2")
+        ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("2")
         : undefined,
       onSwipeDown: canSpaceSwipeCandidate("3")
-        ? () => processSpaceSwipeCandidate("3")
+        ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("3")
         : undefined,
-      onSwipeLeft: () => moveCursorSafely(-1),
-      onSwipeRight: () => moveCursorSafely(1),
+      onSwipeLeft: () => hitTargetActionsRef.current.moveCursorSafely(-1),
+      onSwipeRight: () => hitTargetActionsRef.current.moveCursorSafely(1),
     });
     x += metrics.bottom.space + KEY_SPACING;
     targets.push({
@@ -2190,28 +2220,13 @@ function KeyboardContent(props: {
       width: metrics.bottom.mode,
       safetyReleaseDelay: 180,
       onPress: () => {
-        if (composing && settings.modeComposingEnabled) {
-          runConfiguredAction(
-            settings.modeComposingAction,
-            settings.modeComposingActionMode,
-          );
-        } else {
-          toggleAscii();
-        }
+        hitTargetActionsRef.current.pressMode();
       },
       onSwipeUp: composing && settings.modeComposingEnabled
-        ? () =>
-          runConfiguredAction(
-            settings.modeComposingSwipeUp,
-            settings.modeComposingSwipeUpMode,
-          )
+        ? () => hitTargetActionsRef.current.modeSwipeUp()
         : undefined,
       onSwipeDown: composing && settings.modeComposingEnabled
-        ? () =>
-          runConfiguredAction(
-            settings.modeComposingSwipeDown,
-            settings.modeComposingSwipeDownMode,
-          )
+        ? () => hitTargetActionsRef.current.modeSwipeDown()
         : undefined,
     });
     x += metrics.bottom.mode + KEY_SPACING;
@@ -2219,8 +2234,8 @@ function KeyboardContent(props: {
       id: "enter",
       x,
       width: metrics.bottom.enter,
-      onPress: pressReturn,
-      onSwipeUp: insertNewline,
+      onPress: () => hitTargetActionsRef.current.pressReturn(),
+      onSwipeUp: () => hitTargetActionsRef.current.insertNewline(),
     });
     return targets.map((target, index) => ({
       ...target,
@@ -2239,9 +2254,11 @@ function KeyboardContent(props: {
           : `numeric-${value}`,
         ...horizontalHitFrame(displayX, numericKeyWidth, index, row.length),
         onPress: () => {
-          if (value === "ABC") switchToLetterLayer();
-          else if (value === "space") pressSpace();
-          else pressNumericDigit(value);
+          if (value === "ABC") {
+            hitTargetActionsRef.current.switchToLetterLayer();
+          } else if (value === "space") {
+            hitTargetActionsRef.current.pressSpace();
+          } else hitTargetActionsRef.current.pressNumericDigit(value);
         },
         onLongPress: value === "space"
           ? () => {
@@ -2254,13 +2271,17 @@ function KeyboardContent(props: {
           }
           : undefined,
         onSwipeUp: value === "space" && canSpaceSwipeCandidate("2")
-          ? () => processSpaceSwipeCandidate("2")
+          ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("2")
           : undefined,
         onSwipeDown: value === "space" && canSpaceSwipeCandidate("3")
-          ? () => processSpaceSwipeCandidate("3")
+          ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("3")
           : undefined,
-        onSwipeLeft: value === "space" ? () => moveCursorSafely(-1) : undefined,
-        onSwipeRight: value === "space" ? () => moveCursorSafely(1) : undefined,
+        onSwipeLeft: value === "space"
+          ? () => hitTargetActionsRef.current.moveCursorSafely(-1)
+          : undefined,
+        onSwipeRight: value === "space"
+          ? () => hitTargetActionsRef.current.moveCursorSafely(1)
+          : undefined,
       };
     });
   }
@@ -2280,37 +2301,40 @@ function KeyboardContent(props: {
         x: 0,
         width: numericRightWidth,
         ...frame(0),
-        onPress: pressBackspace,
-        onLongPress: () => startRepeatingBackspace("numeric-backspace"),
-        onLongPressEnd: stopRepeatingBackspace,
+        onPress: () => hitTargetActionsRef.current.pressBackspace(),
+        onLongPress: () =>
+          hitTargetActionsRef.current.startRepeatingBackspace(
+            "numeric-backspace",
+          ),
+        onLongPressEnd: () =>
+          hitTargetActionsRef.current.stopRepeatingBackspace(),
         longPressDuration: DELETE_LONG_PRESS_DURATION,
-        onSwipeLeft: backspaceSwipeLeft,
-        onSwipeUp: backspaceSwipeUp,
-        onSwipeDown: backspaceSwipeDown,
+        onSwipeLeft: () => hitTargetActionsRef.current.backspaceSwipeLeft(),
+        onSwipeUp: () => hitTargetActionsRef.current.backspaceSwipeUp(),
+        onSwipeDown: () => hitTargetActionsRef.current.backspaceSwipeDown(),
       },
       {
         id: "numeric-dot",
         x: 0,
         width: numericRightWidth,
         ...frame(1),
-        onPress: pressNumericDot,
+        onPress: () => hitTargetActionsRef.current.pressNumericDot(),
       },
       {
         id: "numeric-equal",
         x: 0,
         width: numericRightWidth,
         ...frame(2),
-        onPress: () => pressSymbol("="),
-        onSwipeUp: () =>
-          runConfiguredAction(settings.numericEqualsSwipeUp, "rime"),
+        onPress: () => hitTargetActionsRef.current.pressEqual(),
+        onSwipeUp: () => hitTargetActionsRef.current.numericEqualSwipeUp(),
       },
       {
         id: "numeric-enter",
         x: 0,
         width: numericRightWidth,
         ...frame(3),
-        onPress: pressReturn,
-        onSwipeUp: insertNewline,
+        onPress: () => hitTargetActionsRef.current.pressReturn(),
+        onSwipeUp: () => hitTargetActionsRef.current.insertNewline(),
       },
     ];
   }
@@ -2640,6 +2664,112 @@ function KeyboardContent(props: {
     metrics.keyHeight,
   );
 
+  hitTargetActionsRef.current = {
+    nextKeyboard: () => CustomKeyboard.nextKeyboard(),
+    toggleSymbolLayer,
+    pressBacktick: () => pressSymbol("`"),
+    pressComma: () => pressRimePunctuation(","),
+    pressPeriod: () => pressRimePunctuation("."),
+    pressSpace,
+    processSpaceSwipeCandidate,
+    moveCursorSafely,
+    pressMode: () => {
+      if (composing && settings.modeComposingEnabled) {
+        runConfiguredAction(
+          settings.modeComposingAction,
+          settings.modeComposingActionMode,
+        );
+      } else {
+        toggleAscii();
+      }
+    },
+    modeSwipeUp: () =>
+      runConfiguredAction(
+        settings.modeComposingSwipeUp,
+        settings.modeComposingSwipeUpMode,
+      ),
+    modeSwipeDown: () =>
+      runConfiguredAction(
+        settings.modeComposingSwipeDown,
+        settings.modeComposingSwipeDownMode,
+      ),
+    pressReturn,
+    insertNewline,
+    switchToLetterLayer,
+    pressNumericDigit,
+    pressBackspace,
+    startRepeatingBackspace,
+    stopRepeatingBackspace,
+    backspaceSwipeLeft,
+    backspaceSwipeUp,
+    backspaceSwipeDown,
+    pressNumericDot,
+    pressEqual: () => pressSymbol("="),
+    numericEqualSwipeUp: () =>
+      runConfiguredAction(settings.numericEqualsSwipeUp, "rime"),
+    runComposingFunctionPress,
+    runComposingFunctionSwipe,
+    runIdleFunctionPress,
+    runIdleFunctionSwipe,
+    startRepeatingCursorMove,
+    stopRepeatingCursorMove,
+  };
+
+  const cachedComposingFunctionHitTargets = useMemo(
+    () => composingFunctionHitTargets(),
+    [
+      metrics.functionWidth8,
+      settings.composingFunctionOrder,
+    ],
+  );
+  const cachedIdleFunctionHitTargets = useMemo(
+    () => idleFunctionHitTargets(),
+    [
+      metrics.functionWidth8,
+      settings.idleFunctionOrder,
+    ],
+  );
+  const cachedBottomRowHitTargets = useMemo(
+    () => bottomRowHitTargets(),
+    [
+      showNextKeyboardButton,
+      bottomSplitButtonWidth,
+      metrics.bottom.numbers,
+      metrics.bottom.comma,
+      metrics.bottom.space,
+      metrics.bottom.mode,
+      metrics.bottom.enter,
+      composing,
+      settings.modeComposingEnabled,
+      preedit.length,
+      candidates.length,
+    ],
+  );
+  const cachedNumericDigitHitTargets = useMemo(
+    () => NUMERIC_DIGIT_ROWS.map((row) => numericRowHitTargets(row)),
+    [
+      numericKeyWidth,
+      preedit.length,
+      candidates.length,
+    ],
+  );
+  const cachedNumericBottomHitTargets = useMemo(
+    () => numericRowHitTargets(NUMERIC_BOTTOM_ROW),
+    [
+      numericKeyWidth,
+      preedit.length,
+      candidates.length,
+    ],
+  );
+  const cachedNumericRightHitTargets = useMemo(
+    () => numericRightHitTargets(),
+    [
+      numericRightWidth,
+      metrics.keyHeight,
+      numericRowSpacing,
+    ],
+  );
+
   return (
     <VStack
       spacing={6}
@@ -2884,7 +3014,7 @@ function KeyboardContent(props: {
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
                         "func-comp",
-                        composingFunctionHitTargets(),
+                        cachedComposingFunctionHitTargets,
                       )}
                     >
                       {settings.composingFunctionOrder.map(
@@ -2902,7 +3032,7 @@ function KeyboardContent(props: {
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
                         "func-idle",
-                        idleFunctionHitTargets(),
+                        cachedIdleFunctionHitTargets,
                       )}
                     >
                       {settings.idleFunctionOrder.map(renderIdleFunctionKey)}
@@ -2996,12 +3126,9 @@ function KeyboardContent(props: {
                         height: numericPanelHeight,
                       }}
                     >
-                      {[
-                        ["1", "2", "3"],
-                        ["4", "5", "6"],
-                        ["7", "8", "9"],
-                      ].map((row, rowIndex) => {
-                        const hitTargets = numericRowHitTargets(row);
+                      {NUMERIC_DIGIT_ROWS.map((row, rowIndex) => {
+                        const hitTargets =
+                          cachedNumericDigitHitTargets[rowIndex] ?? [];
                         const rowTouch = numericTouchFrame(rowIndex);
                         return (
                           <HStack
@@ -3050,7 +3177,7 @@ function KeyboardContent(props: {
                         contentShape="rect"
                         highPriorityGesture={hitRowGesture(
                           "num-row-zero",
-                          numericRowHitTargets(["ABC", "0", "space"]),
+                          cachedNumericBottomHitTargets,
                         )}
                       >
                         <KeyFace
@@ -3108,7 +3235,7 @@ function KeyboardContent(props: {
                       contentShape="rect"
                       highPriorityGesture={hitRowGesture(
                         "num-row-right",
-                        numericRightHitTargets(),
+                        cachedNumericRightHitTargets,
                       )}
                     >
                       <KeyFace
@@ -3386,7 +3513,7 @@ function KeyboardContent(props: {
               contentShape="rect"
               highPriorityGesture={hitRowGesture(
                 "bottom-row",
-                bottomRowHitTargets(),
+                cachedBottomRowHitTargets,
               )}
             >
               {showNextKeyboardButton

@@ -27,6 +27,7 @@ let coreHapticsClickUnavailable = false;
 const reusableHapticPlayers = new Map<string, HapticPlayerPool>();
 let reusableClickPlayers: HapticPlayerPool | null = null;
 let lastSystemClickAt = 0;
+let cachedGraphemeSegmenter: any = null;
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -535,7 +536,9 @@ export function estimatedTextWidth(
   const Segmenter = (Intl as any).Segmenter;
   const segments: string[] = typeof Segmenter === "function"
     ? Array.from(
-      new Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+      (cachedGraphemeSegmenter ??= new Segmenter(undefined, {
+        granularity: "grapheme",
+      })).segment(text),
       (item: any) => item.segment,
     )
     : Array.from(text);
@@ -544,11 +547,11 @@ export function estimatedTextWidth(
       /\p{Extended_Pictographic}|\p{Emoji_Presentation}|\p{Regional_Indicator}/u
         .test(segment)
     ) {
-      total += fontSize * 2.12;
+      total += fontSize * 1.2;
     } else if (/[\u3000-\u303f\uff01-\uff60\uffe0-\uffe6]/.test(segment)) {
       total += fontSize * 0.96;
     } else if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(segment)) {
-      total += fontSize * 0.94;
+      total += fontSize * 0.95;
     } else if (/[A-Z]/.test(segment)) total += fontSize * 0.64;
     else if (/[0-9]/.test(segment)) total += fontSize * 0.58;
     else if (/[mwMW]/.test(segment)) total += fontSize * 0.78;

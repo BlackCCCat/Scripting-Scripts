@@ -20,7 +20,7 @@ import {
 } from "./utils";
 
 const CANDIDATE_LEADING_PADDING = 7;
-const CANDIDATE_TRAILING_PADDING = CANDIDATE_LEADING_PADDING;
+const CANDIDATE_TRAILING_PADDING = 7;
 const KEY_POPUP_EXTRA_WIDTH = 18;
 const KEY_VISUAL_CORNER_RADIUS = 8;
 const KEY_VISUAL_SHAPE = {
@@ -28,6 +28,8 @@ const KEY_VISUAL_SHAPE = {
   cornerRadius: KEY_VISUAL_CORNER_RADIUS,
 };
 const HIT_TEST_BACKGROUND = "rgba(0,0,0,0.001)";
+const CANDIDATE_WIDTH_CACHE_LIMIT = 360;
+const candidateWidthCache = new Map<string, number>();
 type KeyPopupEdge = "center" | "left" | "right";
 
 function KeyPopup(props: {
@@ -159,6 +161,17 @@ export function candidateButtonNaturalWidth(params: {
   commentFontSize: number;
   expanded?: boolean;
 }) {
+  const cacheKey = [
+    params.expanded ? "1" : "0",
+    params.showIndex === false ? "0" : "1",
+    params.index,
+    params.candidateFontSize,
+    params.commentFontSize,
+    params.text,
+    params.comment,
+  ].join("\u0001");
+  const cached = candidateWidthCache.get(cacheKey);
+  if (cached != null) return cached;
   const displayText = firstDisplayLine(params.text);
   const displayComment = firstDisplayLine(params.comment);
   const textFontSize = params.candidateFontSize * (params.expanded ? 1.08 : 1);
@@ -183,10 +196,15 @@ export function candidateButtonNaturalWidth(params: {
     : 0;
   const hasMetaLine = commentLine.length > 0;
   const minWidth = params.expanded ? 54 : hasMetaLine ? 42 : 12;
-  return Math.ceil(
+  const width = Math.ceil(
     Math.max(minWidth, textWidth, commentWidth) +
       CANDIDATE_LEADING_PADDING + CANDIDATE_TRAILING_PADDING,
   );
+  candidateWidthCache.set(cacheKey, width);
+  if (candidateWidthCache.size > CANDIDATE_WIDTH_CACHE_LIMIT) {
+    candidateWidthCache.delete(candidateWidthCache.keys().next().value);
+  }
+  return width;
 }
 
 function firstDisplayLine(value: string) {
@@ -831,57 +849,61 @@ export function CandidateButton(props: {
   const shadow = props.selected && !useNativeStyle
     ? { color: props.palette.shadow as any, radius: 1, y: 1 }
     : undefined;
-
   return (
     <ZStack
       frame={{ ...rootFrame, width: resolvedWidth }}
-      background={background as any}
       foregroundStyle={fg as any}
-      glassEffect={glassEffect as any}
-      clipShape={props.selected ? { type: "rect", cornerRadius: 8 } : undefined}
-      shadow={shadow}
       contentShape="rect"
       onTapGesture={props.onPress}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
     >
       <VStack
-        spacing={showComment || commentLine ? 1 : 0}
-        frame={{ ...contentFrame, width: resolvedWidth }}
-        padding={{ horizontal: CANDIDATE_LEADING_PADDING, vertical: 4 }}
+        frame={contentFrame}
+        background={background as any}
+        glassEffect={glassEffect as any}
+        clipShape={props.selected ? { type: "rect", cornerRadius: 8 } : undefined}
+        shadow={shadow}
       >
-        <Text
-          font={candidateFontSize * (props.expanded ? 1.08 : 1)}
-          foregroundStyle={fg as any}
-          lineLimit={1}
-          minScaleFactor={0.74}
-          allowsTightening
-          frame={{
-            maxWidth: "infinity" as any,
-            maxHeight: showComment || commentLine
-              ? "infinity" as any
-              : frameHeight,
-            alignment: "leading" as any,
-          }}
+        <VStack
+          alignment="leading"
+          spacing={showComment || commentLine ? 1 : 0}
+          frame={{ alignment: "leading" as any }}
+          padding={{ leading: CANDIDATE_LEADING_PADDING, trailing: CANDIDATE_TRAILING_PADDING, vertical: 4 }}
         >
-          {displayText}
-        </Text>
-        {commentLine
-          ? (
-            <Text
-              font={commentFontSize * (props.expanded ? 1.12 : 1)}
-              foregroundStyle={hintFg as any}
-              lineLimit={1}
-              minScaleFactor={0.62}
-              allowsTightening
-              frame={{
-                maxWidth: "infinity" as any,
-                alignment: "leading" as any,
-              }}
-            >
-              {commentLine}
-            </Text>
-          )
-          : null}
+          <Text
+            font={candidateFontSize * (props.expanded ? 1.08 : 1)}
+            foregroundStyle={fg as any}
+            lineLimit={1}
+            minScaleFactor={0.74}
+            allowsTightening
+            frame={{
+              ...(frameWidth ? { maxWidth: "infinity" as any } : {}),
+              maxHeight: showComment || commentLine
+                ? "infinity" as any
+                : frameHeight,
+              alignment: "leading" as any,
+            }}
+          >
+            {displayText}
+          </Text>
+          {commentLine
+            ? (
+              <Text
+                font={commentFontSize * (props.expanded ? 1.12 : 1)}
+                foregroundStyle={hintFg as any}
+                lineLimit={1}
+                minScaleFactor={0.62}
+                allowsTightening
+                frame={{
+                  ...(frameWidth ? { maxWidth: "infinity" as any } : {}),
+                  alignment: "leading" as any,
+                }}
+              >
+                {commentLine}
+              </Text>
+            )
+            : null}
+        </VStack>
       </VStack>
     </ZStack>
   );
