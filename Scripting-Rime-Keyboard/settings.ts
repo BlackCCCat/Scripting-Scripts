@@ -107,6 +107,7 @@ export type RimeKeyboardSettings = {
   numericEqualsSwipeUp: string;
   letterLongPressDuration: number;
   swipeTriggerDistance: number;
+  showKeyPopups: boolean;
   inputClicks: boolean;
   hapticEngineClicks: boolean;
   haptics: boolean;
@@ -509,6 +510,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   numericEqualsSwipeUp: "V",
   letterLongPressDuration: 520,
   swipeTriggerDistance: 80,
+  showKeyPopups: true,
   inputClicks: false,
   hapticEngineClicks: true,
   haptics: true,
@@ -1068,6 +1070,9 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       SWIPE_TRIGGER_DISTANCE_MIN,
       SWIPE_TRIGGER_DISTANCE_MAX,
     ),
+    showKeyPopups: typeof raw?.showKeyPopups === "boolean"
+      ? raw.showKeyPopups
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.showKeyPopups,
     inputClicks: typeof raw?.hapticEngineClicks === "boolean" &&
         typeof raw?.inputClicks === "boolean"
       ? raw.inputClicks

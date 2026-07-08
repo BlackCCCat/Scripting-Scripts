@@ -250,6 +250,7 @@ export function KeyFace(props: {
   popupSwipeDownLabel?: string;
   popupSwipeDownImage?: string;
   popupOptions?: Array<{ label: string; selected: boolean }>;
+  showPopup?: boolean;
   contextMenu?: any;
 }) {
   const propsRef = useRef(props);
@@ -302,16 +303,20 @@ export function KeyFace(props: {
     4,
     Math.min(9, visualHeight * 0.13),
   );
-  const hasSwipePopup = props.active && swipePopup !== null;
-  const popupTitle = props.active
+  const showPopup = props.showPopup ?? true;
+  const hasSwipePopup = showPopup && props.active && swipePopup !== null;
+  const popupTitle = showPopup && props.active
     ? hasSwipePopup ? swipePopup?.label : props.popupLabel
     : undefined;
-  const popupImage = props.active
+  const popupImage = showPopup && props.active
     ? hasSwipePopup ? swipePopup?.image : props.popupImage
     : undefined;
-  const popupOptions = props.active ? props.popupOptions : undefined;
+  const popupOptions = showPopup && props.active
+    ? props.popupOptions
+    : undefined;
   const popupForeground = hasSwipePopup ? hintFg : fg;
-  const popupVisible = !!(popupTitle || popupImage || popupOptions);
+  const popupVisible = showPopup &&
+    !!(popupTitle || popupImage || popupOptions);
   const popupWidth = popupVisible ? visualWidth + KEY_POPUP_EXTRA_WIDTH : 0;
   const popupRenderWidth = popupOptions
     ? Math.max(popupWidth + 34, visualWidth * 1.7)
@@ -381,6 +386,7 @@ export function KeyFace(props: {
   }
 
   function updateSwipePopup(details: any) {
+    if (propsRef.current.showPopup === false) return;
     if (!propsRef.current.popupLabel && !propsRef.current.popupImage) return;
     const threshold = typeof propsRef.current.swipeTriggerDistance ===
         "function"

@@ -8,6 +8,7 @@ import {
   Navigation,
   NavigationLink,
   NavigationStack,
+  Path,
   Picker,
   Script,
   Section,
@@ -51,6 +52,7 @@ import {
   LETTER_LONG_PRESS_DURATION_MAX,
   LETTER_LONG_PRESS_DURATION_MIN,
   loadRimeKeyboardSettings,
+  normalizeRimeKeyboardSettings,
   type RimeKeyboardSettings,
   type RimeKeyboardTheme,
   saveRimeKeyboardSettings,
@@ -1216,7 +1218,78 @@ function SettingsView() {
     });
   }
 
-  function resetSettings() {
+  function settingsExportFileName() {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return `Scripting-Rime-Keyboard-Settings-${stamp}.json`;
+  }
+
+  function errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function exportSettings() {
+    try {
+      const directory = await DocumentPicker.pickDirectory();
+      if (!directory) return;
+      const current = normalizeRimeKeyboardSettings(applyTextDrafts(settings));
+      const filePath = Path.join(directory, settingsExportFileName());
+      await FileManager.writeAsString(
+        filePath,
+        JSON.stringify(current, null, 2),
+        "utf-8",
+      );
+      await Dialog.alert({
+        title: "导出完成",
+        message: `设置已导出到：${filePath}`,
+      });
+    } catch (error) {
+      await Dialog.alert({
+        title: "导出失败",
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  async function importSettings() {
+    try {
+      const files = await DocumentPicker.pickFiles({
+        types: ["public.json", "public.text"],
+        allowsMultipleSelection: false,
+      });
+      const filePath = files[0];
+      if (!filePath) return;
+      const raw = await FileManager.readAsString(filePath, "utf-8");
+      const imported = normalizeRimeKeyboardSettings(JSON.parse(raw));
+      const confirmed = await Dialog.confirm({
+        title: "导入设置",
+        message: "导入后会覆盖当前设置，确定继续吗？",
+        cancelLabel: "取消",
+        confirmLabel: "导入",
+      });
+      if (!confirmed) return;
+      pendingTextDraftsRef.current = {};
+      updateSettings(imported);
+      await Dialog.alert({
+        title: "导入完成",
+        message: "设置已导入，重新打开键盘后生效。",
+      });
+    } catch (error) {
+      await Dialog.alert({
+        title: "导入失败",
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  async function resetSettings() {
+    const confirmed = await Dialog.confirm({
+      title: "恢复默认设置",
+      message: "确定要恢复默认设置吗？当前自定义配置会被覆盖。",
+      cancelLabel: "取消",
+      confirmLabel: "恢复",
+    });
+    if (!confirmed) return;
+    pendingTextDraftsRef.current = {};
     updateSettings(DEFAULT_RIME_KEYBOARD_SETTINGS);
   }
 
@@ -1960,6 +2033,13 @@ function SettingsView() {
               />
             )
             : null}
+          <Toggle
+            title="显示按键气泡"
+            systemImage="bubble.left"
+            value={settings.showKeyPopups}
+            onChanged={(value) =>
+              patchSettings({ showKeyPopups: value })}
+          />
           <VStack alignment="leading" spacing={8}>
             <HStack>
               <Text>字母长按时长</Text>
@@ -2081,8 +2161,7 @@ function SettingsView() {
             title="显示通知"
             systemImage="bell"
             value={settings.showNotifications}
-            onChanged={(value) =>
-              patchSettings({ showNotifications: value })}
+            onChanged={(value) => patchSettings({ showNotifications: value })}
           />
           <Toggle
             title="键盘启动时轻量部署"
@@ -2804,10 +2883,24 @@ function SettingsView() {
           }
         >
           <Button
-            title="恢复默认设置"
-            systemImage="arrow.counterclockwise"
-            action={resetSettings}
+            title="导入设置"
+            systemImage="square.and.arrow.down"
+            action={() => void importSettings()}
           />
+          <Button
+            title="导出设置"
+            systemImage="square.and.arrow.up"
+            action={() => void exportSettings()}
+          />
+          <Button role="destructive" action={() => void resetSettings()}>
+            <HStack spacing={8}>
+              <Image
+                systemName="arrow.counterclockwise"
+                foregroundStyle="systemRed"
+              />
+              <Text foregroundStyle="systemRed">恢复默认设置</Text>
+            </HStack>
+          </Button>
         </Section>
       </List>
     </NavigationStack>

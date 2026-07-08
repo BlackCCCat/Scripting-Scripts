@@ -3031,6 +3031,7 @@ function KeyboardContent(props: {
                                 passive
                                 active={isPressed(`numeric-${value}`)}
                                 popupLabel={value}
+                                showPopup={settings.showKeyPopups}
                                 onPress={() =>
                                   runWithFeedback(() =>
                                     pressNumericDigit(value)
@@ -3078,6 +3079,7 @@ function KeyboardContent(props: {
                           passive
                           active={isPressed("numeric-0")}
                           popupLabel="0"
+                          showPopup={settings.showKeyPopups}
                           onPress={() =>
                             runWithFeedback(() => pressNumericDigit("0"))}
                         />
@@ -3314,6 +3316,7 @@ function KeyboardContent(props: {
                                 },
                               ]
                               : undefined}
+                            showPopup={settings.showKeyPopups}
                             onPress={() => pressLetter(ch)}
                             onTouchStart={() => beginKeyTouch(ch)}
                             onTouchEnd={() => endKeyTouch(ch)}
