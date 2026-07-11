@@ -16,6 +16,7 @@ export type TimerSession = {
   segments?: TimerSessionSegment[]
   running: boolean
   paused: boolean
+  countdownSeconds?: number
   activityId?: string
 }
 
@@ -98,6 +99,7 @@ export async function loadSession(): Promise<TimerSession | null> {
         : [],
       running: Boolean(data.running),
       paused: Boolean(data.paused),
+      countdownSeconds: Number(data.countdownSeconds) > 0 ? Number(data.countdownSeconds) : undefined,
       activityId: data.activityId ? String(data.activityId) : undefined,
     }
   } catch {

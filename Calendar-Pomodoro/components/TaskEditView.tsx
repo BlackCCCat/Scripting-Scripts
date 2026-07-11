@@ -20,8 +20,8 @@ import {
   useState,
 } from "scripting"
 
-// 倒计时与通知的预设选项
-import { COUNTDOWN_OPTIONS, NOTIFICATION_INTERVAL_OPTIONS } from "../constants"
+// 通知频率的预设选项
+import { NOTIFICATION_INTERVAL_OPTIONS } from "../constants"
 // 任务类型
 import type { Task } from "../types"
 // 读取/保存本地设置（用于记住日历账户选择）
@@ -69,23 +69,14 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
   // 账户筛选后的可写日历
   const [calendars, setCalendars] = useState<Calendar[]>([])
   const [calendarIdx, setCalendarIdx] = useState(0)
-  // 加载状态与错误
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
   // 本地设置（用于记住账户选择）
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const selectionInitRef = useRef(false)
   const initialSourceInjectedRef = useRef(false)
-  // 计时选项
-  const [useCountdown, setUseCountdown] = useState(Boolean(props.initial?.useCountdown ?? false))
+  // 计时选项：倒计时由主页底部时间轴临时决定，任务设置页只保留通知配置
   const [useNotification, setUseNotification] = useState(
     Boolean(props.initial?.useNotification ?? false)
   )
-  const [countdownIdx, setCountdownIdx] = useState(() => {
-    const initialSeconds = props.initial?.countdownSeconds ?? 0
-    const idx = COUNTDOWN_OPTIONS.findIndex((opt) => opt.seconds === initialSeconds)
-    return idx >= 0 ? idx : 0
-  })
   const [notificationIdx, setNotificationIdx] = useState(() => {
     const minutes = props.initial?.notificationIntervalMinutes ?? 0
     const idx = NOTIFICATION_INTERVAL_OPTIONS.findIndex((opt) => opt.minutes === minutes)
@@ -159,15 +150,11 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
 
   async function loadSources() {
     try {
-      setLoading(true)
-      setError("")
       // 读取所有日历账户
       const list = Calendar.getSources?.() ?? []
       setSources(list)
-    } catch (e: any) {
-      setError(String(e?.message ?? e))
-    } finally {
-      setLoading(false)
+    } catch {
+      setSources([])
     }
   }
 
@@ -178,7 +165,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       setSettings(data)
     } catch {
       setSettings({
-        showMarkdown: true,
         selectedCalendarSourceIds: [],
       })
     }
@@ -186,8 +172,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
 
   async function loadCalendars() {
     try {
-      setLoading(true)
-      setError("")
       if (!selectedSourceIds.length) {
         setCalendars([])
         return
@@ -207,10 +191,8 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       })
       const writable = unique.filter((c) => c.isForEvents && c.allowsContentModifications)
       setCalendars(writable)
-    } catch (e: any) {
-      setError(String(e?.message ?? e))
-    } finally {
-      setLoading(false)
+    } catch {
+      setCalendars([])
     }
   }
 
@@ -246,7 +228,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       return
     }
     // UI 选择转换为最终保存的任务字段
-    const countdown = useCountdown ? COUNTDOWN_OPTIONS[countdownIdx]?.seconds ?? 0 : 0
     const notificationMinutes = useNotification
       ? NOTIFICATION_INTERVAL_OPTIONS[notificationIdx]?.minutes ?? 0
       : 0
@@ -255,8 +236,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       name: trimmedName,
       calendarId: picked.identifier,
       calendarTitle: picked.title,
-      useCountdown: useCountdown,
-      countdownSeconds: countdown,
       useNotification: useNotification,
       notificationIntervalMinutes: notificationMinutes,
       noteDraft: props.initial?.noteDraft ?? "",
@@ -356,30 +335,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                 }}
               >
                 {NOTIFICATION_INTERVAL_OPTIONS.map((opt, idx) => (
-                  <Text key={`${opt.label}-${idx}`} tag={idx}>
-                    {opt.label}
-                  </Text>
-                ))}
-              </Picker>
-            ) : null}
-            {/* 倒计时开关与时长 */}
-            <Toggle
-              value={useCountdown}
-              onChanged={(v: boolean) => {
-                HapticFeedback.heavyImpact()
-                setUseCountdown(v)
-              }}
-            >
-              <Text>使用倒计时</Text>
-            </Toggle>
-            {useCountdown ? (
-              <Picker
-                title="倒计时"
-                pickerStyle="wheel"
-                value={countdownIdx}
-                onChanged={(idx: number) => setCountdownIdx(idx)}
-              >
-                {COUNTDOWN_OPTIONS.map((opt, idx) => (
                   <Text key={`${opt.label}-${idx}`} tag={idx}>
                     {opt.label}
                   </Text>

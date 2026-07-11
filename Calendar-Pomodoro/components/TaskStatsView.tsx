@@ -215,7 +215,7 @@ function isSameTaskRecord(event: CalendarEvent, task: Task): boolean {
   return !eventCalendarId || eventCalendarId === task.calendarId;
 }
 
-async function loadCalendarEventsByChunks(task: Task): Promise<CalendarEvent[]> {
+export async function loadCalendarEventsByChunks(task: Task): Promise<CalendarEvent[]> {
   // 避免一次性查询跨 20 多年区间导致系统返回空结果，这里按季度分片拉取。
   const results = new Map<string, CalendarEvent>();
   const now = new Date();

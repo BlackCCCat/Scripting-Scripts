@@ -1,38 +1,40 @@
 // Scripting 组件与 API：
-// - UI 组件（List/Section/Button/Text 等）
+// - UI 组件（Button/Menu/ScrollView/Text 等）
 // - Hooks（useState/useEffect/useMemo/useRef）
 // - 系统能力（LiveActivity/Notification/Script）
 import {
   Button,
+  Circle,
+  DragGesture,
+  GeometryReader,
   HStack,
   Image,
-  List,
+  Menu,
   Navigation,
   NavigationStack,
-  Section,
+  Rectangle,
+  ScrollView,
   Spacer,
-  Tab,
-  TabView,
   Text,
   TextField,
+  TimerIntervalLabel,
   VStack,
+  ZStack,
   useEffect,
   useMemo,
-  useObservable,
   useRef,
   useState,
   LiveActivity,
   type LiveActivityState,
   Notification,
-  ForEach,
+  ReorderableForEach,
   Script,
+  useObservable,
 } from "scripting";
 
-// 业务常量（倒计时/通知选项、正计时窗口）
+// 业务常量（正计时 Live Activity 展示窗口）
 import {
-  COUNTDOWN_OPTIONS,
   COUNT_UP_WINDOW_MS,
-  NOTIFICATION_INTERVAL_OPTIONS,
 } from "../constants";
 // Live Activity UI 注册器
 import { PomodoroLiveActivity } from "../live_activity";
@@ -40,12 +42,6 @@ import { PomodoroLiveActivity } from "../live_activity";
 import type { Task, TimerActivityState } from "../types";
 // 本地持久化（任务）
 import { loadTasks, saveTasks } from "../utils/storage";
-// 本地持久化（设置）
-import {
-  loadSettings,
-  saveSettings,
-  type AppSettings,
-} from "../utils/settings";
 // 本地持久化（计时会话）
 import {
   clearSession,
@@ -54,19 +50,23 @@ import {
   type TimerSession,
   type TimerSessionSegment,
 } from "../utils/session";
+// 任务总时长缓存：先显示缓存，再异步校准日历数据
+import {
+  loadTaskDurationsCache,
+  saveTaskDurationsCache,
+} from "../utils/taskDurations";
 // 时间格式化工具
 import { formatDateTime, formatDuration } from "../utils/time";
 // 任务新增/编辑页面
 import { TaskEditView } from "./TaskEditView";
 // 任务统计页面
-import { TaskStatsView } from "./TaskStatsView";
+import { TaskStatsView, loadCalendarEventsByChunks } from "./TaskStatsView";
 // 总体报告页
 import { OverallReportView } from "./OverallReportView";
 
 // Live Activity 创建器（用于 start/update/end）
 const createTimerActivity = PomodoroLiveActivity;
-// 兼容历史名称，清理残留活动
-const LIVE_ACTIVITY_NAMES = ["calendar-pomodoro", "calendar-loger-timer"];
+const LIVE_ACTIVITY_NAME = "calendar-pomodoro";
 
 function NoteEditorPage(props: { title: string; content: string }) {
   const dismiss = Navigation.useDismiss();
@@ -109,9 +109,387 @@ function NoteEditorPage(props: { title: string; content: string }) {
   );
 }
 
+type TaskDurationMap = Record<string, number>;
+
+function formatCompactDuration(ms: number): string {
+  if (ms <= 0) return "0m";
+  const totalMinutes = Math.max(1, Math.round(ms / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m`;
+  if (minutes <= 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
+function formatClockTime(date: Date): string {
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function currentMinuteOfDay(date = new Date()): number {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function floorToTimelineStep(value: number): number {
+  return Math.floor(value / TIMELINE_STEP_MINUTES) * TIMELINE_STEP_MINUTES;
+}
+
+function playTimelineTickSound() {
+  try {
+    const anyGlobal = globalThis as any;
+    if (typeof anyGlobal.AudioServicesPlaySystemSound === "function") {
+      anyGlobal.AudioServicesPlaySystemSound(1104);
+    } else if (typeof anyGlobal.SystemSound?.play === "function") {
+      anyGlobal.SystemSound.play(1104);
+    }
+  } catch {
+    // 当前 dts 未暴露稳定的系统点击音 API；没有可用实现时静默跳过。
+  }
+}
+
+let repeatingTimerIdSeed = 0;
+const repeatingTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+function setRepeatingTimer(action: () => void, delay: number): number {
+  const nativeSetInterval = (globalThis as any).setInterval;
+  if (typeof nativeSetInterval === "function") {
+    return nativeSetInterval(action, delay) as number;
+  }
+
+  // Scripting 运行时没有稳定暴露 setInterval，这里用 setTimeout 递归模拟可清理的重复定时器。
+  const id = ++repeatingTimerIdSeed;
+  const tick = () => {
+    if (!repeatingTimers.has(id)) return;
+    try {
+      action();
+    } finally {
+      if (repeatingTimers.has(id)) {
+        repeatingTimers.set(id, setTimeout(tick, delay));
+      }
+    }
+  };
+
+  repeatingTimers.set(id, setTimeout(tick, delay));
+  return id;
+}
+
+function clearRepeatingTimer(id: number) {
+  const timer = repeatingTimers.get(id);
+  if (timer != null) {
+    clearTimeout(timer);
+    repeatingTimers.delete(id);
+    return;
+  }
+
+  const nativeClearInterval = (globalThis as any).clearInterval;
+  if (typeof nativeClearInterval === "function") {
+    nativeClearInterval(id);
+  }
+}
+
+const TIMELINE_STEP_MINUTES = 5;
+const TIMELINE_MAX_MINUTES = 24 * 60;
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundToTimelineStep(value: number): number {
+  const rounded = Math.round(value / TIMELINE_STEP_MINUTES) * TIMELINE_STEP_MINUTES;
+  return Math.max(0, Math.min(TIMELINE_MAX_MINUTES, rounded));
+}
+
+function TaskProgressLine(props: { ratio: number; active: boolean }) {
+  const ratio = clamp01(props.ratio);
+  const tint = props.active ? "systemGreen" : "systemCyan";
+  return (
+    <GeometryReader frame={{ height: 16, maxWidth: "infinity" }}>
+      {(proxy) => {
+        const width = Math.max(1, proxy.size.width);
+        const progressWidth = Math.max(2, width * ratio);
+        const restWidth = Math.max(0, width - progressWidth);
+        const dotX = Math.max(0, Math.min(width - 10, progressWidth - 5));
+        return (
+          <ZStack alignment="leading" frame={{ width, height: 16 }}>
+            <HStack spacing={0} frame={{ width, height: 2 }}>
+              <Rectangle fill={tint as any} frame={{ width: progressWidth, height: 2 }} />
+              <Rectangle fill="separator" opacity={0.45} frame={{ width: restWidth, height: 2 }} />
+            </HStack>
+            <Circle fill={tint as any} frame={{ width: 10, height: 10 }} offset={{ x: dotX, y: 0 }} />
+          </ZStack>
+        );
+      }}
+    </GeometryReader>
+  );
+}
+
+const TIMELINE_STEP_WIDTH = 18;
+
+function TimeAxis(props: {
+  value: number;
+  targetLabel: string;
+  durationLabel: string;
+  currentMinute: number;
+  disabled: boolean;
+  maxValue: number;
+  onChanged: (value: number) => void;
+}) {
+  const dragStartRef = useRef(props.value);
+  const draggingRef = useRef(false);
+  const clampedValue = Math.max(0, Math.min(props.maxValue, props.value));
+  const visibleSteps = 18;
+  const maxSteps = Math.ceil(props.maxValue / TIMELINE_STEP_MINUTES);
+  const centerShift = -(clampedValue / TIMELINE_STEP_MINUTES) * TIMELINE_STEP_WIDTH;
+  const futureMarks = Array.from({ length: maxSteps + visibleSteps + 1 }, (_, index) => index);
+
+  function valueFromDrag(translationX: number): number {
+    const deltaSteps = Math.round(-translationX / TIMELINE_STEP_WIDTH);
+    const next = dragStartRef.current + deltaSteps * TIMELINE_STEP_MINUTES;
+    return Math.max(0, Math.min(props.maxValue, next));
+  }
+
+  const dragGesture = DragGesture({ minDistance: 1, coordinateSpace: "local" })
+    .onChanged((details: any) => {
+      if (props.disabled) return;
+      if (!draggingRef.current) {
+        draggingRef.current = true;
+        dragStartRef.current = props.value;
+      }
+      props.onChanged(valueFromDrag(Number(details.translation?.width ?? 0)));
+    })
+    .onEnded((details: any) => {
+      if (props.disabled) return;
+      const next = valueFromDrag(Number(details.translation?.width ?? 0));
+      draggingRef.current = false;
+      dragStartRef.current = next;
+      props.onChanged(next);
+    });
+
+  return (
+    <VStack
+      spacing={4}
+      frame={{ height: 62, maxWidth: "infinity" }}
+      background="rgba(0,0,0,0.001)"
+      clipped
+      gesture={dragGesture}
+    >
+      <Text foregroundStyle="secondaryLabel" monospacedDigit>
+        {props.targetLabel}
+      </Text>
+
+      <ZStack frame={{ height: 18, maxWidth: "infinity" }} clipped allowsHitTesting={false}>
+        <GeometryReader frame={{ height: 18, maxWidth: "infinity" }}>
+          {(proxy) => {
+            const width = Math.max(1, proxy.size.width);
+            const centerX = width / 2;
+            const axisY = 9;
+            // 以时间轴自身为准：当前时间点左侧是已过去时间，右侧是未来时间。
+            // 目标点固定在卡片中央，拖动时移动的是时间轴视窗，所以当前时间点会在视窗中平移。
+            const rawCurrentTimeX = centerX + centerShift;
+            const currentTimeX = Math.max(0, Math.min(width, rawCurrentTimeX));
+            return (
+              <ZStack frame={{ width, height: 18 }}>
+                {currentTimeX > 0.5 ? (
+                  <Rectangle
+                    fill="systemCyan"
+                    opacity={0.65}
+                    frame={{ width: currentTimeX, height: 2 }}
+                    position={{ x: currentTimeX / 2, y: axisY }}
+                  />
+                ) : null}
+                {futureMarks.map((index) => {
+                  const x = rawCurrentTimeX + index * TIMELINE_STEP_WIDTH;
+                  if (x < currentTimeX - 0.5 || x > width + 0.5) {
+                    return null;
+                  }
+                  const absoluteMinute =
+                    props.currentMinute + index * TIMELINE_STEP_MINUTES;
+                  const isHourMark = absoluteMinute % 60 === 0;
+                  const isQuarterMark = absoluteMinute % 15 === 0;
+                  const dotSize = isHourMark ? 6 : isQuarterMark ? 4 : 3;
+                  return (
+                    <Circle
+                      key={index}
+                      fill={isHourMark ? "secondaryLabel" : "separator"}
+                      opacity={isHourMark ? 0.9 : isQuarterMark ? 0.82 : 0.95}
+                      frame={{ width: dotSize, height: dotSize }}
+                      position={{ x, y: axisY }}
+                    />
+                  );
+                })}
+              </ZStack>
+            );
+          }}
+        </GeometryReader>
+        <Circle
+          fill="systemCyan"
+          frame={{ width: 13, height: 13 }}
+        />
+      </ZStack>
+
+      <Text foregroundStyle="secondaryLabel" monospacedDigit>
+        {props.durationLabel}
+      </Text>
+    </VStack>
+  );
+}
+
+function FocusActionButton(props: {
+  title: string;
+  systemImage: string;
+  tint: string;
+  disabled?: boolean;
+  action: () => void;
+}) {
+  return (
+    <Button
+      buttonStyle="plain"
+      disabled={props.disabled}
+      action={props.action}
+      tint={props.tint as any}
+      glassEffect={{ type: "rect", cornerRadius: 24 } as any}
+      frame={{ width: 92, height: 78 }}
+    >
+      <VStack spacing={8} frame={{ width: 92, height: 78, alignment: "center" as any }}>
+        <Image systemName={props.systemImage} foregroundStyle={props.tint as any} imageScale="large" />
+        <Text foregroundStyle="secondaryLabel">{props.title}</Text>
+      </VStack>
+    </Button>
+  );
+}
+
+function FocusStopButton(props: {
+  disabled?: boolean;
+  action: () => void;
+}) {
+  return (
+    <Button
+      buttonStyle="plain"
+      disabled={props.disabled}
+      action={props.action}
+      tint="systemRed"
+      glassEffect={{ type: "rect", cornerRadius: 30 } as any}
+      frame={{ maxWidth: "infinity", minHeight: 62 }}
+    >
+      <HStack spacing={10} frame={{ maxWidth: "infinity", minHeight: 62, alignment: "center" as any }}>
+        <Image systemName="stop.fill" foregroundStyle="systemRed" imageScale="large" />
+        <Text font="headline" fontWeight="bold" foregroundStyle="systemRed">
+          停止并保存
+        </Text>
+      </HStack>
+    </Button>
+  );
+}
+
+function FocusTimerPage(props: {
+  task: Task;
+  calendarTitle: string;
+  timerText: string;
+  timerFrom: Date;
+  timerTo: Date;
+  timerPauseTime?: Date;
+  timerCountsDown: boolean;
+  modeText: string;
+  statusText: string;
+  paused: boolean;
+  saving: boolean;
+  onCancel: () => void;
+  onPause: () => void;
+  onStop: () => void;
+  onNote: () => void;
+}) {
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle="专注中"
+        navigationBarTitleDisplayMode="inline"
+        spacing={28}
+        padding={{ top: 28, bottom: 28, leading: 22, trailing: 22 }}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
+      >
+        <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+          <Text font="title" fontWeight="bold" lineLimit={2}>
+            {props.task.name}
+          </Text>
+          <Text foregroundStyle="secondaryLabel" lineLimit={1}>
+            {props.calendarTitle}
+          </Text>
+          <Text foregroundStyle={props.modeText === "倒计时" ? "systemBlue" : "systemGreen"} font="headline">
+            {props.modeText} · {props.statusText}
+          </Text>
+        </VStack>
+
+        <Spacer />
+
+        <VStack spacing={12} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+          <TimerIntervalLabel
+            from={props.timerFrom}
+            to={props.timerTo}
+            pauseTime={props.timerPauseTime}
+            countsDown={props.timerCountsDown}
+            font={54}
+            monospacedDigit
+            fontWeight="heavy"
+            foregroundStyle={props.timerCountsDown ? "systemBlue" : "systemGreen"}
+          />
+        </VStack>
+
+        <Spacer />
+
+        <FocusStopButton disabled={props.saving} action={props.onStop} />
+
+        <HStack spacing={12} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+          <FocusActionButton
+            title="取消"
+            systemImage="xmark"
+            tint="secondaryLabel"
+            disabled={props.saving}
+            action={props.onCancel}
+          />
+          <FocusActionButton
+            title={props.paused ? "继续" : "暂停"}
+            systemImage={props.paused ? "play.fill" : "pause.fill"}
+            tint="systemOrange"
+            disabled={props.saving}
+            action={props.onPause}
+          />
+          <FocusActionButton
+            title="笔记"
+            systemImage="square.and.pencil"
+            tint="systemBlue"
+            disabled={props.saving}
+            action={props.onNote}
+          />
+        </HStack>
+      </VStack>
+    </NavigationStack>
+  );
+}
+
+function OverallReportSheet(props: { tasks: Task[] }) {
+  const dismiss = Navigation.useDismiss();
+  return <OverallReportView tasks={props.tasks} onExit={() => dismiss()} />;
+}
+
 export function CalendarTimerView() {
   // 任务列表与当前选中任务
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [currentTimelineMinutes, setCurrentTimelineMinutes] = useState(() =>
+    floorToTimelineStep(currentMinuteOfDay()),
+  );
+  // 时间轴保存的是“距离当前时间的偏移分钟”，0 表示从现在开始正计时。
+  const [focusMinutes, setFocusMinutes] = useState(0);
+  const [timelineTouched, setTimelineTouched] = useState(false);
+  const [showFocusPage, setShowFocusPage] = useState(false);
+  const [focusModeText, setFocusModeText] = useState("正计时");
+  const [taskDurations, setTaskDurations] = useState<TaskDurationMap>({});
+  const [taskDurationsLoading, setTaskDurationsLoading] = useState(false);
+  const [uiTick, setUiTick] = useState(Date.now());
+  const activeReorderTask = useObservable<Task | null>(null);
+  const [runtimeCountdownSeconds, setRuntimeCountdownSeconds] = useState<
+    number | null
+  >(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   // 当前关联日历（保存事件时使用）
   const [activeCalendar, setActiveCalendar] = useState<Calendar | null>(null);
@@ -131,17 +509,14 @@ export function CalendarTimerView() {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const [saving, setSaving] = useState(false);
-  // 笔记草稿与 Markdown 预览开关
+  // 笔记草稿
   const [noteDraft, setNoteDraft] = useState("");
-  const [showMarkdown, setShowMarkdown] = useState(true);
   // 当前环境是否支持脚本最小化。这里同步判断，避免首帧后再插入按钮导致导航栏抖动。
   const supportsMinimization =
     typeof Script.supportsMinimization === "function" &&
     Script.supportsMinimization();
-  // 定时器、设置与 Live Activity 的引用
+  // 定时器与 Live Activity 的引用
   const timerIdRef = useRef<number | null>(null);
-  const settingsLoadedRef = useRef(false);
-  const settingsRef = useRef<AppSettings | null>(null);
   const activityRef = useRef<LiveActivity<TimerActivityState> | null>(null);
   const activityStartRef = useRef<Promise<boolean> | null>(null);
   const activityReadyRef = useRef(false);
@@ -154,25 +529,41 @@ export function CalendarTimerView() {
   const accumulatedMsRef = useRef(0);
   const runningRef = useRef(false);
   const pausedRef = useRef(false);
+  const runtimeCountdownSecondsRef = useRef<number | null>(null);
+  const lastTimelineFeedbackRef = useRef<number | null>(null);
   const completedSegmentsRef = useRef<TimerSessionSegment[]>([]);
   const staleRefreshAtRef = useRef(0);
   const stoppingRef = useRef(false);
   const noteSaveTimerRef = useRef<number | null>(null);
   const tasksLoadedRef = useRef(false);
   const restoreDoneRef = useRef(false);
-  const editMode = useObservable<any>(() => {
-    // 编辑模式依赖系统 EditMode，未提供时保持空值
-    const EditMode = (globalThis as any).EditMode;
-    return EditMode?.inactive ? EditMode.inactive() : null;
-  });
-  const activeTab = useObservable<number>(0);
-  const [isEditing, setIsEditing] = useState(false);
+  useEffect(() => {
+    // 首次进入：加载任务
+    void refreshTasks();
+  }, []);
+  useEffect(() => {
+    // 首页进入时刷新“当前时间”所在的时间轴位置；用户未手动滚动前，目标点始终跟随当前时间。
+    const refreshNow = () => {
+      const next = floorToTimelineStep(currentMinuteOfDay());
+      setCurrentTimelineMinutes(next);
+      if (!timelineTouched && !runningRef.current && !pausedRef.current) {
+        setFocusMinutes(0);
+      }
+    };
+    refreshNow();
+    const id = setRepeatingTimer(refreshNow, 30000);
+    return () => clearRepeatingTimer(id);
+  }, [timelineTouched]);
 
   useEffect(() => {
-    // 首次进入：加载任务与设置
-    void refreshTasks();
-    void loadAppSettings();
-  }, []);
+    // 全屏计时页使用独立 UI tick，避免父级 elapsedMs 未触发渲染时页面读秒停住。
+    if (!running && !paused && !showFocusPage) return;
+    const update = () => setUiTick(Date.now());
+    update();
+    const id = setRepeatingTimer(update, 1000);
+    return () => clearRepeatingTimer(id);
+  }, [running, paused, showFocusPage]);
+
 
   useEffect(() => {
     // 任务加载完成后尝试恢复计时会话
@@ -197,6 +588,7 @@ export function CalendarTimerView() {
     runningRef.current = running;
     pausedRef.current = paused;
     completedSegmentsRef.current = completedSegments;
+    runtimeCountdownSecondsRef.current = runtimeCountdownSeconds;
   }, [
     activeTask,
     sessionStartAt,
@@ -205,20 +597,57 @@ export function CalendarTimerView() {
     running,
     paused,
     completedSegments,
+    runtimeCountdownSeconds,
   ]);
 
+  const selectedTask = useMemo(() => {
+    if ((running || paused) && activeTask) return activeTask;
+    if (selectedTaskId) {
+      const found = tasks.find((t) => t.id === selectedTaskId);
+      if (found) return found;
+    }
+    return activeTask ?? tasks[0] ?? null;
+  }, [activeTask, paused, running, selectedTaskId, tasks]);
+
+  useEffect(() => {
+    if (!selectedTaskId && tasks[0]) {
+      setSelectedTaskId(tasks[0].id);
+    }
+  }, [tasks]);
+
   // 当前任务的计时模式
-  const isCountdown = !!(
-    activeTask?.useCountdown && (activeTask.countdownSeconds ?? 0) > 0
-  );
+  const effectiveCountdownSeconds =
+    runtimeCountdownSeconds ??
+    (activeTask?.useCountdown ? (activeTask.countdownSeconds ?? 0) : 0);
+  const isCountdown = effectiveCountdownSeconds > 0;
   const countdownTotalMs = isCountdown
-    ? (activeTask?.countdownSeconds ?? 0) * 1000
+    ? effectiveCountdownSeconds * 1000
     : 0;
+  const liveElapsedMs =
+    running && segmentStartAt
+      ? accumulatedMs + Math.max(0, uiTick - segmentStartAt.getTime())
+      : elapsedMs;
   // 倒计时显示剩余；正计时显示已过
   const displayMs = isCountdown
-    ? Math.max(0, countdownTotalMs - elapsedMs)
-    : elapsedMs;
+    ? Math.max(0, countdownTotalMs - liveElapsedMs)
+    : liveElapsedMs;
   const timerText = useMemo(() => formatDuration(displayMs), [displayMs]);
+  const focusTimerNowMs = Date.now();
+  const focusLiveElapsedMs =
+    running && segmentStartAt
+      ? accumulatedMs + Math.max(0, focusTimerNowMs - segmentStartAt.getTime())
+      : elapsedMs;
+  const focusTimerDisplayMs = isCountdown
+    ? Math.max(0, countdownTotalMs - focusLiveElapsedMs)
+    : focusLiveElapsedMs;
+  const focusTimerFrom = isCountdown
+    ? new Date(focusTimerNowMs)
+    : new Date(focusTimerNowMs - focusTimerDisplayMs);
+  const focusTimerTo = isCountdown
+    ? new Date(focusTimerNowMs + focusTimerDisplayMs)
+    : new Date(focusTimerFrom.getTime() + COUNT_UP_WINDOW_MS);
+  const focusTimerPauseTime =
+    paused || !running ? new Date(focusTimerNowMs) : undefined;
 
   useEffect(() => {
     // 切换任务时同步笔记草稿
@@ -249,18 +678,6 @@ export function CalendarTimerView() {
         clearTimeout(noteSaveTimerRef.current);
     };
   }, [noteDraft, activeTask]);
-
-  useEffect(() => {
-    if (!settingsLoadedRef.current) return;
-    // 仅更新 showMarkdown，同时保留其他设置字段
-    const current = settingsRef.current ?? {
-      showMarkdown,
-      selectedCalendarSourceIds: [],
-    };
-    const next = { ...current, showMarkdown };
-    settingsRef.current = next;
-    void saveSettings(next);
-  }, [showMarkdown]);
 
   useEffect(() => {
     // 根据运行状态控制后台保活
@@ -328,6 +745,13 @@ export function CalendarTimerView() {
     }
   }
 
+  function sessionCountdownSecondsForTask(task: Task | null): number | undefined {
+    const seconds =
+      runtimeCountdownSecondsRef.current ??
+      (task?.useCountdown ? (task.countdownSeconds ?? 0) : 0);
+    return seconds > 0 ? seconds : undefined;
+  }
+
   function buildCurrentSessionSnapshot(now = new Date()): TimerSession | null {
     // 将当前内存中的计时状态整理成可持久化的会话快照
     const task = activeTaskRef.current;
@@ -348,6 +772,7 @@ export function CalendarTimerView() {
       segments: completedSegmentsRef.current,
       running: isRunning,
       paused: pausedRef.current,
+      countdownSeconds: sessionCountdownSecondsForTask(task),
       activityId: activityRef.current?.activityId,
     };
   }
@@ -422,15 +847,78 @@ export function CalendarTimerView() {
     }
   }
 
-  async function refreshTasks() {
+  async function refreshTasks(options?: { waitForDurations?: boolean }) {
     // 读取已保存的任务列表
     try {
       const list = await loadTasks();
+      const cachedDurations = await loadTaskDurationsCache();
+      const visibleDurations: TaskDurationMap = {};
+      for (const task of list) {
+        visibleDurations[task.id] = cachedDurations[task.id] ?? 0;
+      }
       setTasks(list);
+      setTaskDurations(visibleDurations);
       tasksLoadedRef.current = true;
+      const durationRefresh = refreshTaskDurations(list, visibleDurations);
+      if (options?.waitForDurations) {
+        await durationRefresh;
+      } else {
+        void durationRefresh;
+      }
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) });
     }
+  }
+
+  async function refreshTaskDurations(list: Task[], initial?: TaskDurationMap) {
+    if (!list.length) {
+      setTaskDurations({});
+      setTaskDurationsLoading(false);
+      void saveTaskDurationsCache({});
+      return;
+    }
+
+    setTaskDurationsLoading(true);
+    console.log("[Calendar Pomodoro] duration refresh start", JSON.stringify(list.map((task) => ({ id: task.id, name: task.name, calendarId: task.calendarId }))));
+    const totals: TaskDurationMap = { ...(initial ?? taskDurations) };
+    for (const task of list) {
+      totals[task.id] = totals[task.id] ?? 0;
+    }
+
+    for (const task of list) {
+      try {
+        const events = await loadCalendarEventsByChunks(task);
+        totals[task.id] = events.reduce((sum, event) => {
+          const startMs = event.startDate?.getTime?.() ?? 0;
+          const endMs = event.endDate?.getTime?.() ?? 0;
+          return sum + Math.max(0, endMs - startMs);
+        }, 0);
+        console.log("[Calendar Pomodoro] duration loaded", task.name, events.length, totals[task.id]);
+        setTaskDurations({ ...totals });
+      } catch (e) {
+        console.warn("[Calendar Pomodoro] failed to load task duration", task.name, e);
+      }
+    }
+    setTaskDurationsLoading(false);
+    const nextCache: TaskDurationMap = {};
+    for (const task of list) {
+      nextCache[task.id] = totals[task.id] ?? 0;
+    }
+    void saveTaskDurationsCache(nextCache);
+  }
+
+  function addTaskDurationToCache(
+    taskId: string,
+    durationMs: number,
+  ): TaskDurationMap | null {
+    if (durationMs <= 0) return null;
+    const next = {
+      ...taskDurations,
+      [taskId]: (taskDurations[taskId] ?? 0) + durationMs,
+    };
+    setTaskDurations(next);
+    void saveTaskDurationsCache(next);
+    return next;
   }
 
   async function restoreSessionIfNeeded() {
@@ -473,6 +961,17 @@ export function CalendarTimerView() {
       setRunning(session.running);
       setPaused(session.paused);
       setSegmentStartAt(session.running ? segmentStart : null);
+      const restoredCountdownSeconds =
+        session.countdownSeconds ??
+        (task.useCountdown ? (task.countdownSeconds ?? 0) : 0);
+      setRuntimeCountdownSeconds(
+        restoredCountdownSeconds > 0 ? restoredCountdownSeconds : null,
+      );
+      runtimeCountdownSecondsRef.current =
+        restoredCountdownSeconds > 0 ? restoredCountdownSeconds : null;
+      setFocusModeText(restoredCountdownSeconds > 0 ? "倒计时" : "正计时");
+      setSelectedTaskId(task.id);
+      setShowFocusPage(true);
 
       const calendar = await resolveCalendar(task);
       if (calendar) setActiveCalendar(calendar);
@@ -531,11 +1030,10 @@ export function CalendarTimerView() {
         activity: LiveActivity<TimerActivityState>;
       }> = [];
       for (const id of ids) {
-        let activity: LiveActivity<TimerActivityState> | null = null;
-        for (const name of LIVE_ACTIVITY_NAMES) {
-          activity = await LiveActivity.from<TimerActivityState>(id, name);
-          if (activity) break;
-        }
+        const activity = await LiveActivity.from<TimerActivityState>(
+          id,
+          LIVE_ACTIVITY_NAME,
+        );
         if (activity) list.push({ id, activity });
       }
       return list;
@@ -572,18 +1070,6 @@ export function CalendarTimerView() {
         }
       }),
     );
-  }
-
-  async function loadAppSettings() {
-    // 读取本地设置（目前仅 Markdown 预览开关）
-    try {
-      const settings = await loadSettings();
-      settingsLoadedRef.current = true;
-      settingsRef.current = settings;
-      setShowMarkdown(settings.showMarkdown);
-    } catch {
-      settingsLoadedRef.current = true;
-    }
   }
 
   async function persistTasks(next: Task[]) {
@@ -652,6 +1138,17 @@ export function CalendarTimerView() {
     if (activeTaskId === task.id) setActiveTaskId(null);
   }
 
+  function moveTasks(indices: number[], newOffset: number) {
+    // 按 Scripting 文档的 onMove 语义：先取出被拖动项，再插入目标位置。
+    const movingItems = indices
+      .map((index) => tasks[index])
+      .filter((item): item is Task => Boolean(item));
+    if (!movingItems.length) return;
+    const next = tasks.filter((_, index) => !indices.includes(index));
+    next.splice(newOffset, 0, ...movingItems);
+    void persistTasks(next);
+  }
+
   async function resolveCalendar(task: Task): Promise<Calendar | null> {
     // 根据任务保存的日历 ID 找到可写日历
     try {
@@ -707,7 +1204,7 @@ export function CalendarTimerView() {
       const scheduled = await Notification.schedule({
         title: task.name,
         body: "计时提醒",
-        threadIdentifier: "calendar-loger",
+        threadIdentifier: "calendar-pomodoro",
         interruptionLevel: "active",
         trigger,
       });
@@ -734,8 +1231,10 @@ export function CalendarTimerView() {
     pausedAt?: Date,
   ): TimerActivityState {
     // 生成 Live Activity 的状态（正计时/倒计时两套）
-    const countdownSeconds = task.countdownSeconds ?? 0;
-    if (task.useCountdown && countdownSeconds > 0) {
+    const countdownSeconds =
+      runtimeCountdownSecondsRef.current ??
+      (task.useCountdown ? (task.countdownSeconds ?? 0) : 0);
+    if (countdownSeconds > 0) {
       const remaining = Math.max(0, countdownSeconds * 1000 - elapsed);
       const base: TimerActivityState = {
         title: task.name,
@@ -881,6 +1380,7 @@ export function CalendarTimerView() {
           segments: completedSegmentsRef.current,
           running,
           paused,
+          countdownSeconds: sessionCountdownSecondsForTask(task),
           activityId,
         });
       }
@@ -946,6 +1446,7 @@ export function CalendarTimerView() {
         segments: completedSegments,
         running: true,
         paused: false,
+        countdownSeconds: sessionCountdownSecondsForTask(task),
         activityId: activityId ?? undefined,
       });
       return;
@@ -982,6 +1483,7 @@ export function CalendarTimerView() {
       segments: [],
       running: true,
       paused: false,
+      countdownSeconds: sessionCountdownSecondsForTask(task),
       activityId: activityId ?? undefined,
     });
   }
@@ -1015,6 +1517,7 @@ export function CalendarTimerView() {
           segments: nextSegments,
           running: false,
           paused: true,
+          countdownSeconds: sessionCountdownSecondsForTask(activeTask),
           activityId: activityRef.current?.activityId,
         });
       }
@@ -1036,6 +1539,8 @@ export function CalendarTimerView() {
     setAccumulatedMs(0);
     setElapsedMs(0);
     setCompletedSegments([]);
+    setRuntimeCountdownSeconds(null);
+    runtimeCountdownSecondsRef.current = null;
     await clearNotifications();
     await endLiveActivity(activeTask, now, total);
     await persistSessionState(null);
@@ -1114,6 +1619,7 @@ export function CalendarTimerView() {
     const summaryText = summaryLines.join("\n");
     const notePrefix = trimmedNote ? `${trimmedNote}\n\n` : "";
 
+    let savedDurationMs = 0;
     setSaving(true);
     try {
       // 按分段写入日历事件（暂停会切分为多段）
@@ -1134,6 +1640,7 @@ export function CalendarTimerView() {
         event.notes = `${notePrefix}分段：${i + 1}/${finalSegments.length}\n开始：${formatDateTime(startDate)}\n结束：${formatDateTime(endDate)}\n时长：${formatDuration(segmentDuration)}\n\n${summaryText}`;
         await event.save();
         savedCount += 1;
+        savedDurationMs += segmentDuration;
       }
       if (!options?.auto) {
         const message =
@@ -1148,9 +1655,12 @@ export function CalendarTimerView() {
       setSaving(false);
     }
 
-    // 清理 Live Activity
+    // 清理 Live Activity，并刷新主页任务总时长。
     await endLiveActivity(activeTask, now, total);
     await persistSessionState(null);
+    const refreshedBase =
+      addTaskDurationToCache(activeTask.id, savedDurationMs) ?? taskDurations;
+    void refreshTaskDurations(tasks, refreshedBase);
 
     // 清空该任务的笔记草稿
     setTasks((prev) => {
@@ -1167,6 +1677,8 @@ export function CalendarTimerView() {
     setAccumulatedMs(0);
     setElapsedMs(0);
     setCompletedSegments([]);
+    setRuntimeCountdownSeconds(null);
+    runtimeCountdownSecondsRef.current = null;
     stoppingRef.current = false;
   }
 
@@ -1183,21 +1695,41 @@ export function CalendarTimerView() {
     setNoteDraft(next);
   }
 
-  function moveTasks(indices: number[], newOffset: number) {
-    // 拖动排序：将被拖动元素插入到新位置
-    if (!indices.length) return;
-    const movingItems = indices.map((index) => tasks[index]).filter(Boolean);
-    const next = tasks.filter((_, index) => !indices.includes(index));
-    next.splice(newOffset, 0, ...movingItems);
-    void persistTasks(next);
+  async function toggleSelectedTimer() {
+    if (running || paused) {
+      await stopTimer();
+      return;
+    }
+    if (!selectedTask) {
+      await Dialog.alert({ message: "请先添加或选择一个任务" });
+      return;
+    }
+    const countdownSeconds = Math.max(0, focusMinutes) * 60;
+    const taskForSession: Task =
+      countdownSeconds > 0
+        ? {
+            ...selectedTask,
+            useCountdown: true,
+            countdownSeconds,
+          }
+        : {
+            ...selectedTask,
+            useCountdown: false,
+            countdownSeconds: undefined,
+          };
+    setRuntimeCountdownSeconds(countdownSeconds > 0 ? countdownSeconds : null);
+    runtimeCountdownSecondsRef.current =
+      countdownSeconds > 0 ? countdownSeconds : null;
+    setFocusModeText(countdownSeconds > 0 ? "倒计时" : "正计时");
+    setSelectedTaskId(selectedTask.id);
+    await startTask(taskForSession);
+    setShowFocusPage(true);
   }
 
-  function toggleEditMode() {
-    const EditMode = (globalThis as any).EditMode;
-    if (!EditMode?.active || !EditMode?.inactive) return;
-    const next = !isEditing;
-    setIsEditing(next);
-    editMode.setValue(next ? EditMode.active() : EditMode.inactive());
+  function openOverallReport() {
+    void Navigation.present({
+      element: <OverallReportSheet tasks={tasks} />,
+    });
   }
 
   async function refreshLiveActivityManually() {
@@ -1232,6 +1764,7 @@ export function CalendarTimerView() {
       segments: completedSegments,
       running,
       paused,
+      countdownSeconds: sessionCountdownSecondsForTask(activeTask),
       activityId: activityId ?? undefined,
     });
   }
@@ -1253,350 +1786,272 @@ export function CalendarTimerView() {
   };
 
   // 状态文案
-  const statusText = running
-    ? "计时中"
-    : paused
-      ? "暂停中"
-      : sessionStartAt
-        ? "已停止"
-        : "未开始";
-  const currentTaskTitle = activeTask?.name ?? "未选择";
-  const currentCalendarTitle = activeTask?.calendarTitle ?? "未选择";
-  const currentTimerSubtitle = activeTask
-    ? `${currentCalendarTitle}${isCountdown ? " · 倒计时" : " · 正计时"}`
-    : currentCalendarTitle;
-  const iconPalette = {
-    note: {
-      light: "systemBlue",
-      dark: "systemCyan",
-    },
-    cancel: {
-      light: "systemOrange",
-      dark: "systemYellow",
-    },
-    play: {
-      light: "systemGreen",
-      dark: "systemGreen",
-    },
-    pause: {
-      light: "systemOrange",
-      dark: "systemOrange",
-    },
-    stop: {
-      light: "systemRed",
-      dark: "systemRed",
-    },
-  } as const;
+  const selectedTaskTitle = selectedTask?.name ?? "未选择任务";
+  const totalDurationMs = tasks.reduce(
+    (sum, task) => sum + (taskDurations[task.id] ?? 0),
+    0,
+  );
+  const maxTimelineOffset = Math.max(0, floorToTimelineStep(TIMELINE_MAX_MINUTES - currentTimelineMinutes));
+  const countdownMinutes = Math.max(0, Math.min(maxTimelineOffset, focusMinutes));
+  const targetClock = formatClockTime(new Date(Date.now() + countdownMinutes * 60000));
+  const startButtonTitle = running || paused ? "Stop" : "Start";
+  const timerModeText = countdownMinutes > 0
+    ? formatCompactDuration(countdownMinutes * 60000)
+    : "Count Up";
+
+  function handleTimelineChanged(value: number) {
+    const next = Math.max(0, Math.min(maxTimelineOffset, roundToTimelineStep(value)));
+    setTimelineTouched(true);
+    setFocusMinutes(next);
+    if (lastTimelineFeedbackRef.current !== next) {
+      lastTimelineFeedbackRef.current = next;
+      HapticFeedback.selection();
+      playTimelineTickSound();
+    }
+  }
+
+  function resetTimelineToNow() {
+    const next = floorToTimelineStep(currentMinuteOfDay());
+    setCurrentTimelineMinutes(next);
+    setFocusMinutes(0);
+    setTimelineTouched(false);
+  }
+
+  async function refreshHome() {
+    // 下拉刷新时重新对齐当前时间；计时中不改变用户当前会话。
+    const next = floorToTimelineStep(currentMinuteOfDay());
+    setCurrentTimelineMinutes(next);
+    if (!runningRef.current && !pausedRef.current) {
+      setFocusMinutes(0);
+      setTimelineTouched(false);
+    }
+    await refreshTasks({ waitForDurations: true });
+  }
+
+  async function cancelFromFocusPage() {
+    await cancelTimer();
+    setShowFocusPage(false);
+    resetTimelineToNow();
+  }
+
+  async function stopFromFocusPage() {
+    await stopTimer();
+    setShowFocusPage(false);
+    resetTimelineToNow();
+  }
+
+  async function togglePauseFromFocusPage() {
+    if (!activeTask) return;
+    if (paused) {
+      await startTask(activeTask);
+    } else {
+      await pauseTimer();
+    }
+  }
+
+  const focusPage = activeTask ? (
+    <FocusTimerPage
+      task={activeTask}
+      calendarTitle={activeTask.calendarTitle}
+      timerText={timerText}
+      timerFrom={focusTimerFrom}
+      timerTo={focusTimerTo}
+      timerPauseTime={focusTimerPauseTime}
+      timerCountsDown={isCountdown}
+      modeText={focusModeText}
+      statusText={running ? "计时中" : paused ? "已暂停" : "已停止"}
+      paused={paused}
+      saving={saving}
+      onCancel={withButtonHaptic(cancelFromFocusPage)}
+      onPause={withButtonHaptic(togglePauseFromFocusPage)}
+      onStop={withButtonHaptic(stopFromFocusPage)}
+      onNote={withButtonHaptic(openNoteEditor)}
+    />
+  ) : (
+    <Text> </Text>
+  );
 
   return (
-    <TabView selection={activeTab as any} tabViewStyle="tabBarOnly">
-      <Tab title="计时" systemImage="timer" value={0}>
-        <NavigationStack>
-          <List
-            navigationTitle="日历番茄钟"
-            navigationBarTitleDisplayMode="inline"
-            listStyle="insetGroup"
-            environments={{ editMode }}
-            toolbar={{
-              topBarLeading: (
-                <HStack>
+    <NavigationStack>
+      <ZStack
+        alignment="bottom"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        fullScreenCover={{
+          isPresented: showFocusPage && Boolean(activeTask),
+          onChanged: (value: boolean) => setShowFocusPage(value),
+          content: focusPage,
+        }}
+      >
+        <ScrollView
+          navigationTitle="日历番茄钟"
+          navigationBarTitleDisplayMode="inline"
+          refreshable={refreshHome}
+          toolbar={{
+            topBarLeading: (
+              <HStack>
+                <Button
+                  title=""
+                  systemImage="xmark.circle"
+                  action={withButtonHaptic(() => Script.exit())}
+                />
+                {supportsMinimization ? (
                   <Button
                     title=""
-                    systemImage="xmark.circle"
-                    action={withButtonHaptic(() => Script.exit())}
+                    systemImage="minus.circle"
+                    action={withButtonHaptic(minimizeScript)}
                   />
-                  {supportsMinimization ? (
-                    <Button
-                      title=""
-                      systemImage="minus.circle"
-                      action={withButtonHaptic(minimizeScript)}
-                    />
-                  ) : null}
-                </HStack>
-              ),
-              topBarTrailing: (
-                <HStack>
+                ) : null}
+              </HStack>
+            ),
+            topBarTrailing: (
+              <HStack>
+                <Menu title="" systemImage="ellipsis.circle">
                   <Button
-                    title=""
-                    systemImage="arrow.clockwise"
+                    title="刷新实时活动"
                     action={withButtonHaptic(refreshLiveActivityManually)}
                   />
                   <Button
-                    title=""
-                    systemImage="plus.circle"
-                    action={withButtonHaptic(addTask)}
+                    title="显示报告"
+                    action={withButtonHaptic(openOverallReport)}
                   />
-                </HStack>
-              ),
-            }}
-          >
-            <Section header={<Text>当前计时</Text>}>
-              <VStack spacing={10}>
-                <HStack alignment="top">
-                  <VStack alignment="leading" spacing={2}>
-                    <Text font="headline">{currentTaskTitle}</Text>
-                    <Text foregroundStyle="secondaryLabel">
-                      {currentTimerSubtitle}
-                    </Text>
-                  </VStack>
-                  <Spacer />
-                  <Text foregroundStyle="secondaryLabel">{statusText}</Text>
-                </HStack>
-
-                <VStack spacing={4} alignment="center">
-                  <Text font="largeTitle" monospacedDigit>
-                    {timerText}
-                  </Text>
-                  <Text font="caption" foregroundStyle="secondaryLabel">
-                    开始时间：{sessionStartAt ? formatDateTime(sessionStartAt) : "--"}
-                  </Text>
-                </VStack>
-
-                <HStack
-                  spacing={12}
-                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
-                >
-                  <Button
-                    buttonStyle="plain"
-                    disabled={!activeTask || saving || !sessionStartAt}
-                    action={withButtonHaptic(openNoteEditor)}
-                  >
-                    <VStack
-                      frame={{
-                        width: 56,
-                        height: 44,
-                        alignment: "center" as any,
-                      }}
-                    >
-                      <Image
-                        systemName="square.and.pencil"
-                        foregroundStyle={iconPalette.note}
-                        imageScale="large"
-                      />
-                    </VStack>
-                  </Button>
-                  <Button
-                    buttonStyle="plain"
-                    disabled={!activeTask || (!running && !paused) || saving}
-                    action={withButtonHaptic(cancelTimer)}
-                  >
-                    <VStack
-                      frame={{
-                        width: 56,
-                        height: 44,
-                        alignment: "center" as any,
-                      }}
-                    >
-                      <Image
-                        systemName="xmark"
-                        foregroundStyle={iconPalette.cancel}
-                        imageScale="large"
-                      />
-                    </VStack>
-                  </Button>
-                  <Button
-                    buttonStyle="plain"
-                    disabled={!activeTask || saving || (!running && !paused)}
-                    action={withButtonHaptic(() => {
-                      if (!activeTask) return;
-                      return paused ? startTask(activeTask) : pauseTimer();
-                    })}
-                  >
-                    <VStack
-                      frame={{
-                        width: 56,
-                        height: 44,
-                        alignment: "center" as any,
-                      }}
-                    >
-                      <Image
-                        systemName={paused ? "play.fill" : "pause.fill"}
-                        foregroundStyle={
-                          paused ? iconPalette.play : iconPalette.pause
-                        }
-                        imageScale="large"
-                      />
-                    </VStack>
-                  </Button>
-                  <Button
-                    buttonStyle="plain"
-                    disabled={!activeTask || (!running && !paused) || saving}
-                    action={withButtonHaptic(() => stopTimer())}
-                  >
-                    <VStack
-                      frame={{
-                        width: 56,
-                        height: 44,
-                        alignment: "center" as any,
-                      }}
-                    >
-                      <Image
-                        systemName="stop.fill"
-                        foregroundStyle={iconPalette.stop}
-                        imageScale="large"
-                      />
-                    </VStack>
-                  </Button>
-                </HStack>
-              </VStack>
-            </Section>
-
-            <Section
-              header={
-                <HStack>
-                  <Text>任务列表</Text>
-                  <Spacer />
-                  <Button
-                    title=""
-                    systemImage="list.bullet"
-                    action={withButtonHaptic(toggleEditMode)}
-                  />
-                </HStack>
-              }
-            >
-              {tasks.length ? (
-                <ForEach
-                  count={tasks.length}
-                  onMove={moveTasks}
-                  itemBuilder={(index) => {
-                    const task = tasks[index];
-                    if (!task) return <Text> </Text>;
-                    const isActive = activeTaskId === task.id;
-                    const isRunning = running && isActive;
-                    const isPaused = paused && isActive;
-                    const actionTitle = isPaused ? "继续" : "开始";
-                    const countdownSeconds = task.countdownSeconds ?? 0;
-                    const countdownLabel = task.useCountdown
-                      ? (COUNTDOWN_OPTIONS.find(
-                          (opt) => opt.seconds === countdownSeconds,
-                        )?.label ?? "倒计时")
-                      : "";
-                    const notifyLabel = task.useNotification
-                      ? (NOTIFICATION_INTERVAL_OPTIONS.find(
-                          (opt) =>
-                            opt.minutes === task.notificationIntervalMinutes,
-                        )?.label ?? "通知")
-                      : "";
-                    const isCountdownTask =
-                      task.useCountdown && countdownSeconds > 0;
-                    const iconName = isCountdownTask ? "restart" : "play";
-                    const iconColor = isCountdownTask
-                      ? "systemBlue"
-                      : "systemGreen";
-                    return (
-                      <VStack
-                        key={task.id}
-                        listRowSeparator={{
-                          visibility: "hidden",
-                          edges: "all" as any,
-                        }}
-                        trailingSwipeActions={{
-                          allowsFullSwipe: false,
-                          actions: [
-                            <Button
-                              title="编辑"
-                              action={withButtonHaptic(() => editTask(task))}
-                            />,
-                            <Button
-                              title="删除"
-                              role="destructive"
-                              action={withButtonHaptic(() => removeTask(task))}
-                            />,
-                          ],
-                        }}
-                      >
-                        <HStack
-                          padding={{
-                            top: 8,
-                            bottom: 8,
-                          }}
-                          spacing={10}
-                        >
-                          <Button
-                            buttonStyle="plain"
-                            disabled={saving || isEditing}
-                            action={withButtonHaptic(() => openTaskStats(task))}
-                          >
-                            <HStack spacing={10}>
-                              <Image
-                                systemName={iconName}
-                                foregroundStyle={iconColor}
-                                imageScale="large"
-                                frame={{ width: 22, height: 22 }}
-                              />
-                              <VStack alignment="leading">
-                                <Text font="headline">{task.name}</Text>
-                                <HStack spacing={4}>
-                                  <Text foregroundStyle="secondaryLabel">
-                                    {task.calendarTitle}
-                                  </Text>
-                                  {countdownLabel ? (
-                                    <Text foregroundStyle="secondaryLabel">
-                                      · {countdownLabel}
-                                    </Text>
-                                  ) : null}
-                                  {notifyLabel ? (
-                                    <HStack spacing={4}>
-                                      <Text foregroundStyle="secondaryLabel">
-                                        ·
-                                      </Text>
-                                      <Image
-                                        systemName="bell.badge.fill"
-                                        foregroundStyle="secondaryLabel"
-                                        imageScale="small"
-                                      />
-                                      <Text foregroundStyle="secondaryLabel">
-                                        {notifyLabel}
-                                      </Text>
-                                    </HStack>
-                                  ) : null}
-                                </HStack>
-                              </VStack>
-                            </HStack>
-                          </Button>
-                          <Spacer />
-                          {isRunning ? (
-                            <Text foregroundStyle="secondaryLabel">计时中</Text>
-                          ) : isPaused ? (
-                            <Button
-                              title={actionTitle}
-                              systemImage={iconName}
-                              buttonStyle="borderedProminent"
-                              tint="systemGreen"
-                              disabled={saving}
-                              action={withButtonHaptic(() => startTask(task))}
-                            />
-                          ) : (
-                            <Button
-                              title={actionTitle}
-                              systemImage={iconName}
-                              buttonStyle="borderedProminent"
-                              tint="systemGreen"
-                              disabled={saving}
-                              action={withButtonHaptic(() => startTask(task))}
-                            />
-                          )}
-                        </HStack>
-                      </VStack>
-                    );
-                  }}
+                </Menu>
+                <Button
+                  title=""
+                  systemImage="plus.circle"
+                  action={withButtonHaptic(addTask)}
                 />
-              ) : (
-                <Text foregroundStyle="secondaryLabel">
-                  暂无任务，点击右上角新增。
-                </Text>
-              )}
-            </Section>
-          </List>
-        </NavigationStack>
-      </Tab>
+              </HStack>
+            ),
+          }}
+        >
+          <VStack
+            spacing={20}
+            padding={{ top: 18, bottom: 230, leading: 18, trailing: 18 }}
+            frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          >
+            {tasks.length ? (
+              <ReorderableForEach
+                data={tasks}
+                active={activeReorderTask}
+                onMove={moveTasks}
+                builder={(task) => {
+                  const duration = taskDurations[task.id] ?? 0;
+                  const ratio = totalDurationMs > 0 ? duration / totalDurationMs : 0;
+                  const isActive = activeTaskId === task.id && (running || paused);
+                  const isReordering = activeReorderTask.value?.id === task.id;
+                  return (
+                    <VStack
+                      key={task.id}
+                      spacing={8}
+                      padding={{ top: 8, bottom: 8, leading: 10, trailing: 10 }}
+                      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                      background={isReordering ? "rgba(0, 188, 255, 0.14)" : "rgba(0,0,0,0.001)"}
+                      clipShape={{ type: "rect", cornerRadius: 18 } as any}
+                      contentShape="rect"
+                      scaleEffect={isReordering ? 1.025 : 1}
+                      shadow={
+                        isReordering
+                          ? ({ color: "rgba(0, 188, 255, 0.32)", radius: 16, x: 0, y: 8 } as any)
+                          : undefined
+                      }
+                      zIndex={isReordering ? 20 : 0}
+                      onTapGesture={() => {
+                        if (saving) return;
+                        HapticFeedback.mediumImpact();
+                        setSelectedTaskId(task.id);
+                        void openTaskStats(task);
+                      }}
+                      contextMenu={{
+                        menuItems: (
+                          <VStack>
+                            <Button title="查看统计" action={withButtonHaptic(() => openTaskStats(task))} />
+                            <Button title="编辑" action={withButtonHaptic(() => editTask(task))} />
+                            <Button title="删除" role="destructive" action={withButtonHaptic(() => removeTask(task))} />
+                          </VStack>
+                        ),
+                      }}
+                    >
+                      <HStack spacing={10} frame={{ maxWidth: "infinity" }}>
+                        <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                          <Text font="title3" fontWeight="bold" lineLimit={1}>
+                            {task.name}
+                          </Text>
+                          <Text foregroundStyle="secondaryLabel" lineLimit={1}>
+                            # {task.calendarTitle}
+                          </Text>
+                        </VStack>
+                        <Spacer />
+                        <Text foregroundStyle="systemBlue" monospacedDigit>
+                          {taskDurationsLoading && duration <= 0 ? "统计中" : formatCompactDuration(duration)}
+                        </Text>
+                      </HStack>
+                      <TaskProgressLine ratio={ratio} active={isActive} />
+                    </VStack>
+                  );
+                }}
+              />
+            ) : (
+              <VStack spacing={10} padding={{ top: 40 }}>
+                <Text font="title2" fontWeight="bold">暂无任务</Text>
+                <Text foregroundStyle="secondaryLabel">点击右上角新增任务。</Text>
+              </VStack>
+            )}
+          </VStack>
+        </ScrollView>
 
-      <Tab title="报告" systemImage="chart.bar.xaxis" value={1}>
-        <OverallReportView
-          tasks={tasks}
-          onExit={withButtonHaptic(() => Script.exit())}
-        />
-      </Tab>
-    </TabView>
+        <VStack
+          padding={{ bottom: 8, leading: 18, trailing: 18 }}
+          frame={{ maxWidth: "infinity", alignment: "bottom" as any }}
+        >
+          <VStack
+            spacing={10}
+            padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            glassEffect={{ type: "rect", cornerRadius: 34 } as any}
+          >
+            <HStack>
+              <Menu
+                label={
+                  <HStack spacing={6}>
+                    <Text foregroundStyle="systemCyan" font="headline" lineLimit={1}>
+                      {selectedTaskTitle}
+                    </Text>
+                    <Image systemName="play.fill" foregroundStyle="systemCyan" imageScale="small" />
+                  </HStack>
+                }
+              >
+                {tasks.map((task) => (
+                  <Button
+                    key={task.id}
+                    title={task.name}
+                    action={withButtonHaptic(() => setSelectedTaskId(task.id))}
+                  />
+                ))}
+              </Menu>
+              <Spacer />
+              <Button
+                title={startButtonTitle}
+                buttonStyle="borderedProminent"
+                tint={running || paused ? "systemRed" : "systemCyan"}
+                disabled={!selectedTask || saving}
+                action={withButtonHaptic(toggleSelectedTimer)}
+              />
+            </HStack>
+
+            <TimeAxis
+              value={focusMinutes}
+              targetLabel={targetClock}
+              durationLabel={timerModeText}
+              currentMinute={currentTimelineMinutes}
+              disabled={running || paused}
+              maxValue={maxTimelineOffset}
+              onChanged={handleTimelineChanged}
+            />
+
+        
+          </VStack>
+        </VStack>
+      </ZStack>
+    </NavigationStack>
   );
 }
