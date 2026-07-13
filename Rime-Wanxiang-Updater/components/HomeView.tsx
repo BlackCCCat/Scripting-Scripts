@@ -59,6 +59,7 @@ import {
 } from "../utils/update_tasks";
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup";
 import { normalizePath, sleep } from "../utils/common";
+import { isModelUpdateAvailable, modelDisplayMark } from "../utils/model_mark";
 
 const FULLSCREEN_SYMBOL =
   "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left";
@@ -425,7 +426,7 @@ function buildUpdateDecision(
     schemeRemoteDisplayMark(cfg, remote.scheme),
   );
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha);
-  const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha);
+  const modelRemoteMark = normalizeMark(modelDisplayMark(remote.model, localMeta?.model));
   return {
     scheme: !!(
       schemeRemoteMark &&
@@ -436,10 +437,7 @@ function buildUpdateDecision(
       dictRemoteMark &&
       normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark
     ),
-    model: !!(
-      modelRemoteMark &&
-      normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark
-    ),
+    model: !!(modelRemoteMark && isModelUpdateAvailable(localMeta?.model, remote.model)),
   };
 }
 
@@ -1228,7 +1226,7 @@ export function HomeView() {
 
     setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取");
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取");
-    setLocalModelMark(meta.model?.remoteIdOrSha ?? "暂无法获取");
+    setLocalModelMark(modelDisplayMark(meta.model) || "暂无法获取");
     return true;
   }
 
@@ -1241,24 +1239,30 @@ export function HomeView() {
     if (!remote) return;
     const { meta } = await findLocalMeta(current);
     const nextDecision = buildUpdateDecision(meta, remote, current);
+    setRemoteModelMark(modelDisplayMark(remote.model, meta?.model) || "暂无法获取");
+    setLocalModelMark(modelDisplayMark(meta?.model, remote.model) || "暂无法获取");
     setLastCheck(remote);
     setLastCheckDecision(nextDecision);
     setLastCheckKey(checkKey(current));
     saveSharedCheckCache(current, remote, nextDecision);
   }
 
-  function applySharedCheckCache(current: AppConfig) {
+  async function applySharedCheckCache(current: AppConfig) {
     const cache = loadSharedCheckCache();
     if (!cache || cache.key !== checkKey(current)) return false;
+    const { meta } = await findLocalMeta(current);
     setRemoteSchemeVer(
       schemeRemoteDisplayMark(current, cache.remote.scheme) || "暂无法获取",
     );
     setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取");
-    setRemoteModelMark(cache.remote.model?.remoteIdOrSha ?? "暂无法获取");
+    setRemoteModelMark(modelDisplayMark(cache.remote.model, meta?.model) || "暂无法获取");
+    setLocalModelMark(modelDisplayMark(meta?.model, cache.remote.model) || "暂无法获取");
+    const nextDecision = buildUpdateDecision(meta, cache.remote, current);
     setNotes(cache.remote.scheme?.body ?? "");
     setLastCheck(cache.remote);
-    setLastCheckDecision(cache.decision);
+    setLastCheckDecision(nextDecision);
     setLastCheckKey(cache.key);
+    saveSharedCheckCache(current, cache.remote, nextDecision);
     return true;
   }
 
@@ -1312,7 +1316,7 @@ export function HomeView() {
         await sleep(120);
         await refreshLocal(loadConfig());
       }
-      applySharedCheckCache(current);
+      await applySharedCheckCache(current);
     })();
   }, [
     cfg.schemeEdition,
@@ -1596,7 +1600,8 @@ export function HomeView() {
         schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取",
       );
       setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取");
-      setRemoteModelMark(r.model?.remoteIdOrSha ?? "暂无法获取");
+      setRemoteModelMark(modelDisplayMark(r.model, localMeta?.model) || "暂无法获取");
+      setLocalModelMark(modelDisplayMark(localMeta?.model, r.model) || "暂无法获取");
       setNotes(r.scheme?.body ?? "");
       setLastCheck(r);
       setLastCheckDecision(decision);
@@ -1615,7 +1620,7 @@ export function HomeView() {
       );
       pushCheckResultLog(
         "模型",
-        r.model?.remoteIdOrSha ?? "暂无法获取",
+        modelDisplayMark(r.model, localMeta?.model) || "暂无法获取",
         decision.model,
       );
       setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true);
@@ -1651,18 +1656,20 @@ export function HomeView() {
       const shared = loadSharedCheckCache();
       if ((!pre || lastCheckKey !== key) && shared && shared.key === key) {
         pre = shared.remote;
-        decision = shared.decision;
+        decision = buildUpdateDecision(localMeta, shared.remote, effective);
         resolvedKey = key;
         setRemoteSchemeVer(
           schemeRemoteDisplayMark(effective, shared.remote.scheme) ||
             "暂无法获取",
         );
         setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取");
-        setRemoteModelMark(shared.remote.model?.remoteIdOrSha ?? "暂无法获取");
+        setRemoteModelMark(modelDisplayMark(shared.remote.model, localMeta?.model) || "暂无法获取");
+        setLocalModelMark(modelDisplayMark(localMeta?.model, shared.remote.model) || "暂无法获取");
         setNotes(shared.remote.scheme?.body ?? "");
         setLastCheck(shared.remote);
-        setLastCheckDecision(shared.decision);
+        setLastCheckDecision(decision);
         setLastCheckKey(key);
+        saveSharedCheckCache(effective, shared.remote, decision);
       }
       if (!pre || resolvedKey !== key) {
         // 检查阶段也不显示进度（避免误导）
@@ -1677,7 +1684,8 @@ export function HomeView() {
           schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取",
         );
         setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取");
-        setRemoteModelMark(pre.model?.remoteIdOrSha ?? "暂无法获取");
+        setRemoteModelMark(modelDisplayMark(pre.model, localMeta?.model) || "暂无法获取");
+        setLocalModelMark(modelDisplayMark(localMeta?.model, pre.model) || "暂无法获取");
         setNotes(pre.scheme?.body ?? "");
         setLastCheck(pre);
         decision = buildUpdateDecision(localMeta, pre, effective);

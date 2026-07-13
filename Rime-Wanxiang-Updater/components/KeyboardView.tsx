@@ -19,6 +19,7 @@ import { checkAllUpdates, type AllUpdateResult } from "../utils/update_tasks"
 import { collectRimeCandidates, detectRimeDir, verifyInstallPathAccess } from "../utils/hamster"
 import { Runtime } from "../utils/runtime"
 import { saveSharedCheckCache, getCheckCacheKey } from "../utils/check_cache"
+import { isModelUpdateAvailable, modelDisplayMark } from "../utils/model_mark"
 
 type UpdateDecision = {
   scheme: boolean
@@ -54,11 +55,11 @@ function schemeLocalDisplayMark(cfg: AppConfig, metaScheme: MetaBundle["scheme"]
 function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult, cfg: AppConfig): UpdateDecision {
   const schemeRemoteMark = normalizeMark(schemeRemoteDisplayMark(cfg, remote.scheme))
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
-  const modelRemoteMark = normalizeMark(remote.model?.remoteIdOrSha)
+  const modelRemoteMark = normalizeMark(modelDisplayMark(remote.model, localMeta?.model))
   return {
     scheme: !!(schemeRemoteMark && normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
-    model: !!(modelRemoteMark && normalizeMark(localMeta?.model?.remoteIdOrSha) !== modelRemoteMark),
+    model: !!(modelRemoteMark && isModelUpdateAvailable(localMeta?.model, remote.model)),
   }
 }
 
@@ -244,7 +245,7 @@ export function KeyboardView() {
       ? schemeRemoteDisplayMark(cfg, lastCheck?.scheme)
       : kind === "dict"
         ? lastCheck?.dict?.remoteIdOrSha
-        : lastCheck?.model?.remoteIdOrSha
+        : modelDisplayMark(lastCheck?.model, undefined)
     return remote ? "latest" : "error"
   }
 

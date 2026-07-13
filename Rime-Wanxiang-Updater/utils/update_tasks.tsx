@@ -11,6 +11,7 @@ import { assertInstallPathAccess, detectRimeDir } from "./hamster"
 
 import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
 import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
+import { isModelUpdateAvailable } from "./model_mark"
 
 const OWNER = "amzxyz"
 const GH_REPO = "rime_wanxiang"
@@ -843,11 +844,10 @@ export async function autoUpdateAll(
     ? preDecision.dict
     : !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
 
-  const remoteModelMark = normalizeMark(ensureRemoteMark(r.model, "model"))
-  const localModelMark = normalizeMark(meta.model?.remoteIdOrSha)
+  if (r.model && !r.model.remoteIdOrSha) r.model.remoteIdOrSha = ensureRemoteMark(r.model, "model")
   const needModel = typeof preDecision?.model === "boolean"
     ? preDecision.model
-    : !!(r.model && remoteModelMark && localModelMark !== remoteModelMark)
+    : isModelUpdateAvailable(meta.model, r.model)
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")
