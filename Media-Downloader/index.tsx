@@ -13,6 +13,7 @@ import {
   ScrollViewReader,
   Script,
   Section,
+  Slider,
   Spacer,
   Tab,
   TabView,
@@ -41,6 +42,7 @@ import {
   insertHistory,
   listHistory,
   getHistoryFiles,
+  pruneHistoryStorage,
   type HistoryRecord,
 } from "./services/history"
 import {
@@ -89,6 +91,26 @@ async function removeExistingFile(path: string): Promise<boolean> {
   if (!(await FileManager.exists(path))) return false
   await FileManager.remove(path)
   return true
+}
+
+async function removeDownloadSuccessFiles(record: DownloadSuccess): Promise<number> {
+  const files = record.files?.length ? record.files : [{
+    filePath: record.filePath,
+    fileName: record.fileName,
+    finalURL: record.finalURL,
+    bytesWritten: record.bytesWritten,
+    mediaType: record.mediaType || "video",
+  }]
+  const seen = new Set<string>()
+  let deletedCount = 0
+  for (const file of files) {
+    if (!file.filePath || seen.has(file.filePath)) continue
+    seen.add(file.filePath)
+    if (await removeExistingFile(file.filePath)) {
+      deletedCount += 1
+    }
+  }
+  return deletedCount
 }
 
 async function deleteHistoryRecordAndFiles(record: HistoryRecord): Promise<number> {
@@ -173,22 +195,32 @@ async function runIntentDownload(url: string) {
         logs.push(message)
       },
     })
-    await insertHistory(download)
-    const message = await postDownloadAction(download, preferences.defaultSaveMode)
+    const postResult = await postDownloadAction(download, preferences.defaultSaveMode)
+    const preserveFiles = preferences.keepHistoryFiles || postResult.keepFilesInHistory
+    await insertHistory(download, { preserveFiles })
+    if (!preserveFiles) {
+      await removeDownloadSuccessFiles(download)
+    }
+    if (preferences.keepHistoryFiles) {
+      await pruneHistoryStorage({
+        maxCacheBytes: preferences.historyCacheLimitMB == null ? null : preferences.historyCacheLimitMB * 1024 * 1024,
+        maxRecordCount: preferences.historyRecordLimit,
+      })
+    }
 
     Script.exit(
       Intent.json({
         ok: true,
         mode: preferences.defaultSaveMode,
-        message,
+        message: postResult.message,
         title: download.extracted.title,
         thumbnailURL: download.extracted.thumbnailURL,
         pageURL: download.extracted.pageURL,
         canonical: download.extracted.canonical,
         finalURL: download.finalURL,
         bytesWritten: download.bytesWritten,
-        localFilePath: download.filePath,
-        localFilePaths: download.files.map((file) => file.filePath),
+        localFilePath: preserveFiles ? download.filePath : null,
+        localFilePaths: preserveFiles ? download.files.map((file) => file.filePath) : [],
         mediaType: download.mediaType,
         preferNoWatermark: preferences.preferNoWatermark,
         matchedCandidateLabel: download.matchedCandidateLabel,
@@ -371,8 +403,9 @@ function HistoryRow(props: {
   item: HistoryRecord
   onRefresh: () => Promise<void>
   onStatus: (text: string) => void
+  onRedownload: (url: string) => void
 }) {
-  const { item, onRefresh, onStatus } = props
+  const { item, onRefresh, onStatus, onRedownload } = props
 
   const openActions = async () => {
     const files = getHistoryFiles(item)
@@ -386,9 +419,12 @@ function HistoryRow(props: {
     const isImagePost = existingFiles.some((file) => file.mediaType === "image")
     const actions = [
       ...(fileExists ? [{ label: isImagePost ? "预览图片" : "播放视频" }] : []),
-      { label: "分享文件" },
-      { label: "保存到相册" },
-      { label: "导出到文件" },
+      ...(!fileExists ? [{ label: "重新下载" }] : []),
+      ...(fileExists ? [
+        { label: "分享文件" },
+        { label: "保存到相册" },
+        { label: "导出到文件" },
+      ] : []),
       { label: "打开原始页面" },
       { label: "复制原始链接" },
       { label: fileExists ? "删除记录并删除文件" : "删除记录", destructive: true },
@@ -407,6 +443,10 @@ function HistoryRow(props: {
       if (action === "播放视频" || action === "预览图片") {
         if (!fileExists) throw new Error("本地文件不存在")
         await QuickLook.previewURLs(existingFiles.map((file) => file.filePath), true)
+        return
+      }
+      if (action === "重新下载") {
+        onRedownload(item.source_url)
         return
       }
       if (action === "分享文件") {
@@ -644,6 +684,23 @@ function View() {
     })
   }
 
+  const applyHistoryStorageLimits = async () => {
+    if (!preferences.keepHistoryFiles) return
+    const result = await pruneHistoryStorage({
+      maxCacheBytes: preferences.historyCacheLimitMB == null ? null : preferences.historyCacheLimitMB * 1024 * 1024,
+      maxRecordCount: preferences.historyRecordLimit,
+    })
+    if (result.deletedRecords > 0 || result.deletedFiles > 0) {
+      appendLog(`历史缓存清理完成：删除 ${result.deletedRecords} 条记录、${result.deletedFiles} 个文件。`)
+    }
+  }
+
+  const redownloadFromHistory = (url: string) => {
+    setInputURL(url)
+    activeTab.setValue(DOWNLOAD_TAB)
+    void handleDownload(url)
+  }
+
   const handleDownload = async (overrideInput?: string) => {
     const rawInput = (overrideInput ?? inputURL).trim()
     const url = extractFirstURL(rawInput) || rawInput
@@ -686,20 +743,26 @@ function View() {
       })
       if (downloadRunIdRef.current !== runId || cancelRequestedRef.current) return
       appendLog(`下载成功，命中策略：${download.matchedCandidateLabel}`)
-      latestProgressRef.current = { fraction: 0.96, stage: t.writingHistory }
-      latestStatusRef.current = t.writingHistory
-      setDownloadProgress(latestProgressRef.current)
-      await insertHistory(download)
-      await refreshHistory()
-      setLastDownloaded(download)
-      appendLog("历史记录已写入。")
-      latestProgressRef.current = { fraction: 0.98, stage: t.postAction }
+      latestProgressRef.current = { fraction: 0.96, stage: t.postAction }
       latestStatusRef.current = t.postAction
       setDownloadProgress(latestProgressRef.current)
-      const resultMessage = await postDownloadAction(download, preferences.defaultSaveMode)
-      appendLog(`下载后动作完成：${resultMessage}`)
+      const postResult = await postDownloadAction(download, preferences.defaultSaveMode)
+      appendLog(`下载后动作完成：${postResult.message}`)
+      latestProgressRef.current = { fraction: 0.98, stage: t.writingHistory }
+      latestStatusRef.current = t.writingHistory
+      setDownloadProgress(latestProgressRef.current)
+      const preserveFiles = preferences.keepHistoryFiles || postResult.keepFilesInHistory
+      await insertHistory(download, { preserveFiles })
+      if (!preserveFiles) {
+        const deletedCount = await removeDownloadSuccessFiles(download)
+        if (deletedCount > 0) appendLog(`历史记录未保留本地文件，已清理 ${deletedCount} 个下载文件。`)
+      }
+      await applyHistoryStorageLimits()
+      await refreshHistory()
+      setLastDownloaded(preserveFiles ? download : null)
+      appendLog("历史记录已写入。")
       latestProgressRef.current = { fraction: 1, stage: t.done }
-      latestStatusRef.current = `${t.downloadSuccess}：${download.fileName} · ${resultMessage}`
+      latestStatusRef.current = `${t.downloadSuccess}：${download.fileName} · ${postResult.message}`
       setDownloadProgress(latestProgressRef.current)
       setStatus(latestStatusRef.current)
     } catch (error) {
@@ -796,6 +859,45 @@ function View() {
     return t.askEveryTime
   }
 
+  const cacheLimitLabel = (value: number | null) => {
+    return value == null ? t.unlimited : `${value} MB`
+  }
+
+  const recordLimitLabel = (value: number | null) => {
+    return value == null ? t.unlimited : `${value}`
+  }
+
+  const cacheLimitSliderValue = (value: number | null) => {
+    return value == null ? 51 : Math.max(1, Math.min(50, Math.round(value / 100)))
+  }
+
+  const cacheLimitFromSliderValue = (value: number) => {
+    const rounded = Math.max(1, Math.min(51, Math.round(value)))
+    return rounded >= 51 ? null : rounded * 100
+  }
+
+  const recordLimitSliderValue = (value: number | null) => {
+    return value == null ? 51 : Math.max(1, Math.min(50, Math.round(value)))
+  }
+
+  const recordLimitFromSliderValue = (value: number) => {
+    const rounded = Math.max(1, Math.min(51, Math.round(value)))
+    return rounded >= 51 ? null : rounded
+  }
+
+  const updateHistoryStoragePreferences = (next: Preferences) => {
+    updatePreferences(next)
+    void pruneHistoryStorage({
+      maxCacheBytes: next.historyCacheLimitMB == null ? null : next.historyCacheLimitMB * 1024 * 1024,
+      maxRecordCount: next.historyRecordLimit,
+    }).then(async (cleanup) => {
+      await refreshHistory()
+      if (cleanup.deletedRecords > 0 || cleanup.deletedFiles > 0) {
+        setStatus(`历史缓存清理完成：删除 ${cleanup.deletedRecords} 条记录、${cleanup.deletedFiles} 个文件。`)
+      }
+    })
+  }
+
   const chooseLanguage = async () => {
     const result = await Dialog.actionSheet({
       title: t.chooseLanguage,
@@ -877,6 +979,7 @@ function View() {
                 item={item}
                 onRefresh={refreshHistory}
                 onStatus={setStatus}
+                onRedownload={redownloadFromHistory}
               />
             ))
           )}
@@ -979,6 +1082,55 @@ function View() {
               preferNoWatermark: value,
             })}
           />
+          <Toggle
+            title={t.keepHistoryFiles}
+            value={preferences.keepHistoryFiles}
+            onChanged={(value) => {
+              const next = {
+                ...preferences,
+                keepHistoryFiles: value,
+              }
+              updatePreferences(next)
+              if (value) {
+                void pruneHistoryStorage({
+                  maxCacheBytes: next.historyCacheLimitMB == null ? null : next.historyCacheLimitMB * 1024 * 1024,
+                  maxRecordCount: next.historyRecordLimit,
+                }).then(refreshHistory)
+              }
+            }}
+          />
+          {preferences.keepHistoryFiles ? (
+            <>
+              <Text foregroundStyle="secondaryLabel">{t.maxHistoryCache}：{cacheLimitLabel(preferences.historyCacheLimitMB)}</Text>
+              <Slider
+                value={cacheLimitSliderValue(preferences.historyCacheLimitMB)}
+                min={1}
+                max={51}
+                step={1}
+                label={<Text>{t.maxHistoryCache}</Text>}
+                onChanged={(value) => {
+                  updateHistoryStoragePreferences({
+                    ...preferences,
+                    historyCacheLimitMB: cacheLimitFromSliderValue(value),
+                  })
+                }}
+              />
+              <Text foregroundStyle="secondaryLabel">{t.historyRecordLimit}：{recordLimitLabel(preferences.historyRecordLimit)}</Text>
+              <Slider
+                value={recordLimitSliderValue(preferences.historyRecordLimit)}
+                min={1}
+                max={51}
+                step={1}
+                label={<Text>{t.historyRecordLimit}</Text>}
+                onChanged={(value) => {
+                  updateHistoryStoragePreferences({
+                    ...preferences,
+                    historyRecordLimit: recordLimitFromSliderValue(value),
+                  })
+                }}
+              />
+            </>
+          ) : null}
         </Section>
         <Section title={t.tools}>
           <HStack spacing={8}>

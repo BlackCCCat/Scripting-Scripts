@@ -16,9 +16,9 @@ import {
   useRef,
   useState,
 } from "scripting"
-import { type DownloadProgress } from "./services/douyin"
+import { type DownloadProgress, type DownloadSuccess } from "./services/douyin"
 import { postDownloadAction } from "./services/file-actions"
-import { initDatabase, insertHistory } from "./services/history"
+import { initDatabase, insertHistory, pruneHistoryStorage } from "./services/history"
 import { downloadMedia } from "./services/media"
 import { getPreferences, persistPreferences } from "./services/preferences"
 import { extractFirstURL } from "./utils/common"
@@ -45,6 +45,24 @@ function resolveInputURL(): string | null {
   }
 
   return null
+}
+
+async function removeDownloadedFiles(record: DownloadSuccess): Promise<void> {
+  const files = record.files?.length ? record.files : [{
+    filePath: record.filePath,
+    fileName: record.fileName,
+    finalURL: record.finalURL,
+    bytesWritten: record.bytesWritten,
+    mediaType: record.mediaType || "video",
+  }]
+  const seen = new Set<string>()
+  for (const file of files) {
+    if (!file.filePath || seen.has(file.filePath)) continue
+    seen.add(file.filePath)
+    try {
+      if (FileManager.existsSync(file.filePath)) FileManager.removeSync(file.filePath)
+    } catch {}
+  }
 }
 
 async function handleError(error: unknown) {
@@ -151,39 +169,49 @@ function IntentDownloadView(props: {
           onLog: appendLog,
         })
 
-        latestProgressRef.current = { fraction: 0.96, stage: t.writingHistory }
-        latestStatusRef.current = t.writingHistory
-        setProgress(latestProgressRef.current)
-        setStatus(latestStatusRef.current)
-        await insertHistory(download)
-        appendLog("历史记录已写入。")
-
-        latestProgressRef.current = { fraction: 0.98, stage: t.postAction }
+        latestProgressRef.current = { fraction: 0.96, stage: t.postAction }
         latestStatusRef.current = t.postAction
         setProgress(latestProgressRef.current)
         setStatus(latestStatusRef.current)
-        const message = await postDownloadAction(download, preferences.defaultSaveMode)
+        const postResult = await postDownloadAction(download, preferences.defaultSaveMode)
+
+        latestProgressRef.current = { fraction: 0.98, stage: t.writingHistory }
+        latestStatusRef.current = t.writingHistory
+        setProgress(latestProgressRef.current)
+        setStatus(latestStatusRef.current)
+        const preserveFiles = preferences.keepHistoryFiles || postResult.keepFilesInHistory
+        await insertHistory(download, { preserveFiles })
+        if (!preserveFiles) {
+          await removeDownloadedFiles(download)
+        }
+        if (preferences.keepHistoryFiles) {
+          await pruneHistoryStorage({
+            maxCacheBytes: preferences.historyCacheLimitMB == null ? null : preferences.historyCacheLimitMB * 1024 * 1024,
+            maxRecordCount: preferences.historyRecordLimit,
+          })
+        }
+        appendLog("历史记录已写入。")
 
         latestProgressRef.current = { fraction: 1, stage: t.done }
-        latestStatusRef.current = message
+        latestStatusRef.current = postResult.message
         runningRef.current = false
         setProgress(latestProgressRef.current)
         setStatus(latestStatusRef.current)
-        appendLog(message)
+        appendLog(postResult.message)
 
         Script.exit(
           Intent.json({
             ok: true,
             mode: preferences.defaultSaveMode,
-            message,
+            message: postResult.message,
             title: download.extracted.title,
             thumbnailURL: download.extracted.thumbnailURL,
             pageURL: download.extracted.pageURL,
             canonical: download.extracted.canonical,
             finalURL: download.finalURL,
             bytesWritten: download.bytesWritten,
-            localFilePath: download.filePath,
-            localFilePaths: download.files.map((file) => file.filePath),
+            localFilePath: preserveFiles ? download.filePath : null,
+            localFilePaths: preserveFiles ? download.files.map((file) => file.filePath) : [],
             mediaType: download.mediaType,
             preferNoWatermark: preferences.preferNoWatermark,
             matchedCandidateLabel: download.matchedCandidateLabel,

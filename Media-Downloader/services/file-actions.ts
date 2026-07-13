@@ -1,6 +1,11 @@
 import type { SaveMode } from "./preferences"
 import type { DownloadedFile, DownloadSuccess } from "./douyin"
 
+export type PostDownloadResult = {
+  message: string
+  keepFilesInHistory: boolean
+}
+
 export async function saveFilePathToPhotos(filePath: string, fileName: string) {
   const ok = await Photos.saveVideo(filePath, {
     fileName,
@@ -54,7 +59,7 @@ export async function exportDownloadedFilesToFiles(files: DownloadedFile[]) {
   return exported
 }
 
-export async function postDownloadAction(record: DownloadSuccess, mode: SaveMode): Promise<string> {
+export async function postDownloadAction(record: DownloadSuccess, mode: SaveMode): Promise<PostDownloadResult> {
   const files = record.files?.length ? record.files : [{
     filePath: record.filePath,
     fileName: record.fileName,
@@ -66,12 +71,12 @@ export async function postDownloadAction(record: DownloadSuccess, mode: SaveMode
 
   if (mode === "photos") {
     await saveDownloadedFilesToPhotos(files)
-    return "已按默认偏好保存到相册。"
+    return { message: "已按默认偏好保存到相册。", keepFilesInHistory: false }
   }
 
   if (mode === "files") {
     const paths = await exportDownloadedFilesToFiles(files)
-    return `已按默认偏好导出到文件：${paths.join(", ")}`
+    return { message: `已按默认偏好导出到文件：${paths.join(", ")}`, keepFilesInHistory: false }
   }
 
   const result = await Dialog.actionSheet({
@@ -88,15 +93,15 @@ export async function postDownloadAction(record: DownloadSuccess, mode: SaveMode
 
   if (result === 0) {
     await saveDownloadedFilesToPhotos(files)
-    return "已保存到相册。"
+    return { message: "已保存到相册。", keepFilesInHistory: false }
   }
   if (result === 1) {
     const paths = await exportDownloadedFilesToFiles(files)
-    return `已导出到文件：${paths.join(", ")}`
+    return { message: `已导出到文件：${paths.join(", ")}`, keepFilesInHistory: false }
   }
   if (result === 2) {
     await ShareSheet.present(files.map((file) => file.filePath))
-    return "已打开分享面板。"
+    return { message: "已打开分享面板。", keepFilesInHistory: false }
   }
-  return "已加入下载历史。"
+  return { message: "已加入下载历史。", keepFilesInHistory: true }
 }

@@ -5,6 +5,9 @@ export type Preferences = {
   defaultSaveMode: SaveMode
   preferNoWatermark: boolean
   language: LanguageMode
+  keepHistoryFiles: boolean
+  historyCacheLimitMB: number | null
+  historyRecordLimit: number | null
   ytDlpReady: boolean | null
   ytDlpVersion: string | null
   ytDlpCheckedAt: string | null
@@ -18,6 +21,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   defaultSaveMode: "ask",
   preferNoWatermark: true,
   language: "system",
+  keepHistoryFiles: false,
+  historyCacheLimitMB: null,
+  historyRecordLimit: null,
   ytDlpReady: null,
   ytDlpVersion: null,
   ytDlpCheckedAt: null,

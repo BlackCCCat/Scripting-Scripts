@@ -331,7 +331,8 @@ async function fetchSegmentToFile(options: {
       const { done, value } = await reader.read()
       if (done) break
       if (value != null) {
-        FileManager.appendDataSync(options.filePath, value)
+        const data = Data.fromUint8Array(value)
+        if (data) FileManager.appendDataSync(options.filePath, data)
       }
     }
   } finally {
