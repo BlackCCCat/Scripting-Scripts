@@ -1,9 +1,10 @@
 import { Navigation, Script } from "scripting"
-import { TranslatorSettingsView } from "./components/TranslatorSettingsView"
+import { TranslatorRootView } from "./components/TranslatorRootView"
 
 async function run() {
   await Navigation.present({
-    element: <TranslatorSettingsView />,
+    element: <TranslatorRootView />,
+    modalPresentationStyle: "fullScreen",
   })
 
   Script.exit()

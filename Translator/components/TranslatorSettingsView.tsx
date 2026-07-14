@@ -92,7 +92,9 @@ function sourceLanguageLabel(code: string) {
   return targetLanguageLabel(code)
 }
 
-export function TranslatorSettingsView() {
+export function TranslatorSettingsView(props: {
+  onSettingsChanged?: () => void
+}) {
   const dismiss = Navigation.useDismiss()
   const [settings, setSettings] = useState(() => loadTranslatorSettings())
   const engines = useObservable<TranslatorEngineEntry[]>(() => loadTranslatorSettings().engines)
@@ -111,6 +113,7 @@ export function TranslatorSettingsView() {
       const merged = { ...loadTranslatorSettings(), engines: nextEngines }
       setSettings(merged)
       saveTranslatorSettings(merged)
+      props.onSettingsChanged?.()
     })
     return true
   })
@@ -120,6 +123,7 @@ export function TranslatorSettingsView() {
     setSettings(next)
     engines.setValue(next.engines)
     saveTranslatorSettings(next)
+    props.onSettingsChanged?.()
   }
 
   function persistEngineLabelAndImage(

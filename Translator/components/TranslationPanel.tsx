@@ -3,19 +3,21 @@ import {
   Group,
   HStack,
   Image,
-  Menu,
   List,
+  Menu,
   Picker,
   ProgressView,
   Section,
   Spacer,
   Text,
+  TextField,
   VStack,
   useEffect,
   useEffectEvent,
   useRef,
   useState,
 } from "scripting"
+import type { PresentationDetent } from "scripting"
 
 import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
@@ -46,8 +48,13 @@ import {
 } from "../utils/translator_settings"
 
 type TranslationPanelProps = {
-  inputText: string | null
+  inputText?: string | null
   allowsReplacement: boolean
+  editableSource?: boolean
+  embedded?: boolean
+  navigationTitle?: string
+  showDismissButton?: boolean
+  settingsRefreshKey?: number
 }
 
 function summarizeText(text: string, maxLength = 48) {
@@ -237,9 +244,10 @@ function shouldCollapseSourceText(text: string) {
 }
 
 export function TranslationPanel(props: TranslationPanelProps) {
-  const sourceText = props.inputText ?? ""
+  const [settings, setSettings] = useState(() => loadTranslatorSettings())
+  const [draftSourceText, setDraftSourceText] = useState(() => props.inputText ?? "")
+  const sourceText = props.editableSource ? draftSourceText : (props.inputText ?? "")
   const hasInput = sourceText.trim().length > 0
-  const [settings] = useState(() => loadTranslatorSettings())
   const [sourceLanguageCode, setSourceLanguageCode] = useState(() => settings.defaultSourceLanguageCode)
   const [targetLanguageCode, setTargetLanguageCode] = useState(() => settings.defaultTargetLanguageCode)
   const [systemTranslationHost] = useState(() => new Translation())
@@ -251,7 +259,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const executableEngines = getExecutableEngines(settings)
   const assistantConfig = settings.engines.find((engine) => engine.kind === "assistant")?.config
   const [appleEngine] = useState(() => createTranslationEngine())
-  const [assistantEngine] = useState(() => createAssistantTranslationEngine(assistantConfig))
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
 
   const visibleEngines = executableEngines.filter((engine) => {
@@ -287,10 +294,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
     const result = engine.kind === "apple_intelligence"
       ? await appleEngine.translate(request)
       : engine.kind === "assistant"
-        ? await assistantEngine.translate(request)
-      : engine.kind === "system_translation"
-        ? await systemEngine.translate(request)
-        : await translateWithExternalEngine(engine, request)
+        ? await createAssistantTranslationEngine(assistantConfig).translate(request)
+        : engine.kind === "system_translation"
+          ? await systemEngine.translate(request)
+          : await translateWithExternalEngine(engine, request)
 
     return {
       engineId: engine.id,
@@ -301,6 +308,23 @@ export function TranslationPanel(props: TranslationPanelProps) {
       isTranslating: false,
     } satisfies EngineTranslationState
   }
+
+  useEffect(() => {
+    if (!props.editableSource) return
+    setDraftSourceText(props.inputText ?? "")
+  }, [props.editableSource, props.inputText])
+
+  useEffect(() => {
+    if (props.settingsRefreshKey == null) return
+
+    const nextSettings = loadTranslatorSettings()
+    setSettings(nextSettings)
+    setSourceLanguageCode(nextSettings.defaultSourceLanguageCode)
+    setTargetLanguageCode(nextSettings.defaultTargetLanguageCode)
+    setErrorText("")
+    setEngineResults([])
+    targetTouchedRef.current = false
+  }, [props.settingsRefreshKey])
 
   useEffect(() => {
     appleEngine.prewarm()
@@ -580,21 +604,30 @@ export function TranslationPanel(props: TranslationPanelProps) {
     }
   })
 
-  if (!hasInput) {
+  const sourceShouldCollapse = shouldCollapseSourceText(sourceText)
+  const listProps = {
+    listStyle: "insetGroup" as const,
+    scrollContentBackground: "hidden" as const,
+    contentMargins: {
+      edges: "top" as const,
+      insets: 0,
+      placement: "scrollContent" as const,
+    },
+    translationHost: systemTranslationHost,
+    ...(props.embedded ? {} : {
+      presentationDetents: ["medium", "large"] as PresentationDetent[],
+      presentationDragIndicator: "visible" as const,
+      presentationContentInteraction: "resizes" as const,
+    }),
+    ...(props.navigationTitle ? {
+      navigationTitle: props.navigationTitle,
+      navigationBarTitleDisplayMode: "inline" as const,
+    } : {}),
+  }
+
+  if (!hasInput && !props.editableSource) {
     return (
-      <List
-        listStyle="insetGroup"
-        scrollContentBackground="hidden"
-        contentMargins={{
-          edges: "top",
-          insets: 0,
-          placement: "scrollContent",
-        }}
-        presentationDetents={["medium", "large"]}
-        presentationDragIndicator="visible"
-        presentationContentInteraction="resizes"
-        translationHost={systemTranslationHost}
-      >
+      <List {...listProps}>
         <Section>
           <Text foregroundStyle="secondaryLabel">
             当前宿主没有传入可供翻译的文本。
@@ -604,22 +637,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
     )
   }
 
-  const sourceShouldCollapse = shouldCollapseSourceText(sourceText)
-
   return (
-    <List
-      listStyle="insetGroup"
-      scrollContentBackground="hidden"
-      contentMargins={{
-        edges: "top",
-        insets: 0,
-        placement: "scrollContent",
-      }}
-      presentationDetents={["medium", "large"]}
-      presentationDragIndicator="visible"
-      presentationContentInteraction="resizes"
-      translationHost={systemTranslationHost}
-    >
+    <List {...listProps}>
       <Section>
         <HStack spacing={6}>
           <LanguageMenu
@@ -644,20 +663,39 @@ export function TranslationPanel(props: TranslationPanelProps) {
             options={LANGUAGE_OPTIONS}
           />
         </HStack>
-        <CopyableTextRow
-          text={sourceText}
-          lineLimit={sourceShouldCollapse && !isSourceExpanded ? 2 : undefined}
-          extraMenuButtons={sourceShouldCollapse ? [
-            {
-              title: isSourceExpanded ? "收起" : "展开",
-              systemImage: isSourceExpanded ? "chevron.up" : "chevron.down",
-              action: toggleSourceExpanded,
-            },
-          ] : undefined}
-        />
+        {props.editableSource ? (
+          <TextField
+            title=""
+            value={draftSourceText}
+            onChanged={(value: string) => {
+              setDraftSourceText(value)
+              setErrorText("")
+            }}
+            prompt="输入要翻译的文本"
+            axis="vertical"
+          />
+        ) : (
+          <CopyableTextRow
+            text={sourceText}
+            lineLimit={sourceShouldCollapse && !isSourceExpanded ? 2 : undefined}
+            extraMenuButtons={sourceShouldCollapse ? [
+              {
+                title: isSourceExpanded ? "收起" : "展开",
+                systemImage: isSourceExpanded ? "chevron.up" : "chevron.down",
+                action: toggleSourceExpanded,
+              },
+            ] : undefined}
+          />
+        )}
       </Section>
 
-      {visibleEngines.length === 0 ? (
+      {!hasInput && props.editableSource ? (
+        <Section>
+          <Text foregroundStyle="secondaryLabel">
+            输入要翻译的文本后，将按当前已启用的引擎输出结果。
+          </Text>
+        </Section>
+      ) : visibleEngines.length === 0 ? (
         <Section>
           <Text foregroundStyle="secondaryLabel">
             {errorText || "没有启用且可用的翻译引擎。"}
