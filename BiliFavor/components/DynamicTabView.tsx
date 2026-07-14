@@ -7,6 +7,7 @@ import {
   List,
   NavigationStack,
   ProgressView,
+  RoundedRectangle,
   ScrollViewReader,
   type ScrollViewProxy,
   Section,
@@ -120,6 +121,7 @@ function VideoDynamicCard(props: {
   const { item } = props
   const colorScheme = useColorScheme()
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+  const cardShape = { type: "rect" as const, cornerRadius: 24, style: "continuous" as const }
 
   async function copyLink() {
     if (!props.externalUrl) return
@@ -146,7 +148,6 @@ function VideoDynamicCard(props: {
     <HStack
       spacing={10}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      contentShape="rect"
     >
       {avatarContent}
       <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
@@ -174,13 +175,6 @@ function VideoDynamicCard(props: {
     <HStack
       spacing={10}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      contentShape="rect"
-      contextMenu={{
-        menuItems: <Group>
-          <Button title="复制链接" systemImage="link" action={() => void copyLink()} />
-          <Button title="分享链接" systemImage="square.and.arrow.up" action={() => void shareLink()} />
-        </Group>,
-      }}
     >
       <VStack spacing={14} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
         <ZStack
@@ -247,55 +241,72 @@ function VideoDynamicCard(props: {
 
   return (
     <VStack
-      spacing={14}
-      padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
-      background={{ style: cardFill, shape: { type: "rect", cornerRadius: 24 } }}
-      shadow={{
-        color: colorScheme === "dark" ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.08)",
-        radius: 14,
-        y: 6,
-      }}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      listRowInsets={{ top: 0, bottom: 0, leading: 16, trailing: 16 }}
       listRowBackground={<EmptyView />}
       listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
       listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
       onAppear={props.isLast && props.shouldLoadMore ? props.onLoadMore : undefined}
     >
-      <HStack spacing={10} frame={{ maxWidth: "infinity" as any }}>
-        {props.onOpenAuthorUrl ? (
-          <Button
-            buttonStyle="plain"
-            action={props.onOpenAuthorUrl}
-            frame={{ maxWidth: "infinity" }}
-          >
-            {headerContent}
-          </Button>
-        ) : (
-          headerContent
-        )}
-        <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
-          {item.publishedLabel || "刚刚"}
-        </Text>
-      </HStack>
+      <ZStack
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        contentShape={cardShape}
+        clipShape={cardShape}
+        contextMenu={{
+          menuItems: <Group>
+            <Button title="复制链接" systemImage="link" action={() => void copyLink()} />
+            <Button title="分享链接" systemImage="square.and.arrow.up" action={() => void shareLink()} />
+          </Group>,
+        }}
+      >
+        <RoundedRectangle
+          cornerRadius={24}
+          fill={cardFill}
+          stroke="separator"
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        />
 
-      {props.onPress ? (
-        <Button
-          buttonStyle="plain"
-          action={props.onPress}
-          frame={{ maxWidth: "infinity" }}
+        <VStack
+          spacing={14}
+          padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
+          frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         >
-          {bodyContent}
-        </Button>
-      ) : props.onOpenExternalUrl ? (
-        <Button
-          buttonStyle="plain"
-          action={props.onOpenExternalUrl}
-          frame={{ maxWidth: "infinity" }}
-        >
-          {bodyContent}
-        </Button>
-      ) : (
-        bodyContent
-      )}
+          <HStack spacing={10} frame={{ maxWidth: "infinity" as any }}>
+            {props.onOpenAuthorUrl ? (
+              <HStack
+                spacing={0}
+                frame={{ maxWidth: "infinity" }}
+                onTapGesture={props.onOpenAuthorUrl}
+              >
+                {headerContent}
+              </HStack>
+            ) : (
+              headerContent
+            )}
+            <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
+              {item.publishedLabel || "刚刚"}
+            </Text>
+          </HStack>
+
+          {props.onPress ? (
+            <VStack
+              frame={{ maxWidth: "infinity" }}
+              onTapGesture={props.onPress}
+            >
+              {bodyContent}
+            </VStack>
+          ) : props.onOpenExternalUrl ? (
+            <VStack
+              frame={{ maxWidth: "infinity" }}
+              onTapGesture={props.onOpenExternalUrl}
+            >
+              {bodyContent}
+            </VStack>
+          ) : (
+            bodyContent
+          )}
+        </VStack>
+      </ZStack>
     </VStack>
   )
 }
@@ -370,6 +381,8 @@ export function DynamicTabView(props: {
             <List
               navigationTitle="动态"
               navigationBarTitleDisplayMode="large"
+              listRowSpacing={6}
+              listSectionSpacing="compact"
               listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
               refreshable={props.isLoggedIn ? props.onRefresh : undefined}

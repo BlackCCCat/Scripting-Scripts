@@ -7,6 +7,7 @@ import {
   List,
   NavigationStack,
   ProgressView,
+  RoundedRectangle,
   Section,
   Text,
   useColorScheme,
@@ -89,127 +90,143 @@ function FavoriteVideoCard(props: {
   const colorScheme = useColorScheme()
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   const videoUrl = resolveVideoUrl(props.item)
+  const cardShape = { type: "rect" as const, cornerRadius: 24, style: "continuous" as const }
 
   return (
     <VStack
-      spacing={14}
-      padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
-      background={{ style: cardFill, shape: { type: "rect", cornerRadius: 24 } }}
-      shadow={{
-        color: colorScheme === "dark" ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.08)",
-        radius: 14,
-        y: 6,
-      }}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      listRowInsets={{ top: 0, bottom: 0, leading: 16, trailing: 16 }}
       listRowBackground={<EmptyView />}
       listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
       listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
       onAppear={props.isLast && props.shouldLoadMore ? props.onLoadMore : undefined}
     >
-      <Button buttonStyle="plain" action={props.onOpenAuthor} frame={{ maxWidth: "infinity" }}>
-        <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Image
-            imageUrl={props.item.authorFace}
-            resizable={true}
-            scaleToFill={true}
-            frame={{ width: 38, height: 38 }}
-            clipShape={{ type: "rect", cornerRadius: 10 }}
-            placeholder={<ProgressView progressViewStyle="circular" />}
-          />
-          <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-            <Text
-              font="subheadline"
-              foregroundStyle="#FB7299"
-              lineLimit={1}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            >
-              {props.item.authorName}
-            </Text>
-            <Text
-              font="caption"
-              foregroundStyle="secondaryLabel"
-              lineLimit={1}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            >
-              {props.item.authorAction || "投稿了视频"}
-            </Text>
-          </VStack>
-          <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
-            {props.item.publishedLabel || "刚刚"}
-          </Text>
-        </HStack>
-      </Button>
-
-      <Button
-        buttonStyle="plain"
-        action={props.onPlayInline ?? props.onOpenVideo}
-        frame={{ maxWidth: "infinity" }}
+      <ZStack
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        contentShape={cardShape}
+        clipShape={cardShape}
+        contextMenu={{
+          menuItems: <Group>
+            <Button title="复制链接" systemImage="link" action={() => { void copyToPasteboard(videoUrl) }} />
+            <Button title="分享链接" systemImage="square.and.arrow.up" action={() => { void presentShareSheet(videoUrl) }} />
+          </Group>,
+        }}
       >
-        <HStack
-          spacing={10}
-          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-          contentShape="rect"
-          contextMenu={{
-            menuItems: <Group>
-              <Button title="复制链接" systemImage="link" action={() => { void copyToPasteboard(videoUrl) }} />
-              <Button title="分享链接" systemImage="square.and.arrow.up" action={() => { void presentShareSheet(videoUrl) }} />
-            </Group>,
-          }}
+        <RoundedRectangle
+          cornerRadius={24}
+          fill={cardFill}
+          stroke="separator"
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        />
+
+        <VStack
+          spacing={14}
+          padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
+          frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
         >
-          <VStack spacing={14} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-            <ZStack
-              frame={{ maxWidth: "infinity", height: 210 }}
-              background={{ style: "tertiarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}
-            >
+          <HStack
+            spacing={0}
+            frame={{ maxWidth: "infinity" }}
+            onTapGesture={props.onOpenAuthor}
+          >
+            <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
               <Image
-                imageUrl={props.item.cover}
+                imageUrl={props.item.authorFace}
                 resizable={true}
                 scaleToFill={true}
-                frame={{ maxWidth: "infinity", height: 210 }}
-                clipShape={{ type: "rect", cornerRadius: 14 }}
+                frame={{ width: 38, height: 38 }}
+                clipShape={{ type: "rect", cornerRadius: 10 }}
                 placeholder={<ProgressView progressViewStyle="circular" />}
               />
-              <VStack
-                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
-                padding={8}
-              >
+              <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
                 <Text
-                  font="caption2"
-                  foregroundStyle="white"
-                  padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
-                  background={{ style: "rgba(0,0,0,0.72)", shape: { type: "capsule", style: "continuous" } }}
+                  font="subheadline"
+                  foregroundStyle="#FB7299"
+                  lineLimit={1}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
-                  {props.item.durationText || "--:--"}
+                  {props.item.authorName}
                 </Text>
-              </VStack>
-            </ZStack>
-
-            <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-              <Text
-                font="headline"
-                lineLimit={2}
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-              >
-                {props.item.title}
-              </Text>
-
-              <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
                 <Text
                   font="caption"
-                  foregroundStyle="white"
+                  foregroundStyle="secondaryLabel"
                   lineLimit={1}
-                  padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
-                  background={{ style: "#FB7299", shape: { type: "capsule", style: "continuous" } }}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
-                  收藏 UP
+                  {props.item.authorAction || "投稿了视频"}
                 </Text>
-                <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
-                  播放 {props.item.playText}
-                </Text>
-              </HStack>
-            </VStack>
+              </VStack>
+              <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
+                {props.item.publishedLabel || "刚刚"}
+              </Text>
+            </HStack>
+          </HStack>
+
+          <VStack
+            frame={{ maxWidth: "infinity" }}
+            onTapGesture={props.onPlayInline ?? props.onOpenVideo}
+          >
+            <HStack
+              spacing={10}
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            >
+              <VStack spacing={14} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+                <ZStack
+                  frame={{ maxWidth: "infinity", height: 210 }}
+                  background={{ style: "tertiarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+                >
+                  <Image
+                    imageUrl={props.item.cover}
+                    resizable={true}
+                    scaleToFill={true}
+                    frame={{ maxWidth: "infinity", height: 210 }}
+                    clipShape={{ type: "rect", cornerRadius: 14 }}
+                    placeholder={<ProgressView progressViewStyle="circular" />}
+                  />
+                  <VStack
+                    frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+                    padding={8}
+                  >
+                    <Text
+                      font="caption2"
+                      foregroundStyle="white"
+                      padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
+                      background={{ style: "rgba(0,0,0,0.72)", shape: { type: "capsule", style: "continuous" } }}
+                    >
+                      {props.item.durationText || "--:--"}
+                    </Text>
+                  </VStack>
+                </ZStack>
+
+                <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+                  <Text
+                    font="headline"
+                    lineLimit={2}
+                    frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                  >
+                    {props.item.title}
+                  </Text>
+
+                  <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                    <Text
+                      font="caption"
+                      foregroundStyle="white"
+                      lineLimit={1}
+                      padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
+                      background={{ style: "#FB7299", shape: { type: "capsule", style: "continuous" } }}
+                    >
+                      收藏 UP
+                    </Text>
+                    <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
+                      播放 {props.item.playText}
+                    </Text>
+                  </HStack>
+                </VStack>
+              </VStack>
+            </HStack>
           </VStack>
-        </HStack>
-      </Button>
+        </VStack>
+      </ZStack>
     </VStack>
   )
 }
@@ -244,6 +261,8 @@ export function FavoritesTabView(props: {
       <List
         navigationTitle="收藏"
         navigationBarTitleDisplayMode="large"
+        listRowSpacing={6}
+        listSectionSpacing="compact"
         listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
         listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
         refreshable={props.favoriteAuthors.length > 0 ? props.onRefresh : undefined}
@@ -351,21 +370,23 @@ export function FavoritesTabView(props: {
           </Section>
         ) : null}
 
-        {props.items.map((item) => {
-          const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
-          return (
-            <FavoriteVideoCard
-              key={item.id}
-              item={item}
-              isLast={item.id === props.items[props.items.length - 1]?.id}
-              shouldLoadMore={props.hasMore && !props.isLoadingMore}
-              onLoadMore={() => { void props.onLoadMore() }}
-              onOpenAuthor={() => { void openExternalUrl(resolveAuthorSpaceUrl(item)) }}
-              onOpenVideo={() => { void openExternalUrl(resolveVideoUrl(item)) }}
-              onPlayInline={canInlinePlay ? () => setPlayingItem(item) : undefined}
-            />
-          )
-        })}
+        {props.items.length > 0 ? (
+          props.items.map((item, index) => {
+            const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
+            return (
+              <FavoriteVideoCard
+                key={item.id}
+                item={item}
+                isLast={item.id === props.items[props.items.length - 1]?.id}
+                shouldLoadMore={props.hasMore && !props.isLoadingMore}
+                onLoadMore={() => { void props.onLoadMore() }}
+                onOpenAuthor={() => { void openExternalUrl(resolveAuthorSpaceUrl(item)) }}
+                onOpenVideo={() => { void openExternalUrl(resolveVideoUrl(item)) }}
+                onPlayInline={canInlinePlay ? () => setPlayingItem(item) : undefined}
+              />
+            )
+          })
+        ) : null}
 
         {props.favoriteAuthors.length > 0 && props.items.length > 0 ? (
           <VStack
