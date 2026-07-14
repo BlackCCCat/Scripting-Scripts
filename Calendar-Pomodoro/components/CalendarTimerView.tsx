@@ -55,6 +55,12 @@ import {
   loadTaskDurationsCache,
   saveTaskDurationsCache,
 } from "../utils/taskDurations";
+// 全局设置：主题色、日历账户筛选等
+import {
+  DEFAULT_THEME_COLOR,
+  loadSettings,
+  type AppSettings,
+} from "../utils/settings";
 // 时间格式化工具
 import { formatDateTime, formatDuration } from "../utils/time";
 // 任务新增/编辑页面
@@ -63,6 +69,8 @@ import { TaskEditView } from "./TaskEditView";
 import { TaskStatsView, loadCalendarEventsByChunks } from "./TaskStatsView";
 // 总体报告页
 import { OverallReportView } from "./OverallReportView";
+// 设置页
+import { SettingsView } from "./SettingsView";
 
 // Live Activity 创建器（用于 start/update/end）
 const createTimerActivity = PomodoroLiveActivity;
@@ -199,9 +207,9 @@ function roundToTimelineStep(value: number): number {
   return Math.max(0, Math.min(TIMELINE_MAX_MINUTES, rounded));
 }
 
-function TaskProgressLine(props: { ratio: number; active: boolean }) {
+function TaskProgressLine(props: { ratio: number; active: boolean; tint: string }) {
   const ratio = clamp01(props.ratio);
-  const tint = props.active ? "systemGreen" : "systemCyan";
+  const tint = props.active ? "systemGreen" : props.tint;
   return (
     <GeometryReader frame={{ height: 16, maxWidth: "infinity" }}>
       {(proxy) => {
@@ -230,6 +238,7 @@ function TimeAxis(props: {
   targetLabel: string;
   durationLabel: string;
   currentMinute: number;
+  tint: string;
   disabled: boolean;
   maxValue: number;
   onChanged: (value: number) => void;
@@ -291,7 +300,7 @@ function TimeAxis(props: {
               <ZStack frame={{ width, height: 18 }}>
                 {currentTimeX > 0.5 ? (
                   <Rectangle
-                    fill="systemCyan"
+                    fill={props.tint as any}
                     opacity={0.65}
                     frame={{ width: currentTimeX, height: 2 }}
                     position={{ x: currentTimeX / 2, y: axisY }}
@@ -322,7 +331,7 @@ function TimeAxis(props: {
           }}
         </GeometryReader>
         <Circle
-          fill="systemCyan"
+          fill={props.tint as any}
           frame={{ width: 13, height: 13 }}
         />
       </ZStack>
@@ -485,6 +494,7 @@ export function CalendarTimerView() {
   const [focusModeText, setFocusModeText] = useState("正计时");
   const [taskDurations, setTaskDurations] = useState<TaskDurationMap>({});
   const [taskDurationsLoading, setTaskDurationsLoading] = useState(false);
+  const [themeColor, setThemeColor] = useState(DEFAULT_THEME_COLOR);
   const [uiTick, setUiTick] = useState(Date.now());
   const activeReorderTask = useObservable<Task | null>(null);
   const [runtimeCountdownSeconds, setRuntimeCountdownSeconds] = useState<
@@ -540,6 +550,7 @@ export function CalendarTimerView() {
   useEffect(() => {
     // 首次进入：加载任务
     void refreshTasks();
+    void refreshSettings();
   }, []);
   useEffect(() => {
     // 首页进入时刷新“当前时间”所在的时间轴位置；用户未手动滚动前，目标点始终跟随当前时间。
@@ -1732,6 +1743,26 @@ export function CalendarTimerView() {
     });
   }
 
+  async function refreshSettings() {
+    try {
+      const settings = await loadSettings();
+      setThemeColor(settings.themeColor || DEFAULT_THEME_COLOR);
+    } catch {
+      setThemeColor(DEFAULT_THEME_COLOR);
+    }
+  }
+
+  async function openSettings() {
+    const next = await Navigation.present<AppSettings>({
+      element: <SettingsView />,
+    });
+    if (next?.themeColor) {
+      setThemeColor(next.themeColor);
+      return;
+    }
+    await refreshSettings();
+  }
+
   async function refreshLiveActivityManually() {
     // 手动刷新 Live Activity（用于修复偶发的 UI 卡住/遮罩）
     const now = new Date();
@@ -1914,6 +1945,10 @@ export function CalendarTimerView() {
                     title="显示报告"
                     action={withButtonHaptic(openOverallReport)}
                   />
+                  <Button
+                    title="设置"
+                    action={withButtonHaptic(openSettings)}
+                  />
                 </Menu>
                 <Button
                   title=""
@@ -1945,13 +1980,13 @@ export function CalendarTimerView() {
                       spacing={8}
                       padding={{ top: 8, bottom: 8, leading: 10, trailing: 10 }}
                       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                      background={isReordering ? "rgba(0, 188, 255, 0.14)" : "rgba(0,0,0,0.001)"}
+                      background={isReordering ? "rgba(255, 90, 54, 0.14)" : "rgba(0,0,0,0.001)"}
                       clipShape={{ type: "rect", cornerRadius: 18 } as any}
                       contentShape="rect"
                       scaleEffect={isReordering ? 1.025 : 1}
                       shadow={
                         isReordering
-                          ? ({ color: "rgba(0, 188, 255, 0.32)", radius: 16, x: 0, y: 8 } as any)
+                          ? ({ color: "rgba(255, 90, 54, 0.32)", radius: 16, x: 0, y: 8 } as any)
                           : undefined
                       }
                       zIndex={isReordering ? 20 : 0}
@@ -1981,11 +2016,11 @@ export function CalendarTimerView() {
                           </Text>
                         </VStack>
                         <Spacer />
-                        <Text foregroundStyle="systemBlue" monospacedDigit>
+                        <Text foregroundStyle={themeColor as any} monospacedDigit>
                           {taskDurationsLoading && duration <= 0 ? "统计中" : formatCompactDuration(duration)}
                         </Text>
                       </HStack>
-                      <TaskProgressLine ratio={ratio} active={isActive} />
+                      <TaskProgressLine ratio={ratio} active={isActive} tint={themeColor} />
                     </VStack>
                   );
                 }}
@@ -2013,10 +2048,10 @@ export function CalendarTimerView() {
               <Menu
                 label={
                   <HStack spacing={6}>
-                    <Text foregroundStyle="systemCyan" font="headline" lineLimit={1}>
+                    <Text foregroundStyle={themeColor as any} font="headline" lineLimit={1}>
                       {selectedTaskTitle}
                     </Text>
-                    <Image systemName="play.fill" foregroundStyle="systemCyan" imageScale="small" />
+                    <Image systemName="play.fill" foregroundStyle={themeColor as any} imageScale="small" />
                   </HStack>
                 }
               >
@@ -2032,7 +2067,7 @@ export function CalendarTimerView() {
               <Button
                 title={startButtonTitle}
                 buttonStyle="borderedProminent"
-                tint={running || paused ? "systemRed" : "systemCyan"}
+                tint={running || paused ? "systemRed" : themeColor as any}
                 disabled={!selectedTask || saving}
                 action={withButtonHaptic(toggleSelectedTimer)}
               />
@@ -2043,6 +2078,7 @@ export function CalendarTimerView() {
               targetLabel={targetClock}
               durationLabel={timerModeText}
               currentMinute={currentTimelineMinutes}
+              tint={themeColor}
               disabled={running || paused}
               maxValue={maxTimelineOffset}
               onChanged={handleTimelineChanged}

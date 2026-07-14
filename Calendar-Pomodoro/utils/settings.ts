@@ -6,7 +6,11 @@ import { BASE_DIR_NAME } from "../constants"
 // 全局设置结构
 export type AppSettings = {
   selectedCalendarSourceIds: string[]
+  themeColor: string
 }
+
+// 默认主题色：与 script.json 的 color 保持一致
+export const DEFAULT_THEME_COLOR = "rgba(252, 124, 93,1)"
 
 // 设置文件名
 const SETTINGS_FILE_NAME = "settings.json"
@@ -14,6 +18,7 @@ const SETTINGS_FILE_NAME = "settings.json"
 // 默认设置
 const DEFAULT_SETTINGS: AppSettings = {
   selectedCalendarSourceIds: [],
+  themeColor: DEFAULT_THEME_COLOR,
 }
 
 // 获取 FileManager，环境不支持时抛错
@@ -80,8 +85,13 @@ export async function loadSettings(): Promise<AppSettings> {
     const selectedCalendarSourceIds = Array.isArray(data?.selectedCalendarSourceIds)
       ? data.selectedCalendarSourceIds.filter((item: any) => typeof item === "string")
       : DEFAULT_SETTINGS.selectedCalendarSourceIds
+    const themeColor =
+      typeof data?.themeColor === "string" && data.themeColor.trim()
+        ? data.themeColor
+        : DEFAULT_SETTINGS.themeColor
     return {
       selectedCalendarSourceIds,
+      themeColor,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

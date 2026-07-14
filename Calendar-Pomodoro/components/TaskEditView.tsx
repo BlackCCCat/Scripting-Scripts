@@ -1,16 +1,13 @@
 // Scripting 组件与 API：
-// - UI 组件（Form/Picker/Toggle/DisclosureGroup 等）
+// - UI 组件（Form/Picker/Toggle 等）
 // - Hooks（useState/useEffect/useRef）
 import {
   Button,
-  DisclosureGroup,
   Form,
-  HStack,
   Navigation,
   NavigationStack,
   Picker,
   Section,
-  Spacer,
   Text,
   TextField,
   Toggle,
@@ -24,54 +21,24 @@ import {
 import { NOTIFICATION_INTERVAL_OPTIONS } from "../constants"
 // 任务类型
 import type { Task } from "../types"
-// 读取/保存本地设置（用于记住日历账户选择）
-import { loadSettings, saveSettings, type AppSettings } from "../utils/settings"
+// 读取本地设置（用于按设置页中的日历账户筛选日历）
+import { loadSettings } from "../utils/settings"
 
 function newTaskId(): string {
   // 简单的本地唯一 ID（时间戳 + 随机数）
   return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
-function CenterRowButton(props: {
-  title: string
-  role?: "cancel" | "destructive"
-  disabled?: boolean
-  onPress: () => void
-}) {
-  const handlePress = () => {
-    // 按钮触觉反馈：mediumImpact
-    HapticFeedback.mediumImpact()
-    void props.onPress()
-  }
-  return (
-    <Button role={props.role} action={handlePress} disabled={props.disabled}>
-      {/* 通过左右 Spacer 让文字居中对齐 */}
-      <HStack frame={{ width: "100%" as any }} padding={{ top: 14, bottom: 14 }}>
-        <Text opacity={0} frame={{ width: 1 }}>
-          .
-        </Text>
-        <Spacer />
-        <Text font="headline">{props.title}</Text>
-        <Spacer />
-      </HStack>
-    </Button>
-  )
-}
-
 export function TaskEditView(props: { title: string; initial?: Task }) {
   const dismiss = Navigation.useDismiss()
   // 基础字段
   const [name, setName] = useState(props.initial?.name ?? "")
-  // 日历账户列表与选择状态
+  // 日历账户列表与设置页中保存的选择状态
   const [sources, setSources] = useState<CalendarSource[]>([])
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([])
-  const [sourcesExpanded, setSourcesExpanded] = useState(false)
   // 账户筛选后的可写日历
   const [calendars, setCalendars] = useState<Calendar[]>([])
   const [calendarIdx, setCalendarIdx] = useState(0)
-  // 本地设置（用于记住账户选择）
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const selectionInitRef = useRef(false)
   const initialSourceInjectedRef = useRef(false)
   // 计时选项：倒计时由主页底部时间轴临时决定，任务设置页只保留通知配置
   const [useNotification, setUseNotification] = useState(
@@ -86,32 +53,10 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
   useEffect(() => {
     // 页面首次进入：读取账户列表与本地设置
     void loadSources()
-    void loadAppSettings()
   }, [])
 
   useEffect(() => {
-    if (!sources.length) return
-    if (!settings) return
-    if (selectionInitRef.current) return
-    // 首次根据设置恢复勾选的日历账户；若无设置则默认全选
-    const savedIds = settings.selectedCalendarSourceIds ?? []
-    const availableIds = sources.map((src) => src.identifier)
-    const initialIds =
-      savedIds.length > 0
-        ? savedIds.filter((id) => availableIds.includes(id))
-        : availableIds
-    selectionInitRef.current = true
-    setSelectedSourceIds(initialIds)
-  }, [sources, settings])
-
-  useEffect(() => {
-    if (!selectionInitRef.current || !settings) return
-    // 记住上次勾选的账户
-    void saveSettings({ ...settings, selectedCalendarSourceIds: selectedSourceIds })
-  }, [selectedSourceIds, settings])
-
-  useEffect(() => {
-    // 勾选账户变化时，刷新可写日历列表
+    // 设置页中的账户选择变化时，刷新可写日历列表
     void loadCalendars()
   }, [selectedSourceIds, sources.length])
 
@@ -153,20 +98,18 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       // 读取所有日历账户
       const list = Calendar.getSources?.() ?? []
       setSources(list)
+      const data = await loadSettings()
+      const availableIds = list.map((src) => src.identifier)
+      const savedIds = data.selectedCalendarSourceIds ?? []
+      const savedAvailableIds = savedIds.filter((id) => availableIds.includes(id))
+      const initialIds =
+        savedAvailableIds.length > 0
+          ? savedAvailableIds
+          : availableIds
+      setSelectedSourceIds(initialIds)
     } catch {
       setSources([])
-    }
-  }
-
-  async function loadAppSettings() {
-    try {
-      // 读取本地设置（记住的账户选择）
-      const data = await loadSettings()
-      setSettings(data)
-    } catch {
-      setSettings({
-        selectedCalendarSourceIds: [],
-      })
+      setSelectedSourceIds([])
     }
   }
 
@@ -194,21 +137,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
     } catch {
       setCalendars([])
     }
-  }
-
-  async function toggleSource(sourceId: string, enabled: boolean) {
-    // 至少保留一个账户，避免日历列表为空
-    if (!enabled && selectedSourceIds.length <= 1 && selectedSourceIds.includes(sourceId)) {
-      await Dialog.alert({ message: "至少选择一个日历账户" })
-      return
-    }
-    setSelectedSourceIds((prev) => {
-      if (enabled) {
-        if (prev.includes(sourceId)) return prev
-        return [...prev, sourceId]
-      }
-      return prev.filter((id) => id !== sourceId)
-    })
   }
 
   async function onSave() {
@@ -245,8 +173,22 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
 
   return (
     <NavigationStack>
-      <VStack navigationTitle={props.title} navigationBarTitleDisplayMode="inline">
-        {/* 表单分区：任务设置/计时选项/保存 */}
+      <VStack
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => {
+                HapticFeedback.mediumImpact()
+                void onSave()
+              }}
+            />
+          ),
+        }}
+      >
+        {/* 表单分区：任务设置/计时选项 */}
         <Form formStyle="grouped">
           <Section header={<Text>任务设置与日历</Text>}>
             <TextField
@@ -255,41 +197,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
               onChanged={(v: string) => setName(v)}
               prompt="例如：读书"
             />
-
-            <DisclosureGroup
-              label={
-                <HStack>
-                  <Text>日历账户</Text>
-                  <Spacer />
-                  <Text foregroundStyle="secondaryLabel">
-                    已选 {selectedSourceIds.length}/{sources.length}
-                  </Text>
-                </HStack>
-              }
-              isExpanded={sourcesExpanded}
-              onChanged={(value: boolean) => {
-                HapticFeedback.heavyImpact()
-                setSourcesExpanded(value)
-              }}
-            >
-              {sources.length ? (
-                sources.map((src) => (
-                  <Toggle
-                    key={src.identifier}
-                    value={selectedSourceIds.includes(src.identifier)}
-                    onChanged={(value: boolean) => {
-                      HapticFeedback.heavyImpact()
-                      void toggleSource(src.identifier, value)
-                    }}
-                    toggleStyle="switch"
-                  >
-                    <Text>{src.title}</Text>
-                  </Toggle>
-                ))
-              ) : (
-                <Text foregroundStyle="secondaryLabel">暂无日历账户</Text>
-              )}
-            </DisclosureGroup>
 
             {/* 关联日历（从所选账户中筛选） */}
             {calendars.length ? (
@@ -341,12 +248,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                 ))}
               </Picker>
             ) : null}
-          </Section>
-
-          {/* 操作区：保存/取消 */}
-          <Section>
-            <CenterRowButton title="保存" onPress={onSave} />
-            <CenterRowButton title="取消" role="cancel" onPress={() => dismiss()} />
           </Section>
         </Form>
       </VStack>
