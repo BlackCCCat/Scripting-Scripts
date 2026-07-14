@@ -79,7 +79,7 @@ export function HomeSectionOrderView(props: {
         >
           <Section header={<Text>主页区块排序</Text>}>
             <Text foregroundStyle="secondaryLabel">
-              点右上角编辑后拖动排序，主页会按这里的顺序显示五个区块。
+              点右上角编辑后拖动排序，主页会按这里的顺序显示四个区块。
             </Text>
             <ForEach
               count={order.length}

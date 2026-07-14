@@ -5,15 +5,14 @@ export type ReleaseSource = "cnb" | "github"
 export type SchemeEdition = "base" | "pro" | "pure"
 export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou" | "shyplus" | "wx"
 export type InputMethod = "hamster" | "hamster3" | "scripting"
-export type HomeSectionKey = "local" | "remote" | "notes" | "actions" | "status"
+export type HomeSectionKey = "local" | "remote" | "notes" | "status"
 
 export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou", "shyplus", "wx"]
-export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "notes", "actions", "status"]
+export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "notes", "status"]
 export const HOME_SECTION_LABELS: Record<HomeSectionKey, string> = {
   local: "本地信息",
   remote: "远程信息",
   notes: "更新说明",
-  actions: "操作",
   status: "状态",
 }
 
@@ -23,6 +22,7 @@ export type AppConfig = {
   releaseSource: ReleaseSource
   usePrereleaseScheme: boolean
   githubToken: string
+  cnbToken: string
 
   schemeEdition: SchemeEdition
   proSchemeKey: ProSchemeKey
@@ -51,6 +51,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   releaseSource: "cnb",
   usePrereleaseScheme: false,
   githubToken: "",
+  cnbToken: "",
   schemeEdition: "base",
   proSchemeKey: "moqi",
   excludePatternsText: "",
@@ -60,7 +61,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   useBuiltinScriptingPath: false,
   autoCheckOnLaunch: false,
   showVerboseLog: true,
-  homeSectionOrder: ["local", "actions", "status", "remote", "notes"],
+  homeSectionOrder: ["local", "status", "remote", "notes"],
 }
 
 export function normalizeHomeSectionOrder(input: unknown): HomeSectionKey[] {

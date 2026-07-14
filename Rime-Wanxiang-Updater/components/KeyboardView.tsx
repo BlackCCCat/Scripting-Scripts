@@ -55,11 +55,10 @@ function schemeLocalDisplayMark(cfg: AppConfig, metaScheme: MetaBundle["scheme"]
 function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdateResult, cfg: AppConfig): UpdateDecision {
   const schemeRemoteMark = normalizeMark(schemeRemoteDisplayMark(cfg, remote.scheme))
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha)
-  const modelRemoteMark = normalizeMark(modelDisplayMark(remote.model, localMeta?.model))
   return {
     scheme: !!(schemeRemoteMark && normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
-    model: !!(modelRemoteMark && isModelUpdateAvailable(localMeta?.model, remote.model)),
+    model: isModelUpdateAvailable(localMeta?.model, remote.model),
   }
 }
 

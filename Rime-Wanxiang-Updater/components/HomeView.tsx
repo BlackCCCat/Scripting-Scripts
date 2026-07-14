@@ -134,136 +134,125 @@ function normalizeMetaScheme(
   };
 }
 
-function GridButton(props: {
-  title: string;
+function FloatingActionButton(props: {
   icon: string;
-  disabled?: boolean;
+  title?: string;
   color?: string;
+  disabled?: boolean;
+  size?: number;
+  iconSize?: string;
   onPress: () => void;
+  onLongPress?: () => void;
 }) {
-  const colorScheme = useColorScheme();
-  const haptic = () => {
-    try {
-      (globalThis as any).HapticFeedback?.mediumImpact?.();
-    } catch {}
-  };
+  const size = props.size ?? 58;
+  const longPressHandledRef = useRef(false);
   const tintColor: any = props.disabled
     ? "secondaryLabel"
     : (props.color ?? "systemBlue");
-  const darkCardFill: any = props.disabled
-    ? "rgba(58,58,60,0.72)"
-    : "rgba(58,58,60,0.96)";
+
+  function triggerPress() {
+    if (longPressHandledRef.current) {
+      longPressHandledRef.current = false;
+      return;
+    }
+    try {
+      (globalThis as any).HapticFeedback?.mediumImpact?.();
+    } catch {}
+    props.onPress();
+  }
+
+  function triggerLongPress() {
+    if (props.disabled || !props.onLongPress) return;
+    try {
+      (globalThis as any).HapticFeedback?.heavyImpact?.();
+    } catch {}
+    longPressHandledRef.current = true;
+    props.onLongPress();
+  }
+
+  const longPressGesture = props.onLongPress
+    ? { minDuration: 500, perform: triggerLongPress }
+    : undefined;
+
   return (
     <Button
-      action={() => {
-        haptic();
-        props.onPress();
-      }}
+      action={triggerPress}
       disabled={props.disabled}
-      buttonStyle="plain"
+      buttonStyle="glass"
+      buttonBorderShape="circle"
+      controlSize="regular"
       tint={tintColor}
-      frame={{ maxWidth: "infinity", minHeight: 62 }}
+      onLongPressGesture={longPressGesture}
+      frame={{ width: size, height: size }}
     >
-      {colorScheme === "dark" ? (
-        <ZStack
-          frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
-          background={"rgba(0,0,0,0.001)"}
-        >
-          <RoundedRectangle
-            cornerRadius={16}
-            fill={darkCardFill}
-            stroke={"separator"}
-            frame={{
-              maxWidth: "infinity",
-              minHeight: 62,
-              maxHeight: "infinity",
-            }}
-          />
-          <VStack
-            spacing={3}
-            frame={{
-              maxWidth: "infinity",
-              minHeight: 62,
-              maxHeight: "infinity",
-            }}
-            padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
-          >
-            <Spacer />
-            <Image
-              systemName={props.icon}
-              font="title2"
-              frame={{ height: 22 }}
-              foregroundStyle={tintColor}
-            />
-            <Text
-              font="footnote"
-              frame={{
-                maxWidth: "infinity",
-                minHeight: 16,
-                alignment: "center" as any,
-              }}
-              lineLimit={1}
-              multilineTextAlignment="center"
-              foregroundStyle={tintColor}
-            >
-              {props.title}
-            </Text>
-            <Spacer />
-          </VStack>
-        </ZStack>
-      ) : (
-        <VStack
-          spacing={0}
-          frame={{ maxWidth: "infinity", minHeight: 62, maxHeight: "infinity" }}
-          background={{
-            style: "secondarySystemBackground",
-            shape: { type: "rect", cornerRadius: 16 },
-          }}
-        >
-          <VStack
-            spacing={3}
-            frame={{
-              maxWidth: "infinity",
-              minHeight: 62,
-              maxHeight: "infinity",
-            }}
-            padding={{ top: 6, bottom: 6, leading: 6, trailing: 6 }}
-            background={"rgba(0,0,0,0.001)"}
-          >
-            <Spacer />
-            <Image
-              systemName={props.icon}
-              font="title2"
-              frame={{ height: 22 }}
-              foregroundStyle={tintColor}
-            />
-            <Text
-              font="footnote"
-              frame={{
-                maxWidth: "infinity",
-                minHeight: 16,
-                alignment: "center" as any,
-              }}
-              lineLimit={1}
-              multilineTextAlignment="center"
-              foregroundStyle={tintColor}
-            >
-              {props.title}
-            </Text>
-            <Spacer />
-          </VStack>
-        </VStack>
-      )}
+      <VStack
+        frame={{ width: size, height: size, alignment: "center" as any }}
+        onLongPressGesture={longPressGesture}
+      >
+        <Image
+          systemName={props.icon}
+          font={(props.iconSize ?? "title3") as any}
+          foregroundStyle={tintColor}
+        />
+      </VStack>
     </Button>
   );
 }
 
-function RowKV(props: { k: string; v: string }) {
+type ActionClusterItem = {
+  icon: string;
+  title: string;
+  color?: string;
+  disabled?: boolean;
+  onPress: () => void;
+};
+
+function FloatingActionGroup(props: {
+  icon: string;
+  color?: string;
+  expanded: boolean;
+  disabled?: boolean;
+  items: ActionClusterItem[];
+  onToggle: () => void;
+  onLongPress?: () => void;
+}) {
+  return (
+    <HStack spacing={18} frame={{ maxWidth: "infinity", alignment: "trailing" as any }}>
+      {props.expanded ? (
+        <HStack spacing={18}>
+          {props.items.map((item) => (
+            <FloatingActionButton
+              key={item.title}
+              icon={item.icon}
+              title={item.title}
+              color={item.color}
+              disabled={item.disabled}
+              size={50}
+              iconSize="title3"
+              onPress={item.onPress}
+            />
+          ))}
+        </HStack>
+      ) : null}
+      <FloatingActionButton
+        icon={props.expanded ? "xmark" : props.icon}
+        color={props.color}
+        disabled={props.disabled}
+        size={56}
+        iconSize="title2"
+        onPress={props.onToggle}
+        onLongPress={props.onLongPress}
+      />
+    </HStack>
+  );
+}
+
+function RowKV(props: { k: string; v: string; valueColor?: string }) {
   return (
     <HStack>
       <Text>{props.k}</Text>
       <Spacer />
-      <Text>{props.v}</Text>
+      <Text foregroundStyle={(props.valueColor ?? "label") as any}>{props.v}</Text>
     </HStack>
   );
 }
@@ -426,7 +415,6 @@ function buildUpdateDecision(
     schemeRemoteDisplayMark(cfg, remote.scheme),
   );
   const dictRemoteMark = normalizeMark(remote.dict?.remoteIdOrSha);
-  const modelRemoteMark = normalizeMark(modelDisplayMark(remote.model, localMeta?.model));
   return {
     scheme: !!(
       schemeRemoteMark &&
@@ -437,7 +425,7 @@ function buildUpdateDecision(
       dictRemoteMark &&
       normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark
     ),
-    model: !!(modelRemoteMark && isModelUpdateAvailable(localMeta?.model, remote.model)),
+    model: isModelUpdateAvailable(localMeta?.model, remote.model),
   };
 }
 
@@ -503,7 +491,7 @@ function LogEntryRow(props: { entry: LogEntry; insetLeft?: number }) {
       ) : null}
       <VStack
         spacing={2}
-        padding={{ top: 1, bottom: 2 }}
+        padding={{ top: 1, bottom: 1 }}
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
       >
         <HStack
@@ -727,6 +715,179 @@ function FullscreenNotesView(props: { content: string }) {
   );
 }
 
+function UsageGuideRow(props: {
+  icon: string;
+  title: string;
+  detail: string;
+  color?: string;
+}) {
+  return (
+    <HStack
+      spacing={14}
+      padding={{ top: 10, bottom: 10, leading: 2, trailing: 2 }}
+      frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+    >
+      <VStack
+        frame={{ width: 34, height: 34, alignment: "center" as any }}
+        background={{
+          style: "tertiarySystemBackground",
+          shape: { type: "rect", cornerRadius: 10 },
+        }}
+      >
+        <Image
+          systemName={props.icon}
+          font="title3"
+          foregroundStyle={(props.color ?? "systemBlue") as any}
+        />
+      </VStack>
+      <VStack
+        spacing={4}
+        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+      >
+        <Text
+          font="headline"
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          multilineTextAlignment="leading"
+        >
+          {props.title}
+        </Text>
+        <Text
+          font="footnote"
+          foregroundStyle="secondaryLabel"
+          multilineTextAlignment="leading"
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        >
+          {props.detail}
+        </Text>
+      </VStack>
+    </HStack>
+  );
+}
+
+function UsageGuideSection(props: {
+  icon: string;
+  title: string;
+  detail: string;
+  color?: string;
+  children: any;
+}) {
+  return (
+    <VStack
+      spacing={10}
+      padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
+      frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+      background={{
+        style: "secondarySystemBackground",
+        shape: { type: "rect", cornerRadius: 16 },
+      }}
+    >
+      <UsageGuideRow
+        icon={props.icon}
+        title={props.title}
+        detail={props.detail}
+        color={props.color}
+      />
+      <Divider />
+      {props.children}
+    </VStack>
+  );
+}
+
+function UsageGuideView() {
+  const dismiss = Navigation.useDismiss();
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={"使用说明"}
+        navigationBarTitleDisplayMode={"inline"}
+        toolbar={{
+          topBarLeading: (
+            <Button
+              title=""
+              systemImage="xmark"
+              action={() => {
+                try {
+                  (globalThis as any).HapticFeedback?.mediumImpact?.();
+                } catch {}
+                dismiss();
+              }}
+            />
+          ),
+        }}
+      >
+        <ScrollView
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          padding={{ top: 16, bottom: 24, leading: 16, trailing: 16 }}
+        >
+          <VStack spacing={16} frame={{ maxWidth: "infinity" }}>
+            <UsageGuideSection
+              icon="r.square.fill"
+              title="Rime 更新"
+              detail="点击右下角上方按钮，向左展开方案、词库、模型三个更新入口。"
+              color="systemBlue"
+            >
+              <UsageGuideRow
+                icon="doc.text"
+                title="方案"
+                detail="重新下载并写入当前设置中选择的方案包。"
+                color="systemBlue"
+              />
+              <UsageGuideRow
+                icon="books.vertical"
+                title="词库"
+                detail="重新下载并写入当前方案对应的词库文件。"
+                color="systemBlue"
+              />
+              <UsageGuideRow
+                icon="shippingbox"
+                title="模型"
+                detail="重新下载并写入语法模型文件。"
+                color="systemBlue"
+              />
+            </UsageGuideSection>
+
+            <UsageGuideSection
+              icon="bolt.fill"
+              title="更新与部署"
+              detail="点击右下角下方按钮，向左展开部署、检查更新、自动更新三个入口；长按该主按钮会直接执行自动更新。"
+              color="systemBlue"
+            >
+              <UsageGuideRow
+                icon="paperplane"
+                title="部署"
+                detail="触发当前输入法的部署逻辑。Scripting 输入法需要到工具中手动部署。"
+                color="systemBlue"
+              />
+              <UsageGuideRow
+                icon="arrow.triangle.2.circlepath"
+                title="检查更新"
+                detail="只检查远程方案、词库、模型信息，并更新可更新状态，不下载文件。"
+                color="systemBlue"
+              />
+              <UsageGuideRow
+                icon="bolt.fill"
+                title="自动更新"
+                detail="根据检查结果自动更新需要更新的内容，并按设置决定是否自动部署。"
+                color="systemBlue"
+              />
+            </UsageGuideSection>
+
+            <Text
+              font="footnote"
+              foregroundStyle="secondaryLabel"
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              multilineTextAlignment="leading"
+            >
+              提示：本地信息中显示为绿色的项目，表示当前检查结果中该项目有可用更新。
+            </Text>
+          </VStack>
+        </ScrollView>
+      </VStack>
+    </NavigationStack>
+  );
+}
+
 function progressStageLabel(stage: string): string {
   const text = String(stage ?? "");
   if (text.includes("下载中")) return "下载中";
@@ -895,6 +1056,7 @@ export function HomeView() {
   );
   const [editorEntries, setEditorEntries] = useState<FileBrowserEntry[]>([]);
   const [editorLoading, setEditorLoading] = useState(false);
+  const [activeActionGroup, setActiveActionGroup] = useState<"rime" | "update" | null>(null);
 
   // 本地信息
   const [localSelectedScheme, setLocalSelectedScheme] = useState("暂无法获取");
@@ -1289,6 +1451,10 @@ export function HomeView() {
   ]);
 
   useEffect(() => {
+    if (busy) setActiveActionGroup(null);
+  }, [busy]);
+
+  useEffect(() => {
     if (!cfg.showVerboseLog) return;
     const scrollLatest = () => {
       try {
@@ -1537,6 +1703,21 @@ export function HomeView() {
     );
   }
 
+  function renderMainTrailingToolbar() {
+    return (
+      <Button
+        title=""
+        systemImage="questionmark.circle"
+        action={() => {
+          try {
+            (globalThis as any).HapticFeedback?.mediumImpact?.();
+          } catch {}
+          void openUsageGuide();
+        }}
+      />
+    );
+  }
+
   async function openFullscreenLogs() {
     await Navigation.present({
       element: <FullscreenLogView logs={logs} />,
@@ -1546,6 +1727,12 @@ export function HomeView() {
   async function openFullscreenNotes() {
     await Navigation.present({
       element: <FullscreenNotesView content={notes} />,
+    });
+  }
+
+  async function openUsageGuide() {
+    await Navigation.present({
+      element: <UsageGuideView />,
     });
   }
 
@@ -1997,14 +2184,80 @@ export function HomeView() {
     );
   }
 
+  function renderFloatingActions() {
+    const currentCheckReady = lastCheckKey === checkKey(cfg) && !!lastCheckDecision;
+    const autoUpdateReady =
+      currentCheckReady &&
+      !!(lastCheckDecision?.scheme || lastCheckDecision?.dict || lastCheckDecision?.model);
+    const schemeColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue";
+    const dictColor = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : "systemBlue";
+    const modelColor = currentCheckReady && lastCheckDecision?.model ? "systemGreen" : "systemBlue";
+    const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue";
+    const disabled = busy || !pathUsable;
+
+    const toggleGroup = (group: "rime" | "update") => {
+      try {
+        (globalThis as any).HapticFeedback?.mediumImpact?.();
+      } catch {}
+      setActiveActionGroup((current) => (current === group ? null : group));
+    };
+    const runAction = (action: () => void) => {
+      setActiveActionGroup(null);
+      action();
+    };
+
+    return (
+      <VStack
+        spacing={18}
+        padding={{ trailing: 18, bottom: 48, leading: 18 }}
+        frame={{
+          maxWidth: "infinity",
+          maxHeight: "infinity",
+          alignment: "bottomTrailing" as any,
+        }}
+      >
+        <FloatingActionGroup
+          icon="r.square.fill"
+          expanded={activeActionGroup === "rime"}
+          disabled={disabled}
+          items={[
+            { icon: "doc.text", title: "方案", color: schemeColor, disabled, onPress: () => runAction(onUpdateScheme) },
+            { icon: "books.vertical", title: "词库", color: dictColor, disabled, onPress: () => runAction(onUpdateDict) },
+            { icon: "shippingbox", title: "模型", color: modelColor, disabled, onPress: () => runAction(onUpdateModel) },
+          ]}
+          onToggle={() => toggleGroup("rime")}
+        />
+        <FloatingActionGroup
+          icon="bolt.fill"
+          color={autoUpdateColor}
+          expanded={activeActionGroup === "update"}
+          disabled={disabled}
+          items={[
+            { icon: "paperplane", title: "部署", disabled, onPress: () => runAction(onDeploy) },
+            { icon: "arrow.triangle.2.circlepath", title: "检查", disabled, onPress: () => runAction(onCheckUpdate) },
+            { icon: "bolt.fill", title: "自动", color: autoUpdateColor, disabled, onPress: () => runAction(onAutoUpdate) },
+          ]}
+          onToggle={() => toggleGroup("update")}
+          onLongPress={() => {
+            if (!disabled) runAction(onAutoUpdate);
+          }}
+        />
+      </VStack>
+    );
+  }
+
   function renderSection(key: HomeSectionKey) {
     if (key === "local") {
+      const currentCheckReady = lastCheckKey === checkKey(cfg) && !!lastCheckDecision;
+      const schemeValueColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : undefined;
+      const dictValueColor = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : undefined;
+      const modelValueColor = currentCheckReady && lastCheckDecision?.model ? "systemGreen" : undefined;
       return (
         <Section key={key} header={<Text>本地信息</Text>}>
           <RowKV k="当前选择的方案" v={localSelectedScheme} />
-          <RowKV k="本地方案" v={localSchemeVersion} />
-          <RowKV k="本地词库" v={localDictMark} />
-          <RowKV k="本地模型" v={localModelMark} />
+          <RowKV k="本地方案" v={localSchemeVersion} valueColor={schemeValueColor} />
+          <RowKV k="本地词库" v={localDictMark} valueColor={dictValueColor} />
+          <RowKV k="本地模型" v={localModelMark} valueColor={modelValueColor} />
         </Section>
       );
     }
@@ -2047,89 +2300,6 @@ export function HomeView() {
           <ScrollView frame={{ height: 220 }} padding>
             <Markdown content={notes} />
           </ScrollView>
-        </Section>
-      );
-    }
-    if (key === "actions") {
-      const autoUpdateReady =
-        lastCheckKey === checkKey(cfg) &&
-        !!lastCheckDecision &&
-        (lastCheckDecision.scheme ||
-          lastCheckDecision.dict ||
-          lastCheckDecision.model);
-      const schemeColor =
-        lastCheckKey === checkKey(cfg) && lastCheckDecision?.scheme
-          ? "systemGreen"
-          : "systemBlue";
-      const dictColor =
-        lastCheckKey === checkKey(cfg) && lastCheckDecision?.dict
-          ? "systemGreen"
-          : "systemBlue";
-      const modelColor =
-        lastCheckKey === checkKey(cfg) && lastCheckDecision?.model
-          ? "systemGreen"
-          : "systemBlue";
-      const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue";
-      return (
-        <Section key={key} header={<Text>操作</Text>}>
-          <VStack spacing={6} padding={{ top: 1, bottom: 1 }}>
-            <HStack spacing={10} alignment="center">
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton
-                  icon="doc.text"
-                  title="方案"
-                  color={schemeColor}
-                  onPress={onUpdateScheme}
-                  disabled={busy || !pathUsable}
-                />
-              </VStack>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton
-                  icon="books.vertical"
-                  title="词库"
-                  color={dictColor}
-                  onPress={onUpdateDict}
-                  disabled={busy || !pathUsable}
-                />
-              </VStack>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton
-                  icon="shippingbox"
-                  title="模型"
-                  color={modelColor}
-                  onPress={onUpdateModel}
-                  disabled={busy || !pathUsable}
-                />
-              </VStack>
-            </HStack>
-            <HStack spacing={10} alignment="center">
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton
-                  icon="paperplane"
-                  title="部署"
-                  onPress={onDeploy}
-                  disabled={busy || !pathUsable}
-                />
-              </VStack>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton
-                  icon="arrow.triangle.2.circlepath"
-                  title="检查更新"
-                  onPress={onCheckUpdate}
-                  disabled={busy || !pathUsable}
-                />
-              </VStack>
-              <VStack frame={{ maxWidth: "infinity" }}>
-                <GridButton
-                  icon="bolt.fill"
-                  title="自动更新"
-                  color={autoUpdateColor}
-                  onPress={onAutoUpdate}
-                  disabled={busy || !pathUsable}
-                />
-              </VStack>
-            </HStack>
-          </VStack>
         </Section>
       );
     }
@@ -2177,11 +2347,11 @@ export function HomeView() {
                     spacing={0}
                   >
                     <ScrollView
-                      frame={{ height: 152, maxWidth: "infinity" as any }}
-                      padding={{ top: 2, bottom: 2, leading: 0, trailing: 0 }}
+                      frame={{ height: 280, maxWidth: "infinity" as any }}
+                      padding={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
                     >
                       <VStack
-                        spacing={2}
+                        spacing={1}
                         frame={{
                           maxWidth: "infinity",
                           alignment: "topLeading" as any,
@@ -2208,7 +2378,7 @@ export function HomeView() {
                           frame={{
                             maxWidth: "infinity",
                             alignment: "leading" as any,
-                            height: 1,
+                            height: 0,
                           }}
                         />
                       </VStack>
@@ -2244,7 +2414,7 @@ export function HomeView() {
             ) : null}
           </VStack>
         ) : (
-          <VStack spacing={8}>
+          <VStack spacing={8} frame={{ maxWidth: "infinity", minHeight: 128 }}>
             <Text>{stage}</Text>
 
             {busy && showProgress ? (
@@ -2286,18 +2456,22 @@ export function HomeView() {
         selection={activeTab as any}
         editor={renderEditorTab()}
         main={
-          <NavigationStack>
-            <List
-              navigationTitle={"万象工具"}
-              navigationBarTitleDisplayMode={"inline"}
-              listStyle={"insetGroup"}
-              toolbar={{
-                topBarLeading: renderLeadingToolbar(),
-              }}
-            >
-              {cfg.homeSectionOrder.map(renderSection)}
-            </List>
-          </NavigationStack>
+          <ZStack>
+            <NavigationStack>
+              <List
+                navigationTitle={"万象工具"}
+                navigationBarTitleDisplayMode={"inline"}
+                listStyle={"insetGroup"}
+                toolbar={{
+                  topBarLeading: renderLeadingToolbar(),
+                  topBarTrailing: renderMainTrailingToolbar(),
+                }}
+              >
+                {cfg.homeSectionOrder.map(renderSection)}
+              </List>
+            </NavigationStack>
+            {renderFloatingActions()}
+          </ZStack>
         }
         settings={
           <NavigationStack>

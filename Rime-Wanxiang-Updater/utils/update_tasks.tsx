@@ -269,6 +269,104 @@ async function fetchLatestAssetFromCnb(args: {
   return undefined
 }
 
+async function fetchLatestAssetFromCnbOpenApi(args: {
+  owner: string
+  repo: string
+  token?: string
+  assetNameExact?: string
+  assetNameGlob?: string
+  traverseAllPages?: boolean
+  releaseTagExact?: string
+  releaseTitleIncludes?: string[]
+}): Promise<RemoteAsset | undefined> {
+  const token = String(args.token ?? "").trim()
+  if (!token) return undefined
+
+  const headers: Record<string, string> = {
+    "User-Agent": "scripting",
+    "Accept": "application/json",
+    "Authorization": `Bearer ${token}`,
+  }
+  const repoPath = `${args.owner}/${args.repo}`
+  const baseUrl = `https://api.cnb.cool/${repoPath}/-/releases`
+  const exactTag = String(args.releaseTagExact ?? "").trim()
+  const pageSize = 10
+
+  const toReleaseList = async (): Promise<any[]> => {
+    if (exactTag) {
+      const { json } = await httpJson(`${baseUrl}/tags/${encodeURIComponent(exactTag)}`, { headers })
+      return json && typeof json === "object" && !Array.isArray(json) ? [json] : []
+    }
+
+    const releases: any[] = []
+    const maxPages = args.traverseAllPages ? 20 : 1
+    for (let page = 1; page <= maxPages; page++) {
+      const { json } = await httpJson(`${baseUrl}?page=${page}&page_size=${pageSize}`, { headers })
+      const list = Array.isArray(json) ? json : []
+      if (!list.length) break
+      releases.push(...list)
+      if (!args.traverseAllPages) break
+      if (list.length < pageSize) break
+    }
+    return releases
+  }
+
+  const list = await toReleaseList()
+  const re = args.assetNameGlob ? globToRegExp(args.assetNameGlob) : undefined
+  const titleKeywords = (args.releaseTitleIncludes ?? []).map((s) => s.toLowerCase()).filter(Boolean)
+  const normalizedTag = (rel: any) =>
+    String(rel?.tag_name ?? rel?.tag_ref ?? rel?.tagName ?? "").split("/").pop()?.trim().toLowerCase() ?? ""
+  const matchTitle = (rel: any) => {
+    if (!titleKeywords.length) return true
+    const title = String(rel?.name ?? rel?.title ?? "").toLowerCase()
+    return titleKeywords.some((k) => title.includes(k))
+  }
+  const matchTag = (rel: any) => !exactTag || normalizedTag(rel) === exactTag.toLowerCase()
+  const preferred = list.filter((rel) => matchTag(rel) && matchTitle(rel))
+  const searchList = preferred.length ? preferred : list
+
+  for (const rel of searchList) {
+    if (!matchTag(rel)) continue
+    const assets = rel?.assets ?? []
+    for (const a of assets) {
+      const name = a?.name
+      if (!name) continue
+      if (args.assetNameExact && name !== args.assetNameExact) continue
+      if (re && !re.test(name)) continue
+
+      const url = a.browser_download_url ?? a.brower_download_url ?? a.url
+      if (!url) continue
+      const hash = String(a?.hash_value ?? "").trim()
+      return {
+        name,
+        url,
+        updatedAt: a.updated_at ?? a.updatedAt,
+        tag: String(rel?.tag_name ?? rel?.tag_ref ?? rel?.tagName ?? "").split("/").pop() || undefined,
+        body: rel.body,
+        remoteIdOrSha: hash || (a?.id != null ? String(a.id) : undefined),
+        size:
+          typeof a?.size === "number"
+            ? a.size
+            : typeof a?.fileSize === "number"
+              ? a.fileSize
+              : undefined,
+      }
+    }
+  }
+
+  return undefined
+}
+
+async function fetchLatestAssetFromCnbPreferOpenApi(args: Parameters<typeof fetchLatestAssetFromCnb>[0] & { token?: string }) {
+  if (String(args.token ?? "").trim()) {
+    try {
+      const asset = await fetchLatestAssetFromCnbOpenApi(args)
+      if (asset) return asset
+    } catch { }
+  }
+  return fetchLatestAssetFromCnb(args)
+}
+
 function dictPattern(cfg: AppConfig): string {
   if (cfg.schemeEdition === "base") return "*base*dicts*.zip"
   if (cfg.schemeEdition === "pure") return "pure-dicts.zip"
@@ -290,9 +388,10 @@ async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise
       assetNameExact: fileName,
       token: cfg.githubToken,
     })
-    : await fetchLatestAssetFromCnb({
+    : await fetchLatestAssetFromCnbPreferOpenApi({
       owner: OWNER,
       repo: CNB_REPO,
+      token: cfg.cnbToken,
       assetNameExact: fileName,
       releaseTagExact: CNB_MODEL_TAG,
       traverseAllPages: true,
@@ -311,9 +410,10 @@ async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | und
         token: cfg.githubToken,
       })
     }
-    return fetchLatestAssetFromCnb({
+    return fetchLatestAssetFromCnbPreferOpenApi({
       owner: OWNER,
       repo: CNB_REPO,
+      token: cfg.cnbToken,
       assetNameGlob: glob,
       releaseTagExact: CNB_PREVIEW_TAG,
     })
@@ -327,9 +427,10 @@ async function fetchLatestSchemeAsset(cfg: AppConfig): Promise<RemoteAsset | und
       token: cfg.githubToken,
     })
   }
-  return fetchLatestAssetFromCnb({
+  return fetchLatestAssetFromCnbPreferOpenApi({
     owner: OWNER,
     repo: CNB_REPO,
+    token: cfg.cnbToken,
     assetNameGlob: glob,
     releaseTitleIncludes: [CNB_SCHEME_TITLE],
   })
@@ -355,9 +456,10 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
         assetNameGlob: dictPattern(cfg),
         token: cfg.githubToken,
       })
-      : await fetchLatestAssetFromCnb({
+      : await fetchLatestAssetFromCnbPreferOpenApi({
         owner: OWNER,
         repo: CNB_REPO,
+        token: cfg.cnbToken,
         assetNameGlob: dictPattern(cfg),
         releaseTagExact: CNB_PREVIEW_TAG,
       })
@@ -553,9 +655,10 @@ export async function updateDict(
         assetNameGlob: dictPattern(cfg),
         token: cfg.githubToken,
       })
-      : await fetchLatestAssetFromCnb({
+      : await fetchLatestAssetFromCnbPreferOpenApi({
         owner: OWNER,
         repo: CNB_REPO,
+        token: cfg.cnbToken,
         assetNameGlob: dictPattern(cfg),
         releaseTagExact: CNB_PREVIEW_TAG,
       })
@@ -819,7 +922,7 @@ export async function autoUpdateAll(
     onAfterModule?: (kind: "scheme" | "dict" | "model") => void | Promise<void>
   },
   prechecked?: AllUpdateResult,
-  preDecision?: UpdateDecision
+  _preDecision?: UpdateDecision
 ): Promise<AutoUpdateRunResult> {
   params.onStage?.("自动更新：检查更新中…")
   const r = prechecked ?? (await checkAllUpdates(cfg))
@@ -827,27 +930,21 @@ export async function autoUpdateAll(
   const meta = await loadMetaAsync(installRoot, cfg.hamsterBookmarkName)
 
   const schemeRemoteMark = schemeRemoteMarkForConfig(cfg, r.scheme)
-  const needScheme = typeof preDecision?.scheme === "boolean"
-    ? preDecision.scheme
-    : !!(
-      schemeRemoteMark &&
-      normalizeMark(
-        cfg.usePrereleaseScheme
-          ? meta.scheme?.remoteIdOrSha
-          : meta.scheme?.remoteTagOrName
-      ) !== schemeRemoteMark
-    )
+  const needScheme = !!(
+    schemeRemoteMark &&
+    normalizeMark(
+      cfg.usePrereleaseScheme
+        ? meta.scheme?.remoteIdOrSha
+        : meta.scheme?.remoteTagOrName
+    ) !== schemeRemoteMark
+  )
 
   const remoteDictMark = normalizeMark(ensureRemoteMark(r.dict, "dict"))
   const localDictMark = normalizeMark(meta.dict?.remoteIdOrSha)
-  const needDict = typeof preDecision?.dict === "boolean"
-    ? preDecision.dict
-    : !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
+  const needDict = !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
 
   if (r.model && !r.model.remoteIdOrSha) r.model.remoteIdOrSha = ensureRemoteMark(r.model, "model")
-  const needModel = typeof preDecision?.model === "boolean"
-    ? preDecision.model
-    : isModelUpdateAvailable(meta.model, r.model)
+  const needModel = isModelUpdateAvailable(meta.model, r.model)
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")

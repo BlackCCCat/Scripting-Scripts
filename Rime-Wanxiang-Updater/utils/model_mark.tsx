@@ -11,11 +11,22 @@ function normalize(value?: string): string {
   return clean(value).toLowerCase()
 }
 
+function isSha256(value?: string): boolean {
+  return /^[0-9a-f]{64}$/i.test(clean(value))
+}
+
+function parseTime(value?: string): number | undefined {
+  const raw = clean(value)
+  if (!raw) return undefined
+  const time = Date.parse(raw)
+  return Number.isFinite(time) ? time : undefined
+}
+
 function formatChinaTime(value?: string): string {
   const raw = clean(value)
   if (!raw) return ""
-  const time = Date.parse(raw)
-  if (!Number.isFinite(time)) return raw
+  const time = parseTime(raw)
+  if (time === undefined) return raw
 
   const date = new Date(time + 8 * 60 * 60 * 1000)
   const pad = (n: number) => String(n).padStart(2, "0")
@@ -32,11 +43,13 @@ function formatChinaTime(value?: string): string {
 
 export function modelDisplayMark(item?: ModelMarkSource, peer?: ModelMarkSource): string {
   const primary = clean(item?.remoteIdOrSha)
+  if (isSha256(primary)) return primary
+
   const peerPrimary = clean(peer?.remoteIdOrSha)
-  if (primary && peerPrimary && normalize(primary) === normalize(peerPrimary)) {
-    return formatChinaTime(item?.updatedAt) || primary
+  if (primary && peerPrimary && normalize(primary) !== normalize(peerPrimary)) {
+    return primary
   }
-  return primary || formatChinaTime(item?.updatedAt)
+  return formatChinaTime(item?.updatedAt) || primary
 }
 
 export function isModelUpdateAvailable(local?: ModelMarkSource, remote?: ModelMarkSource): boolean {
@@ -45,9 +58,16 @@ export function isModelUpdateAvailable(local?: ModelMarkSource, remote?: ModelMa
 
   const localPrimary = normalize(local?.remoteIdOrSha)
   if (localPrimary !== remotePrimary) return true
+  if (isSha256(remotePrimary)) return false
 
   const remoteTime = normalize(remote?.updatedAt)
   if (!remoteTime) return false
+
+  const localTimeValue = parseTime(local?.updatedAt)
+  const remoteTimeValue = parseTime(remote?.updatedAt)
+  if (localTimeValue !== undefined && remoteTimeValue !== undefined) {
+    return localTimeValue !== remoteTimeValue
+  }
 
   return normalize(local?.updatedAt) !== remoteTime
 }

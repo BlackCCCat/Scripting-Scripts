@@ -649,7 +649,15 @@ export function SettingsView(props: {
             prompt="GitHub Token（可选）：提高请求限额"
             textFieldStyle="roundedBorder"
           />
-        ) : null}
+        ) : (
+          <TextField
+            label={<Text>CNB Token</Text>}
+            value={cfg.cnbToken}
+            onChanged={(v: string) => setCfg((c) => ({ ...c, cnbToken: v }))}
+            prompt="CNB Token（可选）：获取 release 哈希"
+            textFieldStyle="roundedBorder"
+          />
+        )}
       </Section>
 
       <Section header={<Text>方案选项</Text>}>

@@ -17,6 +17,17 @@ type SharedCheckCache = {
 
 const STORAGE_KEY = "wanxiang_check_cache"
 
+function tokenFingerprint(value?: string): string {
+  const text = String(value ?? "")
+  if (!text) return "none"
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16)
+}
+
 function readValue(st: any, key: string): string {
   if (!st) return ""
   if (typeof st.get === "function") return String(st.get(key) ?? "")
@@ -33,6 +44,7 @@ function writeValue(st: any, key: string, value: string) {
 export function getCheckCacheKey(cfg: AppConfig) {
   return [
     cfg.releaseSource,
+    cfg.releaseSource === "cnb" ? `cnb-token:${tokenFingerprint(cfg.cnbToken)}` : "cnb-public",
     cfg.usePrereleaseScheme ? "prerelease" : "stable",
     cfg.schemeEdition,
     cfg.proSchemeKey,
