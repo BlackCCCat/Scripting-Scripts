@@ -11,6 +11,7 @@ import {
   HStack,
   Toggle,
   Picker,
+  Group,
   useEffect,
   useMemo,
   useState,
@@ -72,6 +73,50 @@ const RESET_STORAGE_KEYS = [
   "wanxiang_extracted_files",
   "wanxiang_check_cache",
 ]
+
+function maskToken(token: string, visible = 6): string {
+  const value = String(token ?? "").trim()
+  if (!value) return ""
+  const head = value.slice(0, Math.min(visible, value.length))
+  return `${head}${"•".repeat(Math.max(0, value.length - head.length))}`
+}
+
+function TokenField(props: {
+  label: string
+  value: string
+  prompt: string
+  onChanged: (value: string) => void
+}) {
+  async function openEditor() {
+    try {
+      try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+      const next = await Dialog.prompt({
+        title: props.label,
+        message: "修改后点击保存才会写入；取消不会修改当前 Token。清空内容并保存可移除 Token。",
+        defaultValue: String(props.value ?? ""),
+        placeholder: props.prompt,
+        cancelLabel: "取消",
+        confirmLabel: "保存",
+        selectAll: false,
+      })
+      if (next != null) props.onChanged(next)
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  return (
+    <Button action={() => void openEditor()}>
+      <HStack padding={{ top: 6, bottom: 6 }}>
+        <Text>{props.label}</Text>
+        <Spacer />
+        <Text foregroundStyle={props.value ? "secondaryLabel" : "tertiaryLabel"}>
+          {props.value ? maskToken(props.value) : "未填写"}
+        </Text>
+      </HStack>
+    </Button>
+  )
+}
 
 function normalizeSchemeFromMeta(meta: any, fallback: AppConfig): { schemeEdition: AppConfig["schemeEdition"]; proSchemeKey: ProSchemeKey } | undefined {
   const edition = meta?.scheme?.schemeEdition
@@ -271,6 +316,48 @@ export function SettingsView(props: {
         />
       ),
     })
+  }
+
+  async function pickAndAddBookmark() {
+    try {
+      try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+      const picker: any =
+        typeof DocumentPicker !== "undefined"
+          ? DocumentPicker
+          : (globalThis as any).DocumentPicker
+      if (typeof picker?.pickDirectoryBookmark !== "function") {
+        showInfo("当前版本不支持", "当前 Scripting 版本不支持直接选择并保存书签文件夹，请先升级 Scripting。")
+        return
+      }
+
+      const result = await picker.pickDirectoryBookmark({
+        preferredName: "Rime",
+        initialDirectory: cfg.hamsterRootPath || undefined,
+      })
+      if (!result) return
+
+      const bookmarkName = String(result.bookmarkName ?? "").trim()
+      const pickedPath = normalizePath(String(result.path ?? ""))
+      if (!bookmarkName || !pickedPath) {
+        throw new Error("未获取到有效的书签目录")
+      }
+
+      let next: AppConfig = {
+        ...cfg,
+        hamsterRootPath: pickedPath,
+        hamsterBookmarkName: bookmarkName,
+        useBuiltinScriptingPath: false,
+      }
+      next = await syncSchemeFromLocal(next)
+      setCfg(next)
+
+      const updated = await refreshBookmarks(next)
+      const nextIdx = updated.findIndex((b) => b.name === bookmarkName)
+      if (nextIdx >= 0) setBookmarkIdx(nextIdx)
+      presentToast("已添加书签文件夹")
+    } catch (e: any) {
+      showInfo("选择文件夹失败", String(e?.message ?? e))
+    }
   }
 
   async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
@@ -533,6 +620,19 @@ export function SettingsView(props: {
   const schemeLabels = useMemo<string[]>(() => SCHEME_OPTIONS.slice(), [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
   const useBuiltinScriptingPath = cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK || (cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath)
+  const bookmarkContextMenu = {
+    menuItems: (
+      <Group>
+        <Button
+          title="选择新的文件夹"
+          systemImage="folder.badge.plus"
+          action={() => {
+            void pickAndAddBookmark()
+          }}
+        />
+      </Group>
+    ),
+  }
 
   useEffect(() => {
     props.registerSaveAction?.(() => {
@@ -557,12 +657,13 @@ export function SettingsView(props: {
           textFieldStyle="roundedBorder"
         />
         <Text font="caption" foregroundStyle="secondaryLabel">
-          请在 工具-文件书签 中添加相应文件夹，并在此选择
+          可长按书签文件夹选择新的文件夹，并自动保存为书签
         </Text>
         {bookmarks.length ? (
           <Picker
             title={"书签文件夹"}
             pickerStyle="menu"
+            contextMenu={bookmarkContextMenu}
             value={bookmarkIdx}
             onChanged={(idx: number) => {
               try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
@@ -611,7 +712,14 @@ export function SettingsView(props: {
               </Text>
             ))}
           </Picker>
-        ) : null}
+        ) : (
+          <Text
+            foregroundStyle="secondaryLabel"
+            contextMenu={bookmarkContextMenu}
+          >
+            暂无可用书签，长按此处选择新的文件夹
+          </Text>
+        )}
       </Section>
 
       <Section header={<Text>发布源</Text>}>
@@ -642,20 +750,18 @@ export function SettingsView(props: {
         />
 
         {releaseIdx === 1 ? (
-          <TextField
-            label={<Text>GitHub Token</Text>}
+          <TokenField
+            label="GitHub Token"
             value={cfg.githubToken}
             onChanged={(v: string) => setCfg((c) => ({ ...c, githubToken: v }))}
             prompt="GitHub Token（可选）：提高请求限额"
-            textFieldStyle="roundedBorder"
           />
         ) : (
-          <TextField
-            label={<Text>CNB Token</Text>}
+          <TokenField
+            label="CNB Token"
             value={cfg.cnbToken}
             onChanged={(v: string) => setCfg((c) => ({ ...c, cnbToken: v }))}
             prompt="CNB Token（可选）：获取 release 哈希"
-            textFieldStyle="roundedBorder"
           />
         )}
       </Section>

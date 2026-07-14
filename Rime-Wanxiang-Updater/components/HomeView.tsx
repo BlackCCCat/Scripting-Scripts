@@ -2192,6 +2192,10 @@ export function HomeView() {
     const schemeColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue";
     const dictColor = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : "systemBlue";
     const modelColor = currentCheckReady && lastCheckDecision?.model ? "systemGreen" : "systemBlue";
+    const rimeGroupColor =
+      currentCheckReady && (lastCheckDecision?.scheme || lastCheckDecision?.dict || lastCheckDecision?.model)
+        ? "systemGreen"
+        : "systemBlue";
     const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue";
     const disabled = busy || !pathUsable;
 
@@ -2218,6 +2222,7 @@ export function HomeView() {
       >
         <FloatingActionGroup
           icon="r.square.fill"
+          color={rimeGroupColor}
           expanded={activeActionGroup === "rime"}
           disabled={disabled}
           items={[
