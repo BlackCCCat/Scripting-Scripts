@@ -1,6 +1,7 @@
 import { Device } from "scripting";
 
 export type RimeKeyboardTheme = "system" | "light" | "dark";
+export type KeyboardType = "qwerty" | "t9";
 export type CandidateRightButtonMode = "dismiss" | "expand" | "hidden";
 export type ActionSendMode = "auto" | "rime" | "direct";
 export type KeyColorScheme = "light" | "dark";
@@ -13,6 +14,11 @@ export type KeyColorSettings = {
 export type CandidateMenuAction = {
   name: string;
   action: string;
+};
+export type T9PunctuationItem = {
+  label: string;
+  action: string;
+  mode: ActionSendMode;
 };
 export type ToolbarButtonConfig = {
   id: string;
@@ -27,6 +33,7 @@ export type RimeKeyboardSettings = {
   theme: RimeKeyboardTheme;
   useCustomKeyboardHeight: boolean;
   keyboardHeight: number;
+  keyboardType: KeyboardType;
   candidateBarHeight: number;
   candidateRightButtonMode: CandidateRightButtonMode;
   useNativeKeyStyle: boolean;
@@ -105,6 +112,15 @@ export type RimeKeyboardSettings = {
   backspaceSwipeDown: string;
   backspaceSwipeDownMode: ActionSendMode;
   numericEqualsSwipeUp: string;
+  t9KeySwipeUp: SwipeSettings;
+  t9KeySwipeDown: SwipeSettings;
+  t9KeySwipeUpModes: ActionModeSettings;
+  t9KeySwipeDownModes: ActionModeSettings;
+  t9SpaceSwipeUp: string;
+  t9SpaceSwipeUpMode: ActionSendMode;
+  t9SpaceSwipeDown: string;
+  t9SpaceSwipeDownMode: ActionSendMode;
+  t9PunctuationItems: T9PunctuationItem[];
   letterLongPressDuration: number;
   swipeTriggerDistance: number;
   showKeyPopups: boolean;
@@ -120,6 +136,7 @@ const SETTINGS_KEY = "rime_pinyin_keyboard_settings_v1";
 const LEGACY_SHARED_OPTIONS = { shared: true };
 
 export const LETTER_KEYS = "qwertyuiopasdfghjklzxcvbnm".split("");
+export const T9_KEY_IDS = "123456789".split("");
 
 export const DEFAULT_LETTER_SWIPE_UP: SwipeSettings = {
   q: "1",
@@ -371,6 +388,55 @@ export const DEFAULT_COMPOSING_FUNCTION_ACTION_MODES: ActionModeSettings =
     COMPOSING_FUNCTION_KEYS.map((key) => [key, "auto" as ActionSendMode]),
   );
 
+export const DEFAULT_T9_KEY_SWIPE_UP: SwipeSettings = Object.fromEntries(
+  T9_KEY_IDS.map((key) => [key, key]),
+);
+export const DEFAULT_T9_KEY_SWIPE_DOWN: SwipeSettings = Object.fromEntries(
+  T9_KEY_IDS.map((key) => [key, ""]),
+);
+export const DEFAULT_T9_KEY_SWIPE_UP_MODES: ActionModeSettings = Object
+  .fromEntries(T9_KEY_IDS.map((key) => [key, "direct" as ActionSendMode]));
+export const DEFAULT_T9_KEY_SWIPE_DOWN_MODES: ActionModeSettings = Object
+  .fromEntries(T9_KEY_IDS.map((key) => [key, "rime" as ActionSendMode]));
+
+export const DEFAULT_T9_PUNCTUATION_ITEMS: T9PunctuationItem[] = [
+  { label: "，", action: "，", mode: "rime" },
+  { label: "。", action: "。", mode: "rime" },
+  { label: "？", action: "？", mode: "rime" },
+  { label: "！", action: "！", mode: "rime" },
+  { label: "、", action: "、", mode: "rime" },
+  { label: "；", action: "；", mode: "rime" },
+  { label: "：", action: "：", mode: "rime" },
+  { label: "（", action: "（", mode: "rime" },
+  { label: "）", action: "）", mode: "rime" },
+  { label: "“", action: "“", mode: "rime" },
+  { label: "”", action: "”", mode: "rime" },
+  { label: "…", action: "…", mode: "rime" },
+  { label: "—", action: "—", mode: "rime" },
+  { label: "@", action: "@", mode: "rime" },
+  { label: "#", action: "#", mode: "rime" },
+  { label: "=", action: "=", mode: "rime" },
+];
+
+const LEGACY_T9_PUNCTUATION_ACTIONS = [
+  ",",
+  ".",
+  "?",
+  "!",
+  "\\",
+  ";",
+  ":",
+  "(",
+  ")",
+  '"',
+  '"',
+  "^",
+  "_",
+  "@",
+  "#",
+  "=",
+];
+
 export const DEFAULT_KEY_COLORS: KeyColorSettings = {
   normal: {
     light: "#ffffff",
@@ -431,6 +497,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   theme: "system",
   useCustomKeyboardHeight: false,
   keyboardHeight: 326,
+  keyboardType: "qwerty",
   candidateBarHeight: 45,
   candidateRightButtonMode: "dismiss",
   useNativeKeyStyle: DEFAULT_NATIVE_KEY_STYLE,
@@ -508,6 +575,15 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   backspaceSwipeDown: "{restoreDeleted}",
   backspaceSwipeDownMode: "auto",
   numericEqualsSwipeUp: "V",
+  t9KeySwipeUp: DEFAULT_T9_KEY_SWIPE_UP,
+  t9KeySwipeDown: DEFAULT_T9_KEY_SWIPE_DOWN,
+  t9KeySwipeUpModes: DEFAULT_T9_KEY_SWIPE_UP_MODES,
+  t9KeySwipeDownModes: DEFAULT_T9_KEY_SWIPE_DOWN_MODES,
+  t9SpaceSwipeUp: "0",
+  t9SpaceSwipeUpMode: "direct",
+  t9SpaceSwipeDown: "",
+  t9SpaceSwipeDownMode: "rime",
+  t9PunctuationItems: DEFAULT_T9_PUNCTUATION_ITEMS,
   letterLongPressDuration: 520,
   swipeTriggerDistance: 80,
   showKeyPopups: true,
@@ -572,10 +648,13 @@ function normalizeCandidateRightButtonMode(
     : "dismiss";
 }
 
-function normalizeActionSendMode(value: unknown): ActionSendMode {
+function normalizeActionSendMode(
+  value: unknown,
+  fallback: ActionSendMode = "auto",
+): ActionSendMode {
   return value === "rime" || value === "direct" || value === "auto"
     ? value
-    : "auto";
+    : fallback;
 }
 
 function normalizeColor(value: unknown, fallback: string): string {
@@ -739,6 +818,52 @@ function normalizeActionModeSettings(
   return result;
 }
 
+function normalizeT9PunctuationItems(raw: unknown): T9PunctuationItem[] {
+  const source = Array.isArray(raw) ? raw : [];
+  const result = DEFAULT_T9_PUNCTUATION_ITEMS.map((defaults, index) => {
+    const item = source[index] && typeof source[index] === "object"
+      ? source[index] as Record<string, unknown>
+      : {};
+    const label = typeof item.label === "string" ? item.label : defaults.label;
+    let action = typeof item.action === "string"
+      ? item.action
+      : defaults.action;
+    if (label === defaults.label) {
+      const oldDefault = LEGACY_T9_PUNCTUATION_ACTIONS[index];
+      if (action === oldDefault) action = defaults.action;
+    }
+    const rawMode = item.mode;
+    const migratedDefaultMode = rawMode === "auto" &&
+        label === defaults.label && action === defaults.action
+      ? defaults.mode
+      : undefined;
+    return {
+      label,
+      action,
+      mode: normalizeActionSendMode(
+        migratedDefaultMode ?? rawMode,
+        defaults.mode,
+      ),
+    };
+  });
+  for (
+    let index = DEFAULT_T9_PUNCTUATION_ITEMS.length;
+    index < source.length;
+    index += 1
+  ) {
+    const item = source[index] && typeof source[index] === "object"
+      ? source[index] as Record<string, unknown>
+      : null;
+    if (!item) continue;
+    result.push({
+      label: typeof item.label === "string" ? item.label : "",
+      action: typeof item.action === "string" ? item.action : "",
+      mode: normalizeActionSendMode(item.mode, "rime"),
+    });
+  }
+  return result;
+}
+
 function normalizeLetterSwipeUpSymbols(raw: unknown): SwipeSettings {
   const result = normalizeSwipeSettings(
     raw,
@@ -785,6 +910,7 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       KEYBOARD_HEIGHT_MIN,
       KEYBOARD_HEIGHT_MAX,
     ),
+    keyboardType: raw?.keyboardType === "t9" ? "t9" : "qwerty",
     candidateBarHeight: clampNumber(
       raw?.candidateBarHeight,
       DEFAULT_RIME_KEYBOARD_SETTINGS.candidateBarHeight,
@@ -1058,6 +1184,43 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     numericEqualsSwipeUp: typeof raw?.numericEqualsSwipeUp === "string"
       ? raw.numericEqualsSwipeUp
       : "V",
+    t9KeySwipeUp: normalizeSwipeSettings(
+      raw?.t9KeySwipeUp,
+      DEFAULT_T9_KEY_SWIPE_UP,
+      T9_KEY_IDS,
+    ),
+    t9KeySwipeDown: normalizeSwipeSettings(
+      raw?.t9KeySwipeDown,
+      DEFAULT_T9_KEY_SWIPE_DOWN,
+      T9_KEY_IDS,
+    ),
+    t9KeySwipeUpModes: normalizeActionModeSettings(
+      raw?.t9KeySwipeUpModes,
+      DEFAULT_T9_KEY_SWIPE_UP_MODES,
+      T9_KEY_IDS,
+    ),
+    t9KeySwipeDownModes: normalizeActionModeSettings(
+      raw?.t9KeySwipeDownModes,
+      DEFAULT_T9_KEY_SWIPE_DOWN_MODES,
+      T9_KEY_IDS,
+    ),
+    t9SpaceSwipeUp: typeof raw?.t9SpaceSwipeUp === "string"
+      ? raw.t9SpaceSwipeUp
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.t9SpaceSwipeUp,
+    t9SpaceSwipeUpMode: normalizeActionSendMode(
+      raw?.t9SpaceSwipeUpMode,
+      DEFAULT_RIME_KEYBOARD_SETTINGS.t9SpaceSwipeUpMode,
+    ),
+    t9SpaceSwipeDown: typeof raw?.t9SpaceSwipeDown === "string"
+      ? raw.t9SpaceSwipeDown
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.t9SpaceSwipeDown,
+    t9SpaceSwipeDownMode: normalizeActionSendMode(
+      raw?.t9SpaceSwipeDownMode,
+      DEFAULT_RIME_KEYBOARD_SETTINGS.t9SpaceSwipeDownMode,
+    ),
+    t9PunctuationItems: normalizeT9PunctuationItems(
+      raw?.t9PunctuationItems,
+    ),
     letterLongPressDuration: clampNumber(
       raw?.letterLongPressDuration,
       DEFAULT_RIME_KEYBOARD_SETTINGS.letterLongPressDuration,

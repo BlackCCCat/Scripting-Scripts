@@ -278,8 +278,12 @@ export function KeyFace(props: {
   const [swipePopup, setSwipePopupState] = useState<
     { label?: string; image?: string; key: string } | null
   >(null);
-  const usesEnterColor = props.id === "enter" || props.id === "numeric-enter";
+  const overrideFallbackId = props.id === "t9-enter" ? "enter" : props.id;
+  const usesEnterColor = props.id === "enter" ||
+    props.id === "numeric-enter" ||
+    props.id === "t9-enter";
   const baseBg = props.palette.keyOverrides[props.id] ??
+    props.palette.keyOverrides[overrideFallbackId] ??
     (props.accent || usesEnterColor
       ? props.palette.enterBg
       : props.palette.keyBg);
@@ -289,12 +293,15 @@ export function KeyFace(props: {
   const useNativeVisualStyle = useNativeKeyStyle || useNativeToolbarStyle;
   const nativeGlassShape = useNativeToolbarStyle ? "circle" : KEY_VISUAL_SHAPE;
   const baseFg = props.palette.primaryOverrides?.[props.id] ??
+    props.palette.primaryOverrides?.[overrideFallbackId] ??
     props.palette.primary;
   const fg = props.foregroundStyle ??
     (props.accent
       ? props.palette.accentText
       : (props.selected ? props.palette.accent : baseFg));
-  const hintFg = props.palette.hintOverrides?.[props.id] ?? props.palette.hint;
+  const hintFg = props.palette.hintOverrides?.[props.id] ??
+    props.palette.hintOverrides?.[overrideFallbackId] ??
+    props.palette.hint;
   const width = props.width ?? 32;
   const height = props.height ?? BASE_KEY_HEIGHT;
   const visualInset = props.plain ? 0 : Math.min(
@@ -861,14 +868,20 @@ export function CandidateButton(props: {
         frame={contentFrame}
         background={background as any}
         glassEffect={glassEffect as any}
-        clipShape={props.selected ? { type: "rect", cornerRadius: 8 } : undefined}
+        clipShape={props.selected
+          ? { type: "rect", cornerRadius: 8 }
+          : undefined}
         shadow={shadow}
       >
         <VStack
           alignment="leading"
           spacing={showComment || commentLine ? 1 : 0}
           frame={{ alignment: "leading" as any }}
-          padding={{ leading: CANDIDATE_LEADING_PADDING, trailing: CANDIDATE_TRAILING_PADDING, vertical: 4 }}
+          padding={{
+            leading: CANDIDATE_LEADING_PADDING,
+            trailing: CANDIDATE_TRAILING_PADDING,
+            vertical: 4,
+          }}
         >
           <Text
             font={candidateFontSize * (props.expanded ? 1.08 : 1)}

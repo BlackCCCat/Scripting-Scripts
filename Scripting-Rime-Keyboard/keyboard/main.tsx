@@ -20,8 +20,10 @@ import {
 import {
   type ActionSendMode,
   DEFAULT_CANDIDATE_MENU_ACTIONS,
+  type KeyboardType,
   loadRimeKeyboardSettings,
   type RimeKeyboardSettings,
+  type T9PunctuationItem,
   TOOLBAR_LEFT_BUTTON_MAX,
   type ToolbarButtonConfig,
 } from "../settings";
@@ -42,6 +44,7 @@ import {
   BACKSLASH_SYMBOLS,
   LETTER_ROWS,
   NUMERIC_SYMBOLS,
+  T9_KEYS,
 } from "../keyboardLayout";
 import {
   CandidateButton,
@@ -77,6 +80,7 @@ const DELETE_LONG_PRESS_DURATION = 920;
 const DELETE_REPEAT_SAFETY_DURATION = 4200;
 const CURSOR_REPEAT_DURATION = 420;
 const PRESSED_RELEASE_DELAY = 260;
+const PRESSED_STUCK_RELEASE_DELAY = 1800;
 const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
 const LETTER_LONG_PRESS_LAYER_GRACE_MS = 900;
@@ -87,6 +91,11 @@ const NUMERIC_DIGIT_ROWS = [
   ["7", "8", "9"],
 ];
 const NUMERIC_BOTTOM_ROW = ["ABC", "0", "space"];
+const T9_KEY_ROWS = [
+  T9_KEYS.slice(0, 3),
+  T9_KEYS.slice(3, 6),
+  T9_KEYS.slice(6, 9),
+];
 
 type ExpandedCandidateItem = {
   candidate: Rime.Candidate;
@@ -108,6 +117,17 @@ type LetterLongPressPopup = {
   selected: "lower" | "upper";
 };
 
+type T9PinyinOption = {
+  label: string;
+  digits: string;
+  selected: string[];
+};
+
+type T9FilterState = {
+  digits: string;
+  selected: string[];
+};
+
 type RefreshOptions = {
   suppressCommit?: boolean;
   suppressInlineMarkedText?: boolean;
@@ -123,6 +143,60 @@ const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
 const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
 const TOOLBAR_TEMPLATE_CLIPBOARD = "{clipboard}";
 const LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD = "{{clipboard}}";
+const TONE_MARK_RE = /[\u0300-\u036f]/g;
+const T9_OPTION_LIMIT = 48;
+const T9_LETTER_TO_DIGIT: Record<string, string> = {
+  a: "2",
+  b: "2",
+  c: "2",
+  d: "3",
+  e: "3",
+  f: "3",
+  g: "4",
+  h: "4",
+  i: "4",
+  j: "5",
+  k: "5",
+  l: "5",
+  m: "6",
+  n: "6",
+  o: "6",
+  p: "7",
+  q: "7",
+  r: "7",
+  s: "7",
+  t: "8",
+  u: "8",
+  v: "8",
+  w: "9",
+  x: "9",
+  y: "9",
+  z: "9",
+};
+const PINYIN_SYLLABLES = `
+a ai an ang ao ba bai ban bang bao bei ben beng bi bian biao bie bin bing bo bu
+ca cai can cang cao ce cen ceng cha chai chan chang chao che chen cheng chi chong
+chou chu chua chuai chuan chuang chui chun chuo ci cong cou cu cuan cui cun cuo
+da dai dan dang dao de dei den deng di dia dian diao die ding diu dong dou du duan
+dui dun duo e ei en eng er fa fan fang fei fen feng fo fou fu ga gai gan gang gao
+ge gei gen geng gong gou gu gua guai guan guang gui gun guo ha hai han hang hao
+he hei hen heng hong hou hu hua huai huan huang hui hun huo ji jia jian jiang jiao
+jie jin jing jiong jiu ju juan jue jun ka kai kan kang kao ke ken keng kong kou ku
+kua kuai kuan kuang kui kun kuo la lai lan lang lao le lei leng li lia lian liang
+liao lie lin ling liu lo long lou lu luan lun luo lv lve ma mai man mang mao me
+mei men meng mi mian miao mie min ming miu mo mou mu na nai nan nang nao ne nei
+nen neng ni nian niang niao nie nin ning niu nong nou nu nuan nuo nv nve o ou pa
+pai pan pang pao pei pen peng pi pian piao pie pin ping po pou pu qi qia qian
+qiang qiao qie qin qing qiong qiu qu quan que qun ran rang rao re ren reng ri
+rong rou ru ruan rui run ruo sa sai san sang sao se sen seng sha shai shan shang
+shao she shen sheng shi shou shu shua shuai shuan shuang shui shun shuo si song
+sou su suan sui sun suo ta tai tan tang tao te teng ti tian tiao tie ting tong tou
+tu tuan tui tun tuo wa wai wan wang wei wen weng wo wu xi xia xian xiang xiao xie
+xin xing xiong xiu xu xuan xue xun ya yan yang yao ye yi yin ying yo yong you yu
+yuan yue yun za zai zan zang zao ze zei zen zeng zha zhai zhan zhang zhao zhe zhen
+zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang zhui zhun zhuo zi zong zou zu
+zuan zui zun zuo
+`.trim().split(/\s+/);
 const ToolbarScriptFunction = Function as unknown as new (
   ...args: string[]
 ) => (...args: unknown[]) => Promise<unknown>;
@@ -137,6 +211,178 @@ function stopGlobalRepeatingDelete() {
   }
   globalRepeatingDeleteTimer = null;
   globalRepeatingDeleteSafetyTimer = null;
+}
+
+function stripPinyinTones(text: string): string {
+  return text.normalize("NFD").replace(TONE_MARK_RE, "").normalize("NFC");
+}
+
+function normalizeT9PinyinComment(comment?: string): string {
+  if (!comment) return "";
+  return stripPinyinTones(comment)
+    .replace(/ü/g, "v")
+    .replace(/Ü/g, "V")
+    .replace(/[^A-Za-zvV']+/g, " ")
+    .trim()
+    .replace(/\s+/g, "'");
+}
+
+function t9DigitsForPinyin(text: string): string {
+  let digits = "";
+  for (const ch of text.toLowerCase()) {
+    digits += T9_LETTER_TO_DIGIT[ch] ?? "";
+  }
+  return digits;
+}
+
+function t9PreeditInputPart(preedit: string) {
+  return preedit
+    .split("〔")[0]
+    .replace(/[^0-9A-Za-zvV']+$/g, "");
+}
+
+function trailingT9DigitTail(preedit: string) {
+  const input = t9PreeditInputPart(preedit);
+  const match = input.match(/[1-9]+$/);
+  const rawTail = match?.[0] ?? "";
+  if (rawTail) {
+    return {
+      prefix: input.slice(0, -rawTail.length),
+      tail: rawTail,
+    };
+  }
+  const pinyinTail = input.match(/[A-Za-zvV]+$/)?.[0] ?? "";
+  const tail = pinyinTail ? t9DigitsForPinyin(pinyinTail) : "";
+  return {
+    prefix: tail ? input.slice(0, -pinyinTail.length) : input,
+    tail,
+  };
+}
+
+function t9SelectedCompositionValue(selected: string[]) {
+  return selected.filter(Boolean).join("'");
+}
+
+function t9SelectedDigitPrefix(selected: string[]) {
+  return selected.map(t9DigitsForPinyin).join("");
+}
+
+function t9FilterCursor(filter: T9FilterState) {
+  const selected = filter.selected.filter(Boolean);
+  const consumed = t9SelectedDigitPrefix(selected);
+  if (consumed.length < filter.digits.length) {
+    return {
+      prefix: selected.join("'"),
+      replaceIndex: selected.length,
+      tail: filter.digits.slice(consumed.length),
+    };
+  }
+  if (selected.length > 0) {
+    const prefixSelected = selected.slice(0, -1);
+    const prefixDigits = t9SelectedDigitPrefix(prefixSelected);
+    return {
+      prefix: prefixSelected.join("'"),
+      replaceIndex: selected.length - 1,
+      tail: filter.digits.slice(prefixDigits.length),
+    };
+  }
+  return {
+    prefix: "",
+    replaceIndex: 0,
+    tail: filter.digits,
+  };
+}
+
+function t9FilterFromPreedit(preedit: string): T9FilterState {
+  const { prefix, tail } = trailingT9DigitTail(preedit);
+  const selected = prefix
+    .split(/[^A-Za-zvV]+/)
+    .filter((item) => item.trim().length > 0);
+  return {
+    digits: `${t9SelectedDigitPrefix(selected)}${tail}`,
+    selected,
+  };
+}
+
+function t9PinyinOptionsFromCandidates(
+  preedit: string,
+  candidates: Rime.Candidate[],
+  filterState?: T9FilterState,
+): T9PinyinOption[] {
+  const filter = filterState?.digits
+    ? filterState
+    : t9FilterFromPreedit(preedit);
+  const { replaceIndex, tail } = t9FilterCursor(filter);
+  if (!tail) return [];
+  const matchedSeen = new Set<string>();
+  const fallbackSeen = new Set<string>();
+  const matched: T9PinyinOption[] = [];
+  const fallback: T9PinyinOption[] = [];
+  function addMatched(label: string) {
+    const digits = t9DigitsForPinyin(label);
+    if (!digits || !tail.startsWith(digits) || matchedSeen.has(label)) return;
+    const selected = filter.selected.slice(0, replaceIndex);
+    selected[replaceIndex] = label;
+    matchedSeen.add(label);
+    matched.push({
+      label,
+      digits: filter.digits,
+      selected,
+    });
+  }
+  for (const candidate of candidates) {
+    const syllables = normalizeT9PinyinComment(candidate.comment ?? undefined)
+      .split("'")
+      .filter(Boolean);
+    const label = syllables[replaceIndex] ?? "";
+    if (!label) continue;
+    const digits = t9DigitsForPinyin(label);
+    if (tail && digits && tail.startsWith(digits)) {
+      addMatched(label);
+    } else {
+      if (fallbackSeen.has(label)) continue;
+      const selected = filter.selected.slice(0, replaceIndex);
+      selected[replaceIndex] = label;
+      fallbackSeen.add(label);
+      fallback.push({
+        label,
+        digits: filter.digits,
+        selected,
+      });
+    }
+  }
+  for (const syllable of PINYIN_SYLLABLES) {
+    addMatched(syllable);
+  }
+  return (matched.length > 0 ? matched : fallback)
+    .map((option, index) => ({ option, index }))
+    .sort((a, b) =>
+      b.option.label.length - a.option.label.length ||
+      a.index - b.index
+    )
+    .slice(0, T9_OPTION_LIMIT)
+    .map(({ option }) => option);
+}
+
+function withT9VisualDelimiters(text: string, positions: number[]) {
+  if (!text || positions.length === 0) return text;
+  let output = text;
+  let inserted = 0;
+  const sorted = [...new Set(positions)]
+    .filter((position) => position > 0)
+    .sort((a, b) => a - b);
+  for (const position of sorted) {
+    const index = Math.min(output.length, position + inserted);
+    if (output[index - 1] === "'" || output[index] === "'") continue;
+    output = `${output.slice(0, index)}'${output.slice(index)}`;
+    inserted += 1;
+  }
+  return output;
+}
+
+function t9VisualDelimiterOffset(cursor: number, positions: number[]) {
+  return positions.filter((position) => position > 0 && position <= cursor)
+    .length;
 }
 
 export function KeyboardView() {
@@ -163,6 +409,9 @@ function KeyboardContent(props: {
   const [settings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
   );
+  const [keyboardTypeOverride, setKeyboardTypeOverride] = useState<
+    KeyboardType | null
+  >(null);
   const [keyboardAppearance, setKeyboardAppearance] = useState<
     KeyboardAppearance
   >(() => currentKeyboardAppearance());
@@ -207,6 +456,13 @@ function KeyboardContent(props: {
   const [rimeNotificationToast, setRimeNotificationToast] = useState<
     RimeNotificationToast | null
   >(null);
+  const [t9DelimiterVisualPositions, setT9DelimiterVisualPositions] = useState<
+    number[]
+  >([]);
+  const [t9FilterState, setT9FilterStateValue] = useState<T9FilterState>({
+    digits: "",
+    selected: [],
+  });
   const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -228,6 +484,7 @@ function KeyboardContent(props: {
   );
   const schemasRef = useRef<Rime.Schema[]>([]);
   const rimeOptionStateRef = useRef<Record<string, boolean>>({});
+  const t9FilterStateRef = useRef<T9FilterState>({ digits: "", selected: [] });
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
   const letterLongPressPopupRef = useRef<LetterLongPressPopup | null>(null);
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
@@ -332,6 +589,11 @@ function KeyboardContent(props: {
     schemasRef.current = schemas;
   }, [schemas]);
 
+  function setT9FilterState(next: T9FilterState) {
+    t9FilterStateRef.current = next;
+    setT9FilterStateValue(next);
+  }
+
   async function setupRimeSession() {
     if (
       disposedRef.current || rimeSetupStartedRef.current || sessionRef.current
@@ -404,10 +666,11 @@ function KeyboardContent(props: {
     const ctx = session.context;
     const menu = ctx?.menu;
     const commit = session.commit;
+    const committed = Boolean(commit && !options.suppressCommit);
     if (commit && !options.suppressCommit) insertTextReplacingSelectAll(commit);
     updateMarkedText(
       ctx,
-      Boolean(commit),
+      committed,
       Boolean(options.suppressInlineMarkedText) ||
         suppressSchemaMenuInlineRef.current,
     );
@@ -426,7 +689,20 @@ function KeyboardContent(props: {
       currentSchemaId: session.currentSchema?.id ?? null,
       ascii: session.getOption("ascii_mode"),
     });
-    if (!nextPreedit) setBackslashWrapMode(false);
+    setT9DelimiterVisualPositions((prev) =>
+      nextPreedit
+        ? prev.filter((position) => position <= nextPreedit.length)
+        : []
+    );
+    if (!nextPreedit) {
+      setBackslashWrapMode(false);
+      if (
+        t9FilterStateRef.current.digits ||
+        t9FilterStateRef.current.selected.length > 0
+      ) {
+        setT9FilterState({ digits: "", selected: [] });
+      }
+    }
     if (!nextPreedit) {
       suppressSchemaMenuInlineRef.current = false;
       setCandidateExpanded(false);
@@ -587,6 +863,9 @@ function KeyboardContent(props: {
       setTimeout(() => {
         pressedReleaseTimersRef.current.delete(id);
         cleanupContinuousActionForKey(id);
+        if (letterLongPressPopupRef.current?.key === id) {
+          setLetterLongPressPopup(null);
+        }
         setKeyPressed(id, false);
       }, delay),
     );
@@ -600,7 +879,7 @@ function KeyboardContent(props: {
     const current = pressedKeyIdsRef.current;
     if (pressed) {
       if (fallback) schedulePressedRelease(id);
-      else clearPressedReleaseTimer(id);
+      else schedulePressedFallbackRelease(id, PRESSED_STUCK_RELEASE_DELAY);
     } else clearPressedReleaseTimer(id);
     if (pressed === current.has(id)) return;
     const next = new Set(current);
@@ -627,7 +906,10 @@ function KeyboardContent(props: {
   }
 
   function cleanupContinuousActionForKey(id: string) {
-    if (id === "backspace" || id === "numeric-backspace") {
+    if (
+      id === "backspace" || id === "numeric-backspace" ||
+      id === "t9-backspace"
+    ) {
       stopRepeatingBackspace();
     } else if (
       id === "idle-left" || id === "idle-right" || id === "func-left" ||
@@ -706,7 +988,10 @@ function KeyboardContent(props: {
   }
 
   function endKeyTouch(id: string) {
-    if (id === "backspace" || id === "numeric-backspace") {
+    if (
+      id === "backspace" || id === "numeric-backspace" ||
+      id === "t9-backspace"
+    ) {
       stopRepeatingBackspace();
     }
     if (letterLongPressPopupRef.current?.key === id) {
@@ -1122,6 +1407,50 @@ function KeyboardContent(props: {
     for (const ch of text) processKey(ch.charCodeAt(0), ch, true);
   }
 
+  function processTextThroughRime(text: string) {
+    if (!text) return;
+    const spec = parseRimeKeySpec(text);
+    const s = sessionRef.current;
+    if (spec) {
+      if (!s) return;
+      clearSelectAllStateForExternalAction();
+      s.processKey(spec.keyCode, spec.modifiers);
+      refresh(s);
+      return;
+    }
+    const normalized = text
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t");
+    for (const ch of normalized) {
+      if (ch === "\t") processKey(KEY_TAB, "\t");
+      else processKey(ch.charCodeAt(0), ch, true);
+    }
+  }
+
+  function replaceCompositionWithRimeText(
+    text: string,
+    refreshOptions: RefreshOptions = {},
+  ) {
+    if (!text) return;
+    const s = sessionRef.current;
+    if (!s) {
+      insertTextReplacingSelectAll(text.replace(/'/g, ""));
+      return;
+    }
+    try {
+      s.clearComposition();
+    } catch {}
+    for (const ch of text) {
+      try {
+        (s as any).processKey(ch.charCodeAt(0), ch, true);
+      } catch {
+        s.processKey(ch.charCodeAt(0));
+      }
+    }
+    refresh(s, refreshOptions);
+  }
+
   function pressLetter(ch: string) {
     const typed = shifted || capsLocked ? ch.toUpperCase() : ch;
     if (ascii) {
@@ -1162,12 +1491,21 @@ function KeyboardContent(props: {
 
   function pressRimePunctuation(text: string) {
     if (ascii) insertTextReplacingSelectAll(text);
-    else processText(text);
+    else processTextThroughRime(text);
+  }
+
+  function pressKeyboardComma() {
+    pressRimePunctuation(isT9Keyboard ? "，" : ",");
+  }
+
+  function pressKeyboardPeriod() {
+    pressRimePunctuation(isT9Keyboard ? "。" : ".");
   }
 
   function pressBackspace() {
     const s = sessionRef.current;
     if (s && (s.context?.preedit?.length ?? 0) > 0) {
+      syncT9FilterBackspace();
       s.processKey(KEY_BACKSPACE);
       refresh(s);
     } else {
@@ -1191,7 +1529,7 @@ function KeyboardContent(props: {
   }
 
   function startRepeatingBackspace(
-    id: "backspace" | "numeric-backspace" = "backspace",
+    id: "backspace" | "numeric-backspace" | "t9-backspace" = "backspace",
   ) {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
@@ -1338,6 +1676,34 @@ function KeyboardContent(props: {
     refresh(s);
   }
 
+  function switchT9ToEnglishQwerty() {
+    setKeyboardTypeOverride("qwerty");
+    setSymbolLayer(false);
+    const s = sessionRef.current;
+    if (!s) return;
+    if (preedit) clearComposition();
+    if (!ascii) {
+      s.setOption("ascii_mode", true);
+      setShifted(false);
+      setCapsLocked(false);
+      refresh(s);
+    }
+  }
+
+  function switchEnglishQwertyToT9() {
+    setKeyboardTypeOverride(null);
+    setSymbolLayer(false);
+    const s = sessionRef.current;
+    if (!s) return;
+    if (preedit) clearComposition();
+    if (ascii) {
+      s.setOption("ascii_mode", false);
+      setShifted(false);
+      setCapsLocked(false);
+      refresh(s);
+    }
+  }
+
   function pressShift() {
     if (composing && settings.shiftComposingEnabled) {
       runConfiguredAction(
@@ -1447,8 +1813,96 @@ function KeyboardContent(props: {
     return preedit.length > 0 && candidates.length > index;
   }
 
+  function hasLiveComposition() {
+    return (sessionRef.current?.context?.preedit?.length ?? 0) > 0 ||
+      preedit.length > 0;
+  }
+
+  function runT9SpaceSwipe(direction: "up" | "down") {
+    const numberKey = direction === "up" ? "2" : "3";
+    const candidateIndex = direction === "up" ? 1 : 2;
+    const liveCandidates = sessionRef.current?.context?.menu?.candidates ??
+      candidates;
+    if (hasLiveComposition()) {
+      if (liveCandidates.length > candidateIndex) {
+        processSpaceSwipeCandidate(numberKey);
+      }
+      return;
+    }
+    if (direction === "up") {
+      runConfiguredAction(settings.t9SpaceSwipeUp, settings.t9SpaceSwipeUpMode);
+    } else {
+      runConfiguredAction(
+        settings.t9SpaceSwipeDown,
+        settings.t9SpaceSwipeDownMode,
+      );
+    }
+  }
+
   function pressNumericDigit(value: string) {
     pressSymbol(value);
+  }
+
+  function pressT9Digit(value: string) {
+    if (ascii) {
+      insertTextReplacingSelectAll(value);
+      return;
+    }
+    if (/^[2-9]$/.test(value)) {
+      const current = preedit.length > 0
+        ? t9FilterStateRef.current
+        : { digits: "", selected: [] };
+      setT9FilterState({
+        digits: `${current.digits}${value}`,
+        selected: current.selected,
+      });
+    }
+    processKey(value.charCodeAt(0), value, true);
+  }
+
+  function syncT9FilterBackspace() {
+    if (!isT9Keyboard || ascii) return;
+    const current = t9FilterStateRef.current;
+    if (!current.digits) return;
+    const selectedDigits = t9SelectedDigitPrefix(current.selected);
+    if (current.digits.length > selectedDigits.length) {
+      setT9FilterState({
+        digits: current.digits.slice(0, -1),
+        selected: current.selected,
+      });
+      return;
+    }
+    if (current.selected.length === 0) {
+      setT9FilterState({ digits: current.digits.slice(0, -1), selected: [] });
+      return;
+    }
+    const selected = current.selected.slice(0, -1);
+    setT9FilterState({
+      digits: t9SelectedDigitPrefix(selected),
+      selected,
+    });
+  }
+
+  function runT9PunctuationItem(item: T9PunctuationItem) {
+    runConfiguredAction(item.action, item.mode);
+  }
+
+  function pressT9Delimiter() {
+    if (ascii || preedit.length === 0) {
+      insertTextReplacingSelectAll("'");
+      return;
+    }
+    processText("'");
+    setT9DelimiterVisualPositions((prev) => [...prev, preedit.length]);
+  }
+
+  function selectT9Pinyin(option: T9PinyinOption) {
+    setT9DelimiterVisualPositions([]);
+    setT9FilterState({
+      digits: option.digits,
+      selected: option.selected,
+    });
+    replaceCompositionWithRimeText(t9SelectedCompositionValue(option.selected));
   }
 
   function commitComposition() {
@@ -1690,7 +2144,7 @@ function KeyboardContent(props: {
       return;
     }
     if (mode === "rime") {
-      processText(action);
+      processTextThroughRime(action);
       return;
     }
     switch (action) {
@@ -1758,7 +2212,7 @@ function KeyboardContent(props: {
         return;
       default:
         if (processRimeKeySpec(action)) return;
-        processText(action);
+        processTextThroughRime(action);
     }
   }
 
@@ -1833,9 +2287,15 @@ function KeyboardContent(props: {
       : "";
   }
 
+  const activeKeyboardType = keyboardTypeOverride ?? settings.keyboardType;
+  const isT9Keyboard = activeKeyboardType === "t9";
   const composing = preedit.length > 0;
+  const t9PinyinOptions = isT9Keyboard && composing
+    ? t9PinyinOptionsFromCandidates(preedit, candidates, t9FilterState)
+    : [];
   const usesComposingFunctionRow = composing && !symbolLayer &&
     settings.composingFunctionRowEnabled;
+  const usesT9MixedFunctionRow = usesComposingFunctionRow && isT9Keyboard;
   const schemaMenu = schemas.length > 1
     ? (
       <Group>
@@ -1877,23 +2337,32 @@ function KeyboardContent(props: {
     const menuItems = candidateContextMenu(absoluteIndex);
     return menuItems != null ? { menuItems } : undefined;
   }
+  const keyboardPreedit = isT9Keyboard
+    ? withT9VisualDelimiters(preedit, t9DelimiterVisualPositions)
+    : preedit;
   const showsPreeditCaret = !error &&
     !settings.inlinePreedit &&
     settings.showPreeditCaret &&
-    preedit.length > 0;
+    keyboardPreedit.length > 0;
   const safePreeditCursor = Math.min(
-    preedit.length,
-    Math.max(0, preeditCursor),
+    keyboardPreedit.length,
+    Math.max(
+      0,
+      preeditCursor +
+        (isT9Keyboard
+          ? t9VisualDelimiterOffset(preeditCursor, t9DelimiterVisualPositions)
+          : 0),
+    ),
   );
   const preeditBeforeCaret = showsPreeditCaret
-    ? preedit.slice(0, safePreeditCursor)
+    ? keyboardPreedit.slice(0, safePreeditCursor)
     : error
     ? `Rime 错误：${error}`
     : settings.inlinePreedit
     ? ""
-    : preedit;
+    : keyboardPreedit;
   const preeditAfterCaret = showsPreeditCaret
-    ? preedit.slice(safePreeditCursor)
+    ? keyboardPreedit.slice(safePreeditCursor)
     : "";
   const showsPreeditRow = !settings.inlinePreedit;
   const preeditCaretScrollKey = "preedit-caret-anchor";
@@ -1961,10 +2430,6 @@ function KeyboardContent(props: {
   const expandedCandidateWidth = metrics.width - expandedPagerWidth -
     KEY_SPACING;
   const showNextKeyboardButton = Device.isiPad;
-  const bottomSplitButtonWidth = Math.max(
-    20,
-    (metrics.bottom.numbers - KEY_SPACING) / 2,
-  );
   const bodyRowSpacing = 6;
   const visibleBodyRowCount = (settings.showFunctionRow ? 1 : 0) + 4;
   const normalKeyboardBodyHeight =
@@ -1973,6 +2438,41 @@ function KeyboardContent(props: {
       : 0) +
     metrics.keyHeight * 4 +
     bodyRowSpacing * 3;
+  const numericRowSpacing = 6;
+  const numericPanelHeight = metrics.keyHeight * 4 + numericRowSpacing * 3;
+  const numericLeftWidth = Math.max(40, Math.min(56, metrics.width * 0.14));
+  const numericRightWidth = Math.max(48, Math.min(72, metrics.width * 0.18));
+  const numericCenterWidth = metrics.width - numericLeftWidth -
+    numericRightWidth - KEY_SPACING * 2;
+  const numericKeyWidth = (numericCenterWidth - KEY_SPACING * 2) / 3;
+  const numericPanelTopInset = settings.showFunctionRow
+    ? bodyRowSpacing / 2
+    : 0;
+  const t9PanelHeight = metrics.keyHeight * 3 + numericRowSpacing * 2;
+  const t9PanelTopInset = settings.showFunctionRow ? bodyRowSpacing / 2 : 0;
+  const t9PanelBottomInset = bodyRowSpacing / 2;
+  const t9LeftWidth = Math.max(42, Math.min(58, metrics.width * 0.15));
+  const t9RightWidth = Math.max(48, Math.min(70, metrics.width * 0.17));
+  const t9CenterWidth = metrics.width - t9LeftWidth - t9RightWidth -
+    KEY_SPACING * 2;
+  const t9KeyWidth = (t9CenterWidth - KEY_SPACING * 2) / 3;
+  const bottomNumbersWidth = isT9Keyboard
+    ? t9LeftWidth
+    : metrics.bottom.numbers;
+  const bottomCommaWidth = metrics.bottom.comma;
+  const bottomModeWidth = metrics.bottom.mode;
+  const bottomEnterWidth = isT9Keyboard ? t9RightWidth : metrics.bottom.enter;
+  const bottomSpaceWidth = isT9Keyboard
+    ? Math.max(
+      44,
+      metrics.width - bottomNumbersWidth - bottomCommaWidth -
+        bottomModeWidth - bottomEnterWidth - KEY_SPACING * 4,
+    )
+    : metrics.bottom.space;
+  const bottomSplitButtonWidth = Math.max(
+    20,
+    (bottomNumbersWidth - KEY_SPACING) / 2,
+  );
 
   useEffect(() => {
     if (preeditScrollTimerRef.current != null) {
@@ -2062,6 +2562,43 @@ function KeyboardContent(props: {
       onSwipeDown: () =>
         hitTargetActionsRef.current.runComposingFunctionSwipe("down", key),
     }));
+  }
+
+  function t9MixedFunctionHitTargets(): KeyHitTarget[] {
+    const step = metrics.functionWidth8 + KEY_SPACING;
+    const frame = (index: number) =>
+      horizontalHitFrame(step * index, metrics.functionWidth8, index, 8);
+    return settings.composingFunctionOrder.map((key, index) => {
+      const useIdle = index >= 2 && index <= 6;
+      const actionKey = useIdle ? settings.idleFunctionOrder[index] : key;
+      return {
+        id: useIdle
+          ? idleFunctionViewId(actionKey)
+          : composingFunctionViewId(actionKey),
+        ...frame(index),
+        onPress: () =>
+          useIdle
+            ? hitTargetActionsRef.current.runIdleFunctionPress(actionKey)
+            : hitTargetActionsRef.current.runComposingFunctionPress(actionKey),
+        onSwipeUp: () =>
+          useIdle
+            ? hitTargetActionsRef.current.runIdleFunctionSwipe("up", actionKey)
+            : hitTargetActionsRef.current.runComposingFunctionSwipe(
+              "up",
+              actionKey,
+            ),
+        onSwipeDown: () =>
+          useIdle
+            ? hitTargetActionsRef.current.runIdleFunctionSwipe(
+              "down",
+              actionKey,
+            )
+            : hitTargetActionsRef.current.runComposingFunctionSwipe(
+              "down",
+              actionKey,
+            ),
+      };
+    });
   }
 
   function idleFunctionHitTargets(): KeyHitTarget[] {
@@ -2156,6 +2693,12 @@ function KeyboardContent(props: {
     );
   }
 
+  function renderT9MixedFunctionKey(key: string, index: number) {
+    return index >= 2 && index <= 6
+      ? renderIdleFunctionKey(settings.idleFunctionOrder[index])
+      : renderComposingFunctionKey(key);
+  }
+
   function bottomRowHitTargets(): KeyHitTarget[] {
     let x = 0;
     const targets: KeyHitTarget[] = [];
@@ -2179,24 +2722,24 @@ function KeyboardContent(props: {
       targets.push({
         id: "numbers",
         x,
-        width: metrics.bottom.numbers,
+        width: bottomNumbersWidth,
         onPress: () => hitTargetActionsRef.current.toggleSymbolLayer(),
         onSwipeUp: () => hitTargetActionsRef.current.pressBacktick(),
       });
-      x += metrics.bottom.numbers + KEY_SPACING;
+      x += bottomNumbersWidth + KEY_SPACING;
     }
     targets.push({
       id: "comma",
       x,
-      width: metrics.bottom.comma,
+      width: bottomCommaWidth,
       onPress: () => hitTargetActionsRef.current.pressComma(),
       onSwipeUp: () => hitTargetActionsRef.current.pressPeriod(),
     });
-    x += metrics.bottom.comma + KEY_SPACING;
+    x += bottomCommaWidth + KEY_SPACING;
     targets.push({
       id: "space",
       x,
-      width: metrics.bottom.space,
+      width: bottomSpaceWidth,
       onPress: () => hitTargetActionsRef.current.pressSpace(),
       onLongPress: () => {
         spaceCursorDragXRef.current = null;
@@ -2204,20 +2747,24 @@ function KeyboardContent(props: {
       onLongPressEnd: () => {
         spaceCursorDragXRef.current = null;
       },
-      onSwipeUp: canSpaceSwipeCandidate("2")
+      onSwipeUp: isT9Keyboard
+        ? () => hitTargetActionsRef.current.runT9SpaceSwipe("up")
+        : canSpaceSwipeCandidate("2")
         ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("2")
         : undefined,
-      onSwipeDown: canSpaceSwipeCandidate("3")
+      onSwipeDown: isT9Keyboard
+        ? () => hitTargetActionsRef.current.runT9SpaceSwipe("down")
+        : canSpaceSwipeCandidate("3")
         ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("3")
         : undefined,
       onSwipeLeft: () => hitTargetActionsRef.current.moveCursorSafely(-1),
       onSwipeRight: () => hitTargetActionsRef.current.moveCursorSafely(1),
     });
-    x += metrics.bottom.space + KEY_SPACING;
+    x += bottomSpaceWidth + KEY_SPACING;
     targets.push({
       id: "mode",
       x,
-      width: metrics.bottom.mode,
+      width: bottomModeWidth,
       safetyReleaseDelay: 180,
       onPress: () => {
         hitTargetActionsRef.current.pressMode();
@@ -2229,14 +2776,16 @@ function KeyboardContent(props: {
         ? () => hitTargetActionsRef.current.modeSwipeDown()
         : undefined,
     });
-    x += metrics.bottom.mode + KEY_SPACING;
-    targets.push({
-      id: "enter",
-      x,
-      width: metrics.bottom.enter,
-      onPress: () => hitTargetActionsRef.current.pressReturn(),
-      onSwipeUp: () => hitTargetActionsRef.current.insertNewline(),
-    });
+    x += bottomModeWidth + KEY_SPACING;
+    if (!isT9Keyboard) {
+      targets.push({
+        id: "enter",
+        x,
+        width: bottomEnterWidth,
+        onPress: () => hitTargetActionsRef.current.pressReturn(),
+        onSwipeUp: () => hitTargetActionsRef.current.insertNewline(),
+      });
+    }
     return targets.map((target, index) => ({
       ...target,
       ...horizontalHitFrame(target.x, target.width, index, targets.length),
@@ -2337,6 +2886,27 @@ function KeyboardContent(props: {
         onSwipeUp: () => hitTargetActionsRef.current.insertNewline(),
       },
     ];
+  }
+
+  function t9RowHitTargets(row: typeof T9_KEYS) {
+    return row.map((item, index) => {
+      const displayX = index * (t9KeyWidth + KEY_SPACING);
+      return {
+        id: `t9-${item.digit}`,
+        ...horizontalHitFrame(displayX, t9KeyWidth, index, row.length),
+        onPress: () => hitTargetActionsRef.current.pressT9Digit(item.digit),
+        onSwipeUp: () =>
+          hitTargetActionsRef.current.runConfiguredAction(
+            settings.t9KeySwipeUp[item.digit],
+            settings.t9KeySwipeUpModes[item.digit],
+          ),
+        onSwipeDown: () =>
+          hitTargetActionsRef.current.runConfiguredAction(
+            settings.t9KeySwipeDown[item.digit],
+            settings.t9KeySwipeDownModes[item.digit],
+          ),
+      };
+    });
   }
 
   function collectExpandedCandidateBatch(session = sessionRef.current) {
@@ -2638,19 +3208,11 @@ function KeyboardContent(props: {
     );
   }
 
-  const numericRowSpacing = 6;
-  const numericPanelHeight = metrics.keyHeight * 4 + numericRowSpacing * 3;
-  const numericLeftWidth = Math.max(40, Math.min(56, metrics.width * 0.14));
-  const numericRightWidth = Math.max(48, Math.min(72, metrics.width * 0.18));
-  const numericCenterWidth = metrics.width - numericLeftWidth -
-    numericRightWidth - KEY_SPACING * 2;
-  const numericKeyWidth = (numericCenterWidth - KEY_SPACING * 2) / 3;
-  const numericPanelTopInset = settings.showFunctionRow
-    ? bodyRowSpacing / 2
-    : 0;
   const numericTouchFrame = (index: number) =>
     verticalTouchFrame(index, 4, metrics.keyHeight, numericRowSpacing);
   const numericBottomTouch = numericTouchFrame(3);
+  const t9TouchFrame = (index: number) =>
+    verticalTouchFrame(index, 3, metrics.keyHeight, numericRowSpacing);
   const bodyTouchFrame = (index: number, height: number) =>
     verticalTouchFrame(
       index,
@@ -2663,17 +3225,30 @@ function KeyboardContent(props: {
     visibleBodyRowCount - 1,
     metrics.keyHeight,
   );
+  const t9EnterOverlayHeight = metrics.keyHeight * 2 + t9PanelBottomInset +
+    bottomRowTouch.visualOffsetY;
 
   hitTargetActionsRef.current = {
     nextKeyboard: () => CustomKeyboard.nextKeyboard(),
     toggleSymbolLayer,
     pressBacktick: () => pressSymbol("`"),
-    pressComma: () => pressRimePunctuation(","),
-    pressPeriod: () => pressRimePunctuation("."),
+    pressComma: pressKeyboardComma,
+    pressPeriod: pressKeyboardPeriod,
     pressSpace,
     processSpaceSwipeCandidate,
     moveCursorSafely,
     pressMode: () => {
+      if (
+        keyboardTypeOverride === "qwerty" && settings.keyboardType === "t9" &&
+        ascii
+      ) {
+        switchEnglishQwertyToT9();
+        return;
+      }
+      if (isT9Keyboard && !composing) {
+        switchT9ToEnglishQwerty();
+        return;
+      }
       if (composing && settings.modeComposingEnabled) {
         runConfiguredAction(
           settings.modeComposingAction,
@@ -2697,6 +3272,11 @@ function KeyboardContent(props: {
     insertNewline,
     switchToLetterLayer,
     pressNumericDigit,
+    pressT9Digit,
+    runT9PunctuationItem,
+    pressT9Delimiter,
+    runT9SpaceSwipe,
+    selectT9Pinyin,
     pressBackspace,
     startRepeatingBackspace,
     stopRepeatingBackspace,
@@ -2707,6 +3287,7 @@ function KeyboardContent(props: {
     pressEqual: () => pressSymbol("="),
     numericEqualSwipeUp: () =>
       runConfiguredAction(settings.numericEqualsSwipeUp, "rime"),
+    runConfiguredAction,
     runComposingFunctionPress,
     runComposingFunctionSwipe,
     runIdleFunctionPress,
@@ -2716,10 +3297,15 @@ function KeyboardContent(props: {
   };
 
   const cachedComposingFunctionHitTargets = useMemo(
-    () => composingFunctionHitTargets(),
+    () =>
+      usesT9MixedFunctionRow
+        ? t9MixedFunctionHitTargets()
+        : composingFunctionHitTargets(),
     [
       metrics.functionWidth8,
       settings.composingFunctionOrder,
+      settings.idleFunctionOrder,
+      usesT9MixedFunctionRow,
     ],
   );
   const cachedIdleFunctionHitTargets = useMemo(
@@ -2734,13 +3320,19 @@ function KeyboardContent(props: {
     [
       showNextKeyboardButton,
       bottomSplitButtonWidth,
-      metrics.bottom.numbers,
-      metrics.bottom.comma,
-      metrics.bottom.space,
-      metrics.bottom.mode,
-      metrics.bottom.enter,
+      bottomNumbersWidth,
+      bottomCommaWidth,
+      bottomSpaceWidth,
+      bottomModeWidth,
+      bottomEnterWidth,
       composing,
       settings.modeComposingEnabled,
+      isT9Keyboard,
+      keyboardTypeOverride,
+      settings.t9SpaceSwipeUp,
+      settings.t9SpaceSwipeUpMode,
+      settings.t9SpaceSwipeDown,
+      settings.t9SpaceSwipeDownMode,
       preedit.length,
       candidates.length,
     ],
@@ -2769,6 +3361,85 @@ function KeyboardContent(props: {
       numericRowSpacing,
     ],
   );
+  const cachedT9HitTargets = useMemo(
+    () => T9_KEY_ROWS.map((row) => t9RowHitTargets(row)),
+    [
+      t9KeyWidth,
+      t9RightWidth,
+      settings.t9KeySwipeUp,
+      settings.t9KeySwipeDown,
+      settings.t9KeySwipeUpModes,
+      settings.t9KeySwipeDownModes,
+    ],
+  );
+
+  function renderT9LeftColumn() {
+    const bg = palette.keyOverrides["t9-left-column"] ?? palette.keyBg;
+    const fg = palette.primaryOverrides["t9-left-column"] ?? palette.primary;
+    const items = t9PinyinOptions.length > 0
+      ? t9PinyinOptions.map((option) => ({
+        key: `pinyin-${option.digits}-${option.selected.join("'")}`,
+        label: option.label,
+        action: () => hitTargetActionsRef.current.selectT9Pinyin(option),
+      }))
+      : settings.t9PunctuationItems
+        .filter((item) =>
+          item.label.trim().length > 0 && item.action.trim().length > 0
+        )
+        .map((item, index) => ({
+          key: `punct-${index}-${item.label}-${item.action}`,
+          label: item.label,
+          action: () => hitTargetActionsRef.current.runT9PunctuationItem(item),
+        }));
+    return (
+      <ZStack
+        frame={{ width: t9LeftWidth, height: t9PanelHeight }}
+        background={palette.nativeKeyStyle
+          ? palette.usesCustomColors ? bg as any : "clear" as any
+          : bg as any}
+        foregroundStyle={fg as any}
+        glassEffect={(palette.nativeKeyStyle
+          ? { type: "rect", cornerRadius: 8 }
+          : undefined) as any}
+        clipShape={{ type: "rect", cornerRadius: 8 }}
+        shadow={palette.nativeKeyStyle ? undefined : {
+          color: palette.shadow as any,
+          radius: 1,
+          y: 1,
+        }}
+      >
+        <ScrollView
+          axes="vertical"
+          scrollIndicator="hidden"
+          frame={{ width: t9LeftWidth, height: t9PanelHeight }}
+        >
+          <VStack
+            spacing={0}
+            frame={{ width: t9LeftWidth, alignment: "top" as any }}
+          >
+            {items.map((item) => (
+              <Text
+                key={item.key}
+                font={t9PinyinOptions.length > 0 ? 13 : 18}
+                lineLimit={1}
+                minScaleFactor={0.7}
+                foregroundStyle={fg as any}
+                frame={{
+                  width: t9LeftWidth,
+                  height: t9PanelHeight / 4,
+                  alignment: "center" as any,
+                }}
+                contentShape="rect"
+                onTapGesture={() => runWithFeedback(item.action)}
+              >
+                {item.label}
+              </Text>
+            ))}
+          </VStack>
+        </ScrollView>
+      </ZStack>
+    );
+  }
 
   return (
     <VStack
@@ -3018,7 +3689,9 @@ function KeyboardContent(props: {
                       )}
                     >
                       {settings.composingFunctionOrder.map(
-                        renderComposingFunctionKey,
+                        usesT9MixedFunctionRow
+                          ? renderT9MixedFunctionKey
+                          : renderComposingFunctionKey,
                       )}
                     </HStack>
                   )
@@ -3303,6 +3976,380 @@ function KeyboardContent(props: {
                   </HStack>
                 </VStack>
               )
+              : isT9Keyboard
+              ? (
+                <HStack
+                  spacing={KEY_SPACING}
+                  frame={{
+                    width: metrics.width,
+                    height: t9PanelHeight + t9PanelTopInset +
+                      t9PanelBottomInset + bottomRowTouch.touchHeight,
+                    alignment: "topLeading" as any,
+                  }}
+                >
+                  <VStack
+                    spacing={0}
+                    frame={{
+                      width: metrics.width - t9RightWidth - KEY_SPACING,
+                      height: t9PanelHeight + t9PanelTopInset +
+                        t9PanelBottomInset + bottomRowTouch.touchHeight,
+                      alignment: "topLeading" as any,
+                    }}
+                  >
+                    <VStack
+                      spacing={0}
+                      frame={{
+                        width: metrics.width - t9RightWidth - KEY_SPACING,
+                        height: t9PanelHeight + t9PanelTopInset +
+                          t9PanelBottomInset,
+                        alignment: "topLeading" as any,
+                      }}
+                    >
+                      {t9PanelTopInset > 0
+                        ? (
+                          <VStack
+                            frame={{
+                              width: metrics.width - t9RightWidth -
+                                KEY_SPACING,
+                              height: t9PanelTopInset,
+                            }}
+                          />
+                        )
+                        : null}
+                      <HStack
+                        spacing={KEY_SPACING}
+                        frame={{
+                          width: metrics.width - t9RightWidth - KEY_SPACING,
+                          height: t9PanelHeight,
+                        }}
+                      >
+                        {renderT9LeftColumn()}
+                        <VStack
+                          spacing={0}
+                          frame={{
+                            width: t9CenterWidth,
+                            height: t9PanelHeight,
+                          }}
+                        >
+                          {T9_KEY_ROWS.map((row, rowIndex) => {
+                            const rowTouch = t9TouchFrame(rowIndex);
+                            return (
+                              <HStack
+                                key={`t9-row-${rowIndex}`}
+                                spacing={KEY_SPACING}
+                                frame={{
+                                  width: t9CenterWidth,
+                                  height: rowTouch.touchHeight,
+                                }}
+                                contentShape="rect"
+                                highPriorityGesture={hitRowGesture(
+                                  `t9-row-${rowIndex}`,
+                                  cachedT9HitTargets[rowIndex] ?? [],
+                                )}
+                              >
+                                {row.map((item) => (
+                                  (() => {
+                                    const label = settings.uppercaseLetterLabels
+                                      ? item.letters
+                                      : item.letters.toLowerCase();
+                                    return (
+                                      <KeyFace
+                                        key={`t9-${item.digit}`}
+                                        id={`t9-${item.digit}`}
+                                        label={label}
+                                        topLeft={settings.t9KeySwipeUp[
+                                          item.digit
+                                        ]}
+                                        topRight={settings.t9KeySwipeDown[
+                                          item.digit
+                                        ] || undefined}
+                                        palette={palette}
+                                        width={t9KeyWidth}
+                                        height={metrics.keyHeight}
+                                        touchHeight={rowTouch.touchHeight}
+                                        visualOffsetY={rowTouch.visualOffsetY}
+                                        labelFontSize={item.letters.length > 3
+                                          ? 20
+                                          : 22}
+                                        passive
+                                        active={isPressed(`t9-${item.digit}`)}
+                                        popupLabel={label}
+                                        popupSwipeUpLabel={settings
+                                          .t9KeySwipeUp[
+                                            item.digit
+                                          ]}
+                                        popupSwipeDownLabel={settings
+                                          .t9KeySwipeDown[
+                                            item.digit
+                                          ] || undefined}
+                                        showPopup={settings.showKeyPopups}
+                                        onPress={() =>
+                                          runWithFeedback(() =>
+                                            pressT9Digit(item.digit)
+                                          )}
+                                        onSwipeUp={() =>
+                                          runWithFeedback(() =>
+                                            runConfiguredAction(
+                                              settings.t9KeySwipeUp[item.digit],
+                                              settings.t9KeySwipeUpModes[
+                                                item.digit
+                                              ],
+                                            )
+                                          )}
+                                        onSwipeDown={() =>
+                                          runWithFeedback(() =>
+                                            runConfiguredAction(
+                                              settings.t9KeySwipeDown[
+                                                item.digit
+                                              ],
+                                              settings.t9KeySwipeDownModes[
+                                                item.digit
+                                              ],
+                                            )
+                                          )}
+                                      />
+                                    );
+                                  })()
+                                ))}
+                              </HStack>
+                            );
+                          })}
+                        </VStack>
+                      </HStack>
+                      {t9PanelBottomInset > 0
+                        ? (
+                          <VStack
+                            frame={{
+                              width: metrics.width - t9RightWidth -
+                                KEY_SPACING,
+                              height: t9PanelBottomInset,
+                            }}
+                          />
+                        )
+                        : null}
+                    </VStack>
+                    <HStack
+                      spacing={KEY_SPACING}
+                      frame={{
+                        width: metrics.width - t9RightWidth - KEY_SPACING,
+                        height: bottomRowTouch.touchHeight,
+                      }}
+                      contentShape="rect"
+                      highPriorityGesture={hitRowGesture(
+                        "bottom-row",
+                        cachedBottomRowHitTargets,
+                      )}
+                    >
+                      {showNextKeyboardButton
+                        ? (
+                          <KeyFace
+                            id="next-keyboard"
+                            image="globe"
+                            palette={palette}
+                            width={bottomSplitButtonWidth}
+                            height={metrics.keyHeight}
+                            touchHeight={bottomRowTouch.touchHeight}
+                            visualOffsetY={bottomRowTouch.visualOffsetY}
+                            system
+                            passive
+                            active={isPressed("next-keyboard")}
+                            onPress={() =>
+                              runWithFeedback(() =>
+                                CustomKeyboard.nextKeyboard()
+                              )}
+                          />
+                        )
+                        : null}
+                      <KeyFace
+                        id="numbers"
+                        label={symbolLayer ? "ABC" : "123"}
+                        palette={palette}
+                        width={showNextKeyboardButton
+                          ? bottomSplitButtonWidth
+                          : bottomNumbersWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={bottomRowTouch.touchHeight}
+                        visualOffsetY={bottomRowTouch.visualOffsetY}
+                        system
+                        selected={symbolLayer}
+                        passive
+                        active={isPressed("numbers")}
+                        onPress={() => runWithFeedback(toggleSymbolLayer)}
+                        onSwipeUp={() =>
+                          runWithFeedback(() => pressSymbol("`"))}
+                      />
+                      <KeyFace
+                        id="comma"
+                        label=","
+                        topCenter="."
+                        topCenterForeground={palette.primary}
+                        palette={palette}
+                        width={bottomCommaWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={bottomRowTouch.touchHeight}
+                        visualOffsetY={bottomRowTouch.visualOffsetY}
+                        passive
+                        active={isPressed("comma")}
+                        onPress={() => runWithFeedback(pressKeyboardComma)}
+                        onSwipeUp={() => runWithFeedback(pressKeyboardPeriod)}
+                      />
+                      <KeyFace
+                        id="space"
+                        image="space"
+                        bottomRight={settings.showWanxiangLabel
+                          ? settings.spaceLabel
+                          : undefined}
+                        bottomRightFontSize={settings.spaceLabel.length > 4
+                          ? 8
+                          : settings.spaceLabel.length > 2
+                          ? 10
+                          : 12}
+                        palette={palette}
+                        width={bottomSpaceWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={bottomRowTouch.touchHeight}
+                        visualOffsetY={bottomRowTouch.visualOffsetY}
+                        system
+                        passive
+                        active={isPressed("space")}
+                        onPress={() => runWithFeedback(pressSpace)}
+                        onSwipeUp={() =>
+                          runWithFeedback(() => runT9SpaceSwipe("up"))}
+                        onSwipeDown={() =>
+                          runWithFeedback(() => runT9SpaceSwipe("down"))}
+                        onSwipeLeft={() =>
+                          runWithFeedback(() => moveCursorSafely(-1))}
+                        onSwipeRight={() =>
+                          runWithFeedback(() => moveCursorSafely(1))}
+                      />
+                      <KeyFace
+                        id="mode"
+                        image={composing && settings.modeComposingEnabled
+                          ? settings.modeComposingIcon
+                          : undefined}
+                        modeTopLeft={composing && settings.modeComposingEnabled
+                          ? undefined
+                          : "中"}
+                        modeBottomRight={composing &&
+                            settings.modeComposingEnabled
+                          ? undefined
+                          : "英"}
+                        modeTopLeftActive={!ascii}
+                        palette={palette}
+                        width={bottomModeWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={bottomRowTouch.touchHeight}
+                        visualOffsetY={bottomRowTouch.visualOffsetY}
+                        system
+                        passive
+                        active={isPressed("mode")}
+                        labelFontSize={18}
+                        onPress={() =>
+                          runWithFeedback(() =>
+                            hitTargetActionsRef.current.pressMode()
+                          )}
+                        onSwipeUp={() =>
+                          runWithFeedback(() => {
+                            if (composing && settings.modeComposingEnabled) {
+                              runConfiguredAction(
+                                settings.modeComposingSwipeUp,
+                                settings.modeComposingSwipeUpMode,
+                              );
+                            }
+                          })}
+                        onSwipeDown={() =>
+                          runWithFeedback(() => {
+                            if (composing && settings.modeComposingEnabled) {
+                              runConfiguredAction(
+                                settings.modeComposingSwipeDown,
+                                settings.modeComposingSwipeDownMode,
+                              );
+                            }
+                          })}
+                        contextMenu={schemaMenu != null
+                          ? { menuItems: schemaMenu }
+                          : undefined}
+                      />
+                    </HStack>
+                  </VStack>
+                  <VStack
+                    spacing={0}
+                    frame={{
+                      width: t9RightWidth,
+                      height: t9PanelHeight + t9PanelTopInset +
+                        t9PanelBottomInset + bottomRowTouch.touchHeight,
+                      alignment: "topLeading" as any,
+                    }}
+                  >
+                    {t9PanelTopInset > 0
+                      ? (
+                        <VStack
+                          frame={{
+                            width: t9RightWidth,
+                            height: t9PanelTopInset,
+                          }}
+                        />
+                      )
+                      : null}
+                    <KeyFace
+                      id="t9-backspace"
+                      image="delete.left"
+                      palette={palette}
+                      width={t9RightWidth}
+                      height={metrics.keyHeight}
+                      touchHeight={t9TouchFrame(0).touchHeight}
+                      visualOffsetY={t9TouchFrame(0).visualOffsetY}
+                      system
+                      active={isPressed("t9-backspace")}
+                      onPress={pressBackspace}
+                      onTouchStart={() => beginKeyTouch("t9-backspace")}
+                      onTouchEnd={() => endKeyTouch("t9-backspace")}
+                      onLongPress={() => {
+                        holdKeyPressedUntilRelease("t9-backspace");
+                        startRepeatingBackspace("t9-backspace");
+                      }}
+                      onLongPressEnd={stopRepeatingBackspace}
+                      onLongPressMove={backspaceLongPressMove}
+                      longPressDuration={DELETE_LONG_PRESS_DURATION}
+                      onSwipeLeft={backspaceSwipeLeft}
+                      onSwipeUp={backspaceSwipeUp}
+                      onSwipeDown={backspaceSwipeDown}
+                      onSwipeStart={stopRepeatingBackspace}
+                      swipeTriggerDistance={currentSwipeTriggerDistance}
+                    />
+                    <KeyFace
+                      id="t9-delimiter"
+                      label="'"
+                      palette={palette}
+                      width={t9RightWidth}
+                      height={metrics.keyHeight}
+                      touchHeight={t9TouchFrame(1).touchHeight}
+                      visualOffsetY={t9TouchFrame(1).visualOffsetY}
+                      active={isPressed("t9-delimiter")}
+                      onPress={pressT9Delimiter}
+                      onTouchStart={() => beginKeyTouch("t9-delimiter")}
+                      onTouchEnd={() => endKeyTouch("t9-delimiter")}
+                    />
+                    <KeyFace
+                      id="t9-enter"
+                      image="paperplane.fill"
+                      palette={palette}
+                      width={t9RightWidth}
+                      height={t9EnterOverlayHeight}
+                      touchHeight={t9TouchFrame(2).touchHeight +
+                        t9PanelBottomInset + bottomRowTouch.touchHeight}
+                      visualOffsetY={t9TouchFrame(2).visualOffsetY}
+                      system
+                      active={isPressed("t9-enter")}
+                      onPress={pressReturn}
+                      onTouchStart={() => beginKeyTouch("t9-enter")}
+                      onTouchEnd={() => endKeyTouch("t9-enter")}
+                      onSwipeUp={insertNewline}
+                      swipeTriggerDistance={currentSwipeTriggerDistance}
+                    />
+                  </VStack>
+                </HStack>
+              )
               : (
                 LETTER_ROWS.map((row, rowIndex) => {
                   const sideInset = rowIndex === 1 ? metrics.secondRowInset : 0;
@@ -3503,7 +4550,7 @@ function KeyboardContent(props: {
               )}
           </Group>
 
-          {symbolLayer ? null : (
+          {symbolLayer || isT9Keyboard ? null : (
             <HStack
               spacing={KEY_SPACING}
               frame={{
@@ -3540,7 +4587,7 @@ function KeyboardContent(props: {
                 palette={palette}
                 width={showNextKeyboardButton
                   ? bottomSplitButtonWidth
-                  : metrics.bottom.numbers}
+                  : bottomNumbersWidth}
                 height={metrics.keyHeight}
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}
@@ -3557,15 +4604,14 @@ function KeyboardContent(props: {
                 topCenter="."
                 topCenterForeground={palette.primary}
                 palette={palette}
-                width={metrics.bottom.comma}
+                width={bottomCommaWidth}
                 height={metrics.keyHeight}
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}
                 passive
                 active={isPressed("comma")}
-                onPress={() => runWithFeedback(() => pressRimePunctuation(","))}
-                onSwipeUp={() =>
-                  runWithFeedback(() => pressRimePunctuation("."))}
+                onPress={() => runWithFeedback(pressKeyboardComma)}
+                onSwipeUp={() => runWithFeedback(pressKeyboardPeriod)}
               />
               <KeyFace
                 id="space"
@@ -3579,7 +4625,7 @@ function KeyboardContent(props: {
                   ? 10
                   : 12}
                 palette={palette}
-                width={metrics.bottom.space}
+                width={bottomSpaceWidth}
                 height={metrics.keyHeight}
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}
@@ -3588,9 +4634,15 @@ function KeyboardContent(props: {
                 active={isPressed("space")}
                 onPress={() => runWithFeedback(pressSpace)}
                 onSwipeUp={() =>
-                  runWithFeedback(() => processSpaceSwipeCandidate("2"))}
+                  runWithFeedback(() => {
+                    if (isT9Keyboard) runT9SpaceSwipe("up");
+                    else processSpaceSwipeCandidate("2");
+                  })}
                 onSwipeDown={() =>
-                  runWithFeedback(() => processSpaceSwipeCandidate("3"))}
+                  runWithFeedback(() => {
+                    if (isT9Keyboard) runT9SpaceSwipe("down");
+                    else processSpaceSwipeCandidate("3");
+                  })}
                 onSwipeLeft={() => runWithFeedback(() => moveCursorSafely(-1))}
                 onSwipeRight={() => runWithFeedback(() => moveCursorSafely(1))}
               />
@@ -3607,7 +4659,7 @@ function KeyboardContent(props: {
                   : "英"}
                 modeTopLeftActive={!ascii}
                 palette={palette}
-                width={metrics.bottom.mode}
+                width={bottomModeWidth}
                 height={metrics.keyHeight}
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}
@@ -3616,16 +4668,9 @@ function KeyboardContent(props: {
                 active={isPressed("mode")}
                 labelFontSize={18}
                 onPress={() =>
-                  runWithFeedback(() => {
-                    if (composing && settings.modeComposingEnabled) {
-                      runConfiguredAction(
-                        settings.modeComposingAction,
-                        settings.modeComposingActionMode,
-                      );
-                    } else {
-                      toggleAscii();
-                    }
-                  })}
+                  runWithFeedback(() =>
+                    hitTargetActionsRef.current.pressMode()
+                  )}
                 onSwipeUp={() =>
                   runWithFeedback(() => {
                     if (composing && settings.modeComposingEnabled) {
@@ -3652,7 +4697,7 @@ function KeyboardContent(props: {
                 id="enter"
                 image="paperplane.fill"
                 palette={palette}
-                width={metrics.bottom.enter}
+                width={bottomEnterWidth}
                 height={metrics.keyHeight}
                 touchHeight={bottomRowTouch.touchHeight}
                 visualOffsetY={bottomRowTouch.visualOffsetY}

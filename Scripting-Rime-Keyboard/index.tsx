@@ -17,6 +17,7 @@ import {
   Text,
   TextField,
   Toggle,
+  useEffect,
   useObservable,
   useRef,
   useState,
@@ -36,6 +37,7 @@ import {
   DEFAULT_LETTER_SWIPE_DOWN,
   DEFAULT_LETTER_SWIPE_DOWN_SYMBOLS,
   DEFAULT_RIME_KEYBOARD_SETTINGS,
+  DEFAULT_T9_PUNCTUATION_ITEMS,
   FUNCTION_KEYS,
   FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN,
   FUNCTION_ROW_OFF_LETTER_SWIPE_DOWN_SYMBOLS,
@@ -45,6 +47,7 @@ import {
   KEY_VISUAL_INSET_MIN,
   KEYBOARD_HEIGHT_MAX,
   KEYBOARD_HEIGHT_MIN,
+  type KeyboardType,
   type KeyColorPair,
   type KeyColorScheme,
   type KeyColorSettings,
@@ -58,6 +61,8 @@ import {
   saveRimeKeyboardSettings,
   SWIPE_TRIGGER_DISTANCE_MAX,
   SWIPE_TRIGGER_DISTANCE_MIN,
+  T9_KEY_IDS,
+  type T9PunctuationItem,
   TOOLBAR_LEFT_BUTTON_MAX,
   type ToolbarButtonConfig,
 } from "./settings";
@@ -250,6 +255,19 @@ const KEY_COLOR_GROUPS: Array<{
     ],
   },
   {
+    title: "九键键盘",
+    keys: [
+      ...T9_KEY_IDS.map((key) => ({
+        id: `t9-${key}`,
+        label: `九键 ${key}`,
+      })),
+      { id: "t9-left-column", label: "左侧符号列" },
+      { id: "t9-backspace", label: "九键 Delete" },
+      { id: "t9-delimiter", label: "九键分词" },
+      { id: "t9-enter", label: "九键回车" },
+    ],
+  },
+  {
     title: "功能行",
     keys: [
       { id: "idle-left", label: "左移" },
@@ -293,7 +311,9 @@ const KEY_COLOR_GROUPS: Array<{
   },
 ];
 
-const LETTER_KEY_COLOR_GROUP = KEY_COLOR_GROUPS[0];
+const HINT_COLOR_GROUPS = KEY_COLOR_GROUPS.filter((group) =>
+  group.title === "字母键" || group.title === "九键键盘"
+);
 
 function SettingHint({ children }: { children: any }) {
   return <Text font="caption" foregroundStyle="secondaryLabel">{children}
@@ -638,6 +658,102 @@ function CandidateMenuActionRow(props: {
         draftKey={props.actionDraftKey}
         onDraftChanged={props.onDraftChanged}
       />
+    </VStack>
+  );
+}
+
+function T9PunctuationConfigRow(props: {
+  index: number;
+  item: T9PunctuationItem;
+  onModeChanged: (value: ActionSendMode) => void;
+  onReset: () => void;
+  onRemove?: () => void;
+  labelDraftKey: string;
+  actionDraftKey: string;
+  onDraftChanged: (key: string, value: string) => void;
+}) {
+  const defaults = DEFAULT_T9_PUNCTUATION_ITEMS[props.index];
+  const [labelDraft, setLabelDraft] = useState(props.item.label);
+  const [actionDraft, setActionDraft] = useState(props.item.action);
+  useEffect(() => {
+    setLabelDraft(props.item.label);
+    setActionDraft(props.item.action);
+  }, [props.item.label, props.item.action]);
+  function handleLabelChanged(value: string) {
+    setLabelDraft(value);
+    props.onDraftChanged(props.labelDraftKey, value);
+  }
+  function handleActionChanged(value: string) {
+    setActionDraft(value);
+    props.onDraftChanged(props.actionDraftKey, value);
+  }
+  function handleReset() {
+    if (defaults) {
+      setLabelDraft(defaults.label);
+      setActionDraft(defaults.action);
+    }
+    props.onReset();
+  }
+  const changed = !!defaults &&
+    (labelDraft !== defaults.label ||
+      actionDraft !== defaults.action ||
+      props.item.mode !== defaults.mode);
+  const removable = !defaults && props.onRemove;
+  return (
+    <VStack
+      alignment="leading"
+      spacing={8}
+      frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
+    >
+      <HStack>
+        <Text font="headline">符号 {props.index + 1}</Text>
+        <Spacer />
+        {changed
+          ? (
+            <Button
+              title="重置"
+              systemImage="arrow.counterclockwise"
+              buttonStyle="plain"
+              action={handleReset}
+            />
+          )
+          : removable
+          ? (
+            <Button
+              title="删除"
+              systemImage="trash"
+              role="destructive"
+              buttonStyle="plain"
+              action={() => props.onRemove?.()}
+            />
+          )
+          : null}
+      </HStack>
+      <LabeledTextField
+        title="显示"
+        value={labelDraft}
+        prompt={defaults?.label ?? ""}
+        titleWidth={58}
+        onChanged={handleLabelChanged}
+      />
+      <LabeledTextField
+        title="动作"
+        value={actionDraft}
+        prompt={defaults?.action ?? ""}
+        titleWidth={58}
+        onChanged={handleActionChanged}
+      />
+      <Picker
+        title="发送方式"
+        value={props.item.mode}
+        onChanged={(value: string) =>
+          props.onModeChanged(value as ActionSendMode)}
+        pickerStyle="segmented"
+      >
+        {ACTION_MODE_OPTIONS.map((option) => (
+          <Text key={option.value} tag={option.value}>{option.label}</Text>
+        ))}
+      </Picker>
     </VStack>
   );
 }
@@ -1143,6 +1259,10 @@ function SettingsView() {
       | "letterSwipeDownSymbols"
       | "letterSwipeUpModes"
       | "letterSwipeDownModes"
+      | "t9KeySwipeUp"
+      | "t9KeySwipeDown"
+      | "t9KeySwipeUpModes"
+      | "t9KeySwipeDownModes"
       | "idleFunctionSwipeUp"
       | "idleFunctionSwipeDown"
       | "composingFunctionSwipeUp"
@@ -1188,6 +1308,82 @@ function SettingsView() {
     const actions = settings.candidateMenuActions.slice();
     actions[index] = { name: "", action: "" };
     updateSettings({ ...settings, candidateMenuActions: actions });
+  }
+
+  function t9PunctuationSlot(index: number): T9PunctuationItem {
+    return settings.t9PunctuationItems[index] ??
+      DEFAULT_T9_PUNCTUATION_ITEMS[index] ??
+      { label: "", action: "", mode: "rime" };
+  }
+
+  function t9PunctuationConfigCount() {
+    return Math.max(
+      DEFAULT_T9_PUNCTUATION_ITEMS.length,
+      settings.t9PunctuationItems.length,
+    );
+  }
+
+  function t9PunctuationConfigItems() {
+    return Array.from(
+      { length: t9PunctuationConfigCount() },
+      (_, index) => t9PunctuationSlot(index),
+    );
+  }
+
+  function patchT9PunctuationItem(
+    index: number,
+    patch: Partial<T9PunctuationItem>,
+  ) {
+    const items = settings.t9PunctuationItems.slice();
+    while (items.length <= index) {
+      items.push(
+        DEFAULT_T9_PUNCTUATION_ITEMS[items.length] ?? {
+          label: "",
+          action: "",
+          mode: "rime",
+        },
+      );
+    }
+    items[index] = { ...items[index], ...patch };
+    updateSettings({ ...settings, t9PunctuationItems: items });
+  }
+
+  function resetT9PunctuationItem(index: number) {
+    const defaults = DEFAULT_T9_PUNCTUATION_ITEMS[index];
+    if (!defaults) return;
+    delete pendingTextDraftsRef.current[`t9PunctuationItems.${index}.label`];
+    delete pendingTextDraftsRef.current[`t9PunctuationItems.${index}.action`];
+    const items = settings.t9PunctuationItems.slice();
+    while (items.length <= index) {
+      items.push(
+        DEFAULT_T9_PUNCTUATION_ITEMS[items.length] ?? {
+          label: "",
+          action: "",
+          mode: "rime",
+        },
+      );
+    }
+    items[index] = defaults;
+    updateSettings({ ...settings, t9PunctuationItems: items });
+  }
+
+  function addT9PunctuationItem() {
+    const items = t9PunctuationConfigItems();
+    updateSettings({
+      ...settings,
+      t9PunctuationItems: [
+        ...items,
+        { label: "", action: "", mode: "rime" },
+      ],
+    });
+  }
+
+  function removeT9PunctuationItem(index: number) {
+    delete pendingTextDraftsRef.current[`t9PunctuationItems.${index}.label`];
+    delete pendingTextDraftsRef.current[`t9PunctuationItems.${index}.action`];
+    const items = t9PunctuationConfigItems();
+    items.splice(index, 1);
+    updateSettings({ ...settings, t9PunctuationItems: items });
   }
 
   function patchToolbarButton(id: string, patch: Partial<ToolbarButtonConfig>) {
@@ -1322,6 +1518,16 @@ function SettingsView() {
             {THEME_OPTIONS.map((option) => (
               <Text key={option.value} tag={option.value}>{option.label}</Text>
             ))}
+          </Picker>
+          <Picker
+            title="键盘类型"
+            value={settings.keyboardType}
+            onChanged={(value: string) =>
+              patchSettings({ keyboardType: value as KeyboardType })}
+            pickerStyle="segmented"
+          >
+            <Text tag="qwerty">26 键</Text>
+            <Text tag="t9">9 键</Text>
           </Picker>
           <Toggle
             title="自定义键盘高度"
@@ -1784,14 +1990,17 @@ function SettingsView() {
               </Section>
 
               <Section header={<Text>角标颜色 · 单键覆盖</Text>}>
-                <NavigationLink
-                  title={LETTER_KEY_COLOR_GROUP.title}
-                  destination={renderKeyColorPage(
-                    "keyHintColors",
-                    LETTER_KEY_COLOR_GROUP,
-                    "角标颜色",
-                  )}
-                />
+                {HINT_COLOR_GROUPS.map((group) => (
+                  <NavigationLink
+                    key={"hint-color-link-" + group.title}
+                    title={group.title}
+                    destination={renderKeyColorPage(
+                      "keyHintColors",
+                      group,
+                      "角标颜色",
+                    )}
+                  />
+                ))}
               </Section>
             </>
           )
@@ -2382,6 +2591,126 @@ function SettingsView() {
     );
   }
 
+  function renderT9Page() {
+    return (
+      <List
+        navigationTitle="九键键盘"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={textInputToolbar()}
+        toast={savedToast}
+      >
+        <Section
+          header={<Text>空格划动</Text>}
+          footer={
+            <SettingHint>
+              预编辑且有候选时，空格上划/下划仍优先用于二选/三选上屏；无预编辑时使用这里的动作。
+            </SettingHint>
+          }
+        >
+          <ActionConfigRow
+            title="上划"
+            action={settings.t9SpaceSwipeUp}
+            mode={settings.t9SpaceSwipeUpMode}
+            onActionChanged={(value) =>
+              patchSettings({ t9SpaceSwipeUp: value })}
+            onModeChanged={(value) =>
+              patchSettings({ t9SpaceSwipeUpMode: value })}
+            actionDraftKey="t9SpaceSwipeUp"
+            onDraftChanged={recordTextDraft}
+          />
+          <ActionConfigRow
+            title="下划"
+            action={settings.t9SpaceSwipeDown}
+            mode={settings.t9SpaceSwipeDownMode}
+            onActionChanged={(value) =>
+              patchSettings({ t9SpaceSwipeDown: value })}
+            onModeChanged={(value) =>
+              patchSettings({ t9SpaceSwipeDownMode: value })}
+            actionDraftKey="t9SpaceSwipeDown"
+            onDraftChanged={recordTextDraft}
+          />
+        </Section>
+        <Section
+          header={<Text>九键按键划动</Text>}
+          footer={
+            <SettingHint>
+              默认上划直接上屏对应数字；下划默认无动作。
+            </SettingHint>
+          }
+        >
+          {T9_KEY_IDS.map((key) => (
+            <VStack
+              key={`t9-key-swipe-${key}`}
+              alignment="leading"
+              spacing={8}
+              frame={{
+                maxWidth: "infinity" as any,
+                alignment: "leading" as any,
+              }}
+            >
+              <Text font="headline">按键 {key}</Text>
+              <ActionConfigRow
+                title="上划"
+                action={settings.t9KeySwipeUp[key]}
+                mode={settings.t9KeySwipeUpModes[key]}
+                onActionChanged={(value) =>
+                  patchSwipeMap("t9KeySwipeUp", key, value)}
+                onModeChanged={(value) =>
+                  patchSwipeMap("t9KeySwipeUpModes", key, value)}
+                actionDraftKey={`t9KeySwipeUp.${key}`}
+                onDraftChanged={recordTextDraft}
+              />
+              <ActionConfigRow
+                title="下划"
+                action={settings.t9KeySwipeDown[key]}
+                mode={settings.t9KeySwipeDownModes[key]}
+                onActionChanged={(value) =>
+                  patchSwipeMap("t9KeySwipeDown", key, value)}
+                onModeChanged={(value) =>
+                  patchSwipeMap("t9KeySwipeDownModes", key, value)}
+                actionDraftKey={`t9KeySwipeDown.${key}`}
+                onDraftChanged={recordTextDraft}
+              />
+            </VStack>
+          ))}
+        </Section>
+        <Section
+          header={<Text>左侧符号列</Text>}
+          footer={
+            <SettingHint>
+              键盘左侧一次显示 4
+              个符号，可滚动显示更多；预编辑时会临时显示拼音选择。
+            </SettingHint>
+          }
+        >
+          {t9PunctuationConfigItems().map((item, index) => {
+            return (
+              <T9PunctuationConfigRow
+                key={index}
+                index={index}
+                item={item}
+                onModeChanged={(value) =>
+                  patchT9PunctuationItem(index, { mode: value })}
+                onReset={() => resetT9PunctuationItem(index)}
+                onRemove={index >= DEFAULT_T9_PUNCTUATION_ITEMS.length
+                  ? () => removeT9PunctuationItem(index)
+                  : undefined}
+                labelDraftKey={`t9PunctuationItems.${index}.label`}
+                actionDraftKey={`t9PunctuationItems.${index}.action`}
+                onDraftChanged={recordTextDraft}
+              />
+            );
+          })}
+          <Button
+            title="添加符号"
+            systemImage="plus.circle"
+            action={addT9PunctuationItem}
+          />
+        </Section>
+      </List>
+    );
+  }
+
   function renderLetterSwipePage(direction: "up" | "down") {
     const isUp = direction === "up";
     return (
@@ -2831,6 +3160,7 @@ function SettingsView() {
             destination={renderBackspacePage()}
           />
           <NavigationLink title="数字键盘" destination={renderNumericPage()} />
+          <NavigationLink title="九键键盘" destination={renderT9Page()} />
         </Section>
         <Section header={<Text>字母上下划</Text>}>
           <NavigationLink
