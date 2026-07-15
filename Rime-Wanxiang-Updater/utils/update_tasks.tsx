@@ -34,6 +34,7 @@ export type RemoteAsset = {
   updatedAt?: string
   remoteIdOrSha?: string
   size?: number
+  extractSubdir?: string
 }
 
 export type AllUpdateResult = {
@@ -131,6 +132,41 @@ async function httpJson(url: string, init?: any) {
   return { json, headers: res.headers }
 }
 
+async function isDownloadUrlUsable(url: string, expectedSize?: number): Promise<boolean> {
+  const fetchFn = Runtime.fetch
+  if (!fetchFn) return true
+  try {
+    const res: any = await fetchFn(url, { method: "HEAD" })
+    if (!res?.ok) return false
+    const lenRaw = res?.headers?.get?.("content-length") ?? res?.headers?.get?.("Content-Length")
+    const len = lenRaw != null ? Number(lenRaw) : undefined
+    if (
+      typeof expectedSize === "number" &&
+      Number.isFinite(expectedSize) &&
+      expectedSize > 0 &&
+      typeof len === "number" &&
+      Number.isFinite(len) &&
+      len > 0
+    ) {
+      return Math.abs(len - expectedSize) <= expectedSize * 0.05
+    }
+    return true
+  } catch {
+    // HEAD 在部分环境可能不可用；下载阶段仍会做文件大小校验。
+    return true
+  }
+}
+
+async function usableCnbDownloadUrl(urls: Array<string | undefined>, expectedSize?: number): Promise<string | undefined> {
+  const seen = new Set<string>()
+  for (const raw of urls) {
+    const url = String(raw ?? "").trim()
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    if (await isDownloadUrlUsable(url, expectedSize)) return url
+  }
+  return undefined
+}
 
 async function fetchLatestAssetFromGithub(args: {
   owner: string
@@ -247,21 +283,23 @@ async function fetchLatestAssetFromCnb(args: {
         : a.path
           ? `https://cnb.cool${a.path}`
           : undefined
-      if (!url2) continue
+      const size =
+        typeof a?.size === "number"
+          ? a.size
+          : typeof a?.fileSize === "number"
+            ? a.fileSize
+            : undefined
+      const usableUrl = await usableCnbDownloadUrl([url2], size)
+      if (!usableUrl) continue
 
       return {
         name,
-        url: url2,
+        url: usableUrl,
         updatedAt: a.updated_at ?? a.updatedAt,
         tag: String(rel?.tag_ref ?? rel?.tag_name ?? rel?.tagName ?? "").split("/").pop() || undefined,
         body: rel.body,
         remoteIdOrSha: a?.id != null ? String(a.id) : undefined,
-        size:
-          typeof a?.size === "number"
-            ? a.size
-            : typeof a?.fileSize === "number"
-              ? a.fileSize
-              : undefined,
+        size,
       }
     }
   }
@@ -334,9 +372,18 @@ async function fetchLatestAssetFromCnbOpenApi(args: {
       if (args.assetNameExact && name !== args.assetNameExact) continue
       if (re && !re.test(name)) continue
 
-      const url = a.browser_download_url ?? a.brower_download_url ?? a.url
-      if (!url) continue
       const hash = String(a?.hash_value ?? "").trim()
+      const size =
+        typeof a?.size === "number"
+          ? a.size
+          : typeof a?.fileSize === "number"
+            ? a.fileSize
+            : undefined
+      const url = await usableCnbDownloadUrl(
+        [a.browser_download_url, a.brower_download_url, a.path ? `https://cnb.cool${a.path}` : undefined],
+        size,
+      )
+      if (!url) continue
       return {
         name,
         url,
@@ -344,12 +391,7 @@ async function fetchLatestAssetFromCnbOpenApi(args: {
         tag: String(rel?.tag_name ?? rel?.tag_ref ?? rel?.tagName ?? "").split("/").pop() || undefined,
         body: rel.body,
         remoteIdOrSha: hash || (a?.id != null ? String(a.id) : undefined),
-        size:
-          typeof a?.size === "number"
-            ? a.size
-            : typeof a?.fileSize === "number"
-              ? a.fileSize
-              : undefined,
+        size,
       }
     }
   }
@@ -377,6 +419,37 @@ function schemePattern(cfg: AppConfig): string {
   if (cfg.schemeEdition === "base") return "*base.zip"
   if (cfg.schemeEdition === "pure") return "rime-wanxiang-pure.zip"
   return `*${cfg.proSchemeKey}*fuzhu.zip`
+}
+
+async function fetchLatestDictAsset(cfg: AppConfig): Promise<RemoteAsset | undefined> {
+  if (cfg.releaseSource === "github") {
+    return fetchLatestAssetFromGithub({
+      owner: OWNER,
+      repo: GH_REPO,
+      tag: DICT_TAG,
+      assetNameGlob: dictPattern(cfg),
+      token: cfg.githubToken,
+    })
+  }
+
+  const standalone = await fetchLatestAssetFromCnbPreferOpenApi({
+    owner: OWNER,
+    repo: CNB_REPO,
+    token: cfg.cnbToken,
+    assetNameGlob: dictPattern(cfg),
+    releaseTagExact: CNB_PREVIEW_TAG,
+  })
+  if (standalone) return standalone
+
+  if (cfg.schemeEdition !== "base") return undefined
+  const schemePackage = await fetchLatestAssetFromCnbPreferOpenApi({
+    owner: OWNER,
+    repo: CNB_REPO,
+    token: cfg.cnbToken,
+    assetNameExact: "rime-wanxiang-base.zip",
+    releaseTagExact: CNB_PREVIEW_TAG,
+  })
+  return schemePackage ? { ...schemePackage, extractSubdir: "dicts" } : undefined
 }
 
 async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise<RemoteAsset | undefined> {
@@ -447,22 +520,7 @@ export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> 
     scheme.remoteIdOrSha = scheme.tag ?? scheme.name
   }
 
-  const dict =
-    cfg.releaseSource === "github"
-      ? await fetchLatestAssetFromGithub({
-        owner: OWNER,
-        repo: GH_REPO,
-        tag: DICT_TAG,
-        assetNameGlob: dictPattern(cfg),
-        token: cfg.githubToken,
-      })
-      : await fetchLatestAssetFromCnbPreferOpenApi({
-        owner: OWNER,
-        repo: CNB_REPO,
-        token: cfg.cnbToken,
-        assetNameGlob: dictPattern(cfg),
-        releaseTagExact: CNB_PREVIEW_TAG,
-      })
+  const dict = await fetchLatestDictAsset(cfg)
 
   const model = await fetchModelReleaseAsset(cfg, MODEL_FILE)
 
@@ -646,22 +704,7 @@ export async function updateDict(
   await ensureDir(installRoot)
   await removeDirSafe(Path.join(installRoot, "UpdateCache"))
 
-  const dict =
-    cfg.releaseSource === "github"
-      ? await fetchLatestAssetFromGithub({
-        owner: OWNER,
-        repo: GH_REPO,
-        tag: DICT_TAG,
-        assetNameGlob: dictPattern(cfg),
-        token: cfg.githubToken,
-      })
-      : await fetchLatestAssetFromCnbPreferOpenApi({
-        owner: OWNER,
-        repo: CNB_REPO,
-        token: cfg.cnbToken,
-        assetNameGlob: dictPattern(cfg),
-        releaseTagExact: CNB_PREVIEW_TAG,
-      })
+  const dict = await fetchLatestDictAsset(cfg)
 
   if (!dict?.url) throw new Error("未找到可用的词库资产")
   params.onLog?.(`远程词库资产：${dict.name}`)
@@ -722,6 +765,7 @@ export async function updateDict(
     await unzipToDirWithOverwrite(zipPath, dictDir, {
       excludePatterns: exclude,
       flattenSingleDir: true,
+      sourceSubdir: dict.extractSubdir,
       onCopiedFile: (dstPath) => {
         copied.add(String(dstPath))
         params.onLog?.(`写入文件：${String(dstPath)}`)

@@ -482,24 +482,16 @@ export function SettingsView(props: {
         const pathChanged = selectedPath !== normalizePath(targetPath) || nextBookmarkName !== targetName
         if (pathChanged) {
           try {
-            let next = {
-              ...loadConfig(),
+            if (isBuiltinScripting) {
+              setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
+            }
+            setCfg((live) => ({
+              ...live,
               hamsterRootPath: selectedPath,
               hamsterBookmarkName: nextBookmarkName,
               useBuiltinScriptingPath: isBuiltinScripting,
-              inputMethod: isBuiltinScripting ? "scripting" : (current?.inputMethod ?? cfg.inputMethod),
-            }
-            next = await syncSchemeFromLocal(next)
-            if (isBuiltinScripting) {
-              next = {
-                ...next,
-                inputMethod: "scripting",
-                useBuiltinScriptingPath: true,
-                hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
-              }
-              setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
-            }
-            setCfg(next)
+              inputMethod: isBuiltinScripting ? "scripting" : live.inputMethod,
+            }))
           } catch { }
         }
       } else if (!targetPath) {
@@ -554,9 +546,6 @@ export function SettingsView(props: {
       const pathChanged =
         fixed.hamsterRootPath !== initialHamsterRootPath ||
         fixed.hamsterBookmarkName !== initialHamsterBookmarkName
-      if (pathChanged) {
-        fixed = await syncSchemeFromLocal(fixed)
-      }
       saveConfig(fixed)
       const schemeChanged =
         fixed.schemeEdition !== initialSchemeEdition ||
