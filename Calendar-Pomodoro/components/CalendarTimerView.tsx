@@ -203,8 +203,8 @@ function clamp01(value: number): number {
 }
 
 function roundToTimelineStep(value: number): number {
-  const rounded = Math.round(value / TIMELINE_STEP_MINUTES) * TIMELINE_STEP_MINUTES;
-  return Math.max(0, Math.min(TIMELINE_MAX_MINUTES, rounded));
+  if (value < 0) return Math.round(value);
+  return Math.round(value / TIMELINE_STEP_MINUTES) * TIMELINE_STEP_MINUTES;
 }
 
 function TaskProgressLine(props: { ratio: number; active: boolean; tint: string }) {
@@ -232,6 +232,7 @@ function TaskProgressLine(props: { ratio: number; active: boolean; tint: string 
 }
 
 const TIMELINE_STEP_WIDTH = 18;
+const TIMELINE_MINUTE_WIDTH = TIMELINE_STEP_WIDTH / TIMELINE_STEP_MINUTES;
 
 function TimeAxis(props: {
   value: number;
@@ -240,21 +241,22 @@ function TimeAxis(props: {
   currentMinute: number;
   tint: string;
   disabled: boolean;
+  minValue: number;
   maxValue: number;
   onChanged: (value: number) => void;
 }) {
   const dragStartRef = useRef(props.value);
   const draggingRef = useRef(false);
-  const clampedValue = Math.max(0, Math.min(props.maxValue, props.value));
+  const clampedValue = Math.max(props.minValue, Math.min(props.maxValue, props.value));
   const visibleSteps = 18;
   const maxSteps = Math.ceil(props.maxValue / TIMELINE_STEP_MINUTES);
   const centerShift = -(clampedValue / TIMELINE_STEP_MINUTES) * TIMELINE_STEP_WIDTH;
   const futureMarks = Array.from({ length: maxSteps + visibleSteps + 1 }, (_, index) => index);
 
   function valueFromDrag(translationX: number): number {
-    const deltaSteps = Math.round(-translationX / TIMELINE_STEP_WIDTH);
-    const next = dragStartRef.current + deltaSteps * TIMELINE_STEP_MINUTES;
-    return Math.max(0, Math.min(props.maxValue, next));
+    const rawNext = dragStartRef.current - translationX / TIMELINE_MINUTE_WIDTH;
+    const next = roundToTimelineStep(rawNext);
+    return Math.max(props.minValue, Math.min(props.maxValue, next));
   }
 
   const dragGesture = DragGesture({ minDistance: 1, coordinateSpace: "local" })
@@ -262,7 +264,7 @@ function TimeAxis(props: {
       if (props.disabled) return;
       if (!draggingRef.current) {
         draggingRef.current = true;
-        dragStartRef.current = props.value;
+        dragStartRef.current = clampedValue;
       }
       props.onChanged(valueFromDrag(Number(details.translation?.width ?? 0)));
     })
@@ -1423,7 +1425,7 @@ export function CalendarTimerView() {
     activityReadyRef.current = false;
   }
 
-  async function startTask(task: Task) {
+  async function startTask(task: Task, options?: { initialElapsedMs?: number }) {
     // 已经在计时当前任务则忽略
     if (running && activeTaskId === task.id) return;
 
@@ -1471,21 +1473,23 @@ export function CalendarTimerView() {
       return;
     }
 
-    // 启动新会话
-    const start = new Date();
+    // 启动新会话；若时间轴选择了过去时间，则将会话起点回拨到该时间。
+    const now = new Date();
+    const initialElapsedMs = Math.max(0, options?.initialElapsedMs ?? 0);
+    const start = new Date(now.getTime() - initialElapsedMs);
     setActiveTaskId(task.id);
     setActiveCalendar(calendar);
     setSessionStartAt(start);
     setSegmentStartAt(start);
     setAccumulatedMs(0);
-    setElapsedMs(0);
+    setElapsedMs(initialElapsedMs);
     setCompletedSegments([]);
     setRunning(true);
     setPaused(false);
 
     // 通知与 Live Activity
     await scheduleNotifications(task);
-    const activityId = await startLiveActivity(task, start, 0);
+    const activityId = await startLiveActivity(task, now, initialElapsedMs);
     await persistSessionState({
       taskId: task.id,
       sessionStartAt: start.getTime(),
@@ -1715,7 +1719,8 @@ export function CalendarTimerView() {
       await Dialog.alert({ message: "请先添加或选择一个任务" });
       return;
     }
-    const countdownSeconds = Math.max(0, focusMinutes) * 60;
+    const countdownSeconds = Math.max(0, timelineOffset) * 60;
+    const initialElapsedMs = timelineOffset < 0 ? Math.abs(timelineOffset) * 60000 : 0;
     const taskForSession: Task =
       countdownSeconds > 0
         ? {
@@ -1733,7 +1738,7 @@ export function CalendarTimerView() {
       countdownSeconds > 0 ? countdownSeconds : null;
     setFocusModeText(countdownSeconds > 0 ? "倒计时" : "正计时");
     setSelectedTaskId(selectedTask.id);
-    await startTask(taskForSession);
+    await startTask(taskForSession, { initialElapsedMs });
     setShowFocusPage(true);
   }
 
@@ -1822,16 +1827,18 @@ export function CalendarTimerView() {
     (sum, task) => sum + (taskDurations[task.id] ?? 0),
     0,
   );
+  const minTimelineOffset = -Math.max(0, floorToTimelineStep(currentTimelineMinutes));
   const maxTimelineOffset = Math.max(0, floorToTimelineStep(TIMELINE_MAX_MINUTES - currentTimelineMinutes));
-  const countdownMinutes = Math.max(0, Math.min(maxTimelineOffset, focusMinutes));
-  const targetClock = formatClockTime(new Date(Date.now() + countdownMinutes * 60000));
+  const timelineOffset = Math.max(minTimelineOffset, Math.min(maxTimelineOffset, focusMinutes));
+  const countdownMinutes = Math.max(0, timelineOffset);
+  const targetClock = formatClockTime(new Date(Date.now() + timelineOffset * 60000));
   const startButtonTitle = running || paused ? "Stop" : "Start";
   const timerModeText = countdownMinutes > 0
     ? formatCompactDuration(countdownMinutes * 60000)
     : "Count Up";
 
   function handleTimelineChanged(value: number) {
-    const next = Math.max(0, Math.min(maxTimelineOffset, roundToTimelineStep(value)));
+    const next = Math.max(minTimelineOffset, Math.min(maxTimelineOffset, roundToTimelineStep(value)));
     setTimelineTouched(true);
     setFocusMinutes(next);
     if (lastTimelineFeedbackRef.current !== next) {
@@ -2080,6 +2087,7 @@ export function CalendarTimerView() {
               currentMinute={currentTimelineMinutes}
               tint={themeColor}
               disabled={running || paused}
+              minValue={minTimelineOffset}
               maxValue={maxTimelineOffset}
               onChanged={handleTimelineChanged}
             />
