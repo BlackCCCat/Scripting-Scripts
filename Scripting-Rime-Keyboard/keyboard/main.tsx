@@ -74,10 +74,7 @@ import {
   playPreparedConfiguredHaptic,
   prepareConfiguredHaptics,
 } from "./utils";
-import {
-  ensureT9ProcessorLuaInstalled,
-  T9_PROCESSOR_SCHEMA_ENTRY,
-} from "../t9ProcessorInstall";
+import { ensureT9ProcessorLuaInstalled } from "../t9ProcessorInstall";
 
 function currentKeyboardAppearance(): KeyboardAppearance {
   const value = CustomKeyboard.traits?.keyboardAppearance;
@@ -1637,37 +1634,7 @@ function KeyboardContent(props: {
     }
   }
 
-  async function handleT9ProcessorSetupPrompt() {
-    await ensureT9ProcessorLuaInstalled();
-    const choice = await Dialog.actionSheet({
-      title: "启用九键拼音筛选",
-      message:
-        `请在九键方案配置 engine.processors 下加入：\n${T9_PROCESSOR_SCHEMA_ENTRY}`,
-      cancelButton: true,
-      actions: [
-        { label: "确定" },
-        { label: "修改" },
-      ],
-    });
-    if (choice == null) return false;
-    await Pasteboard.setString(T9_PROCESSOR_SCHEMA_ENTRY);
-    if (choice === 1) {
-      const url = Script.createRunSingleURLScheme(Script.name, {
-        page: "rime-schemas",
-      });
-      try {
-        CustomKeyboard.dismiss();
-      } catch {}
-      setTimeout(() => {
-        void Safari.openURL(url);
-      }, 80);
-    }
-    return true;
-  }
-
-  async function switchEnglishQwertyToT9() {
-    const allowed = await handleT9ProcessorSetupPrompt();
-    if (!allowed) return;
+  function switchEnglishQwertyToT9() {
     setKeyboardTypeOverride(null);
     setSymbolLayer(false);
     const s = sessionRef.current;
@@ -3244,8 +3211,7 @@ function KeyboardContent(props: {
     moveCursorSafely,
     pressMode: () => {
       if (
-        keyboardTypeOverride === "qwerty" && settings.keyboardType === "t9" &&
-        ascii
+        keyboardTypeOverride === "qwerty" && settings.keyboardType === "t9"
       ) {
         switchEnglishQwertyToT9();
         return;
@@ -3330,6 +3296,7 @@ function KeyboardContent(props: {
       bottomSpaceWidth,
       bottomModeWidth,
       bottomEnterWidth,
+      ascii,
       composing,
       settings.modeComposingEnabled,
       isT9Keyboard,
