@@ -8,8 +8,8 @@ export const KEY_DOWN = 0xff54;
 export const KEY_PAGE_UP = 0xff55;
 export const KEY_PAGE_DOWN = 0xff56;
 export const MOD_CONTROL = 1 << 2;
+export const MOD_SHIFT = 1 << 0;
 
-const MOD_SHIFT = 1 << 0;
 const MOD_ALT = 1 << 3;
 const MOD_META = 1 << 4;
 const MOD_SUPER = 1 << 6;

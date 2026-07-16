@@ -1,6 +1,7 @@
 import {
   Button,
   ColorPicker,
+  Editor,
   ForEach,
   HStack,
   Image,
@@ -18,6 +19,7 @@ import {
   TextField,
   Toggle,
   useEffect,
+  useMemo,
   useObservable,
   useRef,
   useState,
@@ -66,6 +68,11 @@ import {
   TOOLBAR_LEFT_BUTTON_MAX,
   type ToolbarButtonConfig,
 } from "./settings";
+import {
+  ensureT9ProcessorLuaInstalled,
+  scriptingRimeDataRoots,
+  T9_PROCESSOR_SCHEMA_ENTRY,
+} from "./t9ProcessorInstall";
 
 const THEME_OPTIONS: Array<{ value: RimeKeyboardTheme; label: string }> = [
   { value: "system", label: "跟随系统" },
@@ -120,6 +127,10 @@ function moveItems<T>(items: T[], indices: number[], newOffset: number) {
   );
   result.splice(insertAt, 0, ...moving);
   return result;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 const COMMAND_REFERENCE_GROUPS: Array<{
@@ -575,6 +586,150 @@ function CommandReferencePage() {
           </SettingHint>
         }
       />
+    </List>
+  );
+}
+
+type RimeConfigFile = {
+  root: string;
+  path: string;
+  name: string;
+};
+
+function readRimeConfigFiles(): RimeConfigFile[] {
+  const files: RimeConfigFile[] = [];
+  const seen = new Set<string>();
+  for (const root of scriptingRimeDataRoots()) {
+    try {
+      if (!FileManager.existsSync(root)) continue;
+      const names = FileManager.readDirectorySync(root, false)
+        .filter((name) =>
+          name.endsWith(".schema.yaml") ||
+          name.endsWith(".custom.yaml") ||
+          name.endsWith(".yaml")
+        )
+        .sort((a, b) => a.localeCompare(b));
+      for (const name of names) {
+        const path = Path.join(root, name);
+        if (seen.has(path) || !FileManager.isFileSync(path)) continue;
+        seen.add(path);
+        files.push({ root, path, name });
+      }
+    } catch {}
+  }
+  return files;
+}
+
+function RimeConfigEditorPage(props: { file: RimeConfigFile }) {
+  const controller = useMemo(() => {
+    let content = "";
+    try {
+      content = FileManager.readAsStringSync(props.file.path);
+    } catch {}
+    return new EditorController({
+      content,
+      ext: "txt",
+      readOnly: false,
+    });
+  }, [props.file.path]);
+  const [showSavedToast, setShowSavedToast] = useState(false);
+
+  useEffect(() => () => controller.dispose(), [controller]);
+
+  async function saveFile() {
+    try {
+      FileManager.writeAsStringSync(props.file.path, controller.content);
+      setShowSavedToast(false);
+      setTimeout(() => setShowSavedToast(true), 20);
+    } catch (error) {
+      await Dialog.alert({
+        title: "保存失败",
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  return (
+    <VStack
+      navigationTitle={props.file.name}
+      navigationBarTitleDisplayMode="inline"
+      toolbar={{
+        topBarTrailing: (
+          <Button
+            title=""
+            systemImage="checkmark.circle"
+            action={() => void saveFile()}
+          />
+        ),
+      }}
+      toast={{
+        isPresented: showSavedToast,
+        onChanged: setShowSavedToast,
+        message: "文件已保存",
+        duration: 1.2,
+        position: "bottom" as const,
+      }}
+    >
+      <Editor
+        controller={controller}
+        scriptName={Script.name}
+        showAccessoryView
+      />
+    </VStack>
+  );
+}
+
+function RimeSchemaDirectoryPage() {
+  const [files, setFiles] = useState<RimeConfigFile[]>(() =>
+    readRimeConfigFiles()
+  );
+
+  function reloadFiles() {
+    setFiles(readRimeConfigFiles());
+  }
+
+  return (
+    <List
+      navigationTitle="Rime 方案目录"
+      navigationBarTitleDisplayMode="inline"
+      toolbar={{
+        topBarTrailing: (
+          <Button
+            title=""
+            systemImage="arrow.clockwise"
+            action={reloadFiles}
+          />
+        ),
+      }}
+    >
+      <Section
+        footer={
+          <SettingHint>
+            请在目标九键方案的 engine.processors 下加入{" "}
+            {T9_PROCESSOR_SCHEMA_ENTRY}
+          </SettingHint>
+        }
+      >
+        {files.length === 0
+          ? <Text foregroundStyle="secondaryLabel">未找到 YAML 配置文件</Text>
+          : files.map((file) => (
+            <NavigationLink
+              key={file.path}
+              destination={<RimeConfigEditorPage file={file} />}
+            >
+              <VStack alignment="leading" spacing={4}>
+                <Text>{file.name}</Text>
+                <Text
+                  font="caption"
+                  foregroundStyle="secondaryLabel"
+                  lineLimit={1}
+                >
+                  {file.root}
+                </Text>
+              </VStack>
+            </NavigationLink>
+          ))}
+      </Section>
     </List>
   );
 }
@@ -1419,10 +1574,6 @@ function SettingsView() {
     return `Scripting-Rime-Keyboard-Settings-${stamp}.json`;
   }
 
-  function errorMessage(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
-  }
-
   async function exportSettings() {
     try {
       const directory = await DocumentPicker.pickDirectory();
@@ -1487,6 +1638,30 @@ function SettingsView() {
     if (!confirmed) return;
     pendingTextDraftsRef.current = {};
     updateSettings(DEFAULT_RIME_KEYBOARD_SETTINGS);
+  }
+
+  async function updateT9ProcessorLua() {
+    try {
+      const result = await ensureT9ProcessorLuaInstalled();
+      if (!result.ok) {
+        await Dialog.alert({
+          title: "更新失败",
+          message: "未能写入 t9_processor.lua，请确认 Rime 目录可访问。",
+        });
+        return;
+      }
+      setShowSavedToast(false);
+      setTimeout(() => setShowSavedToast(true), 20);
+      await Dialog.alert({
+        title: "更新完成",
+        message: `已覆盖 ${result.paths.length} 个 t9_processor.lua 文件。`,
+      });
+    } catch (error) {
+      await Dialog.alert({
+        title: "更新失败",
+        message: errorMessage(error),
+      });
+    }
   }
 
   function openCommandReferencePage() {
@@ -2599,6 +2774,26 @@ function SettingsView() {
         toolbar={textInputToolbar()}
         toast={savedToast}
       >
+        <Section header={<Text>Processor</Text>}>
+          <Button
+            title="更新 T9 Processor"
+            systemImage="arrow.triangle.2.circlepath"
+            action={() => void updateT9ProcessorLua()}
+          />
+          <Button
+            title="复制 processor 配置"
+            systemImage="doc.on.doc"
+            action={() => {
+              void Pasteboard.setString(T9_PROCESSOR_SCHEMA_ENTRY);
+              setShowSavedToast(false);
+              setTimeout(() => setShowSavedToast(true), 20);
+            }}
+          />
+          <NavigationLink
+            title="打开 Rime 方案目录"
+            destination={<RimeSchemaDirectoryPage />}
+          />
+        </Section>
         <Section
           header={<Text>空格划动</Text>}
           footer={
@@ -3238,6 +3433,16 @@ function SettingsView() {
 }
 
 async function run() {
+  const page = String((Script.queryParameters as any)?.page ?? "");
+  if (page === "rime-schemas") {
+    await Navigation.present(
+      <NavigationStack>
+        <RimeSchemaDirectoryPage />
+      </NavigationStack>,
+    );
+    Script.exit();
+    return;
+  }
   await Navigation.present(<SettingsView />);
   Script.exit();
 }

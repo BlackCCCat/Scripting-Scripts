@@ -38,6 +38,7 @@ import {
   KEY_TAB,
   KEY_UP,
   MOD_CONTROL,
+  MOD_SHIFT,
   parseRimeKeySpec,
 } from "../rimeKeys";
 import {
@@ -54,6 +55,14 @@ import {
 import { KEY_SPACING, SIDE_PADDING } from "./constants";
 import { keyboardMetrics } from "./metrics";
 import { type KeyboardAppearance, paletteFor } from "./palette";
+import {
+  t9DigitsForInput,
+  t9DigitsForPinyin,
+  type T9FilterState,
+  type T9PinyinOption,
+  t9PinyinOptionsForFilter,
+  t9SelectedDigitPrefix,
+} from "./t9Pinyin";
 import type { KeyHitTarget } from "./types";
 import {
   createTouchIntentMachine,
@@ -65,6 +74,10 @@ import {
   playPreparedConfiguredHaptic,
   prepareConfiguredHaptics,
 } from "./utils";
+import {
+  ensureT9ProcessorLuaInstalled,
+  T9_PROCESSOR_SCHEMA_ENTRY,
+} from "../t9ProcessorInstall";
 
 function currentKeyboardAppearance(): KeyboardAppearance {
   const value = CustomKeyboard.traits?.keyboardAppearance;
@@ -117,20 +130,16 @@ type LetterLongPressPopup = {
   selected: "lower" | "upper";
 };
 
-type T9PinyinOption = {
-  label: string;
-  digits: string;
+type T9CandidatePinyinFilter = {
   selected: string[];
-};
-
-type T9FilterState = {
-  digits: string;
-  selected: string[];
+  preeditCore: string;
 };
 
 type RefreshOptions = {
   suppressCommit?: boolean;
   suppressInlineMarkedText?: boolean;
+  resetT9FilterFromPreedit?: boolean;
+  preserveT9FilterState?: boolean;
 };
 
 const NOTIFIED_RIME_OPTIONS = new Set([
@@ -143,60 +152,7 @@ const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
 const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
 const TOOLBAR_TEMPLATE_CLIPBOARD = "{clipboard}";
 const LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD = "{{clipboard}}";
-const TONE_MARK_RE = /[\u0300-\u036f]/g;
 const T9_OPTION_LIMIT = 48;
-const T9_LETTER_TO_DIGIT: Record<string, string> = {
-  a: "2",
-  b: "2",
-  c: "2",
-  d: "3",
-  e: "3",
-  f: "3",
-  g: "4",
-  h: "4",
-  i: "4",
-  j: "5",
-  k: "5",
-  l: "5",
-  m: "6",
-  n: "6",
-  o: "6",
-  p: "7",
-  q: "7",
-  r: "7",
-  s: "7",
-  t: "8",
-  u: "8",
-  v: "8",
-  w: "9",
-  x: "9",
-  y: "9",
-  z: "9",
-};
-const PINYIN_SYLLABLES = `
-a ai an ang ao ba bai ban bang bao bei ben beng bi bian biao bie bin bing bo bu
-ca cai can cang cao ce cen ceng cha chai chan chang chao che chen cheng chi chong
-chou chu chua chuai chuan chuang chui chun chuo ci cong cou cu cuan cui cun cuo
-da dai dan dang dao de dei den deng di dia dian diao die ding diu dong dou du duan
-dui dun duo e ei en eng er fa fan fang fei fen feng fo fou fu ga gai gan gang gao
-ge gei gen geng gong gou gu gua guai guan guang gui gun guo ha hai han hang hao
-he hei hen heng hong hou hu hua huai huan huang hui hun huo ji jia jian jiang jiao
-jie jin jing jiong jiu ju juan jue jun ka kai kan kang kao ke ken keng kong kou ku
-kua kuai kuan kuang kui kun kuo la lai lan lang lao le lei leng li lia lian liang
-liao lie lin ling liu lo long lou lu luan lun luo lv lve ma mai man mang mao me
-mei men meng mi mian miao mie min ming miu mo mou mu na nai nan nang nao ne nei
-nen neng ni nian niang niao nie nin ning niu nong nou nu nuan nuo nv nve o ou pa
-pai pan pang pao pei pen peng pi pian piao pie pin ping po pou pu qi qia qian
-qiang qiao qie qin qing qiong qiu qu quan que qun ran rang rao re ren reng ri
-rong rou ru ruan rui run ruo sa sai san sang sao se sen seng sha shai shan shang
-shao she shen sheng shi shou shu shua shuai shuan shuang shui shun shuo si song
-sou su suan sui sun suo ta tai tan tang tao te teng ti tian tiao tie ting tong tou
-tu tuan tui tun tuo wa wai wan wang wei wen weng wo wu xi xia xian xiang xiao xie
-xin xing xiong xiu xu xuan xue xun ya yan yang yao ye yi yin ying yo yong you yu
-yuan yue yun za zai zan zang zao ze zei zen zeng zha zhai zhan zhang zhao zhe zhen
-zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang zhui zhun zhuo zi zong zou zu
-zuan zui zun zuo
-`.trim().split(/\s+/);
 const ToolbarScriptFunction = Function as unknown as new (
   ...args: string[]
 ) => (...args: unknown[]) => Promise<unknown>;
@@ -213,32 +169,25 @@ function stopGlobalRepeatingDelete() {
   globalRepeatingDeleteSafetyTimer = null;
 }
 
-function stripPinyinTones(text: string): string {
-  return text.normalize("NFD").replace(TONE_MARK_RE, "").normalize("NFC");
-}
-
-function normalizeT9PinyinComment(comment?: string): string {
-  if (!comment) return "";
-  return stripPinyinTones(comment)
-    .replace(/ü/g, "v")
-    .replace(/Ü/g, "V")
-    .replace(/[^A-Za-zvV']+/g, " ")
-    .trim()
-    .replace(/\s+/g, "'");
-}
-
-function t9DigitsForPinyin(text: string): string {
-  let digits = "";
-  for (const ch of text.toLowerCase()) {
-    digits += T9_LETTER_TO_DIGIT[ch] ?? "";
-  }
-  return digits;
-}
-
-function t9PreeditInputPart(preedit: string) {
+function t9PreeditCore(preedit: string) {
   return preedit
     .split("〔")[0]
     .replace(/[^0-9A-Za-zvV']+$/g, "");
+}
+
+function t9MixedPreeditInputPart(preedit: string) {
+  return t9PreeditCore(preedit).match(/[\x20-\x7E]+$/)?.[0] ?? "";
+}
+
+function t9PreeditInputPart(preedit: string) {
+  return t9PreeditCore(preedit).match(/[0-9A-Za-zvV']+$/)?.[0] ?? "";
+}
+
+function t9HasCommittedPrefix(preedit: string) {
+  const core = t9PreeditCore(preedit);
+  const tail = t9MixedPreeditInputPart(preedit);
+  const prefix = tail ? core.slice(0, -tail.length) : core;
+  return /[^0-9A-Za-zvV']/.test(prefix);
 }
 
 function trailingT9DigitTail(preedit: string) {
@@ -259,41 +208,13 @@ function trailingT9DigitTail(preedit: string) {
   };
 }
 
-function t9SelectedCompositionValue(selected: string[]) {
-  return selected.filter(Boolean).join("'");
-}
-
-function t9SelectedDigitPrefix(selected: string[]) {
-  return selected.map(t9DigitsForPinyin).join("");
-}
-
-function t9FilterCursor(filter: T9FilterState) {
-  const selected = filter.selected.filter(Boolean);
-  const consumed = t9SelectedDigitPrefix(selected);
-  if (consumed.length < filter.digits.length) {
-    return {
-      prefix: selected.join("'"),
-      replaceIndex: selected.length,
-      tail: filter.digits.slice(consumed.length),
-    };
-  }
-  if (selected.length > 0) {
-    const prefixSelected = selected.slice(0, -1);
-    const prefixDigits = t9SelectedDigitPrefix(prefixSelected);
-    return {
-      prefix: prefixSelected.join("'"),
-      replaceIndex: selected.length - 1,
-      tail: filter.digits.slice(prefixDigits.length),
-    };
-  }
-  return {
-    prefix: "",
-    replaceIndex: 0,
-    tail: filter.digits,
-  };
-}
-
 function t9FilterFromPreedit(preedit: string): T9FilterState {
+  if (t9HasCommittedPrefix(preedit)) {
+    return {
+      digits: t9DigitsForInput(t9MixedPreeditInputPart(preedit)),
+      selected: [],
+    };
+  }
   const { prefix, tail } = trailingT9DigitTail(preedit);
   const selected = prefix
     .split(/[^A-Za-zvV]+/)
@@ -304,64 +225,90 @@ function t9FilterFromPreedit(preedit: string): T9FilterState {
   };
 }
 
-function t9PinyinOptionsFromCandidates(
+function t9UnselectedFilterFromPreedit(preedit: string): T9FilterState {
+  if (!preedit) return { digits: "", selected: [] };
+  const input = t9HasCommittedPrefix(preedit)
+    ? t9MixedPreeditInputPart(preedit)
+    : t9PreeditCore(preedit);
+  return {
+    digits: t9DigitsForInput(input),
+    selected: [],
+  };
+}
+
+function t9ResolvedFilterFromPreedit(
   preedit: string,
-  candidates: Rime.Candidate[],
   filterState?: T9FilterState,
+): T9FilterState {
+  const hasCommittedPrefix = t9HasCommittedPrefix(preedit);
+  const derived = t9FilterFromPreedit(preedit);
+  if (!filterState?.digits) return derived;
+  if (hasCommittedPrefix) {
+    return filterState.digits === derived.digits ? filterState : derived;
+  }
+  return filterState;
+}
+
+function t9PinyinOptionsFromPreedit(
+  preedit: string,
+  filterState?: T9FilterState,
+  candidateFilter?: T9CandidatePinyinFilter | null,
 ): T9PinyinOption[] {
-  const filter = filterState?.digits
-    ? filterState
-    : t9FilterFromPreedit(preedit);
-  const { replaceIndex, tail } = t9FilterCursor(filter);
-  if (!tail) return [];
-  const matchedSeen = new Set<string>();
-  const fallbackSeen = new Set<string>();
-  const matched: T9PinyinOption[] = [];
-  const fallback: T9PinyinOption[] = [];
-  function addMatched(label: string) {
-    const digits = t9DigitsForPinyin(label);
-    if (!digits || !tail.startsWith(digits) || matchedSeen.has(label)) return;
-    const selected = filter.selected.slice(0, replaceIndex);
-    selected[replaceIndex] = label;
-    matchedSeen.add(label);
-    matched.push({
-      label,
-      digits: filter.digits,
-      selected,
-    });
+  const filter = t9ResolvedFilterFromPreedit(preedit, filterState);
+  const activeCandidateFilter = candidateFilter?.preeditCore ===
+      t9PreeditCore(preedit)
+    ? candidateFilter
+    : null;
+  return t9PinyinOptionsForFilter(
+    activeCandidateFilter
+      ? { digits: filter.digits, selected: activeCandidateFilter.selected }
+      : filter,
+    T9_OPTION_LIMIT,
+  );
+}
+
+function t9GreedyPinyinDisplay(filter: T9FilterState) {
+  if (!filter.digits) return "";
+  let selected = filter.selected.filter(Boolean);
+  let guard = 0;
+  while (t9SelectedDigitPrefix(selected).length < filter.digits.length) {
+    const options = t9PinyinOptionsForFilter(
+      { digits: filter.digits, selected },
+      1,
+    );
+    const next = options[0]?.selected.filter(Boolean) ?? [];
+    if (next.length <= selected.length || guard++ > 12) break;
+    selected = next;
   }
-  for (const candidate of candidates) {
-    const syllables = normalizeT9PinyinComment(candidate.comment ?? undefined)
-      .split("'")
-      .filter(Boolean);
-    const label = syllables[replaceIndex] ?? "";
-    if (!label) continue;
-    const digits = t9DigitsForPinyin(label);
-    if (tail && digits && tail.startsWith(digits)) {
-      addMatched(label);
-    } else {
-      if (fallbackSeen.has(label)) continue;
-      const selected = filter.selected.slice(0, replaceIndex);
-      selected[replaceIndex] = label;
-      fallbackSeen.add(label);
-      fallback.push({
-        label,
-        digits: filter.digits,
-        selected,
-      });
-    }
+
+  const consumed = t9SelectedDigitPrefix(selected);
+  const remaining = filter.digits.slice(consumed.length);
+  return selected.length > 0
+    ? remaining ? `${selected.join("'")}'${remaining}` : selected.join("'")
+    : remaining;
+}
+
+function t9LocalPreeditDisplay(
+  preedit: string,
+  filterState?: T9FilterState,
+  candidateFilter?: T9CandidatePinyinFilter | null,
+) {
+  const preeditCore = t9PreeditCore(preedit);
+  const isDigitOnlyPreedit = preeditCore.length > 0 &&
+    /^[2-9]+$/.test(preeditCore);
+  if (!candidateFilter && preedit && !isDigitOnlyPreedit) {
+    return null;
   }
-  for (const syllable of PINYIN_SYLLABLES) {
-    addMatched(syllable);
+  if (
+    candidateFilter && candidateFilter.preeditCore !== preeditCore
+  ) {
+    return null;
   }
-  return (matched.length > 0 ? matched : fallback)
-    .map((option, index) => ({ option, index }))
-    .sort((a, b) =>
-      b.option.label.length - a.option.label.length ||
-      a.index - b.index
-    )
-    .slice(0, T9_OPTION_LIMIT)
-    .map(({ option }) => option);
+  const filter = t9ResolvedFilterFromPreedit(preedit, filterState);
+  const selected = (candidateFilter?.selected ?? filter.selected).filter(
+    Boolean,
+  );
+  return t9GreedyPinyinDisplay({ digits: filter.digits, selected }) || null;
 }
 
 function withT9VisualDelimiters(text: string, positions: number[]) {
@@ -463,6 +410,9 @@ function KeyboardContent(props: {
     digits: "",
     selected: [],
   });
+  const [t9CandidatePinyinFilter, setT9CandidatePinyinFilter] = useState<
+    T9CandidatePinyinFilter | null
+  >(null);
   const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -594,6 +544,14 @@ function KeyboardContent(props: {
     setT9FilterStateValue(next);
   }
 
+  function clearT9ProcessorSelection(session = sessionRef.current) {
+    if (!session) return;
+    try {
+      session.setProperty("t9_processor_selected", "");
+      session.setProperty("t9_processor_digits", "");
+    } catch {}
+  }
+
   async function setupRimeSession() {
     if (
       disposedRef.current || rimeSetupStartedRef.current || sessionRef.current
@@ -604,6 +562,9 @@ function KeyboardContent(props: {
     try {
       const result = await Thread.runInBackground(async () => {
         await Rime.setup();
+        if (settings.keyboardType === "t9") {
+          await ensureT9ProcessorLuaInstalled();
+        }
         if (settings.autoDeployOnLaunch) {
           await Rime.deploy({ fullCheck: false });
         }
@@ -694,13 +655,21 @@ function KeyboardContent(props: {
         ? prev.filter((position) => position <= nextPreedit.length)
         : []
     );
+    if (options.resetT9FilterFromPreedit) {
+      setT9FilterState(t9UnselectedFilterFromPreedit(nextPreedit));
+      setT9CandidatePinyinFilter(null);
+    }
     if (!nextPreedit) {
       setBackslashWrapMode(false);
-      if (
-        t9FilterStateRef.current.digits ||
-        t9FilterStateRef.current.selected.length > 0
-      ) {
-        setT9FilterState({ digits: "", selected: [] });
+      if (!options.preserveT9FilterState) {
+        setT9CandidatePinyinFilter(null);
+        clearT9ProcessorSelection(session);
+        if (
+          t9FilterStateRef.current.digits ||
+          t9FilterStateRef.current.selected.length > 0
+        ) {
+          setT9FilterState({ digits: "", selected: [] });
+        }
       }
     }
     if (!nextPreedit) {
@@ -1428,29 +1397,6 @@ function KeyboardContent(props: {
     }
   }
 
-  function replaceCompositionWithRimeText(
-    text: string,
-    refreshOptions: RefreshOptions = {},
-  ) {
-    if (!text) return;
-    const s = sessionRef.current;
-    if (!s) {
-      insertTextReplacingSelectAll(text.replace(/'/g, ""));
-      return;
-    }
-    try {
-      s.clearComposition();
-    } catch {}
-    for (const ch of text) {
-      try {
-        (s as any).processKey(ch.charCodeAt(0), ch, true);
-      } catch {
-        s.processKey(ch.charCodeAt(0));
-      }
-    }
-    refresh(s, refreshOptions);
-  }
-
   function pressLetter(ch: string) {
     const typed = shifted || capsLocked ? ch.toUpperCase() : ch;
     if (ascii) {
@@ -1505,9 +1451,9 @@ function KeyboardContent(props: {
   function pressBackspace() {
     const s = sessionRef.current;
     if (s && (s.context?.preedit?.length ?? 0) > 0) {
-      syncT9FilterBackspace();
+      setT9CandidatePinyinFilter(null);
       s.processKey(KEY_BACKSPACE);
-      refresh(s);
+      refresh(s, { resetT9FilterFromPreedit: isT9Keyboard });
     } else {
       if (consumeSelectAllForDeletion()) return;
       const before = CustomKeyboard.textBeforeCursor ?? "";
@@ -1587,6 +1533,7 @@ function KeyboardContent(props: {
     setExpandedCandidates([]);
     setExpandedBatchHasMore(false);
     setBackslashWrapMode(false);
+    clearT9ProcessorSelection(s);
     try {
       CustomKeyboard.setMarkedText("", 0, 0);
       CustomKeyboard.unmarkText();
@@ -1690,7 +1637,37 @@ function KeyboardContent(props: {
     }
   }
 
-  function switchEnglishQwertyToT9() {
+  async function handleT9ProcessorSetupPrompt() {
+    await ensureT9ProcessorLuaInstalled();
+    const choice = await Dialog.actionSheet({
+      title: "启用九键拼音筛选",
+      message:
+        `请在九键方案配置 engine.processors 下加入：\n${T9_PROCESSOR_SCHEMA_ENTRY}`,
+      cancelButton: true,
+      actions: [
+        { label: "确定" },
+        { label: "修改" },
+      ],
+    });
+    if (choice == null) return false;
+    await Pasteboard.setString(T9_PROCESSOR_SCHEMA_ENTRY);
+    if (choice === 1) {
+      const url = Script.createRunSingleURLScheme(Script.name, {
+        page: "rime-schemas",
+      });
+      try {
+        CustomKeyboard.dismiss();
+      } catch {}
+      setTimeout(() => {
+        void Safari.openURL(url);
+      }, 80);
+    }
+    return true;
+  }
+
+  async function switchEnglishQwertyToT9() {
+    const allowed = await handleT9ProcessorSetupPrompt();
+    if (!allowed) return;
     setKeyboardTypeOverride(null);
     setSymbolLayer(false);
     const s = sessionRef.current;
@@ -1844,43 +1821,35 @@ function KeyboardContent(props: {
   }
 
   function pressT9Digit(value: string) {
+    const s = sessionRef.current;
     if (ascii) {
-      insertTextReplacingSelectAll(value);
-      return;
+      s?.setOption("ascii_mode", false);
+      setShifted(false);
+      setCapsLocked(false);
     }
+    clearT9ProcessorSelection();
+    setT9CandidatePinyinFilter(null);
+    let nextFilter: T9FilterState | null = null;
     if (/^[2-9]$/.test(value)) {
-      const current = preedit.length > 0
+      const current = t9FilterStateRef.current.digits &&
+          (preedit.length === 0 || !t9HasCommittedPrefix(preedit))
         ? t9FilterStateRef.current
-        : { digits: "", selected: [] };
-      setT9FilterState({
+        : t9FilterFromPreedit(preedit);
+      nextFilter = {
         digits: `${current.digits}${value}`,
         selected: current.selected,
-      });
+      };
+      setT9FilterState(nextFilter);
     }
-    processKey(value.charCodeAt(0), value, true);
-  }
-
-  function syncT9FilterBackspace() {
-    if (!isT9Keyboard || ascii) return;
-    const current = t9FilterStateRef.current;
-    if (!current.digits) return;
-    const selectedDigits = t9SelectedDigitPrefix(current.selected);
-    if (current.digits.length > selectedDigits.length) {
-      setT9FilterState({
-        digits: current.digits.slice(0, -1),
-        selected: current.selected,
-      });
-      return;
-    }
-    if (current.selected.length === 0) {
-      setT9FilterState({ digits: current.digits.slice(0, -1), selected: [] });
-      return;
-    }
-    const selected = current.selected.slice(0, -1);
-    setT9FilterState({
-      digits: t9SelectedDigitPrefix(selected),
-      selected,
+    consumeSelectAllForReplacement();
+    if (!s) return;
+    s.processKey(value.charCodeAt(0));
+    refresh(s, {
+      preserveT9FilterState: nextFilter != null,
     });
+    if (nextFilter != null && !s.context?.preedit) {
+      setT9FilterState(nextFilter);
+    }
   }
 
   function runT9PunctuationItem(item: T9PunctuationItem) {
@@ -1896,13 +1865,31 @@ function KeyboardContent(props: {
     setT9DelimiterVisualPositions((prev) => [...prev, preedit.length]);
   }
 
+  function syncT9ProcessorSelection(selected: string[]) {
+    const s = sessionRef.current;
+    if (!s) return;
+    const value = selected.filter(Boolean).join("'");
+    try {
+      s.setProperty("t9_processor_selected", value);
+      s.setProperty("t9_processor_digits", t9FilterStateRef.current.digits);
+      s.processKey(KEY_SPACE, MOD_CONTROL | MOD_SHIFT);
+    } catch {}
+    refresh(s, { suppressCommit: true, preserveT9FilterState: true });
+  }
+
   function selectT9Pinyin(option: T9PinyinOption) {
+    playReleaseFeedback();
+    playPressFeedback(true);
     setT9DelimiterVisualPositions([]);
     setT9FilterState({
       digits: option.digits,
       selected: option.selected,
     });
-    replaceCompositionWithRimeText(t9SelectedCompositionValue(option.selected));
+    setT9CandidatePinyinFilter({
+      selected: option.selected,
+      preeditCore: t9PreeditCore(preedit),
+    });
+    syncT9ProcessorSelection(option.selected);
   }
 
   function commitComposition() {
@@ -2289,9 +2276,15 @@ function KeyboardContent(props: {
 
   const activeKeyboardType = keyboardTypeOverride ?? settings.keyboardType;
   const isT9Keyboard = activeKeyboardType === "t9";
-  const composing = preedit.length > 0;
-  const t9PinyinOptions = isT9Keyboard && composing
-    ? t9PinyinOptionsFromCandidates(preedit, candidates, t9FilterState)
+  const t9LocalComposing = isT9Keyboard &&
+    (preedit.length > 0 || t9FilterState.digits.length > 0);
+  const composing = preedit.length > 0 || t9LocalComposing;
+  const t9PinyinOptions = t9LocalComposing
+    ? t9PinyinOptionsFromPreedit(
+      preedit,
+      t9FilterState,
+      t9CandidatePinyinFilter,
+    )
     : [];
   const usesComposingFunctionRow = composing && !symbolLayer &&
     settings.composingFunctionRowEnabled;
@@ -2337,8 +2330,14 @@ function KeyboardContent(props: {
     const menuItems = candidateContextMenu(absoluteIndex);
     return menuItems != null ? { menuItems } : undefined;
   }
+  const localT9PreeditDisplay = isT9Keyboard
+    ? t9LocalPreeditDisplay(preedit, t9FilterState, t9CandidatePinyinFilter)
+    : null;
   const keyboardPreedit = isT9Keyboard
-    ? withT9VisualDelimiters(preedit, t9DelimiterVisualPositions)
+    ? withT9VisualDelimiters(
+      localT9PreeditDisplay ?? preedit,
+      localT9PreeditDisplay ? [] : t9DelimiterVisualPositions,
+    )
     : preedit;
   const showsPreeditCaret = !error &&
     !settings.inlinePreedit &&
@@ -2348,7 +2347,7 @@ function KeyboardContent(props: {
     keyboardPreedit.length,
     Math.max(
       0,
-      preeditCursor +
+      localT9PreeditDisplay ? keyboardPreedit.length : preeditCursor +
         (isT9Keyboard
           ? t9VisualDelimiterOffset(preeditCursor, t9DelimiterVisualPositions)
           : 0),
@@ -2412,6 +2411,12 @@ function KeyboardContent(props: {
         commentFontSize: metrics.candidateCommentFontSize,
       })
       : 0;
+  const candidateItems = candidates.map((candidate, index) => ({
+    candidate,
+    pageIndex: index,
+    absoluteIndex: pageNo * rimePageSize + index,
+  }));
+  const visibleCandidateItems = candidateItems;
   const candidateAutoScrollKey = highlightedCandidate
     ? `${pageNo}-${highlightedIdx}-${highlightedCandidate.text}`
     : null;
@@ -3430,7 +3435,10 @@ function KeyboardContent(props: {
                   alignment: "center" as any,
                 }}
                 contentShape="rect"
-                onTapGesture={() => runWithFeedback(item.action)}
+                onTapGesture={() =>
+                  item.key.startsWith("pinyin-")
+                    ? item.action()
+                    : runWithFeedback(item.action)}
               >
                 {item.label}
               </Text>
@@ -3592,26 +3600,28 @@ function KeyboardContent(props: {
                       background={"rgba(0,0,0,0.001)" as any}
                       contentShape="rect"
                     >
-                      {candidates.map((candidate, idx) => (
+                      {visibleCandidateItems.map(({
+                        candidate,
+                        pageIndex,
+                        absoluteIndex,
+                      }) => (
                         <CandidateButton
-                          key={`${pageNo}-${idx}-${candidate.text}`}
-                          index={idx}
+                          key={`${pageNo}-${pageIndex}-${candidate.text}`}
+                          index={pageIndex}
                           candidate={candidate}
                           comment={candidateComment(candidate)}
                           showIndex={settings.showCandidateComment}
-                          selected={idx === highlightedIdx}
+                          selected={pageIndex === highlightedIdx}
                           palette={palette}
                           height={metrics.candidateButtonHeight}
                           candidateFontSize={metrics.candidateFontSize}
                           commentFontSize={metrics.candidateCommentFontSize}
                           contextMenu={candidateContextMenuProps(
-                            pageNo * rimePageSize + idx,
+                            absoluteIndex,
                           )}
                           onPress={() =>
                             runWithFeedback(() =>
-                              selectCandidateAbsolute(
-                                pageNo * rimePageSize + idx,
-                              )
+                              selectCandidateAbsolute(absoluteIndex)
                             )}
                         />
                       ))}
@@ -4748,9 +4758,11 @@ function KeyboardContent(props: {
                   >
                     {(expandedCandidates.length > 0
                       ? expandedCandidates
-                      : candidates.map((candidate, index) => ({
+                      : visibleCandidateItems.map((
+                        { candidate, absoluteIndex },
+                      ) => ({
                         candidate,
-                        absoluteIndex: pageNo * rimePageSize + index,
+                        absoluteIndex,
                       }))).map(({ candidate, absoluteIndex }) => {
                         const comment = candidateComment(candidate);
                         const naturalWidth = candidateButtonNaturalWidth({
