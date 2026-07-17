@@ -92,6 +92,11 @@ function withHaptic(action: () => void | Promise<void>) {
   }
 }
 
+function dismissKeyboardIfNeeded() {
+  if (!Keyboard.visible) return
+  setTimeout(() => Keyboard.hide(), 0)
+}
+
 function pickerLabel(option: LanguageOption) {
   if (option.code === AUTO_LANGUAGE.code) {
     return "自动检测-Auto"
@@ -216,49 +221,25 @@ function CopyableTextRow(props: {
         shape: "rect",
       }}
     >
-      {colorScheme === "dark" ? (
-        <RoundedRectangle
-          cornerRadius={16}
-          fill={darkCardFill}
-          frame={{ maxWidth: "infinity", minHeight: 62 }}
-          overlay={
-            <HStack
-              frame={{ maxWidth: "infinity", minHeight: 62, alignment: "leading" as any }}
-              padding={{ top: 12, bottom: 12, leading: 14, trailing: 14 }}
-            >
-              <Text
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                multilineTextAlignment="leading"
-                selectionDisabled={false}
-                foregroundStyle={props.foregroundStyle}
-              >
-                {hasText ? props.text : (props.emptyText || "")}
-              </Text>
-            </HStack>
-          }
-        />
-      ) : (
-        <RoundedRectangle
-          cornerRadius={16}
-          fill={"systemBackground"}
-          frame={{ maxWidth: "infinity", minHeight: 62 }}
-          overlay={
-            <HStack
-              frame={{ maxWidth: "infinity", minHeight: 62, alignment: "leading" as any }}
-              padding={{ top: 12, bottom: 12, leading: 14, trailing: 14 }}
-            >
-              <Text
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                multilineTextAlignment="leading"
-                selectionDisabled={false}
-                foregroundStyle={props.foregroundStyle}
-              >
-                {hasText ? props.text : (props.emptyText || "")}
-              </Text>
-            </HStack>
-          }
-        />
-      )}
+      <RoundedRectangle
+        cornerRadius={16}
+        fill={colorScheme === "dark" ? darkCardFill : "systemBackground"}
+        frame={{ maxWidth: "infinity", minHeight: 62 }}
+      />
+      <VStack
+        frame={{ maxWidth: "infinity", minHeight: 62, alignment: "topLeading" as any }}
+        padding={{ top: 12, bottom: 12, leading: 14, trailing: 14 }}
+      >
+        <Text
+          frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          multilineTextAlignment="leading"
+          selectionDisabled={false}
+          foregroundStyle={props.foregroundStyle}
+          fixedSize={{ horizontal: false, vertical: true }}
+        >
+          {hasText ? props.text : (props.emptyText || "")}
+        </Text>
+      </VStack>
     </ZStack>
   )
 }
@@ -423,6 +404,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
   }, [hasInput, settings.defaultTargetLanguageCode, sourceLanguageCode, sourceText, targetLanguageCode])
 
   const runTranslation = useEffectEvent(async () => {
+    dismissKeyboardIfNeeded()
+
     if (!hasInput) {
       setErrorText("请输入要翻译的文本。")
       setEngineResults([])
@@ -662,6 +645,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         listSectionSpacing={14}
+        scrollDismissesKeyboard="interactively"
         toolbar={{
           topBarLeading: (
             <Button action={() => dismiss()}>
@@ -769,6 +753,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                 }}
                 prompt="输入要翻译的文本"
                 axis="vertical"
+                submitLabel="done"
+                onSubmit={runTranslation}
                 frame={{ minHeight: 96, maxWidth: "infinity" as any, alignment: "topLeading" as any }}
               />
               <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "trailing" as any }}>
