@@ -1781,7 +1781,10 @@ export function HomeView() {
       await refreshLocal(current);
       const effective = loadConfig();
 
-      const r = await checkAllUpdates(effective);
+      const r = await checkAllUpdates(effective, (kind, message) => {
+        const label = kind === "scheme" ? "方案" : kind === "dict" ? "词库" : "模型";
+        pushLog("ERROR", "CHECK", `${label}请求失败：${message}`, effective);
+      });
       const decision = buildUpdateDecision(localMeta, r, effective);
       setRemoteSchemeVer(
         schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取",
@@ -1840,6 +1843,7 @@ export function HomeView() {
       let pre = lastCheck;
       let decision = lastCheckDecision;
       let resolvedKey = lastCheckKey;
+      let precheckFailed = false;
       const shared = loadSharedCheckCache();
       if ((!pre || lastCheckKey !== key) && shared && shared.key === key) {
         pre = shared.remote;
@@ -1866,7 +1870,11 @@ export function HomeView() {
         setRemoteDictMark("检查更新中...");
         setRemoteModelMark("检查更新中...");
         setNotes("检查更新中...");
-        pre = await checkAllUpdates(effective);
+        pre = await checkAllUpdates(effective, (kind, message) => {
+          const label = kind === "scheme" ? "方案" : kind === "dict" ? "词库" : "模型";
+          precheckFailed = true;
+          pushLog("ERROR", "AUTO", `${label}请求失败：${message}`, effective);
+        });
         setRemoteSchemeVer(
           schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取",
         );
@@ -1889,9 +1897,9 @@ export function HomeView() {
       if (decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新");
       if (decision && !decision.scheme && !decision.dict && !decision.model) {
         setStageAndMaybeLog(
-          "自动更新完成（已是最新，无需更新）",
+          precheckFailed ? "自动更新完成（部分请求失败，请查看日志）" : "自动更新完成（已是最新，无需更新）",
           "AUTO",
-          "SUCCESS",
+          precheckFailed ? "WARN" : "SUCCESS",
           true,
         );
         return;
@@ -1907,6 +1915,7 @@ export function HomeView() {
             await refreshLocal(effective);
             await refreshLastCheckDecision(effective, pre);
           },
+          hasPrecheckFailure: precheckFailed,
         },
         pre,
         decision ?? undefined,
@@ -1914,22 +1923,28 @@ export function HomeView() {
 
       await refreshLocal(effective);
       await refreshLastCheckDecision(effective, autoResult.remote);
+      const hasFailed = precheckFailed || autoResult.failed.scheme || autoResult.failed.dict || autoResult.failed.model;
       if (!autoResult.didUpdate) {
         setStageAndMaybeLog(
-          "自动更新完成（已是最新，无需更新）",
+          hasFailed ? "自动更新完成（全部更新失败，请查看日志）" : "自动更新完成（已是最新，无需更新）",
           "AUTO",
-          "SUCCESS",
+          hasFailed ? "ERROR" : "SUCCESS",
           true,
         );
       } else if (autoResult.didDeploy) {
-        setStageAndMaybeLog("自动更新完成（已部署）", "AUTO", "SUCCESS", true);
+        setStageAndMaybeLog(
+          hasFailed ? "自动更新完成（部分失败，已部署）" : "自动更新完成（已部署）",
+          "AUTO",
+          hasFailed ? "WARN" : "SUCCESS",
+          true,
+        );
       } else {
         const currentNow = loadConfig();
         if (currentNow.inputMethod !== "scripting") {
           setStageAndMaybeLog(
-            "自动更新完成（未自动部署）",
+            hasFailed ? "自动更新完成（部分失败，已跳过部署）" : "自动更新完成（未自动部署）",
             "AUTO",
-            "SUCCESS",
+            hasFailed ? "WARN" : "SUCCESS",
             true,
           );
         }

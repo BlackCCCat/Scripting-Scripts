@@ -34,7 +34,6 @@ export type RemoteAsset = {
   updatedAt?: string
   remoteIdOrSha?: string
   size?: number
-  extractSubdir?: string
 }
 
 export type AllUpdateResult = {
@@ -46,6 +45,11 @@ export type AllUpdateResult = {
 export type AutoUpdateRunResult = {
   remote: AllUpdateResult
   updated: {
+    scheme: boolean
+    dict: boolean
+    model: boolean
+  }
+  failed: {
     scheme: boolean
     dict: boolean
     model: boolean
@@ -432,24 +436,13 @@ async function fetchLatestDictAsset(cfg: AppConfig): Promise<RemoteAsset | undef
     })
   }
 
-  const standalone = await fetchLatestAssetFromCnbPreferOpenApi({
+  return fetchLatestAssetFromCnbPreferOpenApi({
     owner: OWNER,
     repo: CNB_REPO,
     token: cfg.cnbToken,
     assetNameGlob: dictPattern(cfg),
     releaseTagExact: CNB_PREVIEW_TAG,
   })
-  if (standalone) return standalone
-
-  if (cfg.schemeEdition !== "base") return undefined
-  const schemePackage = await fetchLatestAssetFromCnbPreferOpenApi({
-    owner: OWNER,
-    repo: CNB_REPO,
-    token: cfg.cnbToken,
-    assetNameExact: "rime-wanxiang-base.zip",
-    releaseTagExact: CNB_PREVIEW_TAG,
-  })
-  return schemePackage ? { ...schemePackage, extractSubdir: "dicts" } : undefined
 }
 
 async function fetchModelReleaseAsset(cfg: AppConfig, fileName: string): Promise<RemoteAsset | undefined> {
@@ -514,15 +507,27 @@ async function resolveRimeDir(cfg: AppConfig): Promise<string> {
 }
 
 // ===== 统一检查：方案/词库/模型 =====
-export async function checkAllUpdates(cfg: AppConfig): Promise<AllUpdateResult> {
-  const scheme = await fetchLatestSchemeAsset(cfg).catch(() => undefined)
+export async function checkAllUpdates(
+  cfg: AppConfig,
+  onError?: (kind: "scheme" | "dict" | "model", message: string) => void
+): Promise<AllUpdateResult> {
+  const capture = async <T,>(kind: "scheme" | "dict" | "model", task: Promise<T | undefined>) => {
+    try {
+      return await task
+    } catch (error: any) {
+      onError?.(kind, String(error?.message ?? error))
+      return undefined
+    }
+  }
+
+  const scheme = await capture("scheme", fetchLatestSchemeAsset(cfg))
   if (scheme && !scheme.remoteIdOrSha) {
     scheme.remoteIdOrSha = scheme.tag ?? scheme.name
   }
 
-  const dict = await fetchLatestDictAsset(cfg)
+  const dict = await capture("dict", fetchLatestDictAsset(cfg))
 
-  const model = await fetchModelReleaseAsset(cfg, MODEL_FILE)
+  const model = await capture("model", fetchModelReleaseAsset(cfg, MODEL_FILE))
 
   if (dict && !dict.remoteIdOrSha) {
     dict.remoteIdOrSha = ensureRemoteMark(dict, "dict")
@@ -765,7 +770,6 @@ export async function updateDict(
     await unzipToDirWithOverwrite(zipPath, dictDir, {
       excludePatterns: exclude,
       flattenSingleDir: true,
-      sourceSubdir: dict.extractSubdir,
       onCopiedFile: (dstPath) => {
         copied.add(String(dstPath))
         params.onLog?.(`写入文件：${String(dstPath)}`)
@@ -964,14 +968,20 @@ export async function autoUpdateAll(
     onLog?: (s: string) => void
     onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
     onAfterModule?: (kind: "scheme" | "dict" | "model") => void | Promise<void>
+    hasPrecheckFailure?: boolean
   },
   prechecked?: AllUpdateResult,
   _preDecision?: UpdateDecision
 ): Promise<AutoUpdateRunResult> {
   params.onStage?.("自动更新：检查更新中…")
-  const r = prechecked ?? (await checkAllUpdates(cfg))
+  const r = prechecked ?? (await checkAllUpdates(cfg, (kind, message) => {
+    const label = kind === "scheme" ? "方案" : kind === "dict" ? "词库" : "模型"
+    params.onLog?.(`[${label}] 请求失败：${message}`)
+  }))
   const installRoot = await resolveRimeDir(cfg)
   const meta = await loadMetaAsync(installRoot, cfg.hamsterBookmarkName)
+  const updated = { scheme: false, dict: false, model: false }
+  const failed = { scheme: false, dict: false, model: false }
 
   const schemeRemoteMark = schemeRemoteMarkForConfig(cfg, r.scheme)
   const needScheme = !!(
@@ -995,41 +1005,76 @@ export async function autoUpdateAll(
     return {
       remote: r,
       updated: { scheme: false, dict: false, model: false },
+      failed: { scheme: false, dict: false, model: false },
       didUpdate: false,
       didDeploy: false,
     }
   }
 
-  // 自动更新：按需下载三项，最后统一部署一次
+  // 单项失败只记录日志，不阻断后续更新任务。
   if (needScheme) {
-    await updateScheme(cfg, {
-      onStage: (s) => params.onStage?.(`方案：${s}`),
-      onLog: (s) => params.onLog?.(`[方案] ${s}`),
-      onProgress: params.onProgress,
-      autoDeploy: false,
-    })
-    await params.onAfterModule?.("scheme")
+    try {
+      await updateScheme(cfg, {
+        onStage: (s) => params.onStage?.(`方案：${s}`),
+        onLog: (s) => params.onLog?.(`[方案] ${s}`),
+        onProgress: params.onProgress,
+        autoDeploy: false,
+      })
+      updated.scheme = true
+      await params.onAfterModule?.("scheme")
+    } catch (error: any) {
+      failed.scheme = true
+      params.onLog?.(`[方案] 更新失败：${String(error?.message ?? error)}`)
+      params.onStage?.("方案：更新失败，继续后续任务")
+    }
   }
   if (needDict) {
-    await updateDict(cfg, {
-      onStage: (s) => params.onStage?.(`词库：${s}`),
-      onLog: (s) => params.onLog?.(`[词库] ${s}`),
-      onProgress: params.onProgress,
-      autoDeploy: false,
-    })
-    await params.onAfterModule?.("dict")
+    try {
+      await updateDict(cfg, {
+        onStage: (s) => params.onStage?.(`词库：${s}`),
+        onLog: (s) => params.onLog?.(`[词库] ${s}`),
+        onProgress: params.onProgress,
+        autoDeploy: false,
+      })
+      updated.dict = true
+      await params.onAfterModule?.("dict")
+    } catch (error: any) {
+      failed.dict = true
+      params.onLog?.(`[词库] 更新失败：${String(error?.message ?? error)}`)
+      params.onStage?.("词库：更新失败，继续后续任务")
+    }
   }
   if (needModel) {
-    await updateModel(cfg, {
-      onStage: params.onStage,
-      onLog: (s) => params.onLog?.(s),
-      onProgress: params.onProgress,
-      autoDeploy: false,
-      targets: {
-        model: needModel,
-      },
-    })
-    await params.onAfterModule?.("model")
+    try {
+      await updateModel(cfg, {
+        onStage: params.onStage,
+        onLog: (s) => params.onLog?.(s),
+        onProgress: params.onProgress,
+        autoDeploy: false,
+        targets: {
+          model: needModel,
+        },
+      })
+      updated.model = true
+      await params.onAfterModule?.("model")
+    } catch (error: any) {
+      failed.model = true
+      params.onLog?.(`[模型] 更新失败：${String(error?.message ?? error)}`)
+      params.onStage?.("模型：更新失败，继续后续任务")
+    }
+  }
+
+  const didUpdate = updated.scheme || updated.dict || updated.model
+  const hasFailure = params.hasPrecheckFailure || failed.scheme || failed.dict || failed.model
+  if (!didUpdate) {
+    params.onStage?.("自动更新：完成（没有成功更新的项目）")
+    return {
+      remote: r,
+      updated,
+      failed,
+      didUpdate: false,
+      didDeploy: false,
+    }
   }
 
   // 自动更新后统一清理 dicts 下残留的词库子文件夹
@@ -1042,6 +1087,18 @@ export async function autoUpdateAll(
   })
   if (merged > 0) params.onLog?.(`自动更新后整理词库目录：${merged} 个`)
 
+  if (hasFailure) {
+    params.onLog?.("检测到更新任务失败，已跳过自动部署")
+    params.onStage?.("自动更新：检测到失败，已跳过自动部署")
+    return {
+      remote: r,
+      updated,
+      failed,
+      didUpdate,
+      didDeploy: false,
+    }
+  }
+
   // 统一部署（你指定：安装目录/build）
   await deployIfEnabled(cfg, params.onStage, params.onLog)
 
@@ -1050,8 +1107,9 @@ export async function autoUpdateAll(
   }
   return {
     remote: r,
-    updated: { scheme: needScheme, dict: needDict, model: needModel },
-    didUpdate: true,
+    updated,
+    failed,
+    didUpdate,
     didDeploy: cfg.autoDeployAfterDownload !== false && cfg.inputMethod !== "scripting",
   }
 }

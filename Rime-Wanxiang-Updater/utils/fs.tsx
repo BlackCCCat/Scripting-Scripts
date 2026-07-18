@@ -194,7 +194,6 @@ export async function unzipToDirWithOverwrite(
   opts?: {
     excludePatterns?: string[]
     flattenSingleDir?: boolean
-    sourceSubdir?: string
     onCopiedFile?: (dstPath: string, relativePath: string) => void
     onSkippedFile?: (srcPath: string, relativePath: string) => void
     onProgress?: (done: number, total: number) => void
@@ -217,25 +216,6 @@ export async function unzipToDirWithOverwrite(
     const patterns = compilePatterns(opts?.excludePatterns ?? [])
     const shouldSkip = (name: string, rel: string, src: string) =>
       matchAny(name, patterns) || matchAny(rel, patterns) || matchAny(src, patterns)
-
-    const sourceSubdir = String(opts?.sourceSubdir ?? "").replace(/^\/+|\/+$/g, "")
-    if (sourceSubdir) {
-      const direct = Path.join(tmpDir, sourceSubdir)
-      let srcRoot = (await exists(direct)) && (await isDirectory(direct)) ? direct : ""
-      if (!srcRoot && visible.length === 1) {
-        const nested = Path.join(tmpDir, visible[0], sourceSubdir)
-        if ((await exists(nested)) && (await isDirectory(nested))) srcRoot = nested
-      }
-      if (!srcRoot) throw new Error(`压缩包中未找到目录：${sourceSubdir}`)
-      await copyDirWithPolicy(srcRoot, destDir, {
-        excludePatterns: opts?.excludePatterns ?? [],
-        overwritePolicy: "overwrite",
-        onCopiedFile: opts?.onCopiedFile,
-        onSkippedFile: opts?.onSkippedFile,
-        onProgress: opts?.onProgress,
-      })
-      return
-    }
 
     const dirs: string[] = []
     const files: string[] = []
