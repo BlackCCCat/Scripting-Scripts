@@ -14,7 +14,7 @@ import {
 } from "scripting"
 
 import { LoginCenterView } from "./LoginCenterView"
-import type { BiliAuthSession, BiliLoginMode, BiliPlaybackMode, QrLoginState } from "../types"
+import type { BiliAuthSession, BiliCardLayoutMode, BiliLoginMode, BiliPlaybackMode, QrLoginState } from "../types"
 
 async function confirmDialog(options: { title: string; message: string }): Promise<boolean> {
   const runtimeDialog = (globalThis as any).Dialog
@@ -149,8 +149,10 @@ export function SettingsTabView(props: {
   qrLogin: QrLoginState | null
   authMessage: string
   playbackMode: BiliPlaybackMode
+  cardLayoutMode: BiliCardLayoutMode
   onExit: () => void
   onPlaybackModeChange: (mode: BiliPlaybackMode) => Promise<void>
+  onCardLayoutModeChange: (mode: BiliCardLayoutMode) => Promise<void>
   onLoginModeChange: (mode: BiliLoginMode) => Promise<void>
   onStartQrLogin: () => Promise<void>
   onStartWebViewLogin: () => Promise<void>
@@ -276,6 +278,70 @@ export function SettingsTabView(props: {
               </VStack>
               <Spacer />
               {props.playbackMode === "inline" ? (
+                <Image systemName="checkmark.circle.fill" foregroundStyle="#FB7299" />
+              ) : null}
+            </HStack>
+          </Button>
+        </Section>
+
+        <Section
+          header={<Text>卡片布局</Text>}
+        >
+          <Button
+            buttonStyle="plain"
+            action={() => void props.onCardLayoutModeChange("double")}
+            frame={{ maxWidth: "infinity" }}
+          >
+            <HStack
+              spacing={12}
+              padding={{ top: 8, bottom: 8 }}
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              contentShape="rect"
+            >
+              <VStack spacing={3} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+                <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                  双列布局
+                </Text>
+                <Text
+                  font="caption"
+                  foregroundStyle="secondaryLabel"
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                >
+                  默认布局，信息更紧凑
+                </Text>
+              </VStack>
+              <Spacer />
+              {props.cardLayoutMode === "double" ? (
+                <Image systemName="checkmark.circle.fill" foregroundStyle="#FB7299" />
+              ) : null}
+            </HStack>
+          </Button>
+
+          <Button
+            buttonStyle="plain"
+            action={() => void props.onCardLayoutModeChange("single")}
+            frame={{ maxWidth: "infinity" }}
+          >
+            <HStack
+              spacing={12}
+              padding={{ top: 8, bottom: 8 }}
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              contentShape="rect"
+            >
+              <VStack spacing={3} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+                <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                  单列布局
+                </Text>
+                <Text
+                  font="caption"
+                  foregroundStyle="secondaryLabel"
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                >
+                  更大的封面和更完整的信息
+                </Text>
+              </VStack>
+              <Spacer />
+              {props.cardLayoutMode === "single" ? (
                 <Image systemName="checkmark.circle.fill" foregroundStyle="#FB7299" />
               ) : null}
             </HStack>

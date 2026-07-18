@@ -16,6 +16,7 @@ import type {
   BiliAuthSession,
   BiliAuthStore,
   BiliAuthorFilterRule,
+  BiliCardLayoutMode,
   BiliFavoriteAuthor,
   BiliFavoriteAuthorsExport,
   BiliFollowedAuthor,
@@ -44,6 +45,7 @@ import {
   removeAccountPreferences,
   saveStoredPreferences,
   setAuthorFilterRule,
+  setCardLayoutMode,
   setFavoriteAuthors,
   setLoginMode,
   setPlaybackMode,
@@ -1152,6 +1154,7 @@ export function HomeView() {
           favoriteAuthors={favoriteAuthors}
           items={favoriteFeedItems}
           playbackMode={preferences.playbackMode}
+          cardLayoutMode={preferences.cardLayoutMode}
           isLoading={favoriteFeedLoading}
           isLoadingMore={favoriteFeedLoadingMore}
           hasMore={favoriteFeedHasMore}
@@ -1182,6 +1185,7 @@ export function HomeView() {
           followedAuthorsErrorMessage={followedAuthorsErrorMessage}
           authorFilterRule={currentAuthorFilterRule}
           playbackMode={preferences.playbackMode}
+          cardLayoutMode={preferences.cardLayoutMode}
           isLoading={feedLoading}
           errorMessage={feedErrorMessage}
           lastUpdatedAt={lastUpdatedAt}
@@ -1211,9 +1215,13 @@ export function HomeView() {
           qrLogin={qrLogin}
           authMessage={authMessage}
           playbackMode={preferences.playbackMode}
+          cardLayoutMode={preferences.cardLayoutMode}
           onExit={dismiss}
           onPlaybackModeChange={async (mode) => {
             persistPreferences(setPlaybackMode(preferences, mode))
+          }}
+          onCardLayoutModeChange={async (mode: BiliCardLayoutMode) => {
+            persistPreferences(setCardLayoutMode(preferences, mode))
           }}
           onLoginModeChange={async (mode) => {
             persistPreferences(setLoginMode(preferences, mode))

@@ -23,6 +23,7 @@ export type BiliAuthStore = {
 }
 
 export type BiliPlaybackMode = "external" | "inline"
+export type BiliCardLayoutMode = "double" | "single"
 
 export type BiliFollowedAuthor = {
   mid: string
@@ -50,6 +51,7 @@ export type BiliAuthorFilterRule = {
 export type BiliPreferences = {
   loginMode: BiliLoginMode
   playbackMode: BiliPlaybackMode
+  cardLayoutMode: BiliCardLayoutMode
   authorFiltersByAccount: Record<string, BiliAuthorFilterRule>
   favoriteAuthors: BiliFavoriteAuthor[]
 }

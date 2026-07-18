@@ -1,4 +1,5 @@
 import type {
+  BiliCardLayoutMode,
   BiliAuthorFilterRule,
   BiliFavoriteAuthor,
   BiliLoginMode,
@@ -10,6 +11,10 @@ const STORAGE_KEY = "bili_scripting_preferences_v1"
 
 function sanitizePlaybackMode(raw: any): BiliPlaybackMode {
   return raw === "inline" ? "inline" : "external"
+}
+
+function sanitizeCardLayoutMode(raw: any): BiliCardLayoutMode {
+  return raw === "single" ? "single" : "double"
 }
 
 function sanitizeLoginMode(raw: any): BiliLoginMode {
@@ -73,6 +78,7 @@ function sanitizePreferences(raw: any): BiliPreferences {
   return {
     loginMode: sanitizeLoginMode(raw?.loginMode),
     playbackMode: sanitizePlaybackMode(raw?.playbackMode),
+    cardLayoutMode: sanitizeCardLayoutMode(raw?.cardLayoutMode),
     authorFiltersByAccount,
     favoriteAuthors: sanitizeFavoriteAuthors(raw?.favoriteAuthors),
   }
@@ -85,6 +91,7 @@ export function loadStoredPreferences(): BiliPreferences {
     return {
       loginMode: "cookie",
       playbackMode: "external",
+      cardLayoutMode: "double",
       authorFiltersByAccount: {},
       favoriteAuthors: [],
     }
@@ -166,6 +173,16 @@ export function setLoginMode(
   return {
     ...preferences,
     loginMode: sanitizeLoginMode(loginMode),
+  }
+}
+
+export function setCardLayoutMode(
+  preferences: BiliPreferences,
+  cardLayoutMode: BiliCardLayoutMode
+): BiliPreferences {
+  return {
+    ...preferences,
+    cardLayoutMode: sanitizeCardLayoutMode(cardLayoutMode),
   }
 }
 

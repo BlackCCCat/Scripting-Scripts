@@ -4,13 +4,13 @@ import {
   Group,
   HStack,
   Image,
+  LazyVGrid,
   List,
   NavigationStack,
   ProgressView,
-  RoundedRectangle,
+  ScrollView,
   Section,
   Text,
-  useColorScheme,
   useState,
   VStack,
   ZStack,
@@ -18,12 +18,23 @@ import {
 
 import { FavoriteAuthorsManagerView } from "./FavoriteAuthorsManagerView"
 import { InlineVideoPlayerPage, stopActiveInlinePlayback } from "./InlineVideoPlayerPage"
+import { CompactVideoCoverImage, VideoCardBackground, VideoCoverImage, useVideoCoverArtwork } from "./VideoCoverArtwork"
 import type {
   BiliAuthSession,
+  BiliCardLayoutMode,
   BiliFavoriteAuthor,
   BiliPlaybackMode,
   VideoDynamicItem,
 } from "../types"
+
+const DOUBLE_CARD_COLUMNS = [
+  { size: { type: "flexible" as const, min: 0, max: 192 }, spacing: 12 },
+  { size: { type: "flexible" as const, min: 0, max: 192 } },
+]
+
+function compactMetaText(item: VideoDynamicItem): string {
+  return `播放 ${item.playText} · ${item.publishedLabel || "刚刚"}`
+}
 
 async function openExternalUrl(url: string): Promise<void> {
   const target = String(url ?? "").trim()
@@ -80,49 +91,135 @@ function resolveAuthorSpaceUrl(item: VideoDynamicItem): string {
 
 function FavoriteVideoCard(props: {
   item: VideoDynamicItem
-  isLast: boolean
-  shouldLoadMore: boolean
-  onLoadMore: () => void
   onOpenAuthor: () => void
   onOpenVideo: () => void
   onPlayInline?: () => void
+  compact?: boolean
+  embedded?: boolean
+  onAppear?: () => void
 }) {
-  const colorScheme = useColorScheme()
-  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+  const artwork = useVideoCoverArtwork(props.item.cover)
   const videoUrl = resolveVideoUrl(props.item)
-  const cardShape = { type: "rect" as const, cornerRadius: 24, style: "continuous" as const }
+  const compact = Boolean(props.compact)
+  const cardCornerRadius = compact ? 16 : 18
+  const compactCardHeight = 202
+  const cardShape = { type: "rect" as const, cornerRadius: cardCornerRadius, style: "continuous" as const }
+  const avatarSize = compact ? 22 : 38
+  const avatarRadius = compact ? 8 : 10
+  const compactCoverHeight = 108
 
-  return (
-    <VStack
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      listRowInsets={{ top: 0, bottom: 0, leading: 16, trailing: 16 }}
-      listRowBackground={<EmptyView />}
-      listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
-      listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
-      onAppear={props.isLast && props.shouldLoadMore ? props.onLoadMore : undefined}
-    >
-      <ZStack
+  const compactAuthorRow = (
+    <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      <Image
+        imageUrl={props.item.authorFace}
+        resizable={true}
+        scaleToFill={true}
+        frame={{ width: avatarSize, height: avatarSize }}
+        clipShape={{ type: "rect", cornerRadius: avatarRadius }}
+        placeholder={<ProgressView progressViewStyle="circular" />}
+      />
+      <Text
+        font="caption2"
+        foregroundStyle="#FB7299"
+        lineLimit={1}
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        contentShape={cardShape}
-        clipShape={cardShape}
-        contextMenu={{
-          menuItems: <Group>
-            <Button title="复制链接" systemImage="link" action={() => { void copyToPasteboard(videoUrl) }} />
-            <Button title="分享链接" systemImage="square.and.arrow.up" action={() => { void presentShareSheet(videoUrl) }} />
-          </Group>,
-        }}
       >
-        <RoundedRectangle
-          cornerRadius={24}
-          fill={cardFill}
-          stroke="separator"
-          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        />
+        {props.item.authorName}
+      </Text>
+      <Text
+        font="caption2"
+        foregroundStyle="#FB7299"
+        lineLimit={1}
+        padding={{ top: 3, bottom: 3, leading: 6, trailing: 6 }}
+        background={{ style: "rgba(251,114,153,0.14)", shape: { type: "capsule", style: "continuous" } }}
+      >
+        收藏 UP
+      </Text>
+    </HStack>
+  )
 
+  const cardContextMenu = {
+    menuItems: <Group>
+      <Button title="复制链接" systemImage="link" action={() => { void copyToPasteboard(videoUrl) }} />
+      <Button title="分享链接" systemImage="square.and.arrow.up" action={() => { void presentShareSheet(videoUrl) }} />
+    </Group>,
+  }
+
+  const cardBody = (
+    <ZStack
+      frame={compact
+        ? { maxWidth: "infinity", height: compactCardHeight, alignment: "leading" as any }
+        : { maxWidth: "infinity", alignment: "leading" as any }}
+      contentShape={cardShape}
+      clipShape={cardShape}
+      contextMenu={compact && props.embedded ? undefined : cardContextMenu}
+    >
+      <VideoCardBackground dominantColor={artwork.dominantColor} cornerRadius={cardCornerRadius} />
+
+      {compact ? (
+        <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+          <VStack
+            frame={{ maxWidth: "infinity" }}
+            onTapGesture={props.onPlayInline ?? props.onOpenVideo}
+          >
+            <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+                <CompactVideoCoverImage
+                  artwork={artwork}
+                  coverUrl={props.item.cover}
+                  height={compactCoverHeight}
+                />
+              <VStack
+                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+                padding={6}
+              >
+                <Text
+                  font="caption2"
+                  foregroundStyle="white"
+                  padding={{ top: 3, bottom: 3, leading: 6, trailing: 6 }}
+                  background={{ style: "rgba(0,0,0,0.72)", shape: { type: "capsule", style: "continuous" } }}
+                >
+                  {props.item.durationText || "--:--"}
+                </Text>
+              </VStack>
+            </ZStack>
+          </VStack>
+
+          <VStack
+            spacing={6}
+            padding={{ top: 8, bottom: 10, leading: 8, trailing: 8 }}
+            frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          >
+            <Text
+              font="footnote"
+              lineLimit={2}
+              frame={{ maxWidth: "infinity", minHeight: 34, alignment: "topLeading" as any }}
+            >
+              {props.item.title}
+            </Text>
+
+            <HStack
+              spacing={0}
+              frame={{ maxWidth: "infinity" }}
+              onTapGesture={props.onOpenAuthor}
+            >
+              {compactAuthorRow}
+            </HStack>
+
+            <Text
+              font="caption2"
+              foregroundStyle="secondaryLabel"
+              lineLimit={1}
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            >
+              {compactMetaText(props.item)}
+            </Text>
+          </VStack>
+        </VStack>
+      ) : (
         <VStack
           spacing={14}
           padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
-          frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
         >
           <HStack
             spacing={0}
@@ -134,8 +231,8 @@ function FavoriteVideoCard(props: {
                 imageUrl={props.item.authorFace}
                 resizable={true}
                 scaleToFill={true}
-                frame={{ width: 38, height: 38 }}
-                clipShape={{ type: "rect", cornerRadius: 10 }}
+                frame={{ width: avatarSize, height: avatarSize }}
+                clipShape={{ type: "rect", cornerRadius: avatarRadius }}
                 placeholder={<ProgressView progressViewStyle="circular" />}
               />
               <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
@@ -153,7 +250,7 @@ function FavoriteVideoCard(props: {
                   lineLimit={1}
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
-                  {props.item.authorAction || "投稿了视频"}
+                  {`${props.item.authorAction || "投稿了视频"} · ${props.item.publishedLabel || "刚刚"}`}
                 </Text>
               </VStack>
               <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
@@ -166,27 +263,18 @@ function FavoriteVideoCard(props: {
             frame={{ maxWidth: "infinity" }}
             onTapGesture={props.onPlayInline ?? props.onOpenVideo}
           >
-            <HStack
-              spacing={10}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            >
+            <HStack spacing={0} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
               <VStack spacing={14} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-                <ZStack
-                  frame={{ maxWidth: "infinity", height: 210 }}
-                  background={{ style: "tertiarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}
+              <ZStack
+                frame={{ maxWidth: "infinity" }}
+                aspectRatio={{ value: 16 / 9, contentMode: "fit" }}
                 >
-                  <Image
-                    imageUrl={props.item.cover}
-                    resizable={true}
-                    scaleToFill={true}
-                    frame={{ maxWidth: "infinity", height: 210 }}
-                    clipShape={{ type: "rect", cornerRadius: 14 }}
-                    placeholder={<ProgressView progressViewStyle="circular" />}
+                  <VideoCoverImage
+                    artwork={artwork}
+                    coverUrl={props.item.cover}
+                    cornerRadius={14}
                   />
-                  <VStack
-                    frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
-                    padding={8}
-                  >
+                  <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }} padding={8}>
                     <Text
                       font="caption2"
                       foregroundStyle="white"
@@ -226,7 +314,34 @@ function FavoriteVideoCard(props: {
             </HStack>
           </VStack>
         </VStack>
-      </ZStack>
+      )}
+    </ZStack>
+  )
+
+  if (props.embedded) {
+    return (
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        contentShape={cardShape}
+        clipShape={cardShape}
+        contextMenu={compact ? cardContextMenu : undefined}
+        onAppear={props.onAppear}
+      >
+        {cardBody}
+      </VStack>
+    )
+  }
+
+  return (
+    <VStack
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      listRowInsets={{ top: 0, bottom: 0, leading: 8, trailing: 8 }}
+      listRowBackground={<EmptyView />}
+      listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
+      listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+      onAppear={props.onAppear}
+    >
+      {cardBody}
     </VStack>
   )
 }
@@ -236,6 +351,7 @@ export function FavoritesTabView(props: {
   favoriteAuthors: BiliFavoriteAuthor[]
   items: VideoDynamicItem[]
   playbackMode: BiliPlaybackMode
+  cardLayoutMode: BiliCardLayoutMode
   isLoading: boolean
   isLoadingMore: boolean
   hasMore: boolean
@@ -255,10 +371,10 @@ export function FavoritesTabView(props: {
   const summary = props.lastUpdatedAt
     ? `上次刷新 ${new Date(props.lastUpdatedAt).toLocaleString("zh-CN")}`
     : "下拉可以刷新收藏内容"
-
+  const FeedContainer = props.cardLayoutMode === "double" ? ScrollView : List
   return (
     <NavigationStack>
-      <List
+      <FeedContainer
         navigationTitle="收藏"
         navigationBarTitleDisplayMode="large"
         listRowSpacing={6}
@@ -370,19 +486,44 @@ export function FavoritesTabView(props: {
           </Section>
         ) : null}
 
-        {props.items.length > 0 ? (
+        {props.items.length > 0 && props.cardLayoutMode === "double" ? (
+          <LazyVGrid
+            columns={DOUBLE_CARD_COLUMNS}
+            alignment="center"
+            spacing={6}
+            frame={{ maxWidth: "infinity", alignment: "center" as any }}
+          >
+            {props.items.map((item, index) => {
+              const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
+              const isLastItem = index === props.items.length - 1
+
+              return (
+                <FavoriteVideoCard
+                  key={item.id}
+                  embedded={true}
+                  compact={true}
+                  item={item}
+                  onOpenAuthor={() => { void openExternalUrl(resolveAuthorSpaceUrl(item)) }}
+                  onOpenVideo={() => { void openExternalUrl(resolveVideoUrl(item)) }}
+                  onPlayInline={canInlinePlay ? () => setPlayingItem(item) : undefined}
+                  onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
+                />
+              )
+            })}
+          </LazyVGrid>
+        ) : props.items.length > 0 ? (
           props.items.map((item, index) => {
             const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
+            const isLastItem = index === props.items.length - 1
+
             return (
               <FavoriteVideoCard
                 key={item.id}
                 item={item}
-                isLast={item.id === props.items[props.items.length - 1]?.id}
-                shouldLoadMore={props.hasMore && !props.isLoadingMore}
-                onLoadMore={() => { void props.onLoadMore() }}
                 onOpenAuthor={() => { void openExternalUrl(resolveAuthorSpaceUrl(item)) }}
                 onOpenVideo={() => { void openExternalUrl(resolveVideoUrl(item)) }}
                 onPlayInline={canInlinePlay ? () => setPlayingItem(item) : undefined}
+                onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
               />
             )
           })
@@ -423,7 +564,7 @@ export function FavoritesTabView(props: {
             </VStack>
           </Section>
         ) : null}
-      </List>
+      </FeedContainer>
     </NavigationStack>
   )
 }

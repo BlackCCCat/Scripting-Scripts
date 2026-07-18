@@ -4,16 +4,16 @@ import {
   Group,
   HStack,
   Image,
+  LazyVGrid,
   List,
   NavigationStack,
   ProgressView,
-  RoundedRectangle,
+  ScrollView,
   ScrollViewReader,
   type ScrollViewProxy,
   Section,
   Spacer,
   Text,
-  useColorScheme,
   useRef,
   useState,
   VStack,
@@ -22,9 +22,11 @@ import {
 
 import { FollowingsFilterView } from "./FollowingsFilterView"
 import { InlineVideoPlayerPage, stopActiveInlinePlayback } from "./InlineVideoPlayerPage"
+import { CompactVideoCoverImage, VideoCardBackground, VideoCoverImage, useVideoCoverArtwork } from "./VideoCoverArtwork"
 import type {
   BiliAuthSession,
   BiliAuthorFilterRule,
+  BiliCardLayoutMode,
   BiliFollowedAuthor,
   BiliLoginMode,
   BiliPlaybackMode,
@@ -35,6 +37,10 @@ function statsText(playText: string, danmakuText: string): string {
   return `播放 ${playText}  ·  弹幕 ${danmakuText}`
 }
 
+function compactMetaText(item: VideoDynamicItem): string {
+  return `播放 ${item.playText} · ${item.publishedLabel || "刚刚"}`
+}
+
 function subtitleText(item: VideoDynamicItem): string {
   if (item.authorAction && item.publishedLabel) {
     return `${item.authorAction} · ${item.publishedLabel}`
@@ -42,6 +48,11 @@ function subtitleText(item: VideoDynamicItem): string {
   if (item.authorAction) return item.authorAction
   return item.publishedLabel || "视频投稿"
 }
+
+const DOUBLE_CARD_COLUMNS = [
+  { size: { type: "flexible" as const, min: 0, max: 192 }, spacing: 12 },
+  { size: { type: "flexible" as const, min: 0, max: 192 } },
+]
 
 function resolveVideoUrl(item: VideoDynamicItem): string {
   const jumpUrl = String(item.jumpUrl ?? "").trim()
@@ -110,18 +121,27 @@ async function presentShareSheet(value: string): Promise<void> {
 
 function VideoDynamicCard(props: {
   item: VideoDynamicItem
-  isLast: boolean
-  shouldLoadMore: boolean
-  onLoadMore: () => void
   externalUrl: string
   onOpenAuthorUrl?: () => void
   onOpenExternalUrl?: () => void
   onPress?: () => void
+  compact?: boolean
+  embedded?: boolean
+  onAppear?: () => void
 }) {
   const { item } = props
-  const colorScheme = useColorScheme()
-  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
-  const cardShape = { type: "rect" as const, cornerRadius: 24, style: "continuous" as const }
+  const artwork = useVideoCoverArtwork(item.cover)
+  const compact = Boolean(props.compact)
+  const cardCornerRadius = compact ? 16 : 18
+  const compactCardHeight = 202
+  const cardShape = { type: "rect" as const, cornerRadius: cardCornerRadius, style: "continuous" as const }
+  const avatarSize = compact ? 22 : 38
+  const avatarRadius = compact ? 8 : 10
+  const compactCoverHeight = 108
+  const subtitle = subtitleText(item)
+  const footerStats = compact
+    ? compactMetaText(item)
+    : statsText(item.playText, item.danmakuText)
 
   async function copyLink() {
     if (!props.externalUrl) return
@@ -138,17 +158,14 @@ function VideoDynamicCard(props: {
       imageUrl={item.authorFace}
       resizable={true}
       scaleToFill={true}
-      frame={{ width: 38, height: 38 }}
-      clipShape={{ type: "rect", cornerRadius: 10 }}
+      frame={{ width: avatarSize, height: avatarSize }}
+      clipShape={{ type: "rect", cornerRadius: avatarRadius }}
       placeholder={<ProgressView progressViewStyle="circular" />}
     />
   )
 
   const headerContent = (
-    <HStack
-      spacing={10}
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-    >
+    <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
       {avatarContent}
       <VStack spacing={2} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
         <Text
@@ -165,111 +182,239 @@ function VideoDynamicCard(props: {
           lineLimit={1}
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         >
-          {subtitleText(item)}
+          {subtitle}
         </Text>
       </VStack>
     </HStack>
   )
 
-  const bodyContent = (
-    <HStack
-      spacing={10}
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-    >
+  const compactAuthorRow = (
+    <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      {avatarContent}
+      <Text
+        font="caption2"
+        foregroundStyle="#FB7299"
+        lineLimit={1}
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      >
+        {item.authorName}
+      </Text>
+      <Text
+        font="caption2"
+        foregroundStyle={item.badgeColor as any}
+        lineLimit={1}
+        padding={{ top: 3, bottom: 3, leading: 6, trailing: 6 }}
+        background={{
+          style: item.badgeBackgroundColor as any,
+          shape: { type: "capsule", style: "continuous" },
+        }}
+      >
+        {item.badgeText}
+      </Text>
+    </HStack>
+  )
+
+  const bodyContent = compact ? null : (
+    <HStack spacing={0} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
       <VStack spacing={14} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
-        <ZStack
-          frame={{ maxWidth: "infinity", height: 210 }}
-          background={{ style: "tertiarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}
-        >
-          <Image
-            imageUrl={item.cover}
-            resizable={true}
-            scaleToFill={true}
-            frame={{ maxWidth: "infinity", height: 210 }}
-            clipShape={{ type: "rect", cornerRadius: 14 }}
-            placeholder={<ProgressView progressViewStyle="circular" />}
-          />
-          <VStack
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
-            padding={8}
-          >
-            <Text
-              font="caption2"
-              foregroundStyle="white"
-              padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
-              background={{
-                style: "rgba(0,0,0,0.72)",
-                shape: { type: "capsule", style: "continuous" },
-              }}
-            >
-              {item.durationText || "--:--"}
-            </Text>
-          </VStack>
-        </ZStack>
-
-        <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+      <ZStack
+        frame={{ maxWidth: "infinity" }}
+        aspectRatio={{ value: 16 / 9, contentMode: "fit" }}
+      >
+        <VideoCoverImage
+          artwork={artwork}
+          coverUrl={item.cover}
+          cornerRadius={14}
+        />
+        <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }} padding={8}>
           <Text
-            font="headline"
-            lineLimit={2}
-            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            font="caption2"
+            foregroundStyle="white"
+            padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
+            background={{
+              style: "rgba(0,0,0,0.72)",
+              shape: { type: "capsule", style: "continuous" },
+            }}
           >
-            {item.title}
+            {item.durationText || "--:--"}
           </Text>
+        </VStack>
+      </ZStack>
 
-          <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-            <Text
-              font="caption"
-              foregroundStyle={item.badgeColor as any}
-              lineLimit={1}
-              padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
-              background={{
-                style: item.badgeBackgroundColor as any,
-                shape: { type: "capsule", style: "continuous" },
-              }}
-            >
-              {item.badgeText}
-            </Text>
-            <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
-              {statsText(item.playText, item.danmakuText)}
-            </Text>
-            <Spacer />
-          </HStack>
+      <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
+        <Text
+          font="headline"
+          lineLimit={2}
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        >
+          {item.title}
+        </Text>
+
+        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <Text
+            font="caption"
+            foregroundStyle={item.badgeColor as any}
+            lineLimit={1}
+            padding={{ top: 4, bottom: 4, leading: 8, trailing: 8 }}
+            background={{
+              style: item.badgeBackgroundColor as any,
+              shape: { type: "capsule", style: "continuous" },
+            }}
+          >
+            {item.badgeText}
+          </Text>
+          <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
+            {footerStats}
+          </Text>
+          <Spacer />
+        </HStack>
         </VStack>
       </VStack>
     </HStack>
   )
 
-  return (
-    <VStack
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      listRowInsets={{ top: 0, bottom: 0, leading: 16, trailing: 16 }}
-      listRowBackground={<EmptyView />}
-      listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
-      listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
-      onAppear={props.isLast && props.shouldLoadMore ? props.onLoadMore : undefined}
-    >
-      <ZStack
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        contentShape={cardShape}
-        clipShape={cardShape}
-        contextMenu={{
-          menuItems: <Group>
-            <Button title="复制链接" systemImage="link" action={() => void copyLink()} />
-            <Button title="分享链接" systemImage="square.and.arrow.up" action={() => void shareLink()} />
-          </Group>,
-        }}
-      >
-        <RoundedRectangle
-          cornerRadius={24}
-          fill={cardFill}
-          stroke="separator"
-          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        />
+  const cardContextMenu = {
+    menuItems: <Group>
+      <Button title="复制链接" systemImage="link" action={() => void copyLink()} />
+      <Button title="分享链接" systemImage="square.and.arrow.up" action={() => void shareLink()} />
+    </Group>,
+  }
 
+  const cardBody = (
+    <ZStack
+      frame={compact
+        ? { maxWidth: "infinity", height: compactCardHeight, alignment: "leading" as any }
+        : { maxWidth: "infinity", alignment: "leading" as any }}
+      contentShape={cardShape}
+      clipShape={cardShape}
+      contextMenu={compact && props.embedded ? undefined : cardContextMenu}
+    >
+      <VideoCardBackground dominantColor={artwork.dominantColor} cornerRadius={cardCornerRadius} />
+
+      {compact ? (
+        <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+          {props.onPress ? (
+            <VStack
+              frame={{ maxWidth: "infinity" }}
+              onTapGesture={props.onPress}
+            >
+              <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+                <CompactVideoCoverImage
+                  artwork={artwork}
+                  coverUrl={item.cover}
+                  height={compactCoverHeight}
+                />
+                <VStack
+                  frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+                  padding={6}
+                >
+                  <Text
+                    font="caption2"
+                    foregroundStyle="white"
+                    padding={{ top: 3, bottom: 3, leading: 6, trailing: 6 }}
+                    background={{
+                      style: "rgba(0,0,0,0.72)",
+                      shape: { type: "capsule", style: "continuous" },
+                    }}
+                  >
+                    {item.durationText || "--:--"}
+                  </Text>
+                </VStack>
+              </ZStack>
+            </VStack>
+          ) : props.onOpenExternalUrl ? (
+            <VStack
+              frame={{ maxWidth: "infinity" }}
+              onTapGesture={props.onOpenExternalUrl}
+            >
+              <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+                <CompactVideoCoverImage
+                  artwork={artwork}
+                  coverUrl={item.cover}
+                  height={compactCoverHeight}
+                />
+                <VStack
+                  frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+                  padding={6}
+                >
+                  <Text
+                    font="caption2"
+                    foregroundStyle="white"
+                    padding={{ top: 3, bottom: 3, leading: 6, trailing: 6 }}
+                    background={{
+                      style: "rgba(0,0,0,0.72)",
+                      shape: { type: "capsule", style: "continuous" },
+                    }}
+                  >
+                    {item.durationText || "--:--"}
+                  </Text>
+                </VStack>
+              </ZStack>
+            </VStack>
+          ) : (
+            <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+              <CompactVideoCoverImage
+                artwork={artwork}
+                coverUrl={item.cover}
+                height={compactCoverHeight}
+              />
+              <VStack
+                frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
+                padding={6}
+              >
+                <Text
+                  font="caption2"
+                  foregroundStyle="white"
+                  padding={{ top: 3, bottom: 3, leading: 6, trailing: 6 }}
+                  background={{
+                    style: "rgba(0,0,0,0.72)",
+                    shape: { type: "capsule", style: "continuous" },
+                  }}
+                >
+                  {item.durationText || "--:--"}
+                </Text>
+              </VStack>
+            </ZStack>
+          )}
+
+          <VStack
+            spacing={6}
+            padding={{ top: 8, bottom: 10, leading: 8, trailing: 8 }}
+            frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          >
+            <Text
+              font="footnote"
+              lineLimit={2}
+              frame={{ maxWidth: "infinity", minHeight: 34, alignment: "topLeading" as any }}
+            >
+              {item.title}
+            </Text>
+
+            {props.onOpenAuthorUrl ? (
+              <HStack
+                spacing={0}
+                frame={{ maxWidth: "infinity" }}
+                onTapGesture={props.onOpenAuthorUrl}
+              >
+                {compactAuthorRow}
+              </HStack>
+            ) : compactAuthorRow}
+
+            <Text
+              font="caption2"
+              foregroundStyle="secondaryLabel"
+              lineLimit={1}
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            >
+              {footerStats}
+            </Text>
+          </VStack>
+        </VStack>
+      ) : (
         <VStack
           spacing={14}
           padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
-          frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
         >
           <HStack spacing={10} frame={{ maxWidth: "infinity" as any }}>
             {props.onOpenAuthorUrl ? (
@@ -306,7 +451,34 @@ function VideoDynamicCard(props: {
             bodyContent
           )}
         </VStack>
-      </ZStack>
+      )}
+    </ZStack>
+  )
+
+  if (props.embedded) {
+    return (
+      <VStack
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        contentShape={cardShape}
+        clipShape={cardShape}
+        contextMenu={compact ? cardContextMenu : undefined}
+        onAppear={props.onAppear}
+      >
+        {cardBody}
+      </VStack>
+    )
+  }
+
+  return (
+    <VStack
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      listRowInsets={{ top: 0, bottom: 0, leading: 8, trailing: 8 }}
+      listRowBackground={<EmptyView />}
+      listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
+      listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+      onAppear={props.onAppear}
+    >
+      {cardBody}
     </VStack>
   )
 }
@@ -324,6 +496,7 @@ export function DynamicTabView(props: {
   followedAuthorsErrorMessage: string
   authorFilterRule: BiliAuthorFilterRule
   playbackMode: BiliPlaybackMode
+  cardLayoutMode: BiliCardLayoutMode
   isLoading: boolean
   errorMessage: string
   lastUpdatedAt: number | null
@@ -370,7 +543,7 @@ export function DynamicTabView(props: {
   const footerText = props.isFilterActive
     ? `${summary} · 已显示 ${props.items.length} / ${props.totalItemCount} 条`
     : `${summary} · 已加载 ${props.items.length} 条`
-
+  const FeedContainer = props.cardLayoutMode === "double" ? ScrollView : List
   return (
     <NavigationStack>
       <ScrollViewReader>
@@ -378,7 +551,7 @@ export function DynamicTabView(props: {
           scrollProxyRef.current = scrollProxy
 
           return (
-            <List
+            <FeedContainer
               navigationTitle="动态"
               navigationBarTitleDisplayMode="large"
               listRowSpacing={6}
@@ -507,23 +680,50 @@ export function DynamicTabView(props: {
                 </Section>
               ) : null}
 
-              {props.items.length > 0 ? (
+              {props.items.length > 0 && props.cardLayoutMode === "double" ? (
+                <LazyVGrid
+                  columns={DOUBLE_CARD_COLUMNS}
+                  alignment="center"
+                  spacing={6}
+                  frame={{ maxWidth: "infinity", alignment: "center" as any }}
+                >
+                  {props.items.map((item, index) => {
+                    const externalUrl = resolveVideoUrl(item)
+                    const authorUrl = resolveAuthorSpaceUrl(item)
+                    const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
+                    const isLastItem = index === props.items.length - 1
+
+                    return (
+                      <VideoDynamicCard
+                        key={item.id}
+                        embedded={true}
+                        compact={true}
+                        item={item}
+                        externalUrl={externalUrl}
+                        onOpenAuthorUrl={authorUrl ? () => { void openExternalUrl(authorUrl) } : undefined}
+                        onOpenExternalUrl={externalUrl ? () => { void openExternalUrl(externalUrl) } : undefined}
+                        onPress={canInlinePlay ? () => handleOpenItem(item) : undefined}
+                        onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
+                      />
+                    )
+                  })}
+                </LazyVGrid>
+              ) : props.items.length > 0 ? (
                 props.items.map((item, index) => {
                   const externalUrl = resolveVideoUrl(item)
                   const authorUrl = resolveAuthorSpaceUrl(item)
                   const canInlinePlay = props.playbackMode === "inline" && props.auth?.loginMethod === "cookie" && Boolean(props.auth?.cookieHeader)
+                  const isLastItem = index === props.items.length - 1
 
                   return (
                     <VideoDynamicCard
                       key={item.id}
                       item={item}
-                      isLast={index === props.items.length - 1}
-                      shouldLoadMore={props.hasMore && !props.isLoadingMore}
-                      onLoadMore={() => { void props.onLoadMore() }}
                       externalUrl={externalUrl}
                       onOpenAuthorUrl={authorUrl ? () => { void openExternalUrl(authorUrl) } : undefined}
                       onOpenExternalUrl={externalUrl ? () => { void openExternalUrl(externalUrl) } : undefined}
                       onPress={canInlinePlay ? () => handleOpenItem(item) : undefined}
+                      onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
                     />
                   )
                 })
@@ -588,7 +788,7 @@ export function DynamicTabView(props: {
                   </VStack>
                 </Section>
               ) : null}
-            </List>
+            </FeedContainer>
           )
         }}
       </ScrollViewReader>
