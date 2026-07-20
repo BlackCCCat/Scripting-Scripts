@@ -1,4 +1,4 @@
-import { Navigation, NavigationStack, List, Section, Button, Text, HStack, VStack, Spacer, Toolbar, ToolbarItem, Image } from 'scripting'
+import { NavigationLink, List, Section, Button, Text, HStack, VStack, Spacer, Toolbar, ToolbarItem, Image } from 'scripting'
 import { Person } from '../types'
 import { Avatar, RelationshipTag, EmptyState } from '../components'
 
@@ -7,15 +7,13 @@ const GROUP_ORDER = ['自己', '伴侣', '子女', '家人', '朋友', '同学',
 
 interface PersonPickerPageProps {
   persons: Person[]
-  onSelectPerson?: (person: Person) => void
   onCreatePerson: () => void | Promise<Person | void>
   title?: string
-  embedded?: boolean
+  onCancel?: () => void
+  destinationForPerson: (person: Person) => any
 }
 
-export function PersonPickerPage({ persons, onSelectPerson, onCreatePerson, title = '选择人物', embedded = false }: PersonPickerPageProps) {
-  const dismiss = Navigation.useDismiss()
-
+export function PersonPickerPage({ persons, onCreatePerson, title = '选择人物', onCancel, destinationForPerson }: PersonPickerPageProps) {
   // 排序逻辑与人物页保持一致：置顶优先 → 按关系分组 → 组内按姓名排序
   const byName = (a: Person, b: Person) => a.name.localeCompare(b.name, 'zh-CN')
   const pinned = [...persons].filter(p => p.isPinned).sort(byName)
@@ -40,19 +38,20 @@ export function PersonPickerPage({ persons, onSelectPerson, onCreatePerson, titl
 
   const sortedPersons = [...pinned, ...groupKeys.flatMap(key => grouped[key])]
 
-  const openPerson = (person: Person) => {
-    if (!embedded) {
-      dismiss()
-    }
-    onSelectPerson?.(person)
+  const createPerson = async () => {
+    await onCreatePerson()
   }
 
-  const createPerson = async () => {
-    const created = await onCreatePerson()
-    if (created) {
-      onSelectPerson?.(created)
-    }
-  }
+  const renderPersonRow = (person: Person) => (
+    <HStack spacing={12} frame={{ maxWidth: Infinity }} alignment="center">
+      <Avatar person={person} size={40} />
+      <VStack alignment="leading" spacing={2}>
+        <Text fontWeight="semibold">{person.name}</Text>
+        <RelationshipTag relationship={person.relationship} />
+      </VStack>
+      <Spacer />
+    </HStack>
+  )
 
   const content = (
     <List
@@ -62,11 +61,9 @@ export function PersonPickerPage({ persons, onSelectPerson, onCreatePerson, titl
         scrollIndicator="hidden"
         toolbar={
           <Toolbar>
-            {!embedded ? (
-              <ToolbarItem placement="topBarLeading">
-                <Button key="返回" action={dismiss}>
-                  <Image systemName="xmark" fontWeight="semibold" />
-                </Button>
+            {onCancel ? (
+              <ToolbarItem placement="topBarTrailing">
+                <Button title="" systemImage="xmark" role="cancel" foregroundStyle="red" action={onCancel} />
               </ToolbarItem>
             ) : null}
           </Toolbar>
@@ -86,17 +83,9 @@ export function PersonPickerPage({ persons, onSelectPerson, onCreatePerson, titl
         {sortedPersons.length > 0 ? (
           <Section title="现有人物">
             {sortedPersons.map(person => (
-              <Button key={person.id} action={() => openPerson(person)}>
-                <HStack spacing={12} frame={{ maxWidth: Infinity }} alignment="center">
-                  <Avatar person={person} size={40} />
-                  <VStack alignment="leading" spacing={2}>
-                    <Text fontWeight="semibold">{person.name}</Text>
-                    <RelationshipTag relationship={person.relationship} />
-                  </VStack>
-                  <Spacer />
-                  <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
-                </HStack>
-              </Button>
+              <NavigationLink key={person.id} destination={destinationForPerson(person)}>
+                {renderPersonRow(person)}
+              </NavigationLink>
             ))}
           </Section>
         ) : (
@@ -105,9 +94,5 @@ export function PersonPickerPage({ persons, onSelectPerson, onCreatePerson, titl
       </List>
   )
 
-  return embedded ? content : (
-    <NavigationStack>
-      {content}
-    </NavigationStack>
-  )
+  return content
 }

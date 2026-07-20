@@ -325,7 +325,6 @@ type ImageColor = {
 
 type DominantColorItem = {
   color: ImageColor
-  fraction: number
 }
 
 type PersonCardArtwork = {
@@ -673,7 +672,7 @@ function GradientCardBackground({ color, cornerRadius, photoSide = 'left' }: { c
   )
 }
 
-function formatDateShortWithWeekday(date: Date): string {
+function formatDateShort(date: Date): string {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
 }
 
@@ -805,7 +804,7 @@ interface AnniversaryWidgetCardProps {
 function WidgetCardContent({ item, size, onToggleCountdownFormat }: AnniversaryWidgetCardProps) {
   const artwork = useCardArtwork(item.event, item.person)
   const targetDateText = buildTargetDateText(item.event, item.nextDate, item.daysLeft)
-  const shortDateText = formatDateShortWithWeekday(item.nextDate)
+  const shortDateText = formatDateShort(item.nextDate)
   const cornerRadius = size === 'systemSmall' ? 22 : 24
   const avatarShape = item.event.avatarShape ?? 'circle'
   const avatarPosition: AnniversaryAvatarPosition = item.event.avatarPosition ?? 'left'
@@ -846,7 +845,6 @@ function MediumWidgetCardContent({
   cornerRadius,
   avatarPosition,
   onToggleCountdownFormat,
-  compact = false,
   variant = 'standalone'
 }: {
   item: OccurrenceInfo
@@ -855,10 +853,9 @@ function MediumWidgetCardContent({
   cornerRadius: number
   avatarPosition: AnniversaryAvatarPosition
   onToggleCountdownFormat?: () => void
-  compact?: boolean
   variant?: 'standalone' | 'largeTop' | 'largeBottom'
 }) {
-  const height = variant === 'standalone' ? (compact ? 174 : 184) : 190
+  const height = variant === 'standalone' ? 184 : 190
   const backgroundCornerRadius = variant === 'standalone' ? cornerRadius : 0
   const makePhotoClipShape = () => {
     if (variant === 'standalone') {
@@ -916,9 +913,9 @@ function MediumWidgetCardContent({
                 frame={{ maxWidth: Infinity, maxHeight: Infinity, alignment: textAlignment as any }}
                 padding={{ top: 10, bottom: 10, leading: 12, trailing: 12 }}
               >
-              <CardTitleBlock event={item.event} person={item.person} nameFont={compact ? 21 : 23} typeFont={compact ? 17 : 18} alignment={textAlignment} />
-              <CardDateLine text={targetDateText} font={compact ? 14 : 15} alignment={textAlignment} />
-              <CountdownText event={item.event} nextDate={item.nextDate} daysLeft={item.daysLeft} font={compact ? 34 : 39} suffixFont={compact ? 13 : 14} onToggleCountdownFormat={onToggleCountdownFormat} />
+              <CardTitleBlock event={item.event} person={item.person} nameFont={23} typeFont={18} alignment={textAlignment} />
+              <CardDateLine text={targetDateText} font={15} alignment={textAlignment} />
+              <CountdownText event={item.event} nextDate={item.nextDate} daysLeft={item.daysLeft} font={39} suffixFont={14} onToggleCountdownFormat={onToggleCountdownFormat} />
             </VStack>
             </ZStack>
           )
@@ -1039,7 +1036,6 @@ export function AnniversaryWidgetCard({ item, size, onSelected, onDelete, onTogg
 
 interface CompactEventRowProps {
   event: AnniversaryEvent
-  person: Person
   onSelected?: () => void
 }
 

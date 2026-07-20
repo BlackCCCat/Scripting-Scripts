@@ -44,7 +44,7 @@ export function PhotoCropPage({ image, cropAspectRatio = MEDIUM_PHOTO_ASPECT }: 
         toolbar={
           <Toolbar>
             <ToolbarItem placement="topBarLeading">
-              <Button title="取消" role="cancel" action={() => dismiss(null)} />
+              <Button title="" systemImage="xmark" role="cancel" foregroundStyle="red" action={() => dismiss(null)} />
             </ToolbarItem>
             <ToolbarItem placement="topBarTrailing">
               <Button title="使用" systemImage="checkmark" action={handleSave} disabled={isSaving} />

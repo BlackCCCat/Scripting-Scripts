@@ -75,11 +75,11 @@ function normalizeStoredPath(path: string | null | undefined, useICloud: boolean
   return path
 }
 
-export function isICloudAvailable(): boolean {
+function isICloudAvailable(): boolean {
   return !!(FileManager.isiCloudEnabled && FileManager.iCloudDocumentsDirectory)
 }
 
-export function isICloudSyncEnabled(): boolean {
+function isICloudSyncEnabled(): boolean {
   return !!Storage.get<boolean>(ICLOUD_SYNC_KEY, { shared: true })
 }
 

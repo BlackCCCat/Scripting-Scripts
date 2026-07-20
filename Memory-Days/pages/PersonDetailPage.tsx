@@ -114,7 +114,6 @@ export function PersonDetailPage({
               <CompactEventRow
                 key={event.id}
                 event={event}
-                person={livePerson}
                 onSelected={() => onEditEvent(event)}
               />
             ))

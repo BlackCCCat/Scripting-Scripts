@@ -85,6 +85,7 @@ export function HomePage({ events, persons, settings, onClose, onSelectEvent, on
   const [eventsToDelete, setEventsToDelete] = useState<AnniversaryEvent[]>([])
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [showAddFlow, setShowAddFlow] = useState(false)
+  const [addFlowKey, setAddFlowKey] = useState(0)
 
   const requestDeleteEvent = (event: AnniversaryEvent) => {
     setEventsToDelete([event])
@@ -106,6 +107,11 @@ export function HomePage({ events, persons, settings, onClose, onSelectEvent, on
     }
   }
 
+  const openAddFlow = () => {
+    setAddFlowKey(addFlowKey + 1)
+    setShowAddFlow(true)
+  }
+
   const occurrences = buildOccurrenceList(
     events,
     (id) => persons.find(p => p.id === id),
@@ -124,108 +130,111 @@ export function HomePage({ events, persons, settings, onClose, onSelectEvent, on
 
   return (
     <NavigationStack>
-      <List
-        listStyle="insetGroup"
-        navigationTitle="时光纪念"
-        navigationBarTitleDisplayMode="large"
-        scrollIndicator="hidden"
-        listRowSpacing={10}
-        listRowSeparator={{ visibility: 'hidden', edges: 'all' as any }}
-        listSectionSeparator={{ visibility: 'hidden', edges: 'all' as any }}
-        navigationDestination={{
-          isPresented: showAddFlow,
-          onChanged: (value) => {
-            if (!value) setShowAddFlow(false)
-          },
-          content: (
-            <AddEventFlowPage
-              persons={persons}
-              settings={settings}
-              onSave={onSaveEvent}
-              onCreatePerson={onCreatePersonForEvent}
+        <List
+          listStyle="insetGroup"
+          navigationTitle="时光纪念"
+          navigationBarTitleDisplayMode="large"
+          scrollIndicator="hidden"
+          listRowSpacing={10}
+          listRowSeparator={{ visibility: 'hidden', edges: 'all' as any }}
+          listSectionSeparator={{ visibility: 'hidden', edges: 'all' as any }}
+          navigationDestination={{
+            isPresented: showAddFlow,
+            onChanged: (value: boolean) => setShowAddFlow(value),
+            content: (
+              <AddEventFlowPage
+                key={addFlowKey}
+                persons={persons}
+                settings={settings}
+                onCancel={() => setShowAddFlow(false)}
+                onSave={async (event) => {
+                  await onSaveEvent(event)
+                  setShowAddFlow(false)
+                }}
+                onCreatePerson={onCreatePersonForEvent}
+              />
+            )
+          }}
+          toolbar={
+            <Toolbar>
+              <ToolbarItem placement="topBarLeading">
+                <Button key="关闭" action={onClose}>
+                  <Image systemName="xmark" foregroundStyle="red" fontWeight="semibold" />
+                </Button>
+              </ToolbarItem>
+              <ToolbarItem placement="topBarTrailing">
+                <Button
+                  key="添加时光纪念"
+                  action={openAddFlow}
+                >
+                  <Image systemName="plus" fontWeight="semibold" />
+                </Button>
+              </ToolbarItem>
+            </Toolbar>
+          }
+          alert={{
+            title: '删除时光纪念',
+            message: <Text>{eventsToDelete.length > 1 ? '确定要删除这张大卡片里的时光纪念吗？' : '确定要删除这条时光纪念吗？'}</Text>,
+            isPresented: showDeleteAlert,
+            onChanged: setShowDeleteAlert,
+            actions: (
+              <>
+                <Button title="取消" role="cancel" action={() => setShowDeleteAlert(false)} />
+                <Button title="删除" role="destructive" action={confirmDeleteEvent} />
+              </>
+            )
+          }}
+        >
+          {visibleOccurrences.length === 0 ? (
+            <EmptyState
+              title="还没有时光纪念"
+              subtitle="点击右上角添加重要的人与日子"
+              systemImage="heart.text.square"
             />
-          )
-        }}
-        toolbar={
-          <Toolbar>
-            <ToolbarItem placement="topBarLeading">
-              <Button key="关闭" action={onClose}>
-                <Image systemName="xmark" foregroundStyle="red" fontWeight="semibold" />
-              </Button>
-            </ToolbarItem>
-            <ToolbarItem placement="topBarTrailing">
-              <Button
-                key="添加时光纪念"
-                action={() => setShowAddFlow(true)}
-              >
-                <Image systemName="plus" fontWeight="semibold" />
-              </Button>
-            </ToolbarItem>
-          </Toolbar>
-        }
-        alert={{
-          title: '删除时光纪念',
-          message: <Text>{eventsToDelete.length > 1 ? '确定要删除这张大卡片里的时光纪念吗？' : '确定要删除这条时光纪念吗？'}</Text>,
-          isPresented: showDeleteAlert,
-          onChanged: setShowDeleteAlert,
-          actions: (
+          ) : (
             <>
-              <Button title="取消" role="cancel" action={() => setShowDeleteAlert(false)} />
-              <Button title="删除" role="destructive" action={confirmDeleteEvent} />
-            </>
-          )
-        }}
-      >
-        {visibleOccurrences.length === 0 ? (
-          <EmptyState
-            title="还没有时光纪念"
-            subtitle="点击右上角添加重要的人与日子"
-            systemImage="heart.text.square"
-          />
-        ) : (
-          <>
-            {SIZE_SECTIONS.map(section => (
-              <Section key={section.size} title={section.title}>
-                {groupedBySize[section.size].length > 0 ? (
-                  section.size === 'systemLarge' ? (
-                    groupLargeOccurrences(groupedBySize[section.size]).map(group => (
-                      <AnniversaryLargeWidgetCard
-                        key={group.map(item => item.event.id).join('-')}
-                        items={group}
-                        onSelected={onSelectEvent}
-                        onDelete={() => requestDeleteEvents(group)}
-                        onTogglePin={onTogglePinEvent}
-                        onToggleCountdownFormat={onToggleCountdownFormatEvent}
-                      />
-                    ))
+              {SIZE_SECTIONS.map(section => (
+                <Section key={section.size} title={section.title}>
+                  {groupedBySize[section.size].length > 0 ? (
+                    section.size === 'systemLarge' ? (
+                      groupLargeOccurrences(groupedBySize[section.size]).map(group => (
+                        <AnniversaryLargeWidgetCard
+                          key={group.map(item => item.event.id).join('-')}
+                          items={group}
+                          onSelected={onSelectEvent}
+                          onDelete={() => requestDeleteEvents(group)}
+                          onTogglePin={onTogglePinEvent}
+                          onToggleCountdownFormat={onToggleCountdownFormatEvent}
+                        />
+                      ))
+                    ) : (
+                      groupedBySize[section.size].map(item => (
+                        <AnniversaryWidgetCard
+                          key={item.event.id}
+                          item={item}
+                          size={getSingleWidgetCardSize(section.size)}
+                          onSelected={() => onSelectEvent(item.event)}
+                          onDelete={() => requestDeleteEvent(item.event)}
+                          onTogglePin={() => onTogglePinEvent(item.event)}
+                          onToggleCountdownFormat={() => onToggleCountdownFormatEvent(item.event)}
+                        />
+                      ))
+                    )
                   ) : (
-                    groupedBySize[section.size].map(item => (
-                      <AnniversaryWidgetCard
-                        key={item.event.id}
-                        item={item}
-                        size={getSingleWidgetCardSize(section.size)}
-                        onSelected={() => onSelectEvent(item.event)}
-                        onDelete={() => requestDeleteEvent(item.event)}
-                        onTogglePin={() => onTogglePinEvent(item.event)}
-                        onToggleCountdownFormat={() => onToggleCountdownFormatEvent(item.event)}
-                      />
-                    ))
-                  )
-                ) : (
-                  <Text
-                    foregroundStyle="tertiaryLabel"
-                    font={14}
-                    padding={{ vertical: 12, horizontal: 8 }}
-                    listRowBackground={<EmptyView />}
-                  >
-                    {section.emptyText}
-                  </Text>
-                )}
-              </Section>
-            ))}
-          </>
-        )}
-      </List>
+                    <Text
+                      foregroundStyle="tertiaryLabel"
+                      font={14}
+                      padding={{ vertical: 12, horizontal: 8 }}
+                      listRowBackground={<EmptyView />}
+                    >
+                      {section.emptyText}
+                    </Text>
+                  )}
+                </Section>
+              ))}
+            </>
+          )}
+        </List>
     </NavigationStack>
   )
 }

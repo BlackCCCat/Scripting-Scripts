@@ -1,9 +1,10 @@
-import { VStack, HStack, Text, Image, Widget, Spacer, Color, ZStack, GeometryReader, RoundedRectangle, gradient } from 'scripting'
+import { VStack, HStack, Text, Image, Widget, Spacer, Color, ZStack, GeometryReader, RoundedRectangle, gradient, Button } from 'scripting'
 import { AppData, AnniversaryEvent, Person } from './types'
 import { loadAppData } from './storage'
 import { resolveWidgetAvatarPath } from './widgetAvatar'
-import { buildOccurrenceList, getEffectiveType, getWeddingAnniversaryName, getWeddingNameColor } from './dateUtils'
+import { buildOccurrenceList, formatElapsedYearsAndDays, getEffectiveType, getWeddingAnniversaryName, getWeddingNameColor } from './dateUtils'
 import { CapsuleTag, RELATIONSHIP_STYLES, DEFAULT_RELATIONSHIP_STYLE } from './components'
+import { ToggleCountdownFormatIntent } from './app_intents'
 
 // 每种尺寸默认显示的时光纪念数量
 const FAMILY_LIMITS: Record<string, number> = {
@@ -53,16 +54,21 @@ interface WidgetEventCard {
 }
 
 // 根据当前 widget 尺寸获取条数与布局参数
+function getNormalizedWidgetFamily(): 'systemSmall' | 'systemMedium' | 'systemLarge' | null {
+  const family = Widget.family as string
+  if (family === 'small' || family === 'systemSmall') return 'systemSmall'
+  if (family === 'medium' || family === 'systemMedium') return 'systemMedium'
+  if (family === 'large' || family === 'systemLarge') return 'systemLarge'
+  return null
+}
+
 function getDisplayLimit(): number {
-  return FAMILY_LIMITS[Widget.family as string] ?? 1
+  const family = getNormalizedWidgetFamily()
+  return family ? FAMILY_LIMITS[family] : 1
 }
 
 function getWidgetSizeForFamily(): AnniversaryEvent['widgetSize'] | null {
-  const family = Widget.family as string
-  if (family === 'systemSmall') return 'systemSmall'
-  if (family === 'systemMedium') return 'systemMedium'
-  if (family === 'systemLarge') return 'systemLarge'
-  return null
+  return getNormalizedWidgetFamily()
 }
 
 // 将十六进制颜色转为带透明度的 rgba
@@ -85,7 +91,6 @@ type ImageColor = {
 
 type DominantColorItem = {
   color: ImageColor
-  fraction: number
 }
 
 const widgetGradientCache = new Map<string, ImageColor | null>()
@@ -219,7 +224,7 @@ function getPersonFallbackColor(person: Person): string {
 }
 
 // 短日期格式：6月18日 · 星期四
-function formatDateShortWithWeekday(date: Date): string {
+function formatDateShort(date: Date): string {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
 }
 
@@ -343,11 +348,6 @@ function SmallFullWatermark({ item }: { item: Occurrence }) {
   )
 }
 
-// 倒计天数显示：0 天显示为“今天”
-function formatDaysLeft(daysLeft: number): string {
-  return daysLeft === 0 ? '今天' : String(daysLeft)
-}
-
 // 小号组件天数字号：位数越多字号越小，避免 4 位数被截断
 function getSmallDaysFont(daysLeft: number): number {
   if (daysLeft === 0) return 48
@@ -355,6 +355,29 @@ function getSmallDaysFont(daysLeft: number): number {
   if (digits <= 2) return 80
   if (digits === 3) return 64
   return 48
+}
+
+function buildWidgetCountdownParts(item: Occurrence) {
+  const showYearsAndDays = item.event.showYearsAndDays ?? false
+  if (item.daysLeft === 0) {
+    return { main: '今天', suffix: '', color: 'systemRed' as Color, canToggle: false }
+  }
+  if (item.daysLeft > 0) {
+    return {
+      main: showYearsAndDays && item.daysLeft >= 365 ? formatElapsedYearsAndDays(new Date(), item.nextDate) : String(item.daysLeft),
+      suffix: showYearsAndDays && item.daysLeft >= 365 ? '后' : '天后',
+      color: 'accentColor' as Color,
+      canToggle: item.daysLeft >= 365
+    }
+  }
+
+  const absDays = Math.abs(item.daysLeft)
+  return {
+    main: showYearsAndDays && absDays >= 365 ? formatElapsedYearsAndDays(item.nextDate, new Date()) : String(absDays),
+    suffix: showYearsAndDays && absDays >= 365 ? '前' : '天前',
+    color: 'secondaryLabel' as Color,
+    canToggle: absDays >= 365
+  }
 }
 
 function getPhotoPath(item: Occurrence): string | null {
@@ -417,8 +440,58 @@ function getEventWidgetSize(event: AnniversaryEvent): AnniversaryEvent['widgetSi
   return event.widgetSize ?? 'systemMedium'
 }
 
+function normalizeCardName(value: unknown): string {
+  let text = String(value ?? '')
+  if (text.includes('%')) {
+    try {
+      text = decodeURIComponent(text)
+    } catch {
+      // 保留原始参数继续匹配。
+    }
+  }
+  return text
+    .replace(/\u00a0/g, ' ')
+    .replace(/\u3000/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function unquoteCardName(value: string): string {
+  const text = normalizeCardName(value)
+  const first = text[0]
+  const last = text[text.length - 1]
+  if (
+    text.length >= 2 &&
+    ((first === '"' && last === '"') ||
+      (first === "'" && last === "'") ||
+      (first === '“' && last === '”') ||
+      (first === '‘' && last === '’'))
+  ) {
+    return normalizeCardName(text.slice(1, -1))
+  }
+  return text
+}
+
+function readWidgetParameter(): string {
+  const raw = normalizeCardName(Widget.parameter)
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'string') return unquoteCardName(parsed)
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>
+      return unquoteCardName(
+        String(record.cardName ?? record.name ?? record.parameter ?? record.value ?? record.title ?? '')
+      )
+    }
+  } catch {
+    // 普通文本参数不需要 JSON 解析。
+  }
+  return unquoteCardName(raw)
+}
+
 function getCardName(events: AnniversaryEvent[]): string {
-  return (events.find(event => (event.cardName ?? '').trim().length > 0)?.cardName ?? '').trim()
+  return normalizeCardName(events.find(event => normalizeCardName(event.cardName).length > 0)?.cardName)
 }
 
 function chunkPairs<T>(items: T[]): T[][] {
@@ -479,11 +552,13 @@ function selectWidgetEvents(events: AnniversaryEvent[], targetSize: AnniversaryE
     ? buildLargeEventCards(events)
     : buildSingleEventCards(events, targetSize)
 
-  if (parameter) {
-    return cards
-      .filter(card => card.name === parameter)
-      .flatMap(card => card.events)
+  const normalizedParameter = normalizeCardName(parameter)
+  if (normalizedParameter) {
+    return cards.find(card => normalizeCardName(card.name) === normalizedParameter)?.events ?? []
   }
+
+  const unnamedCard = cards.find(card => card.name.length === 0)
+  if (unnamedCard) return unnamedCard.events
 
   return cards.length === 1 ? cards[0].events : []
 }
@@ -601,29 +676,30 @@ function EventSubtitleTags({ item }: { item: Occurrence }) {
 }
 
 function CountdownText({ item, font, suffixFont }: { item: Occurrence; font: number; suffixFont: number }) {
-  const daysColor: Color = item.daysLeft === 0 ? 'systemRed' : (item.daysLeft > 0 ? 'accentColor' : 'secondaryLabel')
-  const suffix = item.daysLeft === 0 ? '' : (item.daysLeft > 0 ? '天后' : '天前')
-  return (
+  const parts = buildWidgetCountdownParts(item)
+  const content = (
     <HStack spacing={2} alignment="firstTextBaseline">
-      <Text fontWeight="bold" fontDesign="rounded" font={font} foregroundStyle={daysColor} lineLimit={1} minScaleFactor={0.55}>
-        {formatDaysLeft(Math.abs(item.daysLeft))}
+      <Text fontWeight="bold" fontDesign="rounded" font={font} foregroundStyle={parts.color} lineLimit={1} minScaleFactor={0.55}>
+        {parts.main}
       </Text>
-      {suffix ? <Text fontWeight="medium" font={suffixFont} foregroundStyle={daysColor}>{suffix}</Text> : null}
+      {parts.suffix ? <Text fontWeight="medium" font={suffixFont} foregroundStyle={parts.color}>{parts.suffix}</Text> : null}
     </HStack>
   )
+  return parts.canToggle ? <Button intent={ToggleCountdownFormatIntent(item.event.id)} buttonStyle="plain">{content}</Button> : content
 }
 
 function SmallCountdownText({ item }: { item: Occurrence }) {
-  const daysColor: Color = item.daysLeft === 0 ? 'systemRed' : (item.daysLeft > 0 ? 'accentColor' : 'secondaryLabel')
-  const suffix = item.daysLeft === 0 ? '' : (item.daysLeft > 0 ? '天后' : '天前')
-  return (
+  const parts = buildWidgetCountdownParts(item)
+  const font = parts.main.includes('年') ? 30 : Math.min(60, getSmallDaysFont(item.daysLeft))
+  const content = (
     <HStack spacing={2} alignment="firstTextBaseline">
-      <Text fontWeight="bold" fontDesign="rounded" font={Math.min(60, getSmallDaysFont(item.daysLeft))} foregroundStyle={daysColor} lineLimit={1} minScaleFactor={0.45}>
-        {item.daysLeft === 0 ? '今天' : Math.abs(item.daysLeft)}
+      <Text fontWeight="bold" fontDesign="rounded" font={font} foregroundStyle={parts.color} lineLimit={1} minScaleFactor={0.45}>
+        {parts.main}
       </Text>
-      {suffix ? <Text fontWeight="semibold" font={15} foregroundStyle={daysColor}>{suffix}</Text> : null}
+      {parts.suffix ? <Text fontWeight="semibold" font={15} foregroundStyle={parts.color}>{parts.suffix}</Text> : null}
     </HStack>
   )
+  return parts.canToggle ? <Button intent={ToggleCountdownFormatIntent(item.event.id)} buttonStyle="plain">{content}</Button> : content
 }
 
 function MediumCardPart({
@@ -635,7 +711,7 @@ function MediumCardPart({
   height: number
   variant?: 'standalone' | 'largeTop' | 'largeBottom'
 }) {
-  const dateText = formatDateShortWithWeekday(item.nextDate)
+  const dateText = formatDateShort(item.nextDate)
   const avatarPosition = item.event.avatarPosition ?? 'left'
   const cornerRadius = variant === 'standalone' ? 24 : 0
 
@@ -694,7 +770,7 @@ function MediumCardPart({
 }
 
 function SmallWidgetView({ item }: { item: Occurrence }) {
-  const dateText = formatDateShortWithWeekday(item.nextDate)
+  const dateText = formatDateShort(item.nextDate)
   const shape = item.event.avatarShape === 'rounded'
     ? { type: 'rect' as const, cornerRadius: 16, style: 'continuous' as const }
     : 'circle' as const
@@ -767,7 +843,7 @@ function LargeWidgetView({ items }: { items: Occurrence[] }) {
 
 // 根视图：按尺寸决定展示数量与布局
 function WidgetView({ occurrences }: { occurrences: Occurrence[] }) {
-  const family = Widget.family as string
+  const family = getNormalizedWidgetFamily()
   const items = occurrences.slice(0, getDisplayLimit())
   const cornerRadius = family === 'systemSmall' ? 22 : 24
 
@@ -830,21 +906,15 @@ async function prepareOccurrences(): Promise<Occurrence[]> {
   }
 
   const persons = await resolvePersonsWidgetAvatars(data.persons)
-  const parameter = (Widget.parameter ?? '').trim()
+  const parameter = readWidgetParameter()
   const targetSize = getWidgetSizeForFamily()
   const sourceEvents = selectWidgetEvents(data.events, targetSize, parameter)
   const events = await resolveEventsWidgetPhotos(sourceEvents)
   const personMap = new Map(persons.map(p => [p.id, p]))
   const list = buildOccurrenceList(events, id => personMap.get(id), new Date()) as Occurrence[]
 
-  if (targetSize === 'systemLarge') {
-    const occurrenceMap = new Map(list.map(item => [item.event.id, item]))
-    return events.map(event => occurrenceMap.get(event.id)).filter(Boolean) as Occurrence[]
-  }
-
-  const pinned = list.filter(item => item.event.isPinned && item.daysLeft >= 0).sort((a, b) => a.daysLeft - b.daysLeft)
-  const upcoming = list.filter(item => !item.event.isPinned && item.daysLeft >= 0).sort((a, b) => a.daysLeft - b.daysLeft)
-  return [...pinned, ...upcoming]
+  const occurrenceMap = new Map(list.map(item => [item.event.id, item]))
+  return events.map(event => occurrenceMap.get(event.id)).filter(Boolean) as Occurrence[]
 }
 
 // 异步加载后呈现小组件

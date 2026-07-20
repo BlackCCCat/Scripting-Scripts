@@ -53,12 +53,12 @@ interface EventEditorPageProps {
   onSave: (event: AnniversaryEvent | AnniversaryEvent[]) => void | Promise<void>
   onDelete?: (event: AnniversaryEvent | AnniversaryEvent[]) => void | Promise<void>
   embedded?: boolean
+  onCancel?: () => void
 }
 
-export function EventEditorPage({ event, pairedEvent, person, secondPerson, settings, initialWidgetSize, onSave, onDelete, embedded = false }: EventEditorPageProps) {
+export function EventEditorPage({ event, pairedEvent, person, secondPerson, settings, initialWidgetSize, onSave, onDelete, embedded = false, onCancel }: EventEditorPageProps) {
   const dismiss = Navigation.useDismiss()
   const isNew = !event
-  const isLargeLocked = !isNew && event?.widgetSize === 'systemLarge'
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
 
   const handleDelete = async () => {
@@ -114,7 +114,7 @@ export function EventEditorPage({ event, pairedEvent, person, secondPerson, sett
   }
   const [repeatType, setRepeatType] = useState<'none' | 'yearly' | 'monthly'>(getInitialRepeatType())
   const [remindOnDay, setRemindOnDay] = useState(event?.remindOnDay ?? settings.defaultRemindOnDay)
-  const [widgetSize, setWidgetSize] = useState<AnniversaryWidgetSize>(event?.widgetSize ?? initialWidgetSize ?? 'systemMedium')
+  const widgetSize: AnniversaryWidgetSize = event?.widgetSize ?? initialWidgetSize ?? 'systemMedium'
   const [cardName, setCardName] = useState(event?.cardName ?? pairedEvent?.cardName ?? '')
   const [denseWatermarkEnabled, setDenseWatermarkEnabled] = useState(event?.denseWatermarkEnabled ?? pairedEvent?.denseWatermarkEnabled ?? true)
   const [widgetGradientEnabled, setWidgetGradientEnabled] = useState(event?.widgetGradientEnabled ?? pairedEvent?.widgetGradientEnabled ?? false)
@@ -168,7 +168,7 @@ export function EventEditorPage({ event, pairedEvent, person, secondPerson, sett
 
   const MIN_ADVANCE_DAYS = 1
   const MAX_ADVANCE_DAYS = 30
-  const finalWidgetSize: AnniversaryWidgetSize = isLargeLocked ? 'systemLarge' : widgetSize
+  const finalWidgetSize: AnniversaryWidgetSize = widgetSize
   const effectiveAvatarShape: AnniversaryAvatarShape = finalWidgetSize === 'systemSmall' ? avatarShape : 'rounded'
   const displayPerson: Person = {
     ...person,
@@ -436,28 +436,6 @@ export function EventEditorPage({ event, pairedEvent, person, secondPerson, sett
             value={widgetGradientEnabled}
             onChanged={setWidgetGradientEnabled}
           />
-          {isLargeLocked ? (
-            <HStack>
-              <Text>尺寸</Text>
-              <Spacer />
-              <Text foregroundStyle="secondaryLabel">大</Text>
-            </HStack>
-          ) : (
-            <Picker
-              title="尺寸"
-              value={widgetSize}
-              onChanged={(v: string) => {
-                const nextSize = v as AnniversaryWidgetSize
-                setWidgetSize(nextSize)
-                setAvatarShape(nextSize === 'systemSmall' ? 'circle' : 'rounded')
-              }}
-              pickerStyle="segmented"
-            >
-              {isNew ? <Text tag="systemLarge">大</Text> : null}
-              <Text tag="systemMedium">中</Text>
-              <Text tag="systemSmall">小</Text>
-            </Picker>
-          )}
           {finalWidgetSize === 'systemSmall' ? (
             <Picker
               title="照片形状"
@@ -503,7 +481,14 @@ export function EventEditorPage({ event, pairedEvent, person, secondPerson, sett
               </ToolbarItem>
             ) : null}
             <ToolbarItem placement="topBarTrailing">
-              <Button title="保存" systemImage="square.and.arrow.down" fontWeight="semibold" action={handleSave} />
+              {embedded && onCancel ? (
+                <HStack spacing={8}>
+                  <Button title="" systemImage="xmark" role="cancel" foregroundStyle="red" action={onCancel} />
+                  <Button title="保存" systemImage="square.and.arrow.down" fontWeight="semibold" action={handleSave} />
+                </HStack>
+              ) : (
+                <Button title="保存" systemImage="square.and.arrow.down" fontWeight="semibold" action={handleSave} />
+              )}
             </ToolbarItem>
           </Toolbar>
         }
@@ -520,7 +505,7 @@ export function EventEditorPage({ event, pairedEvent, person, secondPerson, sett
           )
         }}
       >
-        {finalWidgetSize === 'systemLarge' ? renderHomeCardSection('共用首页卡片') : null}
+        {renderHomeCardSection(finalWidgetSize === 'systemLarge' ? '共用首页卡片' : '首页卡片')}
 
         <Section title={finalWidgetSize === 'systemLarge' ? '第一条时光纪念' : undefined}>
           <VStack spacing={0} listRowSeparator={{ visibility: 'hidden', edges: 'bottom' }}>
@@ -661,7 +646,6 @@ export function EventEditorPage({ event, pairedEvent, person, secondPerson, sett
         </Section>
 
         {finalWidgetSize !== 'systemLarge' ? renderReminderSection('提醒') : null}
-        {finalWidgetSize !== 'systemLarge' ? renderHomeCardSection('首页卡片') : null}
 
         {finalWidgetSize === 'systemLarge' ? (
           <Section title="第二条时光纪念">
