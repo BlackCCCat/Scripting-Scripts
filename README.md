@@ -20,6 +20,7 @@
 - [Gas Info](./ZDict)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Gas-Info.zip)
 - [PhotoSlide](./PhotoSlide): [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/PhotoSlide.zip)
 - [WLOC-Helper](./WLOC-Helper)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/WLOC-Helper.zip)
+- [Memory-Days](./Memory-Days)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Memory-Days.zip)
 
 
 
@@ -39,3 +40,4 @@
 - [Gas Info](./ZDict) 数据来源为[汽油价格](http://www.qiyoujiage.com)，UI几乎照搬[今日油价](https://apps.apple.com/us/app/%E4%BB%8A%E6%97%A5%E6%B2%B9%E4%BB%B7-%E6%B2%B9%E4%BB%B7%E6%9F%A5%E8%AF%A2%E6%B1%BD%E6%B2%B9%E4%BB%B7%E6%A0%BC%E5%AE%9E%E6%97%B6%E5%8A%A0%E6%B2%B9%E8%A1%8C%E6%83%85%E6%9F%A5%E8%AF%A2/id6757325239)
 - [PhotoSlide](./PhotoSlide) 修改自`scripting`群组中开发者分享的`图片管理器`脚本
 - [WLOC-Helper](./WLOC-Helper) 修改自`scripting`群组中`@Waa404`的脚本，修改定位功能基于 [wloc项目](https://github.com/Yu9191/wloc) 实现
+- [Memory-Days](./Memory-Days) 人物及纪念日添加的操作逻辑复用`scripting`群组中`@Waa404`的脚本，重新设计的UI和小组件
