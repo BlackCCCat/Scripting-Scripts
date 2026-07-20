@@ -72,6 +72,7 @@ export interface AppSettings {
   defaultRemindOnDay: boolean
   notificationsEnabled: boolean
   groupPastEvents: boolean // 是否将已过的时光纪念归入「时光纪念」分组
+  iCloudSyncEnabled: boolean // 是否将时光纪念数据保存到 iCloud
   notificationHour: number // 通知时间（小时，0-23），默认9
   notificationMinute: number // 通知时间（分钟，0-59），默认0
 }

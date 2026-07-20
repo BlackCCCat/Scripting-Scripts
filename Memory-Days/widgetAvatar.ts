@@ -1,6 +1,6 @@
 import { Script, Path } from 'scripting'
 
-const APP_FOLDER = '时光纪念数据'
+const APP_FOLDER = '时光纪念'
 const WIDGET_AVATARS_DIR = 'widget-avatars-v2'
 
 // 缩略图最大边长（像素），覆盖放大后小组件头像在 @3x 屏幕下的像素需求

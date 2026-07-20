@@ -1,6 +1,6 @@
 import { Script, Navigation, TabView, VStack, Text, Image, useObservable, useEffect, Widget } from 'scripting'
 import { Person, AnniversaryEvent, AppData, AppSettings } from './types'
-import { loadAppData, saveAppData, generateId, deleteAvatar } from './storage'
+import { exportAppData, importAppData, loadAppData, saveAppData, generateId, deleteAvatar, setAppDataStorageMode } from './storage'
 import { refreshNotifications } from './notifications'
 import { HomePage } from './pages/HomePage'
 import { PeoplePage } from './pages/PeoplePage'
@@ -18,6 +18,7 @@ function MainView() {
     defaultRemindOnDay: true,
     notificationsEnabled: true,
     groupPastEvents: true,
+    iCloudSyncEnabled: false,
     notificationHour: 9,
     notificationMinute: 0
   })
@@ -157,8 +158,48 @@ function MainView() {
   }
 
   const handleSettingsChange = async (newSettings: AppSettings) => {
+    const previousICloud = !!settings.value.iCloudSyncEnabled
+    const nextICloud = !!newSettings.iCloudSyncEnabled
+    if (previousICloud !== nextICloud) {
+      const payload: AppData = {
+        persons: persons.value,
+        events: events.value,
+        settings: newSettings,
+        version: 1
+      }
+      const migrated = await setAppDataStorageMode(nextICloud, payload)
+      persons.setValue(migrated.persons)
+      events.setValue(migrated.events)
+      settings.setValue(migrated.settings)
+      Widget.reloadAll()
+      await refreshNotifications(migrated.events, migrated.persons, migrated.settings)
+      return
+    }
     settings.setValue(newSettings)
     await commit(undefined, undefined, newSettings)
+  }
+
+  const handleExportData = async () => {
+    return await exportAppData({
+      persons: persons.value,
+      events: events.value,
+      settings: settings.value,
+      version: 1
+    })
+  }
+
+  const handleImportData = async () => {
+    const result = await importAppData({
+      persons: persons.value,
+      events: events.value,
+      settings: settings.value,
+      version: 1
+    })
+    persons.setValue(result.data.persons)
+    events.setValue(result.data.events)
+    settings.setValue(result.data.settings)
+    await commit(result.data.persons, result.data.events, result.data.settings)
+    return result
   }
 
   // 呈现人物编辑器
@@ -284,6 +325,8 @@ function MainView() {
           onClose={dismiss}
           onSettingsChange={handleSettingsChange}
           onClearAllData={handleClearAll}
+          onExportData={handleExportData}
+          onImportData={handleImportData}
         />
       </VStack>
     </TabView>
