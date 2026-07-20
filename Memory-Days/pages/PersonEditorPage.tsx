@@ -101,7 +101,7 @@ export function PersonEditorPage({ person, onSave }: PersonEditorPageProps) {
       >
         <Section>
           <ZStack frame={{ maxWidth: Infinity, height: 210 }} alignment="bottomTrailing" clipShape={{ type: 'rect', cornerRadius: 22, style: 'continuous' as const }}>
-            <Button action={pickAvatar} buttonStyle="plain">
+            <Button action={pickAvatar} buttonStyle="plain" frame={{ maxWidth: Infinity, height: 210 }}>
               {avatarPath ? (
                 <Image
                   filePath={avatarPath}
@@ -110,7 +110,7 @@ export function PersonEditorPage({ person, onSave }: PersonEditorPageProps) {
                   frame={{ maxWidth: Infinity, height: 210 }}
                 />
               ) : (
-                <VStack frame={{ maxWidth: Infinity, height: 210 }} alignment="center" spacing={10} background="tertiarySystemGroupedBackground">
+                <VStack frame={{ maxWidth: Infinity, maxHeight: Infinity }} alignment="center" spacing={10} background="tertiarySystemGroupedBackground">
                   <Image systemName="photo.on.rectangle.angled" font={34} foregroundStyle="secondaryLabel" />
                   <Text foregroundStyle="secondaryLabel" font={14}>点击添加人物照片</Text>
                 </VStack>
