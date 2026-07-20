@@ -1,0 +1,49 @@
+{
+  "localizedNames" : {
+    "es" : "",
+    "ru" : "",
+    "it" : "",
+    "fr" : "",
+    "de" : "",
+    "pt" : "",
+    "zh" : "时光纪念",
+    "ja" : "",
+    "en" : "Memory Days"
+  },
+  "icon" : "heart.text.square.fill",
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Memory-Days.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "runInApp" : true,
+  "entry" : "index.tsx",
+  "description" : "记录重要的人与日子，用尺寸卡片呈现生日、相识、恋爱和更多珍贵时刻。",
+  "name" : "时光纪念",
+  "iconImage" : "",
+  "localizedDescriptions" : {
+    "de" : "",
+    "it" : "",
+    "ja" : "",
+    "ru" : "",
+    "en" : "Track important people and dates with anniversary cards for birthdays, meetings, relationships, and more.",
+    "zh" : "记录重要的人与日子，用尺寸卡片呈现生日、相识、恋爱和更多珍贵时刻。",
+    "es" : "",
+    "fr" : "",
+    "pt" : ""
+  },
+  "intentInputTypes" : [
+
+  ],
+  "color" : "rgba(174, 109, 216,1)",
+  "permissions" : null,
+  "author": {
+    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "name": "BlackCCCat",
+    "email": null
+  },
+  "contributors" : [
+
+  ],
+  "version" : ""
+}
