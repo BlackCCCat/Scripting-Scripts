@@ -168,6 +168,11 @@ function normalizePrereleaseSchemeFromMeta(meta: any): boolean | undefined {
   return undefined
 }
 
+function modelDownloadForInputMethod(cfg: AppConfig, inputMethod: InputMethod): boolean {
+  const stored = cfg.downloadModelByInputMethod?.[inputMethod]
+  return typeof stored === "boolean" ? stored : DEFAULT_CONFIG.downloadModel
+}
+
 async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): Promise<string[]> {
   const out: string[] = []
   const push = (p?: string) => {
@@ -220,12 +225,14 @@ export function SettingsView(props: {
     const inputMethod = INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value
     setCfg((c) => {
       const isBuiltinScripting = c.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
+      const nextInputMethod = isBuiltinScripting ? "scripting" : inputMethod
       return {
         ...c,
         releaseSource: releaseIdx === 1 ? "github" : "cnb",
         schemeEdition: SCHEME_OPTIONS[Math.max(0, Math.min(SCHEME_OPTIONS.length - 1, schemeIdx))],
         proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-        inputMethod: isBuiltinScripting ? "scripting" : inputMethod,
+        inputMethod: nextInputMethod,
+        downloadModel: modelDownloadForInputMethod(c, nextInputMethod),
         useBuiltinScriptingPath: isBuiltinScripting ? true : (inputMethod === "scripting" ? c.useBuiltinScriptingPath : false),
       }
     })
@@ -246,7 +253,12 @@ export function SettingsView(props: {
     const latest = props.initial ?? loadConfig()
     const normalizedLatest =
       latest.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
-        ? { ...latest, inputMethod: "scripting" as const, useBuiltinScriptingPath: true }
+        ? {
+          ...latest,
+          inputMethod: "scripting" as const,
+          downloadModel: modelDownloadForInputMethod(latest, "scripting"),
+          useBuiltinScriptingPath: true,
+        }
         : latest
     setCfg(normalizedLatest)
     setReleaseIdx(normalizedLatest.releaseSource === "github" ? 1 : 0)
@@ -410,6 +422,7 @@ export function SettingsView(props: {
           ? normalized.proSchemeKey
           : base.proSchemeKey,
     }
+    next.downloadModel = modelDownloadForInputMethod(next, next.inputMethod)
 
     const changed =
       base.schemeEdition !== next.schemeEdition ||
@@ -485,13 +498,17 @@ export function SettingsView(props: {
             if (isBuiltinScripting) {
               setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
             }
-            setCfg((live) => ({
-              ...live,
-              hamsterRootPath: selectedPath,
-              hamsterBookmarkName: nextBookmarkName,
-              useBuiltinScriptingPath: isBuiltinScripting,
-              inputMethod: isBuiltinScripting ? "scripting" : live.inputMethod,
-            }))
+            setCfg((live) => {
+              const nextInputMethod = isBuiltinScripting ? "scripting" : live.inputMethod
+              return {
+                ...live,
+                hamsterRootPath: selectedPath,
+                hamsterBookmarkName: nextBookmarkName,
+                useBuiltinScriptingPath: isBuiltinScripting,
+                inputMethod: nextInputMethod,
+                downloadModel: modelDownloadForInputMethod(live, nextInputMethod),
+              }
+            })
           } catch { }
         }
       } else if (!targetPath) {
@@ -503,13 +520,14 @@ export function SettingsView(props: {
         const resolved = !isBuiltinScripting && fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
           : first.path
-        setCfg((c) => ({
-          ...c,
-          hamsterRootPath: resolved,
-          hamsterBookmarkName: isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : first.name,
-          useBuiltinScriptingPath: isBuiltinScripting,
-          inputMethod: isBuiltinScripting ? "scripting" : c.inputMethod,
-        }))
+            setCfg((c) => ({
+              ...c,
+              hamsterRootPath: resolved,
+              hamsterBookmarkName: isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : first.name,
+              useBuiltinScriptingPath: isBuiltinScripting,
+              inputMethod: isBuiltinScripting ? "scripting" : c.inputMethod,
+              downloadModel: modelDownloadForInputMethod(c, isBuiltinScripting ? "scripting" : c.inputMethod),
+            }))
         if (isBuiltinScripting) {
           setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
         }
@@ -521,14 +539,19 @@ export function SettingsView(props: {
   }
 
   async function saveAndClose() {
+    const selectedInputMethod =
+      cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
+        ? "scripting"
+        : INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value
     let fixed: AppConfig = {
       ...cfg,
       schemeEdition: SCHEME_OPTIONS[Math.max(0, Math.min(SCHEME_OPTIONS.length - 1, schemeIdx))],
       proSchemeKey: PRO_KEYS[Math.max(0, Math.min(PRO_KEYS.length - 1, proKeyIdx))],
-      inputMethod:
-        cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK
-          ? "scripting"
-          : INPUT_METHODS[Math.max(0, Math.min(INPUT_METHODS.length - 1, inputIdx))].value,
+      inputMethod: selectedInputMethod,
+      downloadModelByInputMethod: {
+        ...(cfg.downloadModelByInputMethod ?? {}),
+        [selectedInputMethod]: cfg.downloadModel,
+      },
     }
 
     try {
@@ -675,6 +698,7 @@ export function SettingsView(props: {
                     hamsterBookmarkName: isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : b.name,
                     useBuiltinScriptingPath: isBuiltinScripting,
                     inputMethod: isBuiltinScripting ? "scripting" : cfg.inputMethod,
+                    downloadModel: modelDownloadForInputMethod(cfg, isBuiltinScripting ? "scripting" : cfg.inputMethod),
                   }
                   if (isBuiltinScripting) {
                     setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
@@ -685,6 +709,7 @@ export function SettingsView(props: {
                       next = {
                         ...next,
                         inputMethod: "scripting",
+                        downloadModel: modelDownloadForInputMethod(next, "scripting"),
                         useBuiltinScriptingPath: true,
                         hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
                       }
@@ -825,6 +850,22 @@ export function SettingsView(props: {
           onChanged={(v: boolean) => {
             try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
             setCfg((c) => ({ ...c, showVerboseLog: v }))
+          }}
+          toggleStyle="switch"
+        />
+        <Toggle
+          title={"下载模型"}
+          value={cfg.downloadModel}
+          onChanged={(v: boolean) => {
+            try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+            setCfg((c) => ({
+              ...c,
+              downloadModel: v,
+              downloadModelByInputMethod: {
+                ...(c.downloadModelByInputMethod ?? {}),
+                [c.inputMethod]: v,
+              },
+            }))
           }}
           toggleStyle="switch"
         />

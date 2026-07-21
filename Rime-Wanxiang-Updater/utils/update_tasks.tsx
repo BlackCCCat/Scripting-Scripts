@@ -527,7 +527,9 @@ export async function checkAllUpdates(
 
   const dict = await capture("dict", fetchLatestDictAsset(cfg))
 
-  const model = await capture("model", fetchModelReleaseAsset(cfg, MODEL_FILE))
+  const model = cfg.downloadModel
+    ? await capture("model", fetchModelReleaseAsset(cfg, MODEL_FILE))
+    : undefined
 
   if (dict && !dict.remoteIdOrSha) {
     dict.remoteIdOrSha = ensureRemoteMark(dict, "dict")
@@ -925,6 +927,12 @@ export async function updateModel(
     }
   }
 ) {
+  if (!cfg.downloadModel) {
+    params.onStage?.("设置中未开启下载模型")
+    params.onLog?.("已跳过模型下载：设置中未开启下载模型")
+    return undefined
+  }
+
   const modelAsset = await fetchModelReleaseAsset(cfg, MODEL_FILE)
   const shouldUpdateModel = params.targets?.model !== false
 
@@ -998,7 +1006,7 @@ export async function autoUpdateAll(
   const needDict = !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
 
   if (r.model && !r.model.remoteIdOrSha) r.model.remoteIdOrSha = ensureRemoteMark(r.model, "model")
-  const needModel = isModelUpdateAvailable(meta.model, r.model)
+  const needModel = cfg.downloadModel && isModelUpdateAvailable(meta.model, r.model)
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")

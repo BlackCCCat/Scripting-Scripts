@@ -58,7 +58,7 @@ function buildUpdateDecision(localMeta: MetaBundle | undefined, remote: AllUpdat
   return {
     scheme: !!(schemeRemoteMark && normalizeMark(schemeLocalDisplayMark(cfg, localMeta?.scheme)) !== schemeRemoteMark),
     dict: !!(dictRemoteMark && normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark),
-    model: isModelUpdateAvailable(localMeta?.model, remote.model),
+    model: cfg.downloadModel && isModelUpdateAvailable(localMeta?.model, remote.model),
   }
 }
 
@@ -351,7 +351,7 @@ export function KeyboardView() {
             <HStack spacing={8}>
               <StatusCard icon="doc.text" label="方案" state={remoteItemState("scheme")} />
               <StatusCard icon="books.vertical" label="词库" state={remoteItemState("dict")} />
-              <StatusCard icon="shippingbox" label="模型" state={remoteItemState("model")} />
+              {cfg.downloadModel ? <StatusCard icon="shippingbox" label="模型" state={remoteItemState("model")} /> : null}
             </HStack>
           </VStack>
 

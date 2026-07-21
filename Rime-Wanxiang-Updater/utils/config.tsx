@@ -30,6 +30,8 @@ export type AppConfig = {
   excludePatternsText: string // 按行
   autoDeployAfterDownload: boolean
   skipBuildCleanup: boolean
+  downloadModel: boolean
+  downloadModelByInputMethod: Partial<Record<InputMethod, boolean>>
   inputMethod: InputMethod
   useBuiltinScriptingPath: boolean
   autoCheckOnLaunch: boolean
@@ -57,6 +59,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   excludePatternsText: "",
   autoDeployAfterDownload: true,
   skipBuildCleanup: false,
+  downloadModel: false,
+  downloadModelByInputMethod: {},
   inputMethod: "hamster",
   useBuiltinScriptingPath: false,
   autoCheckOnLaunch: false,
@@ -94,6 +98,11 @@ export function loadConfig(): AppConfig {
     if (obj && typeof obj === "object") {
       delete obj.usePredictDb
       delete obj.deletePredictDbWhenUnused
+    }
+    if (!obj || typeof obj !== "object") return DEFAULT_CONFIG
+    if (typeof obj.downloadModel !== "boolean") obj.downloadModel = DEFAULT_CONFIG.downloadModel
+    if (!obj.downloadModelByInputMethod || typeof obj.downloadModelByInputMethod !== "object") {
+      obj.downloadModelByInputMethod = {}
     }
     obj.homeSectionOrder = normalizeHomeSectionOrder(obj?.homeSectionOrder)
     const cfg = { ...DEFAULT_CONFIG, ...obj }

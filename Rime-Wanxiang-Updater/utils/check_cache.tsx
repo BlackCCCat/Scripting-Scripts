@@ -49,6 +49,7 @@ export function getCheckCacheKey(cfg: AppConfig) {
     cfg.schemeEdition,
     cfg.proSchemeKey,
     cfg.inputMethod,
+    cfg.downloadModel ? "model-on" : "model-off",
     cfg.useBuiltinScriptingPath ? "builtin" : "manual",
     cfg.hamsterRootPath,
     cfg.hamsterBookmarkName,

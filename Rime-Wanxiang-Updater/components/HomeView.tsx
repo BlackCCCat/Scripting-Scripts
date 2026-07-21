@@ -425,7 +425,7 @@ function buildUpdateDecision(
       dictRemoteMark &&
       normalizeMark(localMeta?.dict?.remoteIdOrSha) !== dictRemoteMark
     ),
-    model: isModelUpdateAvailable(localMeta?.model, remote.model),
+    model: cfg.downloadModel && isModelUpdateAvailable(localMeta?.model, remote.model),
   };
 }
 
@@ -824,7 +824,7 @@ function UsageGuideView() {
             <UsageGuideSection
               icon="r.square.fill"
               title="Rime 更新"
-              detail="点击右下角上方按钮，向左展开方案、词库、模型三个更新入口。"
+              detail="点击右下角上方按钮，向左展开方案、词库，以及开启下载模型时的模型入口。"
               color="systemBlue"
             >
               <UsageGuideRow
@@ -842,7 +842,7 @@ function UsageGuideView() {
               <UsageGuideRow
                 icon="shippingbox"
                 title="模型"
-                detail="重新下载并写入语法模型文件。"
+                detail="开启“下载模型”后，重新下载并写入语法模型文件。"
                 color="systemBlue"
               />
             </UsageGuideSection>
@@ -862,7 +862,7 @@ function UsageGuideView() {
               <UsageGuideRow
                 icon="arrow.triangle.2.circlepath"
                 title="检查更新"
-                detail="只检查远程方案、词库、模型信息，并更新可更新状态，不下载文件。"
+                detail="只检查远程方案、词库，以及开启下载模型时的模型信息，并更新可更新状态，不下载文件。"
                 color="systemBlue"
               />
               <UsageGuideRow
@@ -1379,7 +1379,7 @@ export function HomeView() {
     if (!candidates.length || !meta) {
       setLocalSchemeVersion("暂无法获取");
       setLocalDictMark("暂无法获取");
-      setLocalModelMark("暂无法获取");
+      setLocalModelMark(current.downloadModel ? "暂无法获取" : "");
       return false;
     }
 
@@ -1388,7 +1388,7 @@ export function HomeView() {
 
     setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取");
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取");
-    setLocalModelMark(modelDisplayMark(meta.model) || "暂无法获取");
+    setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta.model) || "暂无法获取") : "");
     return true;
   }
 
@@ -1401,8 +1401,8 @@ export function HomeView() {
     if (!remote) return;
     const { meta } = await findLocalMeta(current);
     const nextDecision = buildUpdateDecision(meta, remote, current);
-    setRemoteModelMark(modelDisplayMark(remote.model, meta?.model) || "暂无法获取");
-    setLocalModelMark(modelDisplayMark(meta?.model, remote.model) || "暂无法获取");
+    setRemoteModelMark(current.downloadModel ? (modelDisplayMark(remote.model, meta?.model) || "暂无法获取") : "");
+    setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta?.model, remote.model) || "暂无法获取") : "");
     setLastCheck(remote);
     setLastCheckDecision(nextDecision);
     setLastCheckKey(checkKey(current));
@@ -1417,8 +1417,8 @@ export function HomeView() {
       schemeRemoteDisplayMark(current, cache.remote.scheme) || "暂无法获取",
     );
     setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取");
-    setRemoteModelMark(modelDisplayMark(cache.remote.model, meta?.model) || "暂无法获取");
-    setLocalModelMark(modelDisplayMark(meta?.model, cache.remote.model) || "暂无法获取");
+    setRemoteModelMark(current.downloadModel ? (modelDisplayMark(cache.remote.model, meta?.model) || "暂无法获取") : "");
+    setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta?.model, cache.remote.model) || "暂无法获取") : "");
     const nextDecision = buildUpdateDecision(meta, cache.remote, current);
     setNotes(cache.remote.scheme?.body ?? "");
     setLastCheck(cache.remote);
@@ -1790,8 +1790,8 @@ export function HomeView() {
         schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取",
       );
       setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取");
-      setRemoteModelMark(modelDisplayMark(r.model, localMeta?.model) || "暂无法获取");
-      setLocalModelMark(modelDisplayMark(localMeta?.model, r.model) || "暂无法获取");
+      setRemoteModelMark(effective.downloadModel ? (modelDisplayMark(r.model, localMeta?.model) || "暂无法获取") : "");
+      setLocalModelMark(effective.downloadModel ? (modelDisplayMark(localMeta?.model, r.model) || "暂无法获取") : "");
       setNotes(r.scheme?.body ?? "");
       setLastCheck(r);
       setLastCheckDecision(decision);
@@ -1808,11 +1808,13 @@ export function HomeView() {
         r.dict?.remoteIdOrSha ?? "暂无法获取",
         decision.dict,
       );
-      pushCheckResultLog(
-        "模型",
-        modelDisplayMark(r.model, localMeta?.model) || "暂无法获取",
-        decision.model,
-      );
+      if (effective.downloadModel) {
+        pushCheckResultLog(
+          "模型",
+          modelDisplayMark(r.model, localMeta?.model) || "暂无法获取",
+          decision.model,
+        );
+      }
       setStageAndMaybeLog("检查完成", "CHECK", "SUCCESS", true);
     } catch (e: any) {
       setStageAndMaybeLog(
@@ -1854,8 +1856,8 @@ export function HomeView() {
             "暂无法获取",
         );
         setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取");
-        setRemoteModelMark(modelDisplayMark(shared.remote.model, localMeta?.model) || "暂无法获取");
-        setLocalModelMark(modelDisplayMark(localMeta?.model, shared.remote.model) || "暂无法获取");
+        setRemoteModelMark(effective.downloadModel ? (modelDisplayMark(shared.remote.model, localMeta?.model) || "暂无法获取") : "");
+        setLocalModelMark(effective.downloadModel ? (modelDisplayMark(localMeta?.model, shared.remote.model) || "暂无法获取") : "");
         setNotes(shared.remote.scheme?.body ?? "");
         setLastCheck(shared.remote);
         setLastCheckDecision(decision);
@@ -1879,8 +1881,8 @@ export function HomeView() {
           schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取",
         );
         setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取");
-        setRemoteModelMark(modelDisplayMark(pre.model, localMeta?.model) || "暂无法获取");
-        setLocalModelMark(modelDisplayMark(localMeta?.model, pre.model) || "暂无法获取");
+        setRemoteModelMark(effective.downloadModel ? (modelDisplayMark(pre.model, localMeta?.model) || "暂无法获取") : "");
+        setLocalModelMark(effective.downloadModel ? (modelDisplayMark(localMeta?.model, pre.model) || "暂无法获取") : "");
         setNotes(pre.scheme?.body ?? "");
         setLastCheck(pre);
         decision = buildUpdateDecision(localMeta, pre, effective);
@@ -1894,7 +1896,7 @@ export function HomeView() {
 
       if (decision?.scheme) pushLog("SUCCESS", "AUTO", "方案有可用更新");
       if (decision?.dict) pushLog("SUCCESS", "AUTO", "词库有可用更新");
-      if (decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新");
+      if (effective.downloadModel && decision?.model) pushLog("SUCCESS", "AUTO", "模型有可用更新");
       if (decision && !decision.scheme && !decision.dict && !decision.model) {
         setStageAndMaybeLog(
           precheckFailed ? "自动更新完成（部分请求失败，请查看日志）" : "自动更新完成（已是最新，无需更新）",
@@ -2029,13 +2031,17 @@ export function HomeView() {
 
   async function onUpdateModel() {
     if (!(await guardPathAccess(true))) return;
+    const current = loadConfig();
+    if (!current.downloadModel) {
+      setStageAndMaybeLog("设置中未开启下载模型", "MODEL", "WARN", true);
+      return;
+    }
     setBusy(true);
     setShowProgress(false); // ✅ 真正有下载进度后再显示
     setStageAndMaybeLog("更新模型中…", "MODEL", "INFO", true);
     setProgressPct("0.00%");
     setProgressValue(undefined);
     try {
-      const current = loadConfig();
       await updateModel(current, {
         autoDeploy: false,
         onStage: (message) =>
@@ -2201,14 +2207,16 @@ export function HomeView() {
 
   function renderFloatingActions() {
     const currentCheckReady = lastCheckKey === checkKey(cfg) && !!lastCheckDecision;
+    const modelEnabled = cfg.downloadModel;
+    const hasModelUpdate = modelEnabled && !!lastCheckDecision?.model;
     const autoUpdateReady =
       currentCheckReady &&
-      !!(lastCheckDecision?.scheme || lastCheckDecision?.dict || lastCheckDecision?.model);
+      !!(lastCheckDecision?.scheme || lastCheckDecision?.dict || hasModelUpdate);
     const schemeColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue";
     const dictColor = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : "systemBlue";
-    const modelColor = currentCheckReady && lastCheckDecision?.model ? "systemGreen" : "systemBlue";
+    const modelColor = currentCheckReady && hasModelUpdate ? "systemGreen" : "systemBlue";
     const rimeGroupColor =
-      currentCheckReady && (lastCheckDecision?.scheme || lastCheckDecision?.dict || lastCheckDecision?.model)
+      currentCheckReady && (lastCheckDecision?.scheme || lastCheckDecision?.dict || hasModelUpdate)
         ? "systemGreen"
         : "systemBlue";
     const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue";
@@ -2243,7 +2251,7 @@ export function HomeView() {
           items={[
             { icon: "doc.text", title: "方案", color: schemeColor, disabled, onPress: () => runAction(onUpdateScheme) },
             { icon: "books.vertical", title: "词库", color: dictColor, disabled, onPress: () => runAction(onUpdateDict) },
-            { icon: "shippingbox", title: "模型", color: modelColor, disabled, onPress: () => runAction(onUpdateModel) },
+            ...(modelEnabled ? [{ icon: "shippingbox", title: "模型", color: modelColor, disabled, onPress: () => runAction(onUpdateModel) }] : []),
           ]}
           onToggle={() => toggleGroup("rime")}
         />
@@ -2271,13 +2279,13 @@ export function HomeView() {
       const currentCheckReady = lastCheckKey === checkKey(cfg) && !!lastCheckDecision;
       const schemeValueColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : undefined;
       const dictValueColor = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : undefined;
-      const modelValueColor = currentCheckReady && lastCheckDecision?.model ? "systemGreen" : undefined;
+      const modelValueColor = currentCheckReady && cfg.downloadModel && lastCheckDecision?.model ? "systemGreen" : undefined;
       return (
         <Section key={key} header={<Text>本地信息</Text>}>
           <RowKV k="当前选择的方案" v={localSelectedScheme} />
           <RowKV k="本地方案" v={localSchemeVersion} valueColor={schemeValueColor} />
           <RowKV k="本地词库" v={localDictMark} valueColor={dictValueColor} />
-          <RowKV k="本地模型" v={localModelMark} valueColor={modelValueColor} />
+          {cfg.downloadModel ? <RowKV k="本地模型" v={localModelMark} valueColor={modelValueColor} /> : null}
         </Section>
       );
     }
@@ -2286,7 +2294,7 @@ export function HomeView() {
         <Section key={key} header={<Text>远程信息</Text>}>
           <RowKV k="远程方案" v={remoteSchemeVer} />
           <RowKV k="远程词库" v={remoteDictMark} />
-          <RowKV k="远程模型" v={remoteModelMark} />
+          {cfg.downloadModel ? <RowKV k="远程模型" v={remoteModelMark} /> : null}
         </Section>
       );
     }
