@@ -250,11 +250,11 @@ export async function loadModules(): Promise<ModuleInfo[]> {
     }
     const link = parseLinkFromContent(text, getLinkPrefixes())
     const localTag = parseTag(text, "local")
-    const isLocal =
+    const hasLocalTag =
       localTag != null &&
       String(localTag).trim() !== "" &&
       !["0", "false", "no"].includes(String(localTag).trim().toLowerCase())
-    if (!link && !isLocal) continue
+    const isLocal = hasLocalTag || !link
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
     const surgeName = parseTag(text, "name") ?? undefined
     const icon = parseTag(text, "icon") ?? parseIcon(text)

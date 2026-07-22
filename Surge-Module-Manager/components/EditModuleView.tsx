@@ -1,5 +1,6 @@
 import {
   Button,
+  Editor,
   Group,
   Form,
   Navigation,
@@ -24,6 +25,51 @@ import { loadModules, type ModuleInfo } from "../utils/storage"
 let cachedLibraryItems: ModuleInfo[] | null = null
 let cachedLibraryError: string | null = null
 let cachedLibraryPromise: Promise<ModuleInfo[]> | null = null
+
+function LocalContentEditorView(props: {
+  initialContent: string
+}) {
+  const dismiss = Navigation.useDismiss()
+  const [controller] = useState(() => new EditorController({
+    content: props.initialContent,
+    ext: "sgmodule",
+    readOnly: false,
+  }))
+
+  useEffect(() => {
+    return () => {
+      controller.dispose()
+    }
+  }, [controller])
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle="编辑模块内容"
+        navigationBarTitleDisplayMode="inline"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        toolbar={{
+          topBarTrailing: (
+            <Button
+              title="保存"
+              action={() => {
+                HapticFeedback.mediumImpact()
+                dismiss(String(controller.content ?? ""))
+              }}
+            />
+          ),
+        }}
+      >
+        <Editor
+          controller={controller}
+          scriptName="Surge Module"
+          showAccessoryView
+          searchEnabled
+        />
+      </VStack>
+    </NavigationStack>
+  )
+}
 
 export function EditModuleView(props: {
   title: string
@@ -204,7 +250,8 @@ export function EditModuleView(props: {
   async function onSave() {
     const trimmedName = name.trim()
     const trimmedLink = link.trim()
-    const trimmedContent = content.trim()
+    const localContent = String(content ?? "")
+    const trimmedContent = localContent.trim()
     const cat = categoryOptions[categoryIdx] === "不设置分类" ? undefined : categoryOptions[categoryIdx]
     const saveDir =
       saveDirOptions.length && saveDirIdx > 0 ? saveDirOptions[saveDirIdx] : undefined
@@ -260,11 +307,20 @@ export function EditModuleView(props: {
       name: trimmedName,
       link: isRemote ? trimmedLink : "",
       isLocal: !isRemote,
-      content: isRemote ? undefined : content,
+      content: isRemote ? undefined : localContent,
       category: cat,
       saveDir,
     }
     dismiss(result)
+  }
+
+  async function openLocalContentEditor() {
+    const next = await Navigation.present<string | null>({
+      element: <LocalContentEditorView initialContent={content} />,
+      modalPresentationStyle: "pageSheet",
+    })
+    if (next == null) return
+    setContent(next)
   }
 
   async function openLink(url: string) {
@@ -354,14 +410,38 @@ export function EditModuleView(props: {
                 prompt="https://"
               />
             ) : (
-              <TextField
-                label={<Text>内容</Text>}
-                value={content}
-                axis="vertical"
-                onChanged={(v: string) => setContent(v)}
-                prompt="模块内容"
-                frame={{ height: 140 }}
-              />
+              <VStack
+                spacing={8}
+                frame={{ maxWidth: "infinity", alignment: "leading" }}
+              >
+                <Text foregroundStyle="secondaryLabel">模块内容（点击编辑）</Text>
+                <Button
+                  buttonStyle="plain"
+                  action={() => {
+                    HapticFeedback.mediumImpact()
+                    void openLocalContentEditor()
+                  }}
+                >
+                  <VStack
+                    spacing={8}
+                    padding={{ top: 12, bottom: 12, leading: 12, trailing: 12 }}
+                    frame={{ maxWidth: "infinity", minHeight: 120, alignment: "topLeading" }}
+                    background={{
+                      style: "secondarySystemBackground",
+                      shape: { type: "rect", cornerRadius: 14 },
+                    }}
+                  >
+                    <Text
+                      font="caption"
+                      foregroundStyle={content.trim() ? "secondaryLabel" : "tertiaryLabel"}
+                      lineLimit={5}
+                      frame={{ maxWidth: "infinity", alignment: "leading" }}
+                    >
+                      {content.trim() || "暂无内容，点击进入 Editor 编辑"}
+                    </Text>
+                  </VStack>
+                </Button>
+              </VStack>
             )}
           </Section>
 
