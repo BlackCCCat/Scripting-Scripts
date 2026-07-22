@@ -1,5 +1,8 @@
 import {
   Button,
+  EmptyView,
+  Grid,
+  GridRow,
   Group,
   HStack,
   Image,
@@ -109,6 +112,88 @@ function FilterMenu(props: {
   )
 }
 
+function BatchMoveMenu(props: {
+  disabled: boolean
+  targets: { label: string; path: string }[]
+  onMove: (path: string) => void | Promise<void>
+}) {
+  const foreground = props.disabled ? "secondaryLabel" : "systemBlue"
+
+  return (
+    <Menu
+      label={(
+        <VStack
+          frame={{ maxWidth: "infinity", minHeight: 46, alignment: "center" }}
+          padding={{ top: 3, bottom: 3 }}
+          spacing={2}
+        >
+          <Image systemName="folder" font={15} foregroundStyle={foreground} />
+          <Text font="caption2" foregroundStyle={foreground} lineLimit={1}>
+            移动
+          </Text>
+        </VStack>
+      )}
+      disabled={props.disabled}
+      buttonStyle="borderless"
+      glassEffect
+      buttonBorderShape="roundedRectangle"
+      tint="systemBlue"
+      frame={{ maxWidth: "infinity", minHeight: 46 }}
+      listRowBackground={<EmptyView />}
+      listRowSeparator="hidden"
+    >
+      {props.targets.map((target) => (
+        <Button
+          key={target.path}
+          title={target.label}
+          action={() => {
+            HapticFeedback.mediumImpact()
+            void props.onMove(target.path)
+          }}
+        />
+      ))}
+    </Menu>
+  )
+}
+
+function BatchCompactButton(props: {
+  title: string
+  systemImage: string
+  tint?: "systemBlue" | "systemGreen" | "systemRed"
+  disabled?: boolean
+  onPress: () => void | Promise<void>
+}) {
+  const foreground = props.disabled ? "secondaryLabel" : (props.tint ?? "systemBlue")
+
+  return (
+    <Button
+      action={() => {
+        HapticFeedback.mediumImpact()
+        void props.onPress()
+      }}
+      disabled={props.disabled}
+      buttonStyle="borderless"
+      glassEffect
+      buttonBorderShape="roundedRectangle"
+      tint={props.tint ?? "systemBlue"}
+      frame={{ maxWidth: "infinity", minHeight: 46 }}
+      listRowBackground={<EmptyView />}
+      listRowSeparator="hidden"
+    >
+      <VStack
+        frame={{ maxWidth: "infinity", minHeight: 46, alignment: "center" }}
+        padding={{ top: 3, bottom: 3 }}
+        spacing={2}
+      >
+        <Image systemName={props.systemImage} font={15} foregroundStyle={foreground} />
+        <Text font="caption2" foregroundStyle={foreground} lineLimit={1}>
+          {props.title}
+        </Text>
+      </VStack>
+    </Button>
+  )
+}
+
 export function HomeView() {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
     markdownFile: "release-notes.md",
@@ -127,6 +212,10 @@ export function HomeView() {
   const [busy, setBusy] = useState(false)
   const [resolvedBaseDir, setResolvedBaseDir] = useState("")
   const [filterCategory, setFilterCategory] = useState("全部")
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [moveTargets, setMoveTargets] = useState<{ label: string; path: string }[]>([])
+  const [lastFailureDetails, setLastFailureDetails] = useState("")
   const [enabledModuleNames, setEnabledModuleNames] = useState<Set<string>>(new Set())
   const [togglingModuleNames, setTogglingModuleNames] = useState<Set<string>>(new Set())
   const categories = cfg.categories ?? []
@@ -161,9 +250,20 @@ export function HomeView() {
   const filteredModules = modules.filter((m) => {
     return matchFilters(m)
   })
+  const selectedModules = filteredModules.filter((m) => selectedKeys.has(moduleKey(m)))
+  const selectedDownloadableCount = selectedModules.filter((m) => !!m.link).length
   const onlyLocalFiltered =
     filteredModules.length > 0 && filteredModules.every((m) => m.isLocal || !m.link)
   const remoteControlReady = !!String(cfg.remotePort ?? "").trim()
+
+  function moduleKey(m: ModuleInfo): string {
+    return m.filePath || `${m.name}-${m.link}`
+  }
+
+  function dirName(path: string): string {
+    const normalized = String(path ?? "").replace(/\/+$/, "")
+    return normalized.split("/").pop() || normalized || "根目录"
+  }
 
   function inferSaveDir(m: ModuleInfo): string | undefined {
     if (!m.filePath) return undefined
@@ -178,12 +278,22 @@ export function HomeView() {
       setResolvedBaseDir(resolved)
       const list = sortModules(await loadModules())
       setModules(list)
+      try {
+        const subDirs = await listDirectSubDirs(resolved)
+        setMoveTargets([
+          { label: "根目录", path: resolved },
+          ...subDirs.map((path) => ({ label: dirName(path), path })),
+        ])
+      } catch {
+        setMoveTargets(resolved ? [{ label: "根目录", path: resolved }] : [])
+      }
       if (resetStageOnSuccess) {
         setStage("就绪")
         setProgress(null)
       }
     } catch (e: any) {
       setModules([])
+      setMoveTargets([])
       setStage(String(e?.message ?? e))
     }
   }
@@ -212,6 +322,48 @@ export function HomeView() {
       setFilterCategory("全部")
     }
   }, [categories, filterCategory])
+
+  function toggleSelection(target: ModuleInfo) {
+    const key = moduleKey(target)
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function clearSelection() {
+    setSelectedKeys(new Set())
+  }
+
+  function exitSelectionMode() {
+    setSelectionMode(false)
+    clearSelection()
+  }
+
+  function selectAllFiltered() {
+    if (
+      filteredModules.length > 0 &&
+      filteredModules.every((m) => selectedKeys.has(moduleKey(m)))
+    ) {
+      clearSelection()
+      return
+    }
+    setSelectedKeys(new Set(filteredModules.map((m) => moduleKey(m))))
+  }
+
+  function invertFilteredSelection() {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      for (const item of filteredModules) {
+        const key = moduleKey(item)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+      }
+      return next
+    })
+  }
 
   async function openSettings() {
     await Navigation.present({
@@ -440,6 +592,16 @@ export function HomeView() {
     }
   }
 
+  async function copyFailureDetails() {
+    if (!lastFailureDetails) return
+    try {
+      await Pasteboard.setString(lastFailureDetails)
+      await Dialog.alert({ message: "失败详情已复制" })
+    } catch (e: any) {
+      await Dialog.alert({ message: String(e?.message ?? e) })
+    }
+  }
+
   async function downloadSingle(target: ModuleInfo) {
     if (!target.link) {
       await Dialog.alert({ message: "本地模块无下载链接，无法更新" })
@@ -458,6 +620,7 @@ export function HomeView() {
     setBusy(true)
     setStage(title)
     setProgress(null)
+    setLastFailureDetails("")
     const errors: string[] = []
     let okCount = 0
     try {
@@ -494,12 +657,15 @@ export function HomeView() {
       await Promise.all(workers)
 
       if (errors.length) {
+        const details = errors.join("\n")
+        setLastFailureDetails(details)
         setStage(`下载完成：成功 ${okCount}/${total}`)
         await Dialog.alert({
           title: "部分下载失败",
-          message: errors.slice(0, 6).join("\n"),
+          message: `${errors.slice(0, 8).join("\n")}${errors.length > 8 ? `\n其余 ${errors.length - 8} 个失败已省略` : ""}\n\n可在状态区域复制完整失败详情。`,
         })
       } else {
+        setLastFailureDetails("")
         setStage(`下载完成：${okCount}/${total}`)
       }
       if (okCount > 0) {
@@ -507,6 +673,7 @@ export function HomeView() {
       }
     } catch (e: any) {
       const msg = String(e?.message ?? e)
+      setLastFailureDetails(msg)
       setStage(`下载失败：${msg}`)
       await Dialog.alert({ title: "下载失败", message: msg })
     } finally {
@@ -523,6 +690,68 @@ export function HomeView() {
       return catOk && dirOk
     })
     await downloadBatch(list, "下载全部模块…")
+  }
+
+  async function downloadSelected() {
+    if (!selectedModules.length) {
+      await Dialog.alert({ message: "请先选择模块" })
+      return
+    }
+    await downloadBatch(selectedModules, `批量更新：${selectedModules.length} 个模块…`)
+  }
+
+  async function deleteSelected() {
+    if (!selectedModules.length) {
+      await Dialog.alert({ message: "请先选择模块" })
+      return
+    }
+    const ok = await Dialog.confirm({
+      title: "批量删除",
+      message: `确定删除已选的 ${selectedModules.length} 个模块？`,
+    })
+    if (!ok) return
+
+    setBusy(true)
+    setStage("批量删除中…")
+    setProgress(null)
+    try {
+      for (const item of selectedModules) {
+        await removeModuleFile(item)
+      }
+      exitSelectionMode()
+      await refreshModules()
+      await syncMetadataIfNeeded()
+      setStage("批量删除完成")
+    } catch (e: any) {
+      setStage(`批量删除失败：${String(e?.message ?? e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function moveSelectedTo(targetDir: string) {
+    if (!selectedModules.length) {
+      await Dialog.alert({ message: "请先选择模块" })
+      return
+    }
+
+    setBusy(true)
+    setStage("批量移动中…")
+    setProgress(null)
+    try {
+      const finalDir = targetDir || (await getModulesDirResolved())
+      for (const item of selectedModules) {
+        await moveModuleFile(item, finalDir, item.name)
+      }
+      exitSelectionMode()
+      await refreshModules()
+      await syncMetadataIfNeeded()
+      setStage("批量移动完成")
+    } catch (e: any) {
+      setStage(`批量移动失败：${String(e?.message ?? e)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function toggleRemoteModule(target: ModuleInfo, nextValue: boolean) {
@@ -577,14 +806,26 @@ export function HomeView() {
         listStyle={"insetGroup"}
         toolbar={{
           topBarLeading: <Button title="" systemImage="switch.2" action={withButtonHaptic(openRemoteSettings)} />,
-          topBarTrailing: <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />,
+          topBarTrailing: (
+            <HStack>
+              <Button
+                title=""
+                systemImage={selectionMode ? "checkmark.circle.fill" : "checklist"}
+                action={withButtonHaptic(() => {
+                  if (selectionMode) exitSelectionMode()
+                  else setSelectionMode(true)
+                })}
+              />
+              <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />
+            </HStack>
+          ),
         }}
         safeAreaInset={{
           bottom: {
             alignment: "trailing",
             spacing: 0,
             content: (
-              <VStack spacing={18} padding={{ bottom: 18, trailing: 16 }}>
+              selectionMode ? <VStack /> : <VStack spacing={18} padding={{ bottom: 18, trailing: 16 }}>
                 <Button
                   action={withButtonHaptic(addModule)}
                   buttonStyle="glass"
@@ -626,7 +867,80 @@ export function HomeView() {
               frame={{ maxWidth: "infinity" }}
             />
           ) : null}
+          {lastFailureDetails ? (
+            <VStack alignment="leading" spacing={8}>
+              <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={4}>
+                {lastFailureDetails}
+              </Text>
+              <Button
+                title="复制失败详情"
+                systemImage="doc.on.doc"
+                action={withButtonHaptic(copyFailureDetails)}
+              />
+            </VStack>
+          ) : null}
         </Section>
+
+        {selectionMode ? (
+          <Section
+            header={(
+              <HStack>
+                <Text>批量操作</Text>
+                <Spacer />
+                <Text foregroundStyle="secondaryLabel">已选 {selectedModules.length}</Text>
+              </HStack>
+            )}
+          >
+            <Grid
+              horizontalSpacing={6}
+              verticalSpacing={0}
+              listRowBackground={<EmptyView />}
+              listRowSeparator="hidden"
+              frame={{ maxWidth: "infinity", alignment: "center" }}
+              padding={{ top: 2, bottom: 2 }}
+            >
+              <GridRow>
+                <BatchCompactButton
+                  title="全选"
+                  systemImage="checkmark.circle"
+                  tint="systemBlue"
+                  onPress={selectAllFiltered}
+                />
+                <BatchCompactButton
+                  title="反选"
+                  systemImage="circle.lefthalf.filled"
+                  tint="systemBlue"
+                  onPress={invertFilteredSelection}
+                />
+                <BatchCompactButton
+                  title="更新"
+                  systemImage="arrow.triangle.2.circlepath"
+                  tint="systemGreen"
+                  disabled={busy || selectedDownloadableCount === 0}
+                  onPress={downloadSelected}
+                />
+                <BatchMoveMenu
+                  disabled={busy || selectedModules.length === 0}
+                  targets={moveTargets}
+                  onMove={moveSelectedTo}
+                />
+                <BatchCompactButton
+                  title="删除"
+                  systemImage="trash"
+                  tint="systemRed"
+                  disabled={busy || selectedModules.length === 0}
+                  onPress={deleteSelected}
+                />
+                <BatchCompactButton
+                  title="完成"
+                  systemImage="checkmark"
+                  tint="systemBlue"
+                  onPress={exitSelectionMode}
+                />
+              </GridRow>
+            </Grid>
+          </Section>
+        ) : null}
 
         <Section
           header={(
@@ -661,7 +975,7 @@ export function HomeView() {
                 return (
                   <VStack
                     key={`${m.name}-${m.link}`}
-                    contextMenu={{
+                    contextMenu={selectionMode ? undefined : {
                       menuItems: (
                         <Group>
                           <Button title="查看模块" action={withButtonHaptic(() => viewModuleContent(m))} />
@@ -672,7 +986,7 @@ export function HomeView() {
                     }}
                     leadingSwipeActions={{
                       allowsFullSwipe: false,
-                      actions: [
+                      actions: selectionMode ? [] : [
                         <Button
                           title="更新"
                           tint={m.link ? "systemGreen" : "systemGray"}
@@ -683,12 +997,19 @@ export function HomeView() {
                     }}
                     trailingSwipeActions={{
                       allowsFullSwipe: false,
-                      actions: [
+                      actions: selectionMode ? [] : [
                         <Button title="编辑" tint="systemOrange" action={withButtonHaptic(() => modifyModuleFor(m))} />,
                       ],
                     }}
                   >
                     <HStack spacing={10}>
+                      {selectionMode ? (
+                        <Button
+                          title=""
+                          systemImage={selectedKeys.has(moduleKey(m)) ? "checkmark.circle.fill" : "circle"}
+                          action={withButtonHaptic(() => toggleSelection(m))}
+                        />
+                      ) : null}
                       <ModuleIcon module={m} />
                       <VStack alignment="leading" spacing={3}>
                         <Text font="headline">{m.name}</Text>
@@ -699,15 +1020,17 @@ export function HomeView() {
                         ) : null}
                       </VStack>
                       <Spacer />
-                      <Toggle
-                        title=""
-                        value={enabledModuleNames.has(remoteName)}
-                        disabled={!remoteControlReady || togglingModuleNames.has(remoteName)}
-                        toggleStyle="switch"
-                        onChanged={(value: boolean) => {
-                          void toggleRemoteModule(m, value)
-                        }}
-                      />
+                      {!selectionMode ? (
+                        <Toggle
+                          title=""
+                          value={enabledModuleNames.has(remoteName)}
+                          disabled={!remoteControlReady || togglingModuleNames.has(remoteName)}
+                          toggleStyle="switch"
+                          onChanged={(value: boolean) => {
+                            void toggleRemoteModule(m, value)
+                          }}
+                        />
+                      ) : null}
                     </HStack>
                   </VStack>
                 )

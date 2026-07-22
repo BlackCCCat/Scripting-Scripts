@@ -2,6 +2,7 @@ import {
   Button,
   ForEach,
   Form,
+  Group,
   Navigation,
   NavigationStack,
   Section,
@@ -75,6 +76,10 @@ export function SettingsView(props: {
     return !!v && typeof v === "object" && typeof v.then === "function"
   }
 
+  function normalizeBookmarkPath(path: string): string {
+    return String(path ?? "").trim().replace(/\/+$/, "")
+  }
+
   async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
     try {
       const r = fn.apply(thisArg, args)
@@ -106,7 +111,9 @@ export function SettingsView(props: {
     if (cleaned.length) {
       let idx = -1
       if (targetName) idx = cleaned.findIndex((b) => b.name === targetName)
-      if (idx < 0 && targetPath) idx = cleaned.findIndex((b) => b.path === targetPath)
+      if (idx < 0 && targetPath) {
+        idx = cleaned.findIndex((b) => normalizeBookmarkPath(b.path) === normalizeBookmarkPath(targetPath))
+      }
       setBookmarkIdx(idx >= 0 ? idx : 0)
       if (idx >= 0) {
         const matched = cleaned[idx]
@@ -116,11 +123,12 @@ export function SettingsView(props: {
         const resolved = fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [matched.name])) ?? matched.path)
           : matched.path
-        const pathChanged = resolved !== targetPath || matched.name !== targetName
+        const selectedPath = normalizeBookmarkPath(resolved || matched.path)
+        const pathChanged = selectedPath !== normalizeBookmarkPath(targetPath) || matched.name !== targetName
         if (pathChanged) {
-          setCfg((c) => ({ ...c, baseDir: resolved, baseBookmarkName: matched.name }))
+          setCfg((c) => ({ ...c, baseDir: selectedPath, baseBookmarkName: matched.name }))
           try {
-            const next = { ...loadConfig(), baseDir: resolved, baseBookmarkName: matched.name }
+            const next = { ...loadConfig(), baseDir: selectedPath, baseBookmarkName: matched.name }
             saveConfig(next)
             props.onDone?.(next)
           } catch {}
@@ -133,7 +141,7 @@ export function SettingsView(props: {
         const resolved = fm?.bookmarkedPath && canUseByName
           ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
           : first.path
-        setCfg((c) => ({ ...c, baseDir: resolved, baseBookmarkName: first.name }))
+        setCfg((c) => ({ ...c, baseDir: normalizeBookmarkPath(resolved || first.path), baseBookmarkName: first.name }))
       }
     } else {
       setBookmarkIdx(0)
@@ -147,6 +155,44 @@ export function SettingsView(props: {
       setCategoryCounts(counts)
     } catch {
       setCategoryCounts({})
+    }
+  }
+
+  async function pickAndSaveBookmarkFolder() {
+    try {
+      HapticFeedback.mediumImpact()
+      const picker: any = (globalThis as any).DocumentPicker
+      if (typeof picker?.pickDirectoryBookmark !== "function") {
+        await Dialog.alert({
+          title: "当前版本不支持",
+          message: "当前 Scripting 版本不支持直接选择并保存书签文件夹，请先升级 Scripting。",
+        })
+        return
+      }
+
+      const result = await picker.pickDirectoryBookmark({
+        preferredName: "Surge模块管理",
+        initialDirectory: cfg.baseDir || undefined,
+      })
+      if (!result) return
+
+      const bookmarkName = String(result.bookmarkName ?? "").trim()
+      const pickedPath = normalizeBookmarkPath(String(result.path ?? ""))
+      if (!bookmarkName || !pickedPath) {
+        throw new Error("未获取到有效的书签目录")
+      }
+
+      const next: AppConfig = { ...cfg, baseDir: pickedPath, baseBookmarkName: bookmarkName }
+      setCfg(next)
+      saveConfig(next)
+      props.onDone?.(next)
+      const updated = await refreshBookmarks(next)
+      const idx = updated.findIndex((b) => b.name === bookmarkName)
+      if (idx >= 0) setBookmarkIdx(idx)
+      await refreshCounts(next)
+      await Dialog.alert({ message: "已选择并保存书签文件夹" })
+    } catch (e: any) {
+      await Dialog.alert({ title: "选择文件夹失败", message: String(e?.message ?? e) })
     }
   }
 
@@ -315,6 +361,18 @@ function deleteCategoryAt(indices: number[]) {
     }
   }
 
+  const bookmarkContextMenu = {
+    menuItems: (
+      <Group>
+        <Button
+          title="选择新的文件夹"
+          systemImage="folder.badge.plus"
+          action={() => void pickAndSaveBookmarkFolder()}
+        />
+      </Group>
+    ),
+  }
+
   return (
     <NavigationStack>
       <VStack
@@ -342,12 +400,13 @@ function deleteCategoryAt(indices: number[]) {
               textFieldStyle="roundedBorder"
             />
             <Text font="caption" foregroundStyle="secondaryLabel">
-              请在 工具-文件书签 中添加相应文件夹，并在此选择该文件夹
+              可长按书签文件夹选择新的文件夹，并自动保存为书签
             </Text>
             {bookmarks.length ? (
               <Picker
                 title={"书签文件夹"}
                 pickerStyle="menu"
+                contextMenu={bookmarkContextMenu}
                 value={bookmarkIdx}
                 onChanged={(idx: number) => {
                   HapticFeedback.heavyImpact()
@@ -362,11 +421,12 @@ function deleteCategoryAt(indices: number[]) {
                       const resolved = fm?.bookmarkedPath && canUseByName
                         ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [b.name])) ?? b.path)
                         : b.path
-                      const next: AppConfig = { ...cfg, baseDir: resolved, baseBookmarkName: b.name }
+                      const next: AppConfig = { ...cfg, baseDir: normalizeBookmarkPath(resolved || b.path), baseBookmarkName: b.name }
                       setCfg(next)
                       try {
                         saveConfig(next)
                         props.onDone?.(next)
+                        await refreshCounts(next)
                       } catch {}
                     })()
                   }
@@ -378,7 +438,14 @@ function deleteCategoryAt(indices: number[]) {
                   </Text>
                 ))}
               </Picker>
-            ) : null}
+            ) : (
+              <Text
+                foregroundStyle="secondaryLabel"
+                contextMenu={bookmarkContextMenu}
+              >
+                暂无可用书签，长按此处选择新的文件夹
+              </Text>
+            )}
           </Section>
 
           <Section header={<Text>链接格式</Text>}>

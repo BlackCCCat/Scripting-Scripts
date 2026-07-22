@@ -42,7 +42,9 @@ export function EditModuleView(props: {
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [libraryError, setLibraryError] = useState("")
   const [existingLinks, setExistingLinks] = useState<Set<string>>(new Set())
+  const [existingNames, setExistingNames] = useState<Set<string>>(new Set())
   const [filterText, setFilterText] = useState("")
+  const [showOnlyNew, setShowOnlyNew] = useState(false)
   const showLibrary = !initial
 
   const categoryOptions = useMemo<string[]>(() => ["不设置分类", ...props.categories], [props.categories])
@@ -90,8 +92,10 @@ export function EditModuleView(props: {
     try {
       const list = await loadModules()
       setExistingLinks(new Set(list.map((m) => m.link).filter(Boolean)))
+      setExistingNames(new Set(list.map((m) => m.name).filter(Boolean)))
     } catch {
       setExistingLinks(new Set())
+      setExistingNames(new Set())
     }
   }
 
@@ -223,6 +227,35 @@ export function EditModuleView(props: {
       return
     }
 
+    if (!initial) {
+      let names = existingNames
+      let links = existingLinks
+      if (!names.size && !links.size) {
+        try {
+          const list = await loadModules()
+          names = new Set(list.map((m) => m.name).filter(Boolean))
+          links = new Set(list.map((m) => m.link).filter(Boolean))
+          setExistingNames(names)
+          setExistingLinks(links)
+        } catch {}
+      }
+
+      if (names.has(trimmedName)) {
+        await Dialog.alert({
+          title: "模块已存在",
+          message: `已存在同名模块：${trimmedName}`,
+        })
+        return
+      }
+      if (isRemote && links.has(trimmedLink)) {
+        await Dialog.alert({
+          title: "模块已存在",
+          message: "已存在相同下载链接的模块",
+        })
+        return
+      }
+    }
+
     const result: ModuleInfo = {
       name: trimmedName,
       link: isRemote ? trimmedLink : "",
@@ -271,10 +304,14 @@ export function EditModuleView(props: {
   }
 
   const shownItems = useMemo(() => {
-    if (!filterText) return libraryItems
+    let list = libraryItems
+    if (showOnlyNew) {
+      list = list.filter((m) => !existingLinks.has(m.link))
+    }
+    if (!filterText) return list
     const key = filterText.toLowerCase()
-    return libraryItems.filter((m) => m.name.toLowerCase().includes(key))
-  }, [libraryItems, filterText])
+    return list.filter((m) => m.name.toLowerCase().includes(key))
+  }, [libraryItems, filterText, showOnlyNew, existingLinks])
 
   return (
     <NavigationStack>
@@ -409,6 +446,14 @@ export function EditModuleView(props: {
                   />
                 </HStack>
               ) : null}
+              <Toggle
+                title="只看未添加"
+                value={showOnlyNew}
+                onChanged={(value: boolean) => {
+                  HapticFeedback.heavyImpact()
+                  setShowOnlyNew(value)
+                }}
+              />
               <List listStyle="plain" frame={{ height: 360 }}>
                 {shownItems.map((item) => {
                   const existed = existingLinks.has(item.link)
