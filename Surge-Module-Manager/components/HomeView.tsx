@@ -1,5 +1,6 @@
 import {
   Button,
+  Divider,
   EmptyView,
   Grid,
   GridRow,
@@ -796,6 +797,100 @@ export function HomeView() {
     }
   }
 
+  const fixedStatusPanel = (
+    <VStack
+      spacing={6}
+      frame={{ maxWidth: "infinity", alignment: "leading" }}
+    >
+      <HStack>
+        <Text font="headline">状态</Text>
+        <Spacer />
+      </HStack>
+      <Text>{stage}</Text>
+      {progress !== null ? (
+        <ProgressView
+          value={progress}
+          total={1}
+          progressViewStyle="linear"
+          frame={{ maxWidth: "infinity" }}
+        />
+      ) : null}
+      {lastFailureDetails ? (
+        <VStack alignment="leading" spacing={8}>
+          <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={4}>
+            {lastFailureDetails}
+          </Text>
+          <Button
+            title="复制失败详情"
+            systemImage="doc.on.doc"
+            action={withButtonHaptic(copyFailureDetails)}
+          />
+        </VStack>
+      ) : null}
+    </VStack>
+  )
+
+  const fixedBatchPanel = selectionMode ? (
+    <VStack
+      spacing={8}
+      frame={{ maxWidth: "infinity", alignment: "leading" }}
+    >
+      <HStack>
+        <Text font="headline">批量操作</Text>
+        <Spacer />
+        <Text foregroundStyle="secondaryLabel">已选 {selectedModules.length}</Text>
+      </HStack>
+      <Grid
+        horizontalSpacing={6}
+        verticalSpacing={0}
+        listRowBackground={<EmptyView />}
+        listRowSeparator="hidden"
+        frame={{ maxWidth: "infinity", alignment: "center" }}
+        padding={{ top: 2, bottom: 2 }}
+      >
+        <GridRow>
+          <BatchCompactButton
+            title="全选"
+            systemImage="checkmark.circle"
+            tint="systemBlue"
+            onPress={selectAllFiltered}
+          />
+          <BatchCompactButton
+            title="反选"
+            systemImage="circle.lefthalf.filled"
+            tint="systemBlue"
+            onPress={invertFilteredSelection}
+          />
+          <BatchCompactButton
+            title="更新"
+            systemImage="arrow.triangle.2.circlepath"
+            tint="systemGreen"
+            disabled={busy || selectedDownloadableCount === 0}
+            onPress={downloadSelected}
+          />
+          <BatchMoveMenu
+            disabled={busy || selectedModules.length === 0}
+            targets={moveTargets}
+            onMove={moveSelectedTo}
+          />
+          <BatchCompactButton
+            title="删除"
+            systemImage="trash"
+            tint="systemRed"
+            disabled={busy || selectedModules.length === 0}
+            onPress={deleteSelected}
+          />
+          <BatchCompactButton
+            title="完成"
+            systemImage="checkmark"
+            tint="systemBlue"
+            onPress={exitSelectionMode}
+          />
+        </GridRow>
+      </Grid>
+    </VStack>
+  ) : null
+
 
   return (
     <NavigationStack>
@@ -821,6 +916,27 @@ export function HomeView() {
           ),
         }}
         safeAreaInset={{
+          top: {
+            alignment: "center",
+            spacing: 0,
+            content: (
+              <VStack
+                padding={{ top: 8, bottom: 8, leading: 18, trailing: 18 }}
+                frame={{ maxWidth: "infinity" }}
+              >
+                <VStack
+                  spacing={selectionMode ? 10 : 0}
+                  padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
+                  frame={{ maxWidth: "infinity", alignment: "leading" }}
+                  glassEffect={{ type: "rect", cornerRadius: 28 } as any}
+                >
+                  {fixedStatusPanel}
+                  {selectionMode ? <Divider /> : null}
+                  {fixedBatchPanel}
+                </VStack>
+              </VStack>
+            ),
+          },
           bottom: {
             alignment: "trailing",
             spacing: 0,
@@ -857,91 +973,6 @@ export function HomeView() {
           },
         }}
       >
-        <Section header={<Text>状态</Text>}>
-          <Text>{stage}</Text>
-          {progress !== null ? (
-            <ProgressView
-              value={progress}
-              total={1}
-              progressViewStyle="linear"
-              frame={{ maxWidth: "infinity" }}
-            />
-          ) : null}
-          {lastFailureDetails ? (
-            <VStack alignment="leading" spacing={8}>
-              <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={4}>
-                {lastFailureDetails}
-              </Text>
-              <Button
-                title="复制失败详情"
-                systemImage="doc.on.doc"
-                action={withButtonHaptic(copyFailureDetails)}
-              />
-            </VStack>
-          ) : null}
-        </Section>
-
-        {selectionMode ? (
-          <Section
-            header={(
-              <HStack>
-                <Text>批量操作</Text>
-                <Spacer />
-                <Text foregroundStyle="secondaryLabel">已选 {selectedModules.length}</Text>
-              </HStack>
-            )}
-          >
-            <Grid
-              horizontalSpacing={6}
-              verticalSpacing={0}
-              listRowBackground={<EmptyView />}
-              listRowSeparator="hidden"
-              frame={{ maxWidth: "infinity", alignment: "center" }}
-              padding={{ top: 2, bottom: 2 }}
-            >
-              <GridRow>
-                <BatchCompactButton
-                  title="全选"
-                  systemImage="checkmark.circle"
-                  tint="systemBlue"
-                  onPress={selectAllFiltered}
-                />
-                <BatchCompactButton
-                  title="反选"
-                  systemImage="circle.lefthalf.filled"
-                  tint="systemBlue"
-                  onPress={invertFilteredSelection}
-                />
-                <BatchCompactButton
-                  title="更新"
-                  systemImage="arrow.triangle.2.circlepath"
-                  tint="systemGreen"
-                  disabled={busy || selectedDownloadableCount === 0}
-                  onPress={downloadSelected}
-                />
-                <BatchMoveMenu
-                  disabled={busy || selectedModules.length === 0}
-                  targets={moveTargets}
-                  onMove={moveSelectedTo}
-                />
-                <BatchCompactButton
-                  title="删除"
-                  systemImage="trash"
-                  tint="systemRed"
-                  disabled={busy || selectedModules.length === 0}
-                  onPress={deleteSelected}
-                />
-                <BatchCompactButton
-                  title="完成"
-                  systemImage="checkmark"
-                  tint="systemBlue"
-                  onPress={exitSelectionMode}
-                />
-              </GridRow>
-            </Grid>
-          </Section>
-        ) : null}
-
         <Section
           header={(
             <HStack frame={{ maxWidth: "infinity" }}>
