@@ -979,7 +979,7 @@ export async function autoUpdateAll(
     hasPrecheckFailure?: boolean
   },
   prechecked?: AllUpdateResult,
-  _preDecision?: UpdateDecision
+  preDecision?: UpdateDecision
 ): Promise<AutoUpdateRunResult> {
   params.onStage?.("自动更新：检查更新中…")
   const r = prechecked ?? (await checkAllUpdates(cfg, (kind, message) => {
@@ -992,7 +992,7 @@ export async function autoUpdateAll(
   const failed = { scheme: false, dict: false, model: false }
 
   const schemeRemoteMark = schemeRemoteMarkForConfig(cfg, r.scheme)
-  const needScheme = !!(
+  const computedNeedScheme = !!(
     schemeRemoteMark &&
     normalizeMark(
       cfg.usePrereleaseScheme
@@ -1003,10 +1003,20 @@ export async function autoUpdateAll(
 
   const remoteDictMark = normalizeMark(ensureRemoteMark(r.dict, "dict"))
   const localDictMark = normalizeMark(meta.dict?.remoteIdOrSha)
-  const needDict = !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
+  const computedNeedDict = !!(r.dict && remoteDictMark && localDictMark !== remoteDictMark)
 
   if (r.model && !r.model.remoteIdOrSha) r.model.remoteIdOrSha = ensureRemoteMark(r.model, "model")
-  const needModel = cfg.downloadModel && isModelUpdateAvailable(meta.model, r.model)
+  const computedNeedModel = cfg.downloadModel && isModelUpdateAvailable(meta.model, r.model)
+
+  const needScheme = preDecision
+    ? !!(preDecision.scheme && r.scheme)
+    : computedNeedScheme
+  const needDict = preDecision
+    ? !!(preDecision.dict && r.dict)
+    : computedNeedDict
+  const needModel = preDecision
+    ? !!(cfg.downloadModel && preDecision.model && r.model)
+    : computedNeedModel
 
   if (!needScheme && !needDict && !needModel) {
     params.onStage?.("自动更新：已是最新，无需更新")

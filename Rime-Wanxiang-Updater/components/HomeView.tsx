@@ -143,37 +143,18 @@ function FloatingActionButton(props: {
   size?: number;
   iconSize?: string;
   onPress: () => void;
-  onLongPress?: () => void;
 }) {
   const size = props.size ?? 58;
-  const longPressHandledRef = useRef(false);
   const tintColor: any = props.disabled
     ? "secondaryLabel"
     : (props.color ?? "systemBlue");
 
   function triggerPress() {
-    if (longPressHandledRef.current) {
-      longPressHandledRef.current = false;
-      return;
-    }
     try {
       (globalThis as any).HapticFeedback?.mediumImpact?.();
     } catch {}
     props.onPress();
   }
-
-  function triggerLongPress() {
-    if (props.disabled || !props.onLongPress) return;
-    try {
-      (globalThis as any).HapticFeedback?.heavyImpact?.();
-    } catch {}
-    longPressHandledRef.current = true;
-    props.onLongPress();
-  }
-
-  const longPressGesture = props.onLongPress
-    ? { minDuration: 500, perform: triggerLongPress }
-    : undefined;
 
   return (
     <Button
@@ -183,12 +164,10 @@ function FloatingActionButton(props: {
       buttonBorderShape="circle"
       controlSize="regular"
       tint={tintColor}
-      onLongPressGesture={longPressGesture}
       frame={{ width: size, height: size }}
     >
       <VStack
         frame={{ width: size, height: size, alignment: "center" as any }}
-        onLongPressGesture={longPressGesture}
       >
         <Image
           systemName={props.icon}
@@ -215,7 +194,6 @@ function FloatingActionGroup(props: {
   disabled?: boolean;
   items: ActionClusterItem[];
   onToggle: () => void;
-  onLongPress?: () => void;
 }) {
   return (
     <HStack spacing={18} frame={{ maxWidth: "infinity", alignment: "trailing" as any }}>
@@ -242,7 +220,6 @@ function FloatingActionGroup(props: {
         size={56}
         iconSize="title2"
         onPress={props.onToggle}
-        onLongPress={props.onLongPress}
       />
     </HStack>
   );
@@ -851,7 +828,7 @@ function UsageGuideView() {
             <UsageGuideSection
               icon="bolt.fill"
               title="更新与部署"
-              detail="点击右下角下方按钮，向左展开部署、检查更新、自动更新三个入口；长按该主按钮会直接执行自动更新。"
+              detail="点击右下角下方按钮，向左展开部署、检查更新、自动更新三个入口。"
               color="systemBlue"
             >
               <UsageGuideRow
@@ -2272,9 +2249,6 @@ export function HomeView() {
             { icon: "bolt.fill", title: "自动", color: autoUpdateColor, disabled, onPress: () => runAction(onAutoUpdate) },
           ]}
           onToggle={() => toggleGroup("update")}
-          onLongPress={() => {
-            if (!disabled) runAction(onAutoUpdate);
-          }}
         />
       </VStack>
     );
