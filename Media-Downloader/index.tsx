@@ -37,11 +37,12 @@ import {
 import { cleanupCurrentDownloadFiles, clearDownloadCancelFlag, downloadMedia, getYtDlpVersion, installOrUpdateYtDlp, requestDownloadCancel } from "./services/media"
 import {
   clearHistoryRecords,
-  deleteHistoryRecord,
   initDatabase,
   insertHistory,
   listHistory,
   getHistoryFiles,
+  removeHistoryRecordFiles,
+  deleteHistoryRecord,
   pruneHistoryStorage,
   type HistoryRecord,
 } from "./services/history"
@@ -57,6 +58,8 @@ import { getI18n, languageLabel, localizeRuntimeText } from "./utils/i18n"
 const HISTORY_TAB = 0
 const DOWNLOAD_TAB = 1
 const SETTINGS_TAB = 2
+const DESKTOP_BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+const YOINKS_URL = "https://github.com/pablostanley/yoinks"
 
 type ContentTab = typeof HISTORY_TAB | typeof DOWNLOAD_TAB | typeof SETTINGS_TAB
 
@@ -87,6 +90,14 @@ async function openOriginalPage(url: string) {
   await Safari.present(url, true)
 }
 
+async function openExternalURL(url: string) {
+  try {
+    const opened = await Safari.openURL(url)
+    if (opened) return
+  } catch {}
+  await Safari.present(url, true)
+}
+
 async function removeExistingFile(path: string): Promise<boolean> {
   if (!(await FileManager.exists(path))) return false
   await FileManager.remove(path)
@@ -113,21 +124,14 @@ async function removeDownloadSuccessFiles(record: DownloadSuccess): Promise<numb
   return deletedCount
 }
 
+function isCookieLoginRequiredError(message: string): boolean {
+  return /需要登录|cookies|login|authentication|empty media response|匿名访问下不可用/i.test(message)
+}
+
 async function deleteHistoryRecordAndFiles(record: HistoryRecord): Promise<number> {
-  const files = getHistoryFiles(record)
-  const seen = new Set<string>()
-  let deletedCount = 0
-
-  for (const file of files) {
-    if (!file.filePath || seen.has(file.filePath)) continue
-    seen.add(file.filePath)
-    if (await removeExistingFile(file.filePath)) {
-      deletedCount += 1
-    }
-  }
-
+  const result = await removeHistoryRecordFiles(record)
   await deleteHistoryRecord(record.id)
-  return deletedCount
+  return result.deletedCount
 }
 
 async function removeDownloadCacheDirectories(): Promise<number> {
@@ -176,10 +180,10 @@ function resolveIntentURL(): string | null {
 }
 
 async function runIntentDownload(url: string) {
+  const logs: string[] = []
   try {
     const preferences = getPreferences()
     await initDatabase()
-    const logs: string[] = []
     const download = await downloadMedia(url, {
       preferNoWatermark: preferences.preferNoWatermark,
       ytDlpReady: preferences.ytDlpReady,
@@ -229,10 +233,9 @@ async function runIntentDownload(url: string) {
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await Pasteboard.setString(message)
     await Dialog.alert({
       title: "下载失败",
-      message: `${message}\n\n错误信息已复制到剪贴板。`,
+      message,
       buttonLabel: "好",
     })
     Script.exit(Intent.text(`下载失败：${message}`))
@@ -260,7 +263,8 @@ function ThumbnailView(props: {
         <Image
           imageUrl={props.url}
           resizable
-          frame={{ width, height }}
+          scaleToFit
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
           clipShape={{ type: "rect", cornerRadius: 8 }}
           placeholder={<Image systemName="play.rectangle.fill" foregroundStyle="secondaryLabel" />}
         />
@@ -268,63 +272,6 @@ function ThumbnailView(props: {
         <Image systemName="play.rectangle.fill" foregroundStyle="secondaryLabel" />
       )}
     </VStack>
-  )
-}
-
-function RecentDownloadPage(props: {
-  item: DownloadSuccess
-  t: ReturnType<typeof getI18n>
-}) {
-  const dismiss = Navigation.useDismiss()
-  const { item, t } = props
-
-  return (
-    <NavigationStack>
-      <List
-        navigationTitle={t.recentDownload}
-        navigationBarTitleDisplayMode="inline"
-        toolbar={{
-          cancellationAction: <Button title={t.close} action={dismiss} />,
-        }}
-      >
-        <Section>
-          <HStack alignment="top" spacing={14}>
-            <ThumbnailView url={item.extracted.thumbnailURL} width={118} height={158} />
-            <VStack alignment="leading" spacing={12} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-              <Text font="headline" lineLimit={4}>{item.extracted.title || item.fileName}</Text>
-              <Text font="caption" foregroundStyle="secondaryLabel">{formatBytes(item.bytesWritten)} · {formatDate(item.createdAt)}</Text>
-              <VStack alignment="leading" spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                <Button
-                  title={t.shareFile}
-                  systemImage="square.and.arrow.up"
-                  action={() => void ShareSheet.present(item.files?.length ? item.files.map((file) => file.filePath) : [item.filePath])}
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  padding={{ horizontal: 12, vertical: 8 }}
-                  glassEffect
-                />
-                <Button
-                  title={t.openOriginalPage}
-                  systemImage="safari"
-                  action={async () => {
-                    try {
-                      await openOriginalPage(item.extracted.canonical || item.extracted.pageURL)
-                    } catch (error) {
-                      await Dialog.alert({
-                        title: "打开失败",
-                        message: error instanceof Error ? error.message : String(error),
-                      })
-                    }
-                  }}
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  padding={{ horizontal: 12, vertical: 8 }}
-                  glassEffect
-                />
-              </VStack>
-            </VStack>
-          </HStack>
-        </Section>
-      </List>
-    </NavigationStack>
   )
 }
 
@@ -337,6 +284,44 @@ function SavedFilesPage(props: {
         title={props.t.savedFiles}
         directoryPath={ROOT_DIR}
       />
+    </NavigationStack>
+  )
+}
+
+function AboutPage(props: {
+  t: ReturnType<typeof getI18n>
+}) {
+  const dismiss = Navigation.useDismiss()
+  const { t } = props
+
+  return (
+    <NavigationStack>
+      <List
+        navigationTitle={t.about}
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          cancellationAction: <Button title={t.close} action={dismiss} />,
+        }}
+      >
+        <Section title={t.operationGuide}>
+          {t.operationGuideItems.map((item, index) => (
+            <HStack key={`guide-${index}`} alignment="top" spacing={10}>
+              <Text font="caption" foregroundStyle="secondaryLabel">{String(index + 1)}</Text>
+              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>{item}</Text>
+            </HStack>
+          ))}
+        </Section>
+        <Section title={t.acknowledgements}>
+          {t.acknowledgementItems.map((item, index) => (
+            <Text key={`thanks-${index}`}>{item}</Text>
+          ))}
+          <Button
+            title={t.yoinksProject}
+            systemImage="link"
+            action={() => void openExternalURL(YOINKS_URL)}
+          />
+        </Section>
+      </List>
     </NavigationStack>
   )
 }
@@ -544,14 +529,16 @@ function View() {
     stage: "未开始",
   })
   const latestStatusRef = useRef("")
+  const downloadLogsRef = useRef<string[]>([])
   const [downloadLogs, setDownloadLogs] = useState<string[]>([])
   const [history, setHistory] = useState<HistoryRecord[]>([])
-  const [lastDownloaded, setLastDownloaded] = useState<DownloadSuccess | null>(null)
   const [preferences, setPreferences] = useState<Preferences>(getPreferences())
   const [ytDlpStatus, setYtDlpStatus] = useState("")
   const [ytDlpBusy, setYtDlpBusy] = useState(false)
   const ytDlpCheckingRef = useRef(false)
   const downloadRunIdRef = useRef(0)
+  const [toastMessage, setToastMessage] = useState("")
+  const [toastPresented, setToastPresented] = useState(false)
   const t = getI18n(preferences.language)
 
   const refreshHistory = async () => {
@@ -582,7 +569,40 @@ function View() {
       minute: "2-digit",
       second: "2-digit",
     })
-    setDownloadLogs((current) => [...current, `[${timestamp}] ${message}`].slice(-60))
+    const next = [...downloadLogsRef.current, `[${timestamp}] ${message}`].slice(-60)
+    downloadLogsRef.current = next
+    setDownloadLogs(next)
+  }
+
+  const showToast = (message: string) => {
+    setToastMessage(message)
+    setToastPresented(false)
+    setTimeout(() => setToastPresented(true), 40)
+  }
+
+  const copyText = async (text: string, message: string) => {
+    await Pasteboard.setString(text)
+    showToast(message)
+  }
+
+  const copyDownloadLogs = async () => {
+    const logs = downloadLogsRef.current
+    await copyText(logs.length ? logs.join("\n") : t.noLogs, t.copiedLogs)
+  }
+
+  const copyDownloadStatus = async () => {
+    const statusText = loading
+      ? `${Math.round(latestProgressRef.current.fraction * 100)}% · ${latestProgressRef.current.stage}`
+      : (latestStatusRef.current || status || t.ready)
+    await copyText(statusText, t.copiedStatus)
+  }
+
+  const retryCurrentTask = () => {
+    if (loading) return
+    const rawInput = (inputURL || "").trim()
+    if (!rawInput) return
+    activeTab.setValue(DOWNLOAD_TAB)
+    void handleDownload(rawInput)
   }
 
   useEffect(() => {
@@ -677,11 +697,45 @@ function View() {
     await handleDownload(nextInput)
   }
 
-  const openRecentDownload = async () => {
-    if (!lastDownloaded) return
-    await Navigation.present({
-      element: <RecentDownloadPage item={lastDownloaded} t={t} />,
-    })
+  const openCookieLoginBrowser = async (targetURL?: string, retryHint = false): Promise<boolean> => {
+    const rawTarget = (targetURL || extractFirstURL(inputURL) || inputURL).trim()
+    let loginURL = extractFirstURL(rawTarget) || rawTarget
+    if (!loginURL) {
+      const prompted = await Dialog.prompt({
+        title: t.loginCookies,
+        message: preferences.language === "en"
+          ? "Enter the website URL you want to log in to."
+          : "输入需要登录并保存 Cookie 的网站链接。",
+        placeholder: "https://www.instagram.com/",
+        cancelLabel: t.cancel,
+        confirmLabel: t.loginCookies,
+        selectAll: true,
+      })
+      if (!prompted?.trim()) return false
+      loginURL = extractFirstURL(prompted.trim()) || prompted.trim()
+    }
+    if (!/^https?:\/\//i.test(loginURL)) {
+      loginURL = `https://${loginURL}`
+    }
+
+    setStatus(retryHint ? t.cookieLoginRetry : t.cookieLoginOpened)
+    showToast(retryHint ? t.cookieLoginRetry : t.cookieLoginOpened)
+    const webView = new WebViewController()
+    try {
+      webView.setCustomUserAgent(DESKTOP_BROWSER_UA)
+      await webView.loadURL(loginURL)
+      await webView.present({
+        navigationTitle: t.loginCookies,
+        fullscreen: true,
+      })
+      const cookies = await webView.getCookies(loginURL)
+      const message = `${t.cookieLoginSaved}：${cookies.length}`
+      setStatus(message)
+      showToast(message)
+      return true
+    } finally {
+      webView.dispose()
+    }
   }
 
   const applyHistoryStorageLimits = async () => {
@@ -701,19 +755,21 @@ function View() {
     void handleDownload(url)
   }
 
-  const handleDownload = async (overrideInput?: string) => {
+  const handleDownload = async (overrideInput?: string, retriedAfterCookieLogin = false) => {
     const rawInput = (overrideInput ?? inputURL).trim()
     const url = extractFirstURL(rawInput) || rawInput
     if (!url) {
       setStatus(t.emptyInput)
       return
     }
+    let retryAfterLoginInput: string | null = null
 
     setLoading(true)
     const runId = downloadRunIdRef.current + 1
     downloadRunIdRef.current = runId
     cancelRequestedRef.current = false
     await clearDownloadCancelFlag()
+    downloadLogsRef.current = []
     setDownloadLogs([])
     latestProgressRef.current = { fraction: 0.01, stage: t.preparing }
     latestStatusRef.current = t.analyzing
@@ -759,7 +815,6 @@ function View() {
       }
       await applyHistoryStorageLimits()
       await refreshHistory()
-      setLastDownloaded(preserveFiles ? download : null)
       appendLog("历史记录已写入。")
       latestProgressRef.current = { fraction: 1, stage: t.done }
       latestStatusRef.current = `${t.downloadSuccess}：${download.fileName} · ${postResult.message}`
@@ -779,16 +834,30 @@ function View() {
       appendLog(`下载失败：${message}`)
       latestStatusRef.current = `${t.downloadFailed}：${message}`
       setStatus(latestStatusRef.current)
-      await Dialog.alert({
-        title: t.downloadFailed,
-        message,
-      })
+      if (!retriedAfterCookieLogin && isCookieLoginRequiredError(message)) {
+        appendLog("该网站可能需要登录，正在打开内置浏览器。")
+        setLoading(false)
+        const loggedIn = await openCookieLoginBrowser(url, true)
+        if (loggedIn) {
+          appendLog("登录浏览器已关闭，自动重试下载。")
+          retryAfterLoginInput = rawInput
+        }
+      }
+      if (!retryAfterLoginInput) {
+        await Dialog.alert({
+          title: t.downloadFailed,
+          message,
+        })
+      }
     } finally {
       if (downloadRunIdRef.current === runId) {
         setLoading(false)
         cancelRequestedRef.current = false
         await clearDownloadCancelFlag()
       }
+    }
+    if (retryAfterLoginInput) {
+      await handleDownload(retryAfterLoginInput, true)
     }
   }
 
@@ -956,6 +1025,12 @@ function View() {
     })
   }
 
+  const openAboutPage = async () => {
+    await Navigation.present({
+      element: <AboutPage t={t} />,
+    })
+  }
+
   const renderHistoryPage = () => (
     <NavigationStack>
       <List
@@ -999,9 +1074,11 @@ function View() {
         navigationBarTitleDisplayMode="inline"
         toolbar={{
           cancellationAction: <Button title={t.close} action={dismiss} />,
-          topBarTrailing: lastDownloaded
-            ? <Button title="" systemImage="checkmark.circle" action={() => void openRecentDownload()} />
-            : undefined as any,
+          topBarTrailing: (
+            <HStack spacing={8}>
+              <Button title="" systemImage="globe" action={() => void openCookieLoginBrowser()} />
+            </HStack>
+          ),
         }}
       >
         <Section
@@ -1009,7 +1086,16 @@ function View() {
           footer={<Text font="caption" foregroundStyle="secondaryLabel">{t.currentTaskFooter}</Text>}
         >
           {inputURL ? (
-            <Text lineLimit={3}>{inputURL}</Text>
+            <HStack
+              spacing={8}
+              onTapGesture={loading ? undefined : retryCurrentTask}
+              contextMenu={{
+                menuItems: <Button title={t.retryCurrentTask} systemImage="arrow.clockwise" action={retryCurrentTask} disabled={loading} />,
+              }}
+            >
+              <Text lineLimit={3} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>{inputURL}</Text>
+              <Image systemName="arrow.clockwise" foregroundStyle={loading ? "secondaryLabel" : "systemBlue"} />
+            </HStack>
           ) : (
             <Text foregroundStyle="secondaryLabel">{t.noLinkAdded}</Text>
           )}
@@ -1023,7 +1109,7 @@ function View() {
             {(proxy: any) => {
               logProxyRef.current = proxy
               return (
-                <ScrollView frame={{ maxWidth: "infinity", height: 220 }}>
+                <ScrollView frame={{ maxWidth: "infinity", height: 220 }} onTapGesture={() => void copyDownloadLogs()}>
                   <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
                     {downloadLogs.length === 0 ? (
                       <Text foregroundStyle="secondaryLabel">{t.noLogs}</Text>
@@ -1046,13 +1132,13 @@ function View() {
 
         <Section title={t.status}>
           {loading ? (
-            <VStack alignment="leading" spacing={8}>
+            <VStack alignment="leading" spacing={8} onTapGesture={() => void copyDownloadStatus()}>
               <ProgressView value={downloadProgress.fraction} total={1} />
               <Text>{localizeRuntimeText(downloadProgress.stage, preferences.language)}</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(downloadProgress.fraction * 100)}%</Text>
             </VStack>
           ) : (
-            <Text foregroundStyle="secondaryLabel">{localizeRuntimeText(status, preferences.language)}</Text>
+            <Text foregroundStyle="secondaryLabel" onTapGesture={() => void copyDownloadStatus()}>{localizeRuntimeText(status, preferences.language)}</Text>
           )}
         </Section>
 
@@ -1145,12 +1231,24 @@ function View() {
           <Text foregroundStyle="secondaryLabel">{languageLabel(preferences.language, t)}</Text>
           <Button title={t.chooseLanguage} systemImage="globe" action={() => void chooseLanguage()} />
         </Section>
+        <Section>
+          <Button title={t.about} systemImage="info.circle" action={() => void openAboutPage()} />
+        </Section>
       </List>
     </NavigationStack>
   )
 
   return (
-    <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    <ZStack
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      toast={toastMessage ? {
+        message: toastMessage,
+        isPresented: toastPresented,
+        onChanged: setToastPresented,
+        position: "top",
+        duration: 2,
+      } : undefined}
+    >
       <TabView
         selection={activeTab as any}
         tint="systemPink"

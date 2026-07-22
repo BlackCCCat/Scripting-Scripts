@@ -22,7 +22,7 @@ import { initDatabase, insertHistory, pruneHistoryStorage } from "./services/his
 import { downloadMedia } from "./services/media"
 import { getPreferences, persistPreferences } from "./services/preferences"
 import { extractFirstURL } from "./utils/common"
-import { getI18n, localizeRuntimeText, resolveLanguage } from "./utils/i18n"
+import { getI18n, localizeRuntimeText } from "./utils/i18n"
 
 function resolveInputURL(): string | null {
   if (Intent.urlsParameter?.length) {
@@ -70,12 +70,9 @@ async function handleError(error: unknown) {
   const t = getI18n(preferences.language)
   const message = error instanceof Error ? error.message : String(error)
   const localizedMessage = localizeRuntimeText(message, preferences.language)
-  await Pasteboard.setString(message)
   await Dialog.alert({
     title: t.downloadFailed,
-    message: resolveLanguage(preferences.language) === "zh"
-      ? `${localizedMessage}\n\n错误信息已复制到剪贴板。`
-      : `${localizedMessage}\n\nThe error message has been copied to the clipboard.`,
+    message: localizedMessage,
     buttonLabel: t.close,
   })
   Script.exit(Intent.text(`${t.downloadFailed}: ${localizedMessage}`))

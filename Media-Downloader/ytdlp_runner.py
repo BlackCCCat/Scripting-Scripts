@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import time
+import traceback
 
 from yt_dlp import YoutubeDL
 
@@ -55,6 +56,40 @@ def print_metadata(info, fallback_url):
         "thumbnail": best_thumbnail(info),
     }
     print("MEDIA_DOWNLOADER_METADATA " + json.dumps(metadata, ensure_ascii=False))
+
+
+def safe_format(item):
+    keys = [
+        "format_id",
+        "format_note",
+        "ext",
+        "vcodec",
+        "acodec",
+        "height",
+        "width",
+        "abr",
+        "tbr",
+        "fps",
+        "filesize",
+        "filesize_approx",
+        "protocol",
+    ]
+    return {key: item.get(key) for key in keys if item.get(key) is not None}
+
+
+def print_probe(info, fallback_url):
+    formats = info.get("formats") or []
+    payload = {
+        "id": info.get("id"),
+        "title": info.get("title"),
+        "description": info.get("description"),
+        "webpage_url": info.get("webpage_url") or info.get("original_url") or fallback_url,
+        "thumbnail": best_thumbnail(info),
+        "extractor_key": info.get("extractor_key"),
+        "duration": info.get("duration"),
+        "formats": [safe_format(item) for item in formats if item.get("format_id")],
+    }
+    print("MEDIA_DOWNLOADER_PROBE " + json.dumps(payload, ensure_ascii=False))
 
 
 def main():
@@ -113,12 +148,45 @@ def main():
             finished_paths.append(os.path.abspath(filename))
 
     options = {
-        "format": config["format"],
         "format_sort": config.get("format_sort") or [],
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
     }
+    if config.get("no_check_certificate"):
+        options["nocheckcertificate"] = True
+    if isinstance(config.get("http_headers"), dict):
+        options["http_headers"] = {
+            str(key): str(value)
+            for key, value in config.get("http_headers").items()
+            if value is not None
+        }
+    if config.get("cookiefile"):
+        options["cookiefile"] = config.get("cookiefile")
+
+    mode = config.get("mode") or "download"
+    if mode != "probe":
+        options["format"] = config["format"]
+
+    if mode == "probe":
+        options.pop("format", None)
+        options.update({
+            "skip_download": True,
+            "extract_flat": False,
+        })
+        try:
+            with YoutubeDL(options) as ydl:
+                info = ydl.extract_info(config["url"], download=False)
+        except BaseException:
+            if cancel_flag and os.path.exists(cancel_flag):
+                print("MEDIA_DOWNLOADER_CANCELLED Download canceled")
+                raise SystemExit(130)
+            print("MEDIA_DOWNLOADER_TRACEBACK")
+            traceback.print_exc()
+            raise
+        print_metadata(info, config["url"])
+        print_probe(info, config["url"])
+        return
 
     options.update({
         "outtmpl": config["output"],
@@ -138,6 +206,8 @@ def main():
             cleanup_media_files(config["paths"], started_at)
             print("MEDIA_DOWNLOADER_CANCELLED Download canceled")
             raise SystemExit(130)
+        print("MEDIA_DOWNLOADER_TRACEBACK")
+        traceback.print_exc()
         raise
 
     print_metadata(info, config["url"])

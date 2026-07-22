@@ -1,3 +1,4 @@
+import { Path } from "scripting"
 import type { SaveMode } from "./preferences"
 import type { DownloadedFile, DownloadSuccess } from "./douyin"
 
@@ -6,14 +7,81 @@ export type PostDownloadResult = {
   keepFilesInHistory: boolean
 }
 
-export async function saveFilePathToPhotos(filePath: string, fileName: string) {
-  const ok = await Photos.saveVideo(filePath, {
-    fileName,
-    shouldMoveFile: false,
-  })
-  if (!ok) {
-    throw new Error("保存到相册失败")
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`
+}
+
+function commandLine(args: string[]): string {
+  const [command, ...rest] = args
+  return [command, ...rest.map(shellQuote)].join(" ")
+}
+
+async function saveVideoToPhotos(filePath: string, fileName: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const ok = await Photos.saveVideo(filePath, {
+      fileName,
+      shouldMoveFile: false,
+    })
+    return { ok }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+async function makePhotosCompatibleVideo(filePath: string): Promise<string | null> {
+  const ext = Path.extname(filePath)
+  const base = ext ? filePath.slice(0, -ext.length) : filePath
+  const outputPath = `${base}.photos.mp4`
+  const result = await Shell.run(
+    commandLine([
+      "ffmpeg",
+      "-nostdin",
+      "-y",
+      "-i",
+      filePath,
+      "-c:v",
+      "h264_videotoolbox",
+      "-b:v",
+      "6000k",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "160k",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ]),
+    { timeout: 3600 }
+  )
+
+  if (result.exitCode !== 0 || !FileManager.existsSync(outputPath)) {
+    try {
+      if (FileManager.existsSync(outputPath)) FileManager.removeSync(outputPath)
+    } catch {}
+    return null
+  }
+
+  return outputPath
+}
+
+export async function saveFilePathToPhotos(filePath: string, fileName: string) {
+  const original = await saveVideoToPhotos(filePath, fileName)
+  if (original.ok) return
+
+  let convertedPath: string | null = null
+  try {
+    convertedPath = await makePhotosCompatibleVideo(filePath)
+    if (convertedPath) {
+      const converted = await saveVideoToPhotos(convertedPath, fileName)
+      if (converted.ok) return
+    }
+  } finally {
+    try {
+      if (convertedPath && FileManager.existsSync(convertedPath)) FileManager.removeSync(convertedPath)
+    } catch {}
+  }
+
+  throw new Error(original.error ? `保存到相册失败：${original.error}` : "保存到相册失败")
 }
 
 export async function saveImageFilePathToPhotos(filePath: string, fileName: string) {

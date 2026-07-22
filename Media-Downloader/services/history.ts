@@ -126,30 +126,43 @@ async function listHistoryOldestFirst(): Promise<HistoryRecord[]> {
 }
 
 export function getHistoryFiles(record: HistoryRecord): DownloadedFile[] {
+  const files: DownloadedFile[] = []
+  const seen = new Set<string>()
+
+  const addFile = (file: Partial<DownloadedFile> & Record<string, unknown>) => {
+    const filePath = typeof file.filePath === "string" ? file.filePath : typeof file.file_path === "string" ? file.file_path : ""
+    const fileName = typeof file.fileName === "string" ? file.fileName : typeof file.file_name === "string" ? file.file_name : Path.basename(filePath || record.file_path)
+    if (!filePath || !fileName || seen.has(filePath)) return
+    seen.add(filePath)
+    files.push({
+      filePath,
+      fileName,
+      finalURL: typeof file.finalURL === "string" ? file.finalURL : typeof file.final_url === "string" ? file.final_url : record.final_url,
+      bytesWritten: typeof file.bytesWritten === "number" ? file.bytesWritten : typeof file.bytes_written === "number" ? file.bytes_written : 0,
+      mediaType: file.mediaType === "image" || file.media_type === "image" ? "image" : "video",
+    })
+  }
+
   if (record.files_json) {
     try {
-      const files = JSON.parse(record.files_json)
-      if (Array.isArray(files)) {
-        return files
-          .filter((file) => file && typeof file.filePath === "string" && typeof file.fileName === "string")
-          .map((file) => ({
-            filePath: file.filePath,
-            fileName: file.fileName,
-            finalURL: typeof file.finalURL === "string" ? file.finalURL : record.final_url,
-            bytesWritten: typeof file.bytesWritten === "number" ? file.bytesWritten : 0,
-            mediaType: file.mediaType === "image" ? "image" : "video",
-          }))
+      const parsedFiles = JSON.parse(record.files_json)
+      if (Array.isArray(parsedFiles)) {
+        for (const file of parsedFiles) {
+          if (file && typeof file === "object") addFile(file as Record<string, unknown>)
+        }
       }
     } catch {}
   }
 
-  return [{
+  addFile({
     filePath: record.file_path,
     fileName: record.file_name,
     finalURL: record.final_url,
     bytesWritten: record.bytes_written,
     mediaType: record.media_type === "image" ? "image" : "video",
-  }]
+  })
+
+  return files
 }
 
 export async function removeHistoryRecordFiles(record: HistoryRecord): Promise<{ deletedCount: number; deletedBytes: number }> {
