@@ -11,6 +11,7 @@ import {
 
 import { DynamicTabView } from "./DynamicTabView"
 import { FavoritesTabView } from "./FavoritesTabView"
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SettingsTabView } from "./SettingsTabView"
 import type {
   BiliAuthSession,
@@ -177,6 +178,10 @@ type FavoriteFeedCursorState = {
 
 export function HomeView() {
   const dismiss = Navigation.useDismiss()
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "bilifavor:release-notes:last-seen-hash",
+  })
   const [initialStore] = useState<BiliAuthStore>(() => loadStoredAuthState())
   const [initialPreferences] = useState<BiliPreferences>(() => loadStoredPreferences())
   const activeTab = useObservable<RootTab>(DYNAMIC_TAB)
@@ -1147,6 +1152,7 @@ export function HomeView() {
       tint="#FB7299"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
+      sheet={releaseNotesSheet}
     >
       <Tab title="收藏" systemImage="heart.fill" value={FAVORITES_TAB}>
         <FavoritesTabView
