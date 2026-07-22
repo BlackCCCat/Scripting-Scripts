@@ -8,6 +8,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { PersonDetailPage } from './pages/PersonDetailPage'
 import { PersonEditorPage } from './pages/PersonEditorPage'
 import { EventEditorPage } from './pages/EventEditorPage'
+import { useMarkdownReleaseNotesSheet } from './releaseNotes'
 
 function MainView() {
   const dismiss = Navigation.useDismiss()
@@ -24,6 +25,11 @@ function MainView() {
   })
   const isLoading = useObservable(true)
   const selectedTab = useObservable(0)
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: 'release-notes.md',
+    storageKey: '时光纪念:release-notes:last-seen-hash',
+    title: '更新说明'
+  })
 
   // 加载数据
   useEffect(() => {
@@ -283,14 +289,14 @@ function MainView() {
 
   if (isLoading.value) {
     return (
-      <TabView tabIndex={selectedTab.value}>
+      <TabView tabIndex={selectedTab.value} sheet={releaseNotesSheet}>
         <Text>加载中…</Text>
       </TabView>
     )
   }
 
   return (
-    <TabView tabIndex={selectedTab.value}>
+    <TabView tabIndex={selectedTab.value} sheet={releaseNotesSheet}>
       <VStack tabItem={<><Image systemName="heart.text.square.fill" font={20} /><Text>时光纪念</Text></>} tag={0} frame={{ maxWidth: Infinity, maxHeight: Infinity }}>
         <HomePage
           events={events.value}
