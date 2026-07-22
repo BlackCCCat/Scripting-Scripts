@@ -54,6 +54,7 @@ import {
 import { getPreferences, persistPreferences, type LanguageMode, type Preferences, type SaveMode } from "./services/preferences"
 import { extractFirstURL, formatBytes, formatDate, sleep } from "./utils/common"
 import { getI18n, languageLabel, localizeRuntimeText } from "./utils/i18n"
+import { useMarkdownReleaseNotesSheet } from "./components/release-notes-sheet"
 
 const HISTORY_TAB = 0
 const DOWNLOAD_TAB = 1
@@ -540,6 +541,11 @@ function View() {
   const [toastMessage, setToastMessage] = useState("")
   const [toastPresented, setToastPresented] = useState(false)
   const t = getI18n(preferences.language)
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "media-downloader:release-notes:last-seen-hash",
+    title: t.releaseNotes,
+  })
 
   const refreshHistory = async () => {
     const list = await listHistory()
@@ -1241,6 +1247,7 @@ function View() {
   return (
     <ZStack
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      sheet={releaseNotesSheet}
       toast={toastMessage ? {
         message: toastMessage,
         isPresented: toastPresented,
