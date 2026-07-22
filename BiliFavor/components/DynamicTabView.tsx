@@ -125,6 +125,9 @@ function VideoDynamicCard(props: {
   onOpenAuthorUrl?: () => void
   onOpenExternalUrl?: () => void
   onPress?: () => void
+  alternatePlaybackTitle: string
+  alternatePlaybackSystemImage: string
+  onAlternatePlayback: () => void
   compact?: boolean
   embedded?: boolean
   onAppear?: () => void
@@ -275,6 +278,11 @@ function VideoDynamicCard(props: {
 
   const cardContextMenu = {
     menuItems: <Group>
+      <Button
+        title={props.alternatePlaybackTitle}
+        systemImage={props.alternatePlaybackSystemImage}
+        action={props.onAlternatePlayback}
+      />
       <Button title="复制链接" systemImage="link" action={() => void copyLink()} />
       <Button title="分享链接" systemImage="square.and.arrow.up" action={() => void shareLink()} />
     </Group>,
@@ -534,6 +542,16 @@ export function DynamicTabView(props: {
     void openExternalUrl(target)
   }
 
+  function handleAlternatePlayback(item: VideoDynamicItem) {
+    if (props.playbackMode === "external") {
+      setFilterPresented(false)
+      setPlayingItem(item)
+      return
+    }
+
+    void openExternalUrl(resolveVideoUrl(item))
+  }
+
   async function handleManualRefresh() {
     const topAnchorKey = props.items[0]?.id || "dynamic-state-top"
     scrollProxyRef.current?.scrollTo(topAnchorKey, "top")
@@ -544,6 +562,8 @@ export function DynamicTabView(props: {
     ? `${summary} · 已显示 ${props.items.length} / ${props.totalItemCount} 条`
     : `${summary} · 已加载 ${props.items.length} 条`
   const FeedContainer = props.cardLayoutMode === "double" ? ScrollView : List
+  const alternatePlaybackTitle = props.playbackMode === "external" ? "应用内播放" : "跳转播放"
+  const alternatePlaybackSystemImage = props.playbackMode === "external" ? "play.rectangle" : "safari"
   return (
     <NavigationStack>
       <ScrollViewReader>
@@ -578,7 +598,7 @@ export function DynamicTabView(props: {
                     onChangeRule={props.onUpdateAuthorFilterRule}
                   />
                 ) : (
-                  playingItem && props.auth ? <InlineVideoPlayerPage auth={props.auth} item={playingItem} /> : <VStack />
+                  playingItem ? <InlineVideoPlayerPage auth={props.auth} item={playingItem} /> : <VStack />
                 ),
               }}
               toolbar={{
@@ -703,6 +723,9 @@ export function DynamicTabView(props: {
                         onOpenAuthorUrl={authorUrl ? () => { void openExternalUrl(authorUrl) } : undefined}
                         onOpenExternalUrl={externalUrl ? () => { void openExternalUrl(externalUrl) } : undefined}
                         onPress={canInlinePlay ? () => handleOpenItem(item) : undefined}
+                        alternatePlaybackTitle={alternatePlaybackTitle}
+                        alternatePlaybackSystemImage={alternatePlaybackSystemImage}
+                        onAlternatePlayback={() => handleAlternatePlayback(item)}
                         onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
                       />
                     )
@@ -723,6 +746,9 @@ export function DynamicTabView(props: {
                       onOpenAuthorUrl={authorUrl ? () => { void openExternalUrl(authorUrl) } : undefined}
                       onOpenExternalUrl={externalUrl ? () => { void openExternalUrl(externalUrl) } : undefined}
                       onPress={canInlinePlay ? () => handleOpenItem(item) : undefined}
+                      alternatePlaybackTitle={alternatePlaybackTitle}
+                      alternatePlaybackSystemImage={alternatePlaybackSystemImage}
+                      onAlternatePlayback={() => handleAlternatePlayback(item)}
                       onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
                     />
                   )

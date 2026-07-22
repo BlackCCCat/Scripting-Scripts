@@ -104,7 +104,7 @@ function PresentationStateObserver(props: {
 }
 
 export function InlineVideoPlayerPage(props: {
-  auth: BiliAuthSession
+  auth: BiliAuthSession | null
   item: VideoDynamicItem
 }) {
   const sessionId = useMemo(() => {
@@ -119,6 +119,7 @@ export function InlineVideoPlayerPage(props: {
   const progressReportedRef = useRef(false)
   const finalizedRef = useRef(false)
   const jumpUrl = useMemo(() => resolveVideoUrl(props.item), [props.item])
+  const cookieHeader = props.auth?.cookieHeader ?? ""
 
   function getProgressSnapshot() {
     const source = sourceRef.current
@@ -154,7 +155,7 @@ export function InlineVideoPlayerPage(props: {
     const progress = nearFinished && duration > 0 ? duration : currentTime
 
     try {
-      await reportPlaybackProgress(props.auth.cookieHeader, source, progress)
+      await reportPlaybackProgress(cookieHeader, source, progress)
     } catch (error) {
       progressReportedRef.current = false
       console.log("[BiliFavor] 上报播放进度失败:", String(error))
@@ -187,7 +188,7 @@ export function InlineVideoPlayerPage(props: {
       : progressSnapshot.currentTime
 
     try {
-      await reportPlaybackProgress(props.auth.cookieHeader, progressSnapshot.source, progress)
+      await reportPlaybackProgress(cookieHeader, progressSnapshot.source, progress)
     } catch (error) {
       progressReportedRef.current = false
       console.log("[BiliFavor] 上报播放进度失败:", String(error))
@@ -217,7 +218,7 @@ export function InlineVideoPlayerPage(props: {
 
     ;(async () => {
       try {
-        const source = await fetchInlinePlaybackSource(props.auth.cookieHeader, props.item)
+        const source = await fetchInlinePlaybackSource(cookieHeader, props.item)
         if (cancelled || finalizedRef.current) return
         sourceRef.current = source
 
@@ -253,7 +254,7 @@ export function InlineVideoPlayerPage(props: {
       cancelled = true
       void reportProgressIfNeeded()
     }
-  }, [player, props.auth.cookieHeader, props.item.id])
+  }, [player, cookieHeader, props.item.id])
 
   useEffect(() => {
     const stop = async () => {

@@ -94,6 +94,9 @@ function FavoriteVideoCard(props: {
   onOpenAuthor: () => void
   onOpenVideo: () => void
   onPlayInline?: () => void
+  alternatePlaybackTitle: string
+  alternatePlaybackSystemImage: string
+  onAlternatePlayback: () => void
   compact?: boolean
   embedded?: boolean
   onAppear?: () => void
@@ -140,6 +143,11 @@ function FavoriteVideoCard(props: {
 
   const cardContextMenu = {
     menuItems: <Group>
+      <Button
+        title={props.alternatePlaybackTitle}
+        systemImage={props.alternatePlaybackSystemImage}
+        action={props.onAlternatePlayback}
+      />
       <Button title="复制链接" systemImage="link" action={() => { void copyToPasteboard(videoUrl) }} />
       <Button title="分享链接" systemImage="square.and.arrow.up" action={() => { void presentShareSheet(videoUrl) }} />
     </Group>,
@@ -372,6 +380,19 @@ export function FavoritesTabView(props: {
     ? `上次刷新 ${new Date(props.lastUpdatedAt).toLocaleString("zh-CN")}`
     : "下拉可以刷新收藏内容"
   const FeedContainer = props.cardLayoutMode === "double" ? ScrollView : List
+  const alternatePlaybackTitle = props.playbackMode === "external" ? "应用内播放" : "跳转播放"
+  const alternatePlaybackSystemImage = props.playbackMode === "external" ? "play.rectangle" : "safari"
+
+  function handleAlternatePlayback(item: VideoDynamicItem) {
+    if (props.playbackMode === "external") {
+      setManagerPresented(false)
+      setPlayingItem(item)
+      return
+    }
+
+    void openExternalUrl(resolveVideoUrl(item))
+  }
+
   return (
     <NavigationStack>
       <FeedContainer
@@ -401,7 +422,7 @@ export function FavoritesTabView(props: {
               onExportAuthors={props.onExportAuthors}
             />
           ) : (
-            playingItem && props.auth ? <InlineVideoPlayerPage auth={props.auth} item={playingItem} /> : <VStack />
+            playingItem ? <InlineVideoPlayerPage auth={props.auth} item={playingItem} /> : <VStack />
           ),
         }}
         toolbar={{
@@ -506,6 +527,9 @@ export function FavoritesTabView(props: {
                   onOpenAuthor={() => { void openExternalUrl(resolveAuthorSpaceUrl(item)) }}
                   onOpenVideo={() => { void openExternalUrl(resolveVideoUrl(item)) }}
                   onPlayInline={canInlinePlay ? () => setPlayingItem(item) : undefined}
+                  alternatePlaybackTitle={alternatePlaybackTitle}
+                  alternatePlaybackSystemImage={alternatePlaybackSystemImage}
+                  onAlternatePlayback={() => handleAlternatePlayback(item)}
                   onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
                 />
               )
@@ -523,6 +547,9 @@ export function FavoritesTabView(props: {
                 onOpenAuthor={() => { void openExternalUrl(resolveAuthorSpaceUrl(item)) }}
                 onOpenVideo={() => { void openExternalUrl(resolveVideoUrl(item)) }}
                 onPlayInline={canInlinePlay ? () => setPlayingItem(item) : undefined}
+                alternatePlaybackTitle={alternatePlaybackTitle}
+                alternatePlaybackSystemImage={alternatePlaybackSystemImage}
+                onAlternatePlayback={() => handleAlternatePlayback(item)}
                 onAppear={isLastItem && props.hasMore && !props.isLoadingMore ? () => { void props.onLoadMore() } : undefined}
               />
             )
