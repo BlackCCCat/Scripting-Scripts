@@ -20,6 +20,7 @@ import {
 import { HomePage } from "./src/HomePage"
 import { NearbyPage } from "./src/NearbyPage"
 import { SettingsPage } from "./src/SettingsPage"
+import { useMarkdownReleaseNotesSheet } from "./src/ReleaseNotesSheet"
 import { Theme } from "./src/theme"
 
 /** 给页面套上导航标题的容器 */
@@ -43,6 +44,11 @@ function Page({
 
 function App() {
   const selection = useObservable<number>(0)
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "today-oil-price:release-notes:last-seen-hash",
+    title: "更新内容",
+  })
   const [preferred, setPreferred] = useState<FuelCode>(getPreferredFuel())
   const [radiusKm, setRadiusKm] = useState<number>(getSearchRadiusKm())
 
@@ -58,7 +64,7 @@ function App() {
   }
 
   return (
-    <TabView selection={selection} tint={Theme.orange}>
+    <TabView selection={selection} tint={Theme.orange} sheet={releaseNotesSheet}>
       <NavigationStack
         tabItem={<Label title="油价" systemImage="fuelpump.fill" />}
         tag={0}

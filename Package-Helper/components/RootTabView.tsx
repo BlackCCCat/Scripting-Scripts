@@ -7,6 +7,7 @@ import {
 
 import { HomePage } from "./HomePage"
 import { PreviewPage } from "./PreviewPage"
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SettingsPage } from "./SettingsPage"
 import { HOME_TAB, PREVIEW_TAB, SETTINGS_TAB } from "../types"
 import { deleteHomePickup, deletePreviewPickup, markPicked, safeRefreshWidget, unmarkPicked } from "../utils"
@@ -16,6 +17,11 @@ export function RootTabView(props: {
 }) {
   const selection = useObservable(HOME_TAB)
   const [version, setVersion] = useState(0)
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    title: "更新说明",
+    markdownFile: "release-notes.md",
+    storageKey: "sms-pickup:release-notes:last-seen-hash",
+  })
 
   function bump() {
     setVersion((current) => current + 1)
@@ -27,6 +33,7 @@ export function RootTabView(props: {
       tint="systemBlue"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
+      sheet={releaseNotesSheet}
     >
       <Tab title="预览" systemImage="doc.text.magnifyingglass" value={PREVIEW_TAB}>
         <PreviewPage

@@ -24,6 +24,7 @@ import {
 import type { AlarmDraft, AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { AddAlarmView } from "./AddAlarmView"
 import { CalendarSettingsView } from "./CalendarSettingsView"
+import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SoundSettingsView } from "./SoundSettingsView"
 import { StatusView } from "./StatusView"
 import { SystemAlarmSettingsView } from "./SystemAlarmSettingsView"
@@ -328,6 +329,9 @@ function AlarmRow(props: {
 
 export function HomeView() {
   const colorScheme = useColorScheme()
+  const releaseNotesSheet = useReleaseNotesSheet({
+    title: "更新说明",
+  })
   const [initialState] = useState(() => loadCustomAlarmState())
   const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
@@ -1133,7 +1137,7 @@ export function HomeView() {
   }
 
   return (
-    <ZStack>
+    <ZStack sheet={releaseNotesSheet}>
       <TabView
         selection={activeTab as any}
         tint="systemOrange"

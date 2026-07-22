@@ -6,6 +6,7 @@ import { SettingsTab } from "../tabs/SettingsTab"
 import { loadSleepTrackerSettings } from "../data/settings"
 import { loadMockSleepTrackerSnapshot, MOCK_HISTORY_DAYS, refreshMockSleepTrackerSnapshot } from "../data/mock"
 import { loadCachedSleepTrackerSnapshot, refreshSleepTrackerSnapshot, DEFAULT_QUERY_DAYS } from "../data/health"
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 import type { SleepTrackerSettings, SleepTrackerSnapshot } from "../types"
 
 const DAILY_TAB = 0
@@ -13,6 +14,10 @@ const TRENDS_TAB = 1
 const SETTINGS_TAB = 2
 
 export function RootTabView() {
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "sleep-tracker:release-notes:last-seen-hash",
+  })
   const [settings, setSettings] = useState<SleepTrackerSettings>(() => loadSleepTrackerSettings())
   const [tabIndex, setTabIndex] = useState<number>(DAILY_TAB)
   const [snapshot, setSnapshot] = useState<SleepTrackerSnapshot | null>(() => 
@@ -50,6 +55,7 @@ export function RootTabView() {
       tint="#36C6B0"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
+      sheet={releaseNotesSheet}
     >
       <Tab title="每日" systemImage="moon.stars.fill" value={DAILY_TAB}>
         <DailyTab

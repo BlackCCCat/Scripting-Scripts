@@ -34,6 +34,7 @@ import {
 import type { AlbumOption, PhotoItem, PhotoSource, PointOffset } from "./types"
 import { formatDate, interactiveMotion, trashFlightMotion } from "./utils"
 import { instructionsMarkdown } from "./instructions"
+import { useMarkdownReleaseNotesSheet } from "./components/ReleaseNotesSheet"
 
 const initialOffset: PointOffset = { x: 0, y: 0 }
 const allPhotosSource: PhotoSource = { kind: "all" }
@@ -83,6 +84,10 @@ function App() {
   const dismiss = Navigation.useDismiss()
   const today = startOfDay(Date.now())
   const defaultStartDate = today - 30 * dayInMilliseconds
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "photoslide:release-notes:last-seen-hash",
+  })
 
 
   const [items, setItems] = useState<PhotoItem[]>([])
@@ -1648,11 +1653,11 @@ function App() {
 
   return (
     <NavigationStack
-      sheet={{
+      sheet={showInstructions ? {
         isPresented: showInstructions,
         onChanged: setShowInstructions,
         content: renderInstructionsSheetContent()
-      }}
+      } : releaseNotesSheet}
     >
       <ZStack
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}

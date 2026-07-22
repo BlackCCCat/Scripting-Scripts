@@ -17,6 +17,7 @@ import {
 import { RegexEditorView } from "./RegexEditorView"
 import { RegexListRow } from "./RegexListRow"
 import { RegexTemplatePickerView } from "./RegexTemplatePickerView"
+import { useMarkdownReleaseNotesSheet } from "../utils/release_notes"
 import {
   loadRegexLibrary,
   removeRegexItemById,
@@ -41,6 +42,11 @@ export function HomeView() {
   const dismiss = Navigation.useDismiss()
   const [query, setQuery] = useState("")
   const [reloadToken, setReloadToken] = useState(0)
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    title: "更新说明",
+    markdownFile: "release-notes.md",
+    storageKey: "regex-tester:release-notes:last-seen-hash",
+  })
 
   void reloadToken
   const items = loadRegexLibrary()
@@ -88,6 +94,7 @@ export function HomeView() {
           </Toolbar>
         )}
         listStyle="insetGroup"
+        sheet={releaseNotesSheet}
       >
         {filtered.length ? (
           <Section header={<Text>{query.trim() ? `搜索结果 ${filtered.length} 条` : `已保存 ${filtered.length} 条`}</Text>}>

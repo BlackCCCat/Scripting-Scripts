@@ -24,6 +24,7 @@ import {
   normalizeQuery,
   type ZdicResult,
 } from "./shared"
+import { useZDictReleaseNotesSheet } from "./release_notes_sheet"
 
 function SearchInputPanel(props: {
   value: string
@@ -90,6 +91,11 @@ function ZDictScriptView() {
   const [loading, setLoading] = useState(false)
   const [errorText, setErrorText] = useState("")
   const requestIdRef = useRef(0)
+  const releaseNotesSheet = useZDictReleaseNotesSheet({
+    title: "更新内容",
+    markdownFile: "release-notes.md",
+    storageKey: "zdict:release-notes:last-seen-hash",
+  })
 
   async function runLookup(nextQuery = queryText) {
     const normalized = normalizeQuery(nextQuery)
@@ -183,6 +189,7 @@ function ZDictScriptView() {
       spacing={14}
       padding={16}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+      sheet={releaseNotesSheet}
     >
       <ScrollView axes="vertical" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
         <ResultView

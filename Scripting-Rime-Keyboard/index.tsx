@@ -73,6 +73,7 @@ import {
   scriptingRimeDataRoots,
   T9_PROCESSOR_SCHEMA_ENTRY,
 } from "./t9ProcessorInstall";
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet";
 
 const THEME_OPTIONS: Array<{ value: RimeKeyboardTheme; label: string }> = [
   { value: "system", label: "跟随系统" },
@@ -1142,6 +1143,11 @@ function SettingsView() {
   const [settings, setSettings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
   );
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "scripting-rime-keyboard:release-notes:last-seen-hash",
+    title: "更新内容",
+  });
   const pendingTextDraftsRef = useRef<Record<string, string>>({});
   const [showSavedToast, setShowSavedToast] = useState(false);
   const functionOrderEditMode = useObservable(() => EditMode.inactive());
@@ -3320,6 +3326,7 @@ function SettingsView() {
       <List
         navigationTitle="Scripting Rime Keyboard"
         navigationBarTitleDisplayMode="inline"
+        sheet={releaseNotesSheet}
         toolbar={{
           topBarTrailing: (
             <Button

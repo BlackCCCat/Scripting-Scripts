@@ -36,6 +36,7 @@ import {
   symbolPool,
   type SymbolSettings,
 } from "../utils/symbol_settings"
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 
 type ViewMode = "app" | "keyboard"
 
@@ -181,6 +182,11 @@ function ToggleRow(props: {
 }
 
 export function PasswordGeneratorView(props: { mode: ViewMode }) {
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "password-generator:release-notes:last-seen-hash",
+    title: "更新说明",
+  })
   const [symbolSettings, setSymbolSettings] = useState<SymbolSettings>(() => loadSymbolSettings())
   const [options, setOptions] = useState<PasswordOptions>(() => createDefaultOptions(loadSymbolSettings()))
   const [password, setPassword] = useState(() => generatePassword(createDefaultOptions(loadSymbolSettings())))
@@ -589,6 +595,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
       <VStack
         navigationTitle="Password Generator"
         navigationBarTitleDisplayMode="inline"
+        sheet={releaseNotesSheet}
         toolbar={{
           topBarLeading: (
             <Button

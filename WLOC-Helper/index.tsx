@@ -38,6 +38,7 @@ import {
 import { MapPage } from "./pages/MapPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
+import { useMarkdownReleaseNotesSheet } from "./components/ReleaseNotesSheet";
 import { parseAndConvert } from "./utils/coords";
 
 type SheetKind = "settings" | "favorites" | "surge" | null;
@@ -441,6 +442,11 @@ function SurgeRemoteConfigPage(props: {
 
 function App() {
   const dismiss = Navigation.useDismiss();
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "wloc-helper:release-notes:last-seen-hash",
+    title: "更新内容",
+  });
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [favorites, setFavorites] = useState<FavoriteLocation[]>(() => loadFavorites());
   const [surgeStatus, setSurgeStatus] = useState<SurgeStatus>("checking");
@@ -813,6 +819,12 @@ function App() {
   }
 
   const sheetContent = buildSheetContent(sheetKind.value);
+  const activeSheet =
+    sheetKind.value && sheetContent
+      ? { content: sheetContent, isPresented: showSheet }
+      : releaseNotesSheet.isPresented
+        ? releaseNotesSheet
+        : undefined;
   const loc = activeLoc.value;
 
   const topBtnSize = 24;
@@ -939,11 +951,7 @@ function App() {
 
   return (
     <ZStack
-      sheet={
-        sheetKind.value && sheetContent
-          ? { content: sheetContent, isPresented: showSheet }
-          : undefined
-      }
+      sheet={activeSheet}
       alert={{
         title: "提示",
         message: <Text>{errorMsg.value}</Text>,

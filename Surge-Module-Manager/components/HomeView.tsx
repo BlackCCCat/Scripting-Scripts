@@ -37,6 +37,7 @@ import { downloadModule } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
 import { RemoteControlView } from "./RemoteControlView"
 import { SettingsView } from "./SettingsView"
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 import {
   fetchEnabledModuleNames,
   getModuleRemoteName,
@@ -109,6 +110,12 @@ function FilterMenu(props: {
 }
 
 export function HomeView() {
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "surge-modules-manager:release-notes:last-seen-hash",
+    title: "更新内容",
+  })
+
   const withButtonHaptic = (action: () => void | Promise<void>) => () => {
     HapticFeedback.mediumImpact()
     void action()
@@ -564,6 +571,7 @@ export function HomeView() {
   return (
     <NavigationStack>
       <List
+        sheet={releaseNotesSheet}
         navigationTitle={"Surge 模块管理"}
         navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}

@@ -18,6 +18,7 @@ import {
   useState,
 } from "scripting"
 import type { SourceItem } from "../types"
+import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SourceBlockView } from "./SourceBlockView"
 import { chooseImportInitialDirectory, pickSourcesFromFiles, pickSourcesFromPhotos } from "../utils/importer"
 import { buildOutputFileName } from "../utils/id"
@@ -173,6 +174,11 @@ function removeSourcesByPdfPaths(sources: SourceItem[], pdfPaths: Set<string>): 
 }
 
 export function PDFHelperView() {
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "pdfhelper:release-notes:last-seen-hash",
+    title: "更新说明",
+  })
   const [sources, setSources] = useState<SourceItem[]>([])
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
   const [processing, setProcessing] = useState<boolean>(false)
@@ -489,7 +495,10 @@ export function PDFHelperView() {
         }}
         spacing={0}
       >
-        <List listStyle="insetGroup">
+        <List
+          listStyle="insetGroup"
+          sheet={releaseNotesSheet}
+        >
           {sources.length === 0 ? (
             <VStack spacing={8} padding={24}>
               <Text>点右上角「+」添加文件或照片</Text>

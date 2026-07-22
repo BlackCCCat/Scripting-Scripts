@@ -71,6 +71,8 @@ import { TaskStatsView, loadCalendarEventsByChunks } from "./TaskStatsView";
 import { OverallReportView } from "./OverallReportView";
 // 设置页
 import { SettingsView } from "./SettingsView";
+// 更新说明弹窗
+import { useReleaseNotesSheet } from "./ReleaseNotesSheet";
 
 // Live Activity 创建器（用于 start/update/end）
 const createTimerActivity = PomodoroLiveActivity;
@@ -483,6 +485,10 @@ function OverallReportSheet(props: { tasks: Task[] }) {
 }
 
 export function CalendarTimerView() {
+  const releaseNotesSheet = useReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    title: "更新说明",
+  });
   // 任务列表与当前选中任务
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -1919,6 +1925,7 @@ export function CalendarTimerView() {
           onChanged: (value: boolean) => setShowFocusPage(value),
           content: focusPage,
         }}
+        sheet={releaseNotesSheet}
       >
         <ScrollView
           navigationTitle="日历番茄钟"

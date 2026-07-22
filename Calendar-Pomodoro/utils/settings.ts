@@ -7,6 +7,7 @@ import { BASE_DIR_NAME } from "../constants"
 export type AppSettings = {
   selectedCalendarSourceIds: string[]
   themeColor: string
+  releaseNotesSeenHash?: string
 }
 
 // 默认主题色：与 script.json 的 color 保持一致
@@ -89,9 +90,14 @@ export async function loadSettings(): Promise<AppSettings> {
       typeof data?.themeColor === "string" && data.themeColor.trim()
         ? data.themeColor
         : DEFAULT_SETTINGS.themeColor
+    const releaseNotesSeenHash =
+      typeof data?.releaseNotesSeenHash === "string"
+        ? data.releaseNotesSeenHash
+        : undefined
     return {
       selectedCalendarSourceIds,
       themeColor,
+      releaseNotesSeenHash,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

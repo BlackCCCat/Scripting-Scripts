@@ -48,6 +48,7 @@ import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
+import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SettingsView } from "./SettingsView"
 import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, writePipControlState } from "../services/pip_control"
@@ -264,6 +265,10 @@ function ImageViewerView(props: {
 }
 
 export function AppRoot() {
+  const releaseNotesSheet = useReleaseNotesSheet({
+    title: "CAIS 更新说明",
+    detents: ["medium", "large"],
+  })
   const colorScheme = useColorScheme()
   const activeTab = useObservable(TAB_CLIPS)
   const pipPresented = useObservable(false)
@@ -1131,6 +1136,7 @@ export function AppRoot() {
       tint="systemIndigo"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
+      sheet={releaseNotesSheet}
       pip={{
         isPresented: pipPresented,
         maximumUpdatesPerSecond: 2,
