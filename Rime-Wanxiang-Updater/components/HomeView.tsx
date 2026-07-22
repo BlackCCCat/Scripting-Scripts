@@ -37,6 +37,7 @@ import {
 } from "../utils/config";
 import { SettingsView } from "./SettingsView";
 import { AdaptiveHomeTabView } from "./AdaptiveHomeTabView";
+import { useMarkdownReleaseNotesSheet } from "./MarkdownReleaseNotesSheet";
 import { loadMetaAsync, type MetaBundle } from "../utils/meta";
 import {
   detectRimeDir,
@@ -1048,6 +1049,11 @@ export function HomeView() {
   const [cfg, setCfg] = useState<AppConfig>(() => loadConfig());
   const logProxyRef = useRef<any>();
   const settingsSaveRef = useRef<(() => void) | null>(null);
+  const releaseNotesSheet = useMarkdownReleaseNotesSheet({
+    markdownFile: "release-notes.md",
+    storageKey: "wanxiang-helper:release-notes:last-seen-hash",
+    title: "更新内容",
+  });
   const [editorRootPath, setEditorRootPath] = useState(() =>
     String(loadConfig().hamsterRootPath ?? "").trim(),
   );
@@ -2479,6 +2485,7 @@ export function HomeView() {
         message: alert.message,
         actions: alert.actions,
       }}
+      sheet={releaseNotesSheet}
     >
       <AdaptiveHomeTabView
         selection={activeTab as any}
