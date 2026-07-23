@@ -15,6 +15,7 @@ import {
   Section,
   Spacer,
   Text,
+  TextField,
   Toggle,
   VStack,
   useEffect,
@@ -213,10 +214,13 @@ export function HomeView() {
   const [busy, setBusy] = useState(false)
   const [resolvedBaseDir, setResolvedBaseDir] = useState("")
   const [filterCategory, setFilterCategory] = useState("全部")
+  const [searchText, setSearchText] = useState("")
+  const [searchVisible, setSearchVisible] = useState(false)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
   const [moveTargets, setMoveTargets] = useState<{ label: string; path: string }[]>([])
   const [lastFailureDetails, setLastFailureDetails] = useState("")
+  const [statusCardVisible, setStatusCardVisible] = useState(false)
   const [enabledModuleNames, setEnabledModuleNames] = useState<Set<string>>(new Set())
   const [togglingModuleNames, setTogglingModuleNames] = useState<Set<string>>(new Set())
   const categories = cfg.categories ?? []
@@ -248,8 +252,20 @@ export function HomeView() {
     return catOk && dirOk
   }
 
+  function matchSearch(m: ModuleInfo): boolean {
+    const key = searchText.trim().toLowerCase()
+    if (!key) return true
+    return [
+      m.name,
+      m.surgeName,
+      m.category,
+      m.link,
+      m.content,
+    ].some((value) => String(value ?? "").toLowerCase().includes(key))
+  }
+
   const filteredModules = modules.filter((m) => {
-    return matchFilters(m)
+    return matchFilters(m) && matchSearch(m)
   })
   const selectedModules = filteredModules.filter((m) => selectedKeys.has(moduleKey(m)))
   const selectedDownloadableCount = selectedModules.filter((m) => !!m.link).length
@@ -323,6 +339,21 @@ export function HomeView() {
       setFilterCategory("全部")
     }
   }, [categories, filterCategory])
+
+  useEffect(() => {
+    const hasStatus = stage !== "就绪" || progress !== null || !!lastFailureDetails
+    if (!hasStatus) {
+      setStatusCardVisible(false)
+      return
+    }
+
+    setStatusCardVisible(true)
+    const timer = setTimeout(() => {
+      setStatusCardVisible(false)
+    }, 3000)
+
+    return () => clearTimeout(timer)
+  }, [stage, progress, lastFailureDetails])
 
   function toggleSelection(target: ModuleInfo) {
     const key = moduleKey(target)
@@ -688,7 +719,7 @@ export function HomeView() {
     const list = current.filter((m) => {
       const catOk = filterCategory === "全部" ? true : m.category === filterCategory
       const dirOk = filterDir === "全部" ? true : getTopDir(m) === filterDir
-      return catOk && dirOk
+      return catOk && dirOk && matchSearch(m)
     })
     await downloadBatch(list, "下载全部模块…")
   }
@@ -891,6 +922,10 @@ export function HomeView() {
     </VStack>
   ) : null
 
+  const showStatusPanel = statusCardVisible && (stage !== "就绪" || progress !== null || !!lastFailureDetails)
+  const showTopCard = showStatusPanel || selectionMode
+  const showSearchPanel = searchVisible || !!searchText.trim()
+  const showTopInset = showSearchPanel || showTopCard
 
   return (
     <NavigationStack>
@@ -900,7 +935,16 @@ export function HomeView() {
         navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}
         toolbar={{
-          topBarLeading: <Button title="" systemImage="switch.2" action={withButtonHaptic(openRemoteSettings)} />,
+          topBarLeading: (
+            <HStack>
+              <Button title="" systemImage="switch.2" action={withButtonHaptic(openRemoteSettings)} />
+              <Button
+                title=""
+                systemImage={searchVisible || searchText.trim() ? "magnifyingglass.circle.fill" : "magnifyingglass"}
+                action={withButtonHaptic(() => setSearchVisible((value) => !value))}
+              />
+            </HStack>
+          ),
           topBarTrailing: (
             <HStack>
               <Button
@@ -915,26 +959,54 @@ export function HomeView() {
             </HStack>
           ),
         }}
+        ignoresSafeArea={{ regions: "keyboard" }}
         safeAreaInset={{
           top: {
             alignment: "center",
             spacing: 0,
             content: (
-              <VStack
-                padding={{ top: 8, bottom: 8, leading: 18, trailing: 18 }}
-                frame={{ maxWidth: "infinity" }}
-              >
+              showTopInset ? (
                 <VStack
-                  spacing={selectionMode ? 10 : 0}
-                  padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
-                  frame={{ maxWidth: "infinity", alignment: "leading" }}
-                  glassEffect={{ type: "rect", cornerRadius: 28 } as any}
+                  spacing={showSearchPanel && showTopCard ? 8 : 0}
+                  padding={{ top: 8, bottom: 8, leading: 18, trailing: 18 }}
+                  frame={{ maxWidth: "infinity" }}
                 >
-                  {fixedStatusPanel}
-                  {selectionMode ? <Divider /> : null}
-                  {fixedBatchPanel}
+                  {showSearchPanel ? (
+                    <HStack
+                      spacing={8}
+                      padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
+                      frame={{ maxWidth: "infinity" }}
+                      glassEffect={{ type: "rect", cornerRadius: 20 } as any}
+                    >
+                      <TextField
+                        title="搜索"
+                        value={searchText}
+                        onChanged={(value: string) => setSearchText(value)}
+                        prompt="搜索模块名称或内容"
+                      />
+                      {searchText.trim() ? (
+                        <Button
+                          title=""
+                          systemImage="xmark.circle.fill"
+                          action={withButtonHaptic(() => setSearchText(""))}
+                        />
+                      ) : null}
+                    </HStack>
+                  ) : null}
+                  {showTopCard ? (
+                    <VStack
+                      spacing={showStatusPanel && selectionMode ? 10 : 0}
+                      padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
+                      frame={{ maxWidth: "infinity", alignment: "leading" }}
+                      glassEffect={{ type: "rect", cornerRadius: 28 } as any}
+                    >
+                      {showStatusPanel ? fixedStatusPanel : null}
+                      {showStatusPanel && selectionMode ? <Divider /> : null}
+                      {fixedBatchPanel}
+                    </VStack>
+                  ) : null}
                 </VStack>
-              </VStack>
+              ) : <VStack />
             ),
           },
           bottom: {
@@ -998,7 +1070,7 @@ export function HomeView() {
           )}
         >
           {filteredModules.length === 0 ? (
-            <Text>暂无模块</Text>
+            <Text>{searchText.trim() ? "暂无匹配模块" : "暂无模块"}</Text>
           ) : (
             filteredModules.map((m) => (
               (() => {

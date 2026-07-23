@@ -258,7 +258,7 @@ export async function loadModules(): Promise<ModuleInfo[]> {
     const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
     const surgeName = parseTag(text, "name") ?? undefined
     const icon = parseTag(text, "icon") ?? parseIcon(text)
-    modules.push({ name, link, surgeName, category, icon, filePath: path, isLocal })
+    modules.push({ name, link, surgeName, category, icon, filePath: path, isLocal, content: text })
   }
   return modules
 }
