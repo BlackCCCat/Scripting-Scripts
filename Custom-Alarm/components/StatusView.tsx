@@ -8,6 +8,7 @@ import {
   Section,
   Spacer,
   Text,
+  Toggle,
 } from "scripting"
 
 import {
@@ -50,7 +51,9 @@ export function StatusView(props: {
   currentMonthTotalWorkCount: number
   currentMonthRemainingWorkCount: number
   lastSyncedAt: number | null
+  alarmCardGradientEnabled: boolean
   onOpenSoundSettings?: () => void
+  onAlarmCardGradientEnabledChange?: (enabled: boolean) => void
   embedded?: boolean
 }) {
   const dismiss = Navigation.useDismiss()
@@ -109,6 +112,25 @@ export function StatusView(props: {
         <MetricRow icon="sun.max.fill" title="可休假天数" value={String(props.currentMonthRemainingOffCount)} tint="#EA580C" />
         <MetricRow icon="calendar.badge.exclamationmark" title="总调班天数" value={String(props.currentMonthTotalWorkCount)} tint="#3B82F6" />
         <MetricRow icon="briefcase.fill" title="剩余调班天数" value={String(props.currentMonthRemainingWorkCount)} tint="#2563EB" />
+      </Section>
+
+      <Section header={<Text>页面显示</Text>}>
+        <HStack spacing={12}>
+          <Image
+            systemName="paintpalette.fill"
+            foregroundStyle={"#FF9500" as any}
+            frame={{ width: 20, alignment: "center" as any }}
+          />
+          <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            闹钟渐变颜色
+          </Text>
+          <Toggle
+            title=""
+            value={props.alarmCardGradientEnabled}
+            onChanged={(value: boolean) => props.onAlarmCardGradientEnabledChange?.(value)}
+            toggleStyle="switch"
+          />
+        </HStack>
       </Section>
 
       {!props.embedded && (

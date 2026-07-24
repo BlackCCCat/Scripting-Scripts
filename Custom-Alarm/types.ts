@@ -81,6 +81,7 @@ export type CustomAlarmState = {
   alarms: AlarmRecord[]
   holidaySources: HolidayCalendarSource[]
   availableSounds: string[]
+  alarmCardGradientEnabled: boolean
   managedSystemAlarmIds: string[]
   cleanupCandidateAlarmIds: string[]
   alarmConfigurationVersion: number

@@ -1,5 +1,6 @@
 import {
   Button,
+  EmptyView,
   ForEach,
   HStack,
   Image,
@@ -7,6 +8,7 @@ import {
   Navigation,
   NavigationStack,
   ProgressView,
+  Rectangle,
   Tab,
   TabView,
   Text,
@@ -14,6 +16,8 @@ import {
   VStack,
   ZStack,
   modifiers,
+  type Color,
+  type KeywordPoint,
   useEffect,
   useColorScheme,
   useMemo,
@@ -250,20 +254,92 @@ function AlarmMetaTag(props: {
   )
 }
 
+type AlarmCardGradientConfig = {
+  lightColors: Color[]
+  darkColors: Color[]
+  startPoint: KeywordPoint
+  endPoint: KeywordPoint
+}
+
+const ALARM_CARD_GRADIENT_POINTS = {
+  startPoint: "topLeading" as KeywordPoint,
+  endPoint: "bottomTrailing" as KeywordPoint,
+}
+
+const ALARM_CARD_GRADIENTS: Record<AlarmRepeatRule["kind"], AlarmCardGradientConfig> = {
+  once: {
+    ...ALARM_CARD_GRADIENT_POINTS,
+    lightColors: ["#FFF7ED", "#FED7AA", "#FDBA74"],
+    darkColors: ["#21120A", "#5C2D0C", "#9A3412"],
+  },
+  daily: {
+    ...ALARM_CARD_GRADIENT_POINTS,
+    lightColors: ["#ECFDF5", "#A7F3D0", "#6EE7B7"],
+    darkColors: ["#061C14", "#064E3B", "#047857"],
+  },
+  weekly: {
+    ...ALARM_CARD_GRADIENT_POINTS,
+    lightColors: ["#EFF6FF", "#BFDBFE", "#93C5FD"],
+    darkColors: ["#071527", "#1E3A8A", "#2563EB"],
+  },
+  monthly: {
+    ...ALARM_CARD_GRADIENT_POINTS,
+    lightColors: ["#F5F3FF", "#DDD6FE", "#C4B5FD"],
+    darkColors: ["#181226", "#4C1D95", "#7C3AED"],
+  },
+  holiday: {
+    ...ALARM_CARD_GRADIENT_POINTS,
+    lightColors: ["#FFF1F2", "#FDA4AF", "#FB7185"],
+    darkColors: ["#260B12", "#881337", "#BE123C"],
+  },
+  custom: {
+    ...ALARM_CARD_GRADIENT_POINTS,
+    lightColors: ["#ECFEFF", "#A5F3FC", "#67E8F9"],
+    darkColors: ["#061C22", "#155E75", "#0891B2"],
+  },
+}
+
+function AlarmCardGradient(props: {
+  kind: AlarmRepeatRule["kind"]
+}) {
+  const gradientConfig = ALARM_CARD_GRADIENTS[props.kind]
+
+  return (
+    <Rectangle
+      fill={{
+        light: {
+          colors: gradientConfig.lightColors,
+          startPoint: gradientConfig.startPoint,
+          endPoint: gradientConfig.endPoint,
+        },
+        dark: {
+          colors: gradientConfig.darkColors,
+          startPoint: gradientConfig.startPoint,
+          endPoint: gradientConfig.endPoint,
+        },
+      }}
+      cornerRadius={22}
+      allowsHitTesting={false}
+    />
+  )
+}
+
 function AlarmRow(props: {
   record: AlarmRecord
   subtitle: string
   nextDateText: string
+  gradientEnabled: boolean
   onToggle: (record: AlarmRecord, enabled: boolean) => void | Promise<void>
 }) {
   const titleText = props.record.title.trim()
   const showsTitle = titleText.length > 0 && titleText !== "闹钟"
 
   return (
-    <HStack
-      spacing={10}
+    <ZStack
+      alignment="center"
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      padding={{ top: 8, bottom: 8, leading: 4, trailing: 2 }}
+      glassEffect={{ type: "rect", cornerRadius: 22 } as any}
+      clipShape={{ type: "rect", cornerRadius: 22 } as any}
       modifiers={
         modifiers()
           .contentShape({
@@ -282,48 +358,55 @@ function AlarmRow(props: {
           })
       }
     >
-      <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={6}>
-        <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
-          <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={2}>
-            <Text
-              font="title2"
-              foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            >
-              {displayTime(props.record)}
-            </Text>
-            {showsTitle ? (
+      {props.gradientEnabled ? <AlarmCardGradient kind={props.record.repeatRule.kind} /> : null}
+      <HStack
+        spacing={10}
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        padding={{ top: 12, bottom: 12, leading: 14, trailing: 10 }}
+      >
+        <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={6}>
+          <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
+            <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={2}>
               <Text
-                font="subheadline"
+                font="title2"
                 foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
                 frame={{ maxWidth: "infinity", alignment: "leading" as any }}
               >
-                {titleText}
+                {displayTime(props.record)}
               </Text>
-            ) : null}
-          </VStack>
-          <VStack frame={{ width: 56, alignment: "trailing" as any }}>
-            <Toggle
-              title=""
-              value={props.record.enabled}
-              onChanged={(value: boolean) => props.onToggle(props.record, value)}
-              toggleStyle="switch"
+              {showsTitle ? (
+                <Text
+                  font="subheadline"
+                  foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                >
+                  {titleText}
+                </Text>
+              ) : null}
+            </VStack>
+            <VStack frame={{ width: 56, alignment: "trailing" as any }}>
+              <Toggle
+                title=""
+                value={props.record.enabled}
+                onChanged={(value: boolean) => props.onToggle(props.record, value)}
+                toggleStyle="switch"
+              />
+            </VStack>
+          </HStack>
+          <VStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            <AlarmMetaTag
+              icon="arrow.trianglehead.2.clockwise"
+              text={props.subtitle}
+            />
+            <AlarmMetaTag
+              icon="calendar"
+              text={`下次 ${props.nextDateText}`}
+              tint="#2563EB"
             />
           </VStack>
-        </HStack>
-        <VStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <AlarmMetaTag
-            icon="arrow.trianglehead.2.clockwise"
-            text={props.subtitle}
-          />
-          <AlarmMetaTag
-            icon="calendar"
-            text={`下次 ${props.nextDateText}`}
-            tint="#2563EB"
-          />
         </VStack>
-      </VStack>
-    </HStack>
+      </HStack>
+    </ZStack>
   )
 }
 
@@ -336,6 +419,7 @@ export function HomeView() {
   const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
   const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
+  const [alarmCardGradientEnabled, setAlarmCardGradientEnabled] = useState<boolean>(() => initialState.alarmCardGradientEnabled)
   const [managedSystemAlarmIds, setManagedSystemAlarmIds] = useState<string[]>(() => initialState.managedSystemAlarmIds)
   const [cleanupCandidateAlarmIds, setCleanupCandidateAlarmIds] = useState<string[]>(() => initialState.cleanupCandidateAlarmIds)
   const [alarmConfigurationVersion, setAlarmConfigurationVersion] = useState<number>(() => initialState.alarmConfigurationVersion)
@@ -406,6 +490,7 @@ export function HomeView() {
       alarms: nextRecords,
       holidaySources: nextHolidaySources,
       availableSounds: nextAvailableSounds,
+      alarmCardGradientEnabled,
       managedSystemAlarmIds: nextManagedSystemAlarmIds,
       cleanupCandidateAlarmIds: nextCleanupCandidateAlarmIds,
       alarmConfigurationVersion: nextAlarmConfigurationVersion,
@@ -522,11 +607,12 @@ export function HomeView() {
       alarms: records,
       holidaySources,
       availableSounds,
+      alarmCardGradientEnabled,
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds,
       alarmConfigurationVersion,
     })
-  }, [records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
+  }, [records, holidaySources, availableSounds, alarmCardGradientEnabled, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
 
   useEffect(() => {
     if (!AlarmManager.isAvailable) return
@@ -887,6 +973,11 @@ export function HomeView() {
     }
   }
 
+  function updateAlarmCardGradientEnabled(enabled: boolean) {
+    if (enabled === alarmCardGradientEnabled) return
+    setAlarmCardGradientEnabled(enabled)
+  }
+
   function renderStatusTab() {
     return (
       <NavigationStack>
@@ -904,9 +995,11 @@ export function HomeView() {
           currentMonthRemainingWorkCount={currentMonthSummary.remainingWork}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
           availableSoundCount={Math.max(0, availableSounds.length - 1)}
+          alarmCardGradientEnabled={alarmCardGradientEnabled}
           onOpenSoundSettings={() => {
             void openSoundSettings()
           }}
+          onAlarmCardGradientEnabledChange={updateAlarmCardGradientEnabled}
         />
       </NavigationStack>
     )
@@ -943,6 +1036,12 @@ export function HomeView() {
                 return (
                   <VStack
                     key={`${record.id}-${record.updatedAt}`}
+                    frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                    background="rgba(0,0,0,0.001)"
+                    contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+                    listRowInsets={{ top: 6, bottom: 6, leading: 12, trailing: 12 }}
+                    listRowSeparator="hidden"
+                    listRowBackground={<EmptyView />}
                     trailingSwipeActions={rowSwipeActions({
                       onEdit: () => {
                         void editAlarm(record)
@@ -956,6 +1055,7 @@ export function HomeView() {
                       record={record}
                       subtitle={displaySubtitle(record, holidaySourceMap)}
                       nextDateText={nextOccurrenceDateLabel(record, holidaySourceMap)}
+                      gradientEnabled={alarmCardGradientEnabled}
                       onToggle={toggleAlarm}
                     />
                   </VStack>
