@@ -65,6 +65,7 @@ function LocalContentEditorView(props: {
           scriptName="Surge Module"
           showAccessoryView
           searchEnabled
+          ignoresSafeArea={{ edges: "bottom" }}
         />
       </VStack>
     </NavigationStack>
