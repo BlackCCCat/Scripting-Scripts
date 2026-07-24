@@ -1,5 +1,6 @@
 ## 本次更新
 - 卡片使用glass效果
+- Editor去除safety area
 
 ## 上次更新
 
