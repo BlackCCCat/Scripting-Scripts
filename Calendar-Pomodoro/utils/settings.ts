@@ -7,6 +7,7 @@ import { BASE_DIR_NAME } from "../constants"
 export type AppSettings = {
   selectedCalendarSourceIds: string[]
   themeColor: string
+  useEditorForNotes: boolean
   releaseNotesSeenHash?: string
 }
 
@@ -20,6 +21,7 @@ const SETTINGS_FILE_NAME = "settings.json"
 const DEFAULT_SETTINGS: AppSettings = {
   selectedCalendarSourceIds: [],
   themeColor: DEFAULT_THEME_COLOR,
+  useEditorForNotes: true,
 }
 
 // 获取 FileManager，环境不支持时抛错
@@ -94,9 +96,14 @@ export async function loadSettings(): Promise<AppSettings> {
       typeof data?.releaseNotesSeenHash === "string"
         ? data.releaseNotesSeenHash
         : undefined
+    const useEditorForNotes =
+      typeof data?.useEditorForNotes === "boolean"
+        ? data.useEditorForNotes
+        : DEFAULT_SETTINGS.useEditorForNotes
     return {
       selectedCalendarSourceIds,
       themeColor,
+      useEditorForNotes,
       releaseNotesSeenHash,
     }
   } catch {

@@ -31,6 +31,7 @@ export function SettingsView() {
   const [settings, setSettings] = useState<AppSettings>({
     selectedCalendarSourceIds: [],
     themeColor: DEFAULT_THEME_COLOR,
+    useEditorForNotes: true,
   })
   const [sources, setSources] = useState<CalendarSource[]>([])
   const [sourcesExpanded, setSourcesExpanded] = useState(true)
@@ -54,6 +55,7 @@ export function SettingsView() {
         ...data,
         selectedCalendarSourceIds,
         themeColor: data.themeColor || DEFAULT_THEME_COLOR,
+        useEditorForNotes: data.useEditorForNotes,
       }
       setSources(list)
       setSettings(next)
@@ -88,6 +90,11 @@ export function SettingsView() {
     await persist({ ...settings, themeColor })
   }
 
+  async function updateUseEditorForNotes(useEditorForNotes: boolean) {
+    HapticFeedback.heavyImpact()
+    await persist({ ...settings, useEditorForNotes })
+  }
+
   return (
     <NavigationStack>
       <VStack
@@ -111,6 +118,16 @@ export function SettingsView() {
               title="恢复默认主题色"
               action={() => void updateThemeColor(DEFAULT_THEME_COLOR)}
             />
+          </Section>
+
+          <Section header={<Text>编辑设置</Text>}>
+            <Toggle
+              value={settings.useEditorForNotes}
+              onChanged={(value: boolean) => void updateUseEditorForNotes(value)}
+              toggleStyle="switch"
+            >
+              <Text>使用编辑器编辑笔记</Text>
+            </Toggle>
           </Section>
 
           <Section header={<Text>日历账户</Text>}>

@@ -6,6 +6,7 @@ import {
   Button,
   Circle,
   DragGesture,
+  Editor,
   GeometryReader,
   HStack,
   Image,
@@ -113,6 +114,52 @@ function NoteEditorPage(props: { title: string; content: string }) {
             maxHeight: "infinity",
             alignment: "topLeading" as any,
           }}
+        />
+      </VStack>
+    </NavigationStack>
+  );
+}
+
+function NoteCodeEditorPage(props: { title: string; content: string }) {
+  const dismiss = Navigation.useDismiss();
+  const [controller] = useState(
+    () =>
+      new EditorController({
+        content: props.content,
+        ext: "md",
+        readOnly: false,
+      }),
+  );
+
+  useEffect(() => {
+    return () => {
+      controller.dispose();
+    };
+  }, [controller]);
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode="inline"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        presentationDetents={["large"]}
+        presentationDragIndicator="visible"
+        toolbar={{
+          topBarLeading: (
+            <Button title="取消" role="cancel" action={() => dismiss(null)} />
+          ),
+          topBarTrailing: (
+            <Button title="保存" action={() => dismiss(String(controller.content ?? ""))} />
+          ),
+        }}
+      >
+        <Editor
+          controller={controller}
+          scriptName="Calendar Pomodoro Note"
+          showAccessoryView
+          searchEnabled
+          ignoresSafeArea={{ edges: "bottom" }}
         />
       </VStack>
     </NavigationStack>
@@ -1704,8 +1751,18 @@ export function CalendarTimerView() {
   }
 
   async function editNote(content: string, title = "笔记"): Promise<string> {
+    let useEditorForNotes = true;
+    try {
+      const settings = await loadSettings();
+      useEditorForNotes = settings.useEditorForNotes;
+    } catch {
+      useEditorForNotes = true;
+    }
+
     const next = await Navigation.present<string | null>({
-      element: <NoteEditorPage title={title} content={content} />,
+      element: useEditorForNotes
+        ? <NoteCodeEditorPage title={title} content={content} />
+        : <NoteEditorPage title={title} content={content} />,
       modalPresentationStyle: "pageSheet",
     });
     return next == null ? content : String(next);
