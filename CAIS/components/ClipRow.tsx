@@ -1,4 +1,4 @@
-import { HStack, Image, Spacer, Text, useColorScheme, VStack } from "scripting"
+import { HStack, Image, Spacer, Text, VStack } from "scripting"
 import type { ClipItem } from "../types"
 import { formatDateTime, summarizeContent } from "../utils/common"
 import { imagePreviewPath } from "../storage/image_store"
@@ -22,20 +22,12 @@ export function ClipRow(props: {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
   const previewPath = item.kind === "image" ? imagePreviewPath(item.imagePath) : undefined
-  const colorScheme = useColorScheme()
-  const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   return (
     <HStack
       spacing={12}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
-      background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
       glassEffect={{ type: "rect", cornerRadius: 18 } as any}
-      shadow={{
-        color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
-        radius: 10,
-        y: 4,
-      }}
     >
       <Image
         systemName={iconName(item.kind)}
