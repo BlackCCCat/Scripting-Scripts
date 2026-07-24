@@ -395,7 +395,14 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
 
       if (record.enabled) {
         const occurrenceLimit = occurrenceLimitForRecord(record)
-        if (occurrenceLimit !== null && baseRecord.completedOccurrences! >= occurrenceLimit) {
+        if (record.repeatRule.kind === "once") {
+          nextRecord = {
+            ...baseRecord,
+            enabled: false,
+            systemAlarmIds: [],
+            lastScheduledAt: null,
+          }
+        } else if (occurrenceLimit !== null && baseRecord.completedOccurrences! >= occurrenceLimit) {
           nextRecord = {
             ...baseRecord,
             enabled: false,

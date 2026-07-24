@@ -904,8 +904,16 @@ export function reconcileAlarmRecords(
       && updated.repeatRule.timestamp <= now
       && activeIds.length === 0
     ) {
-      changed = true
-      return []
+      if (updated.enabled || updated.systemAlarmIds.length > 0 || updated.lastScheduledAt !== null) {
+        changed = true
+        updated = {
+          ...updated,
+          enabled: false,
+          systemAlarmIds: [],
+          lastScheduledAt: null,
+          updatedAt: now,
+        }
+      }
     }
 
     if (
