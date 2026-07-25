@@ -1,5 +1,6 @@
 import {
   Button,
+  EmptyView,
   ForEach,
   HStack,
   Image,
@@ -26,6 +27,9 @@ import {
   summarizePasswordOptions,
 } from "../utils/password"
 
+const GLASS_HISTORY_ROW = { type: "rect", cornerRadius: 12 } as any
+const GLASS_EMPTY_CARD = { type: "rect", cornerRadius: 18 } as any
+
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
     try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
@@ -43,13 +47,17 @@ function HistoryRow(props: {
 }) {
   const strength = evaluatePasswordStrength(props.item.password, props.item.options)
   return (
-    <Button
-      buttonStyle="plain"
-      action={withHaptic(() => {
+    <HStack
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      background="rgba(0,0,0,0.001)"
+      contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+      onTapGesture={withHaptic(() => {
         if (props.selectionMode) props.onToggleSelected(props.item.id)
         else void props.onCopy(props.item)
       })}
-      frame={{ maxWidth: "infinity" }}
+      listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 } as any}
+      listRowSeparator="hidden"
+      listRowBackground={<EmptyView />}
       trailingSwipeActions={{
         allowsFullSwipe: true,
         actions: [
@@ -65,10 +73,7 @@ function HistoryRow(props: {
         spacing={8}
         padding={{ top: 10, bottom: 10, leading: 10, trailing: 10 }}
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
-        background={{
-          style: "secondarySystemBackground",
-          shape: { type: "rect", cornerRadius: 12 },
-        }}
+        glassEffect={GLASS_HISTORY_ROW}
       >
         <HStack frame={{ width: "100%" as any }}>
           {props.selectionMode ? (
@@ -102,7 +107,7 @@ function HistoryRow(props: {
           </Text>
         </HStack>
       </VStack>
-    </Button>
+    </HStack>
   )
 }
 
@@ -254,7 +259,9 @@ export function PasswordHistoryView() {
           />
           <VStack
             spacing={8}
+            padding={{ top: 16, bottom: 16, leading: 16, trailing: 16 }}
             frame={{ maxWidth: "infinity", alignment: "center" as any }}
+            glassEffect={GLASS_EMPTY_CARD}
           >
             <Text frame={{ maxWidth: "infinity", alignment: "center" as any }}>
               暂无复制历史

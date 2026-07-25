@@ -40,6 +40,11 @@ import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 
 type ViewMode = "app" | "keyboard"
 
+const GLASS_CARD = { type: "rect", cornerRadius: 16 } as any
+const GLASS_PANEL = { type: "rect", cornerRadius: 14 } as any
+const GLASS_ROW_CARD = { type: "rect", cornerRadius: 12 } as any
+const GLASS_BUTTON = { type: "rect", cornerRadius: 14 } as any
+
 function createDefaultOptions(symbolSettings: SymbolSettings): PasswordOptions {
   return {
     length: 16,
@@ -86,10 +91,7 @@ function Card(props: {
     <VStack
       spacing={10}
       padding={props.padding ?? { top: 14, bottom: 14, leading: 14, trailing: 14 }}
-      background={{
-        style: "secondarySystemBackground",
-        shape: { type: "rect", cornerRadius: 16 },
-      }}
+      glassEffect={GLASS_CARD}
     >
       {props.children}
     </VStack>
@@ -106,18 +108,25 @@ function ActionButton(props: {
   const tint: any = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
   return (
     <Button
-      buttonStyle="bordered"
       tint={tint}
       disabled={props.disabled}
+      glassEffect={GLASS_BUTTON}
       action={withHaptic(props.onPress)}
-      frame={{ maxWidth: "infinity", minHeight: 42 }}
+      frame={{ maxWidth: "infinity", minHeight: 48 }}
     >
-      <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-        <Image systemName={props.icon} font="subheadline" foregroundStyle={tint} />
-        <Text font="subheadline" foregroundStyle={tint}>
-          {props.title}
-        </Text>
-      </HStack>
+      <VStack
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        padding={{ top: 9, bottom: 9, leading: 12, trailing: 12 }}
+      >
+        <Spacer />
+        <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+          <Image systemName={props.icon} font="subheadline" foregroundStyle={tint} />
+          <Text font="subheadline" foregroundStyle={tint}>
+            {props.title}
+          </Text>
+        </HStack>
+        <Spacer />
+      </VStack>
     </Button>
   )
 }
@@ -131,9 +140,9 @@ function IconActionButton(props: {
   const tint: any = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue")
   return (
     <Button
-      buttonStyle="bordered"
       tint={tint}
       disabled={props.disabled}
+      glassEffect={GLASS_BUTTON}
       action={withHaptic(props.onPress)}
       frame={{ width: 42, minHeight: 42 }}
     >
@@ -344,10 +353,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
             spacing={8}
             padding={{ top: 10, bottom: 10, leading: 10, trailing: 10 }}
             frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
-            background={{
-              style: "secondarySystemBackground",
-              shape: { type: "rect", cornerRadius: 12 },
-            }}
+            glassEffect={GLASS_ROW_CARD}
           >
             <HStack frame={{ width: "100%" as any }}>
               <Text font="caption2" foregroundStyle="secondaryLabel">
@@ -430,10 +436,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
           spacing={8}
           frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
           padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
-          background={{
-            style: "tertiarySystemBackground",
-            shape: { type: "rect", cornerRadius: 14 },
-          }}
+          glassEffect={GLASS_PANEL}
         >
           <HStack frame={{ width: "100%" as any }}>
             <Text font="caption" foregroundStyle="secondaryLabel">

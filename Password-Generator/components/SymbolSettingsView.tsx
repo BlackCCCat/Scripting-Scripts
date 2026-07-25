@@ -20,6 +20,9 @@ import {
   normalizeSymbolSettings,
 } from "../utils/symbol_settings"
 
+const GLASS_SYMBOL_ROW = { type: "rect", cornerRadius: 14 } as any
+const GLASS_SYMBOL_BUTTON = { type: "rect", cornerRadius: 14 } as any
+
 function withHaptic(action: () => void | Promise<void>) {
   return () => {
     try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch {}
@@ -47,6 +50,7 @@ function SymbolToggleRow(props: {
         spacing={12}
         alignment="center"
         padding={{ top: 8, bottom: 8 }}
+        glassEffect={GLASS_SYMBOL_ROW}
       >
         <Text font="title3" frame={{ width: 28, alignment: "center" as any }}>
           {props.value}
@@ -150,6 +154,7 @@ export function SymbolSettingsView(props: { initial: SymbolSettings }) {
           topBarTrailing: (
             <Button
               title="保存"
+              glassEffect={GLASS_SYMBOL_BUTTON}
               action={withHaptic(saveAndClose)}
             />
           ),
@@ -173,7 +178,11 @@ export function SymbolSettingsView(props: { initial: SymbolSettings }) {
             onChanged={setDraft}
             prompt="输入一个或多个符号"
           />
-          <Button title="添加到列表" action={withHaptic(addCustomSymbols)} />
+          <Button
+            title="添加到列表"
+            glassEffect={GLASS_SYMBOL_BUTTON}
+            action={withHaptic(addCustomSymbols)}
+          />
         </Section>
 
         <Section header={<Text>自定义符号</Text>} footer={<Text>左滑可删除自定义符号</Text>}>
