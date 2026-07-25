@@ -13,8 +13,7 @@ export function SoftCard(props: {
       spacing={12}
       padding={props.padding ?? 18}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      background={{ style: palette.card, shape: { type: "rect", cornerRadius: 24 } }}
-      shadow={{ color: "rgba(0,0,0,0.16)", radius: 16, y: 6 }}
+      glassEffect={{ type: "rect", cornerRadius: 24 } as any}
     >
       {props.title || props.subtitle || props.trailing ? (
         <HStack alignment="top" spacing={10} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
@@ -51,7 +50,7 @@ export function MetricTile(props: {
       spacing={4}
       padding={14}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      background={{ style: palette.cardSoft, shape: { type: "rect", cornerRadius: 18 } }}
+      glassEffect={{ type: "rect", cornerRadius: 18 } as any}
     >
       <Text font="caption" foregroundStyle={palette.mutedInk} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
         {props.label}

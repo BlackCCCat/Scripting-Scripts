@@ -417,7 +417,7 @@ export function DailyTab(props: {
                 spacing={6}
                 padding={14}
                 frame={{ maxWidth: "infinity", minHeight: 130, alignment: "leading" as any }}
-                background={{ style: palette.cardSoft, shape: { type: "rect", cornerRadius: 18 } }}
+                glassEffect={{ type: "rect", cornerRadius: 18 } as any}
               >
                 <Text font="caption" foregroundStyle={palette.mutedInk} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
                   睡眠时长
@@ -433,7 +433,7 @@ export function DailyTab(props: {
                 spacing={6}
                 padding={14}
                 frame={{ maxWidth: "infinity", minHeight: 130, alignment: "leading" as any }}
-                background={{ style: palette.cardSoft, shape: { type: "rect", cornerRadius: 18 } }}
+                glassEffect={{ type: "rect", cornerRadius: 18 } as any}
               >
                 <Text font="caption" foregroundStyle={palette.mutedInk} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
                   恢复性睡眠
