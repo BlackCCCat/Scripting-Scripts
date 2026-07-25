@@ -271,6 +271,47 @@ function clearRepeatingTimer(id: number) {
   }
 }
 
+async function saveMindfulMinutesIfNeeded(
+  task: Task,
+  segments: TimerSessionSegment[],
+) {
+  if (!task.syncMindfulMinutes || !segments.length) return;
+
+  try {
+    const settings = await loadSettings();
+    if (!settings.linkAppleHealth) return;
+
+    const health = (globalThis as any).Health;
+    const sampleFactory = (globalThis as any).HealthCategorySample;
+    const presenceValue = (globalThis as any).HealthCategoryValuePresence?.present ?? 0;
+    if (health?.isHealthDataAvailable === false) return;
+    if (typeof health?.saveCategorySample !== "function") return;
+    if (typeof sampleFactory?.create !== "function") return;
+
+    for (const segment of segments) {
+      const duration = Math.max(0, segment.endAt - segment.startAt);
+      if (duration < 1000) continue;
+
+      const sample = sampleFactory.create({
+        type: "mindfulSession",
+        startDate: new Date(segment.startAt),
+        endDate: new Date(segment.endAt),
+        value: presenceValue,
+        metadata: {
+          source: "Calendar Pomodoro",
+          taskId: task.id,
+          taskName: task.name,
+        },
+      });
+      if (sample) {
+        await health.saveCategorySample(sample);
+      }
+    }
+  } catch (error) {
+    console.error("[Calendar Pomodoro] Apple Health 同步失败:", error);
+  }
+}
+
 const TIMELINE_STEP_MINUTES = 5;
 const TIMELINE_MAX_MINUTES = 24 * 60;
 function clamp01(value: number): number {
@@ -1789,6 +1830,7 @@ export function CalendarTimerView() {
         savedCount += 1;
         savedDurationMs += segmentDuration;
       }
+      await saveMindfulMinutesIfNeeded(activeTask, finalSegments);
       if (!options?.auto) {
         const message =
           savedCount > 0

@@ -32,6 +32,7 @@ export function SettingsView() {
     selectedCalendarSourceIds: [],
     themeColor: DEFAULT_THEME_COLOR,
     useEditorForNotes: true,
+    linkAppleHealth: true,
   })
   const [sources, setSources] = useState<CalendarSource[]>([])
   const [sourcesExpanded, setSourcesExpanded] = useState(true)
@@ -56,6 +57,7 @@ export function SettingsView() {
         selectedCalendarSourceIds,
         themeColor: data.themeColor || DEFAULT_THEME_COLOR,
         useEditorForNotes: data.useEditorForNotes,
+        linkAppleHealth: data.linkAppleHealth,
       }
       setSources(list)
       setSettings(next)
@@ -95,6 +97,11 @@ export function SettingsView() {
     await persist({ ...settings, useEditorForNotes })
   }
 
+  async function updateLinkAppleHealth(linkAppleHealth: boolean) {
+    HapticFeedback.heavyImpact()
+    await persist({ ...settings, linkAppleHealth })
+  }
+
   return (
     <NavigationStack>
       <VStack
@@ -127,6 +134,16 @@ export function SettingsView() {
               toggleStyle="switch"
             >
               <Text>使用编辑器编辑笔记</Text>
+            </Toggle>
+          </Section>
+
+          <Section header={<Text>Apple Health</Text>}>
+            <Toggle
+              value={settings.linkAppleHealth}
+              onChanged={(value: boolean) => void updateLinkAppleHealth(value)}
+              toggleStyle="switch"
+            >
+              <Text>关联Apple Health</Text>
             </Toggle>
           </Section>
 

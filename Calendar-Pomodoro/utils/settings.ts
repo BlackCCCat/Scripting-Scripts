@@ -8,6 +8,7 @@ export type AppSettings = {
   selectedCalendarSourceIds: string[]
   themeColor: string
   useEditorForNotes: boolean
+  linkAppleHealth: boolean
   releaseNotesSeenHash?: string
 }
 
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   selectedCalendarSourceIds: [],
   themeColor: DEFAULT_THEME_COLOR,
   useEditorForNotes: true,
+  linkAppleHealth: true,
 }
 
 // 获取 FileManager，环境不支持时抛错
@@ -100,10 +102,15 @@ export async function loadSettings(): Promise<AppSettings> {
       typeof data?.useEditorForNotes === "boolean"
         ? data.useEditorForNotes
         : DEFAULT_SETTINGS.useEditorForNotes
+    const linkAppleHealth =
+      typeof data?.linkAppleHealth === "boolean"
+        ? data.linkAppleHealth
+        : DEFAULT_SETTINGS.linkAppleHealth
     return {
       selectedCalendarSourceIds,
       themeColor,
       useEditorForNotes,
+      linkAppleHealth,
       releaseNotesSeenHash,
     }
   } catch {

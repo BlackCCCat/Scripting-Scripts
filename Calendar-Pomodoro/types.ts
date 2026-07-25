@@ -18,6 +18,8 @@ export type Task = {
   notificationIntervalMinutes?: number
   // 笔记草稿（自动保存）
   noteDraft?: string
+  // 是否将该任务的专注时间同步为 Apple Health 正念分钟
+  syncMindfulMinutes?: boolean
 }
 
 // Live Activity 需要的状态结构

@@ -49,6 +49,10 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
     const idx = NOTIFICATION_INTERVAL_OPTIONS.findIndex((opt) => opt.minutes === minutes)
     return idx >= 0 ? idx : 0
   })
+  const [appleHealthEnabled, setAppleHealthEnabled] = useState(true)
+  const [syncMindfulMinutes, setSyncMindfulMinutes] = useState(
+    Boolean(props.initial?.syncMindfulMinutes ?? false)
+  )
 
   useEffect(() => {
     // 页面首次进入：读取账户列表与本地设置
@@ -99,6 +103,7 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       const list = Calendar.getSources?.() ?? []
       setSources(list)
       const data = await loadSettings()
+      setAppleHealthEnabled(data.linkAppleHealth)
       const availableIds = list.map((src) => src.identifier)
       const savedIds = data.selectedCalendarSourceIds ?? []
       const savedAvailableIds = savedIds.filter((id) => availableIds.includes(id))
@@ -167,6 +172,9 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
       useNotification: useNotification,
       notificationIntervalMinutes: notificationMinutes,
       noteDraft: props.initial?.noteDraft ?? "",
+      syncMindfulMinutes: appleHealthEnabled
+        ? syncMindfulMinutes
+        : Boolean(props.initial?.syncMindfulMinutes ?? false),
     }
     dismiss(task)
   }
@@ -220,7 +228,16 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
             )}
           </Section>
 
-          <Section header={<Text>计时选项</Text>}>
+          <Section
+            header={<Text>计时选项</Text>}
+            footer={
+              appleHealthEnabled ? (
+                <Text foregroundStyle="secondaryLabel" font="footnote">
+                  开启正念将同步专注时间到Apple Health
+                </Text>
+              ) : undefined
+            }
+          >
             {/* 通知开关与频率 */}
             <Toggle
               value={useNotification}
@@ -247,6 +264,19 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
                   </Text>
                 ))}
               </Picker>
+            ) : null}
+
+            {appleHealthEnabled ? (
+              <Toggle
+                value={syncMindfulMinutes}
+                onChanged={(v: boolean) => {
+                  HapticFeedback.heavyImpact()
+                  setSyncMindfulMinutes(v)
+                }}
+                toggleStyle="switch"
+              >
+                <Text>正念</Text>
+              </Toggle>
             ) : null}
           </Section>
         </Form>
