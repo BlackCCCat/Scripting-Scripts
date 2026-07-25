@@ -12,15 +12,16 @@ import {
   Navigation,
   useState,
   useEffect,
-  gradient,
   TextField,
   Widget,
+  gradient,
 } from "scripting"
 import { FUELS, FuelCode, OilPriceData, ProvincePrice, fuelMeta } from "./types"
 import { fetchOilPrices, matchProvince, normalizeProvinceName } from "./service"
 import { Theme } from "./theme"
 import {
   getLocationMode,
+  getLastAutoProvinceName,
   getManualProvinceName,
   LocationMode,
   setLastAutoProvinceName,
@@ -54,14 +55,16 @@ function HeaderCard({
     <VStack
       spacing={0}
       padding={{ horizontal: 18, top: 18, bottom: 16 }}
-      background={gradient("linear", {
-        colors: [...Theme.headerGradient],
-        startPoint: "topLeading",
-        endPoint: "bottomTrailing",
-      })}
-      clipShape={{ type: "rect", cornerRadius: 22 }}
+      background={{
+        style: gradient("linear", {
+          colors: [...Theme.headerGradient],
+          startPoint: "topLeading",
+          endPoint: "bottomTrailing",
+        }),
+        shape: Theme.glassHeaderCard,
+      } as any}
+      glassEffect={Theme.glassHeaderCard as any}
       frame={{ maxWidth: "infinity" }}
-      shadow={{ color: "rgba(240,130,15,0.35)", radius: 12, y: 6 }}
     >
       {/* 顶部：省份 + 更新时间 */}
       <HStack>
@@ -104,8 +107,11 @@ function HeaderCard({
             spacing={3}
             frame={{ maxWidth: "infinity" }}
             padding={{ vertical: 10 }}
-            background={Theme.headerChipBg}
-            clipShape={{ type: "rect", cornerRadius: 12 }}
+            background={{
+              style: Theme.headerChipBg,
+              shape: Theme.glassSmallCard,
+            } as any}
+            glassEffect={Theme.glassSmallCard as any}
           >
             <Text font={12} foregroundStyle="rgba(255,255,255,0.85)">
               {f.label}
@@ -124,21 +130,17 @@ function HeaderCard({
         frame={{ maxWidth: "infinity" }}
       >
         <HStack
-          spacing={0}
-          frame={{ maxWidth: "infinity" }}
+          spacing={6}
+          frame={{ maxWidth: "infinity", alignment: "center" as any }}
         >
-          <Spacer />
-          <HStack spacing={6}>
-            <Image
-              systemName="calendar"
-              font={13}
-              foregroundStyle="rgba(255,255,255,0.9)"
-            />
-            <Text font={13} fontWeight="medium" foregroundStyle="white">
-              下次调价: {forecast.nextAdjustText} · 剩余 {forecast.remainingDays} 天
-            </Text>
-          </HStack>
-          <Spacer />
+          <Image
+            systemName="calendar"
+            font={13}
+            foregroundStyle="rgba(255,255,255,0.9)"
+          />
+          <Text font={13} fontWeight="medium" foregroundStyle="white">
+            下次调价: {forecast.nextAdjustText} · 剩余 {forecast.remainingDays} 天
+          </Text>
         </HStack>
         <Text
           font={12}
@@ -159,8 +161,7 @@ function ProvinceRow({ item }: { item: ProvincePrice }) {
     <VStack
       spacing={10}
       padding={14}
-      background={Theme.cardBg}
-      clipShape={{ type: "rect", cornerRadius: 14 }}
+      glassEffect={Theme.glassCard as any}
     >
       <HStack>
         <Text font={17} fontWeight="semibold">
@@ -330,8 +331,7 @@ function ProvinceDetailPage({
 
         <VStack
           spacing={0}
-          background={Theme.cardBg}
-          clipShape={{ type: "rect", cornerRadius: 14 }}
+          glassEffect={Theme.glassCard as any}
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         >
           {FUELS.map(f => (
@@ -343,8 +343,7 @@ function ProvinceDetailPage({
           alignment="leading"
           spacing={8}
           padding={16}
-          background={Theme.cardBg}
-          clipShape={{ type: "rect", cornerRadius: 14 }}
+          glassEffect={Theme.glassCard as any}
           frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         >
           <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
@@ -436,15 +435,14 @@ function ProvinceSelectorPage({
         <Button action={chooseAuto}>
           <VStack
             padding={mode === "auto" ? 2 : 0}
-            background={mode === "auto" ? Theme.orange : Theme.pageBg}
+            background={mode === "auto" ? Theme.orange : "rgba(0,0,0,0.001)"}
             clipShape={{ type: "rect", cornerRadius: 14 }}
             frame={{ maxWidth: "infinity" }}
           >
             <HStack
               spacing={14}
               padding={{ horizontal: 16, vertical: 14 }}
-              background={Theme.pageBg}
-              clipShape={{ type: "rect", cornerRadius: 12 }}
+              glassEffect={Theme.glassSmallCard as any}
               frame={{ maxWidth: "infinity" }}
             >
               <Image
@@ -481,8 +479,7 @@ function ProvinceSelectorPage({
               <Button action={() => chooseManual(p)}>
                 <HStack
                   padding={{ horizontal: 16, vertical: 16 }}
-                  background={Theme.cardBg}
-                  clipShape={{ type: "rect", cornerRadius: 12 }}
+                  glassEffect={Theme.glassSmallCard as any}
                   frame={{ maxWidth: "infinity" }}
                 >
                   <Text font={18}>{p.province}</Text>
@@ -520,6 +517,23 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
   >(getManualProvinceName())
   const [sortMode, setSortMode] = useState<ProvinceSortMode>("default")
 
+  async function requestCurrentProvinceName(forceRefresh: boolean) {
+    try {
+      const loc = await Location.requestCurrent({ forceRequest: forceRefresh })
+      if (!loc) {
+        return null
+      }
+      const placemarks = await Location.reverseGeocode({
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        locale: "zh-CN",
+      })
+      return placemarks?.[0]?.administrativeArea ?? null
+    } catch {
+      return null
+    }
+  }
+
   async function load(forceRefresh = false) {
     if (forceRefresh) {
       setRefreshing(true)
@@ -529,27 +543,21 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
     setResolvingProvince(true)
     setError(null)
     try {
+      const provinceNamePromise = requestCurrentProvinceName(forceRefresh)
       const result = await fetchOilPrices({ forceRefresh })
       setData(result)
-
-      // 定位当前省份
-      let provinceName: string | null = null
-      try {
-        const loc = await Location.requestCurrent({ forceRequest: forceRefresh })
-        if (loc) {
-          const placemarks = await Location.reverseGeocode({
-            latitude: loc.latitude,
-            longitude: loc.longitude,
-            locale: "zh-CN",
-          })
-          provinceName = placemarks?.[0]?.administrativeArea ?? null
-        }
-      } catch {
-        // 定位失败，忽略，使用默认省份
+      const cachedAutoProvince = matchProvince(
+        result.provinces,
+        getLastAutoProvinceName()
+      )
+      if (locationModeState === "auto" && cachedAutoProvince) {
+        setAutoProvince(cachedAutoProvince)
+        setLocatedName(cachedAutoProvince.province)
       }
 
+      const provinceName = await provinceNamePromise
       const matched = matchProvince(result.provinces, provinceName)
-      const displayProvince = matched ?? result.provinces[0]
+      const displayProvince = matched ?? cachedAutoProvince ?? result.provinces[0]
       if (matched) {
         setLastAutoProvinceName(matched.province)
       }

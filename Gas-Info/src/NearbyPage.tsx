@@ -40,8 +40,7 @@ function StationRow({
       <HStack
         spacing={12}
         padding={14}
-        background={Theme.cardBg}
-        clipShape={{ type: "rect", cornerRadius: 14 }}
+        glassEffect={Theme.glassCard as any}
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       >
         <ZStackIcon index={entry.index} />
@@ -285,9 +284,7 @@ export function NearbyPage({ radiusKm }: { radiusKm: number }) {
                 font={18}
                 foregroundStyle={Theme.orange}
                 padding={12}
-                background="ultraThinMaterial"
-                clipShape="circle"
-                shadow={{ color: "rgba(0,0,0,0.18)", radius: 8, y: 3 }}
+                glassEffect={Theme.glassCircle as any}
               />
             </Button>
           </HStack>

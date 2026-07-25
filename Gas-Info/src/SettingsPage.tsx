@@ -28,8 +28,7 @@ function SettingSection({
       </Text>
       <VStack
         spacing={0}
-        background={Theme.cardBg}
-        clipShape={{ type: "rect", cornerRadius: 14 }}
+        glassEffect={Theme.glassCard as any}
         frame={{ maxWidth: "infinity" }}
       >
         {children}
