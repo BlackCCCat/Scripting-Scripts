@@ -1,6 +1,6 @@
 import {
   Button,
-  Divider,
+  EmptyView,
   Group,
   HStack,
   Image,
@@ -435,7 +435,11 @@ export function PDFHelperView() {
 
   return (
     <NavigationStack>
-      <VStack
+      <ZStack
+        alignment="bottom"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        background="systemGroupedBackground"
+        ignoresSafeArea={{ edges: "bottom" }}
         navigationTitle="PDF Helper"
         navigationBarTitleDisplayMode="inline"
         toolbar={{
@@ -493,11 +497,12 @@ export function PDFHelperView() {
             </HStack>
           ),
         }}
-        spacing={0}
       >
         <List
           listStyle="insetGroup"
           sheet={releaseNotesSheet}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          ignoresSafeArea={{ edges: "bottom" }}
         >
           {sources.length === 0 ? (
             <VStack spacing={8} padding={24}>
@@ -516,41 +521,54 @@ export function PDFHelperView() {
               />
             ))
           )}
+          <VStack
+            frame={{ height: 116 }}
+            listRowBackground={<EmptyView />}
+            listRowSeparator="hidden"
+          />
         </List>
 
-        <Divider />
-
-        <VStack spacing={8} padding={12}>
-          <HStack>
-            <Text foregroundStyle="secondaryLabel">
-              已选择 {selectedPages.length} 项 · 共 {selectedTotalPageCount} 页（图片 {selectedImageCount}）
-            </Text>
-            <Spacer />
-            {loadingMessage ? (
-              <HStack spacing={6}>
-                <ProgressView progressViewStyle="circular" />
-                <Text font="footnote">{loadingMessage}</Text>
-              </HStack>
-            ) : null}
-          </HStack>
-          <HStack spacing={10}>
-            <Button
-              title={processing ? "处理中..." : "转换"}
-              systemImage="doc.badge.gearshape"
-              buttonStyle="borderedProminent"
-              disabled={!canConvert}
-              action={() => void runConvert()}
-            />
-            <Button
-              title={processing ? "处理中..." : "合并"}
-              systemImage="square.stack.3d.up.fill"
-              buttonStyle="borderedProminent"
-              disabled={!canMerge}
-              action={() => void runMerge()}
-            />
-          </HStack>
+        <VStack
+          padding={{ bottom: 8, leading: 18, trailing: 18 }}
+          frame={{ maxWidth: "infinity", alignment: "bottom" as any }}
+        >
+          <VStack
+            spacing={10}
+            padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            glassEffect={{ type: "rect", cornerRadius: 34 } as any}
+          >
+            <HStack>
+              <Text foregroundStyle="secondaryLabel" font="footnote">
+                已选择 {selectedPages.length} 项 · 共 {selectedTotalPageCount} 页（图片 {selectedImageCount}）
+              </Text>
+              <Spacer />
+              {loadingMessage ? (
+                <HStack spacing={6}>
+                  <ProgressView progressViewStyle="circular" />
+                  <Text font="footnote">{loadingMessage}</Text>
+                </HStack>
+              ) : null}
+            </HStack>
+            <HStack spacing={10}>
+              <Button
+                title={processing ? "处理中..." : "转换"}
+                systemImage="doc.badge.gearshape"
+                buttonStyle="borderedProminent"
+                disabled={!canConvert}
+                action={() => void runConvert()}
+              />
+              <Button
+                title={processing ? "处理中..." : "合并"}
+                systemImage="square.stack.3d.up.fill"
+                buttonStyle="borderedProminent"
+                disabled={!canMerge}
+                action={() => void runMerge()}
+              />
+            </HStack>
+          </VStack>
         </VStack>
-      </VStack>
+      </ZStack>
     </NavigationStack>
   )
 }
