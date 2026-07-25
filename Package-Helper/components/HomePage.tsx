@@ -1,6 +1,5 @@
 import {
   Button,
-  DisclosureGroup,
   ForEach,
   HStack,
   List,
@@ -9,10 +8,9 @@ import {
   Text,
   useEffect,
   useState,
-  VStack,
 } from "scripting"
 
-import { EmptyPickupBlock, MetricTile, PickupRow } from "./common"
+import { EmptyPickupBlock, GlassCard, MetricTile, PickupRow } from "./common"
 import type { PickupInfo } from "../types"
 import { getHomePickupInfo, loadConfig } from "../utils"
 
@@ -74,7 +72,7 @@ export function HomePage(props: {
         }}
       >
         <Section header={<Text>概览</Text>}>
-          <VStack spacing={10}>
+          <GlassCard spacing={10}>
             <HStack spacing={10}>
               <MetricTile
                 label="待取件"
@@ -103,7 +101,7 @@ export function HomePage(props: {
                 tint="#AF52DE"
               />
             </HStack>
-          </VStack>
+          </GlassCard>
         </Section>
 
         <Section header={<Text>待处理包裹</Text>}>
@@ -137,41 +135,53 @@ export function HomePage(props: {
           )}
         </Section>
 
-        <Section header={<Text>最近已处理</Text>}>
+        <Section
+          header={(
+            <HStack>
+              <Text
+                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              >
+                {pickedItems.length > 0 ? `最近已处理 (${pickedItems.length})` : "最近已处理"}
+              </Text>
+              {pickedItems.length > 0 ? (
+                <Button
+                  title=""
+                  systemImage={pickedExpanded ? "chevron.up" : "chevron.down"}
+                  buttonStyle="plain"
+                  action={() => setPickedExpanded(!pickedExpanded)}
+                />
+              ) : null}
+            </HStack>
+          )}
+        >
           {pickedItems.length === 0 ? (
             <EmptyPickupBlock
               title="还没有已处理记录"
               subtitle="标记已取件后，会在这里保留最近状态。"
             />
-          ) : (
-            <DisclosureGroup
-              title={`最近已处理 (${pickedItems.length})`}
-              isExpanded={pickedExpanded}
-              onChanged={setPickedExpanded}
-            >
-              <ForEach
-                count={pickedItems.length}
-                itemBuilder={(index) => {
+          ) : pickedExpanded ? (
+            <ForEach
+              count={pickedItems.length}
+              itemBuilder={(index) => {
+                const item = pickedItems[index]
+                return (
+                  <PickupRow
+                    key={`picked-${item.code}-${index}`}
+                    item={item}
+                    showDate={cfg.showDate}
+                    checked
+                    onToggle={props.onUnpicked}
+                  />
+                )
+              }}
+              onDelete={(indices) => {
+                for (const index of indices) {
                   const item = pickedItems[index]
-                  return (
-                    <PickupRow
-                      key={`picked-${item.code}-${index}`}
-                      item={item}
-                      showDate={cfg.showDate}
-                      checked
-                      onToggle={props.onUnpicked}
-                    />
-                  )
-                }}
-                onDelete={(indices) => {
-                  for (const index of indices) {
-                    const item = pickedItems[index]
-                    if (item) void props.onDelete(item.code)
-                  }
-                }}
-              />
-            </DisclosureGroup>
-          )}
+                  if (item) void props.onDelete(item.code)
+                }
+              }}
+            />
+          ) : null}
         </Section>
       </List>
     </NavigationStack>
