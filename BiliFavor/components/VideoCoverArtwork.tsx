@@ -357,9 +357,8 @@ export function CompactVideoCoverImage(props: {
 }) {
   const frame = { maxWidth: "infinity" as const, height: props.height }
   const frameFill = makeVideoCoverFrameFill(props.artwork.dominantColor)
-  const background = { style: frameFill }
   const placeholder = (
-    <ZStack frame={frame} background={background}>
+    <ZStack frame={frame} background={frameFill}>
       <ProgressView progressViewStyle="circular" />
     </ZStack>
   )
@@ -371,7 +370,7 @@ export function CompactVideoCoverImage(props: {
         resizable={true}
         scaleToFit={true}
         frame={frame}
-        background={background}
+        background={frameFill}
       />
     )
   }
@@ -383,7 +382,7 @@ export function CompactVideoCoverImage(props: {
         resizable={true}
         scaleToFit={true}
         frame={frame}
-        background={background}
+        background={frameFill}
         placeholder={placeholder}
       />
     )

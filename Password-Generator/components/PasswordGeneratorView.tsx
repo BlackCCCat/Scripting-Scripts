@@ -211,7 +211,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
   useEffect(() => {
     if (props.mode !== "keyboard") return
     try { CustomKeyboard.setToolbarVisible(false) } catch {}
-    try { CustomKeyboard.setHasDictationKey(false) } catch {}
+    try { (CustomKeyboard as any).setHasDictationKey?.(false) } catch {}
   }, [props.mode])
 
   function regenerate(nextOptions = options) {

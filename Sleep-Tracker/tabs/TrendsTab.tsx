@@ -742,7 +742,7 @@ export function TrendsTab(props: {
                         scrollTargetBehavior="viewAligned"
                         frame={{ width: viewportWidth, height: size.height }}
                       >
-                        <VStack spacing={8} padding={{ top: 10 }} scrollTargetlayout>
+                        <VStack spacing={8} padding={{ top: 10 }} scrollTargetLayout>
                           <Chart
                             frame={{ width: contentWidth, height: 240 }}
                             chartLegend="hidden"
@@ -847,7 +847,7 @@ export function TrendsTab(props: {
                         scrollTargetBehavior="viewAligned"
                         frame={{ width: viewportWidth, height: size.height }}
                       >
-                        <VStack spacing={8} padding={{ top: 10 }} scrollTargetlayout>
+                        <VStack spacing={8} padding={{ top: 10 }} scrollTargetLayout>
                           <Chart
                             frame={{ width: contentWidth, height: 220 }}
                             chartLegend="hidden"
@@ -993,7 +993,7 @@ export function TrendsTab(props: {
               scrollTargetBehavior="viewAligned"
               frame={{ maxWidth: "infinity" }}
             >
-              <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }} scrollTargetlayout>
+              <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }} scrollTargetLayout>
                 {calendarItems.map((item) => (
                   <VStack
                     key={`calendar-${item.key}`}
@@ -1047,7 +1047,7 @@ export function TrendsTab(props: {
                 scrollTargetBehavior="viewAligned"
                 frame={{ maxWidth: "infinity" }}
               >
-                <HStack alignment="top" spacing={8} scrollTargetlayout>
+                <HStack alignment="top" spacing={8} scrollTargetLayout>
                   {regularityColumns.map((item) => {
                     const startMinutes = Math.max(22 * 60, Math.min(34 * 60, item.start ?? 22 * 60))
                     const endMinutes = Math.max(startMinutes + 30, Math.min(34 * 60, item.end ?? startMinutes + 30))

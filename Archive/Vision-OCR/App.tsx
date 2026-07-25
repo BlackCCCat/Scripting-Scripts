@@ -694,7 +694,7 @@ export default function App({ initialImage }: { initialImage?: UIImage | null })
                   <ZStack
                     frame={{ width: size.width, height: size.height }}
                     clipped
-                    contentShape={{ kind: 'interaction', shape: { type: 'rect' } }}
+                    contentShape="rect"
                   >
                     <ZStack
                       frame={{ width: size.width, height: size.height }}

@@ -6,7 +6,7 @@ function run() {
     throw new Error("当前运行环境不支持自定义键盘")
   }
   try { keyboard.setToolbarVisible(false) } catch {}
-  try { keyboard.setHasDictationKey(false) } catch {}
+  try { keyboard.setHasDictationKey?.(false) } catch {}
   keyboard.present(<PasswordGeneratorView mode="keyboard" />)
 }
 

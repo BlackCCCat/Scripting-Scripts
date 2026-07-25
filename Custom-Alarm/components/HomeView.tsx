@@ -318,7 +318,6 @@ function AlarmCardGradient(props: {
           endPoint: gradientConfig.endPoint,
         },
       }}
-      cornerRadius={22}
       allowsHitTesting={false}
     />
   )
