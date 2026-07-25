@@ -32,7 +32,7 @@ function LocalContentEditorView(props: {
   const dismiss = Navigation.useDismiss()
   const [controller] = useState(() => new EditorController({
     content: props.initialContent,
-    ext: "sgmodule",
+    ext: "txt",
     readOnly: false,
   }))
 
