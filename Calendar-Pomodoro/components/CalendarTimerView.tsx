@@ -5,6 +5,7 @@
 import {
   Button,
   Circle,
+  Device,
   DragGesture,
   Editor,
   GeometryReader,
@@ -184,6 +185,31 @@ function formatClockTime(date: Date): string {
   return `${hh}:${mm}`;
 }
 
+function colorWithAlpha(color: string, alpha: number): string {
+  const value = color.trim();
+  const rgbaMatch = value.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbaMatch?.[1]) {
+    const parts = rgbaMatch[1].split(",").map((item) => item.trim());
+    if (parts.length >= 3) {
+      return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
+    }
+  }
+
+  const hex = value.replace("#", "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    const [r, g, b] = hex.split("").map((item) => parseInt(item + item, 16));
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  return `rgba(252, 124, 93, ${alpha})`;
+}
+
 function currentMinuteOfDay(date = new Date()): number {
   return date.getHours() * 60 + date.getMinutes();
 }
@@ -277,6 +303,59 @@ function TaskProgressLine(props: { ratio: number; active: boolean; tint: string 
         );
       }}
     </GeometryReader>
+  );
+}
+
+function TaskRowCard(props: {
+  task: Task;
+  duration: number;
+  durationLoading: boolean;
+  ratio: number;
+  active: boolean;
+  themeColor: string;
+  highlighted?: boolean;
+  previewWidth?: number;
+  onTap?: () => void;
+  contextMenu?: any;
+}) {
+  const rowFrame = props.previewWidth
+    ? ({ width: props.previewWidth, alignment: "leading" as any })
+    : ({ maxWidth: "infinity", alignment: "leading" as any });
+  const highlightBackground = colorWithAlpha(props.themeColor, 0.14);
+  const highlightShadow = colorWithAlpha(props.themeColor, 0.32);
+
+  return (
+    <VStack
+      spacing={8}
+      padding={{ top: 8, bottom: 8, leading: 10, trailing: 10 }}
+      frame={rowFrame}
+      background={(props.highlighted ? highlightBackground : "rgba(0,0,0,0.001)") as any}
+      clipShape={{ type: "rect", cornerRadius: 18 } as any}
+      contentShape="rect"
+      shadow={
+        props.highlighted
+          ? ({ color: highlightShadow, radius: 16, x: 0, y: 8 } as any)
+          : undefined
+      }
+      onTapGesture={props.onTap}
+      contextMenu={props.contextMenu}
+    >
+      <HStack spacing={10} frame={{ maxWidth: "infinity" }}>
+        <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <Text font="title3" fontWeight="bold" lineLimit={1}>
+            {props.task.name}
+          </Text>
+          <Text foregroundStyle="secondaryLabel" lineLimit={1}>
+            # {props.task.calendarTitle}
+          </Text>
+        </VStack>
+        <Spacer />
+        <Text foregroundStyle={props.themeColor as any} monospacedDigit>
+          {props.durationLoading && props.duration <= 0 ? "统计中" : formatCompactDuration(props.duration)}
+        </Text>
+      </HStack>
+      <TaskProgressLine ratio={props.ratio} active={props.active} tint={props.themeColor} />
+    </VStack>
   );
 }
 
@@ -1899,6 +1978,7 @@ export function CalendarTimerView() {
   const timerModeText = countdownMinutes > 0
     ? formatCompactDuration(countdownMinutes * 60000)
     : "Count Up";
+  const taskRowPreviewWidth = Math.max(260, Device.screen.width - 36);
 
   function handleTimelineChanged(value: number) {
     const next = Math.max(minTimelineOffset, Math.min(maxTimelineOffset, roundToTimelineStep(value)));
@@ -2044,24 +2124,15 @@ export function CalendarTimerView() {
                   const duration = taskDurations[task.id] ?? 0;
                   const ratio = totalDurationMs > 0 ? duration / totalDurationMs : 0;
                   const isActive = activeTaskId === task.id && (running || paused);
-                  const isReordering = activeReorderTask.value?.id === task.id;
                   return (
-                    <VStack
-                      key={task.id}
-                      spacing={8}
-                      padding={{ top: 8, bottom: 8, leading: 10, trailing: 10 }}
-                      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                      background={isReordering ? "rgba(255, 90, 54, 0.14)" : "rgba(0,0,0,0.001)"}
-                      clipShape={{ type: "rect", cornerRadius: 18 } as any}
-                      contentShape="rect"
-                      scaleEffect={isReordering ? 1.025 : 1}
-                      shadow={
-                        isReordering
-                          ? ({ color: "rgba(255, 90, 54, 0.32)", radius: 16, x: 0, y: 8 } as any)
-                          : undefined
-                      }
-                      zIndex={isReordering ? 20 : 0}
-                      onTapGesture={() => {
+                    <TaskRowCard
+                      task={task}
+                      duration={duration}
+                      durationLoading={taskDurationsLoading}
+                      ratio={ratio}
+                      active={isActive}
+                      themeColor={themeColor}
+                      onTap={() => {
                         if (saving) return;
                         HapticFeedback.mediumImpact();
                         setSelectedTaskId(task.id);
@@ -2075,24 +2146,20 @@ export function CalendarTimerView() {
                             <Button title="删除" role="destructive" action={withButtonHaptic(() => removeTask(task))} />
                           </VStack>
                         ),
+                        preview: (
+                          <TaskRowCard
+                            task={task}
+                            duration={duration}
+                            durationLoading={taskDurationsLoading}
+                            ratio={ratio}
+                            active={isActive}
+                            themeColor={themeColor}
+                            highlighted
+                            previewWidth={taskRowPreviewWidth}
+                          />
+                        ),
                       }}
-                    >
-                      <HStack spacing={10} frame={{ maxWidth: "infinity" }}>
-                        <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                          <Text font="title3" fontWeight="bold" lineLimit={1}>
-                            {task.name}
-                          </Text>
-                          <Text foregroundStyle="secondaryLabel" lineLimit={1}>
-                            # {task.calendarTitle}
-                          </Text>
-                        </VStack>
-                        <Spacer />
-                        <Text foregroundStyle={themeColor as any} monospacedDigit>
-                          {taskDurationsLoading && duration <= 0 ? "统计中" : formatCompactDuration(duration)}
-                        </Text>
-                      </HStack>
-                      <TaskProgressLine ratio={ratio} active={isActive} tint={themeColor} />
-                    </VStack>
+                    />
                   );
                 }}
               />
