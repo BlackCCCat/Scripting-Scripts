@@ -190,12 +190,25 @@ export function prepareCaisFeedback(settings?: Pick<CaisSettings, "hapticEngineC
   }
 }
 
+function playLegacyHapticFallback() {
+  try {
+    const Haptics = (globalThis as any).Haptics
+    if (Haptics?.transient && Haptics.supportsHaptics !== false) {
+      const profile = hapticProfile(DEFAULT_HAPTIC_LEVEL)
+      void Haptics.transient(profile.intensity, profile.sharpness)
+    }
+  } catch {}
+}
+
 export function playCaisHaptic() {
   if (coreHapticsUnavailable) return
   const { HapticEngine } = coreHaptics()
   if (HapticEngine) {
     prepareCaisFeedback()
-    if (!hapticEngineReady || !reusableHapticEngine) return
+    if (!hapticEngineReady || !reusableHapticEngine) {
+      playLegacyHapticFallback()
+      return
+    }
     try {
       makeTransientPlayer(DEFAULT_HAPTIC_LEVEL)?.start?.(0)
       return
@@ -204,13 +217,7 @@ export function playCaisHaptic() {
       return
     }
   }
-  try {
-    const Haptics = (globalThis as any).Haptics
-    if (Haptics?.transient && Haptics.supportsHaptics !== false) {
-      const profile = hapticProfile(DEFAULT_HAPTIC_LEVEL)
-      void Haptics.transient(profile.intensity, profile.sharpness)
-    }
-  } catch {}
+  playLegacyHapticFallback()
 }
 
 function playCoreClick() {

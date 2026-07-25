@@ -53,6 +53,7 @@ import { SettingsView } from "./SettingsView"
 import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, writePipControlState } from "../services/pip_control"
 import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
+import { prepareCaisFeedback } from "../utils/feedback"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -297,6 +298,7 @@ export function AppRoot() {
 
   useEffect(() => {
     settingsRef.current = settings
+    prepareCaisFeedback(settings)
   }, [settings])
 
   useEffect(() => {
