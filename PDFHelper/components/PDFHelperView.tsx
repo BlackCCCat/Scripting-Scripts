@@ -512,20 +512,22 @@ export function PDFHelperView() {
               </Text>
             </VStack>
           ) : (
-            sources.map((source) => (
-              <SourceBlockView
-                key={source.id}
-                source={source}
-                onTogglePage={togglePage}
-                onDeletePage={deletePage}
+            <Group>
+              {sources.map((source) => (
+                <SourceBlockView
+                  key={source.id}
+                  source={source}
+                  onTogglePage={togglePage}
+                  onDeletePage={deletePage}
+                />
+              ))}
+              <VStack
+                frame={{ height: 116 }}
+                listRowBackground={<EmptyView />}
+                listRowSeparator="hidden"
               />
-            ))
+            </Group>
           )}
-          <VStack
-            frame={{ height: 116 }}
-            listRowBackground={<EmptyView />}
-            listRowSeparator="hidden"
-          />
         </List>
 
         <VStack
