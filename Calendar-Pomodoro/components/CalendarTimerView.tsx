@@ -573,16 +573,26 @@ function FocusTimerPage(props: {
   statusText: string;
   paused: boolean;
   saving: boolean;
+  embeddedInNavigation?: boolean;
+  onHome: () => void;
   onCancel: () => void;
   onPause: () => void;
   onStop: () => void;
   onNote: () => void;
 }) {
-  return (
-    <NavigationStack>
+  const content = (
       <VStack
         navigationTitle="专注中"
         navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarTrailing: props.embeddedInNavigation ? undefined : (
+            <Button
+              title=""
+              systemImage="house"
+              action={props.onHome}
+            />
+          ),
+        }}
         spacing={28}
         padding={{ top: 28, bottom: 28, leading: 22, trailing: 22 }}
         frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
@@ -642,8 +652,13 @@ function FocusTimerPage(props: {
           />
         </HStack>
       </VStack>
-    </NavigationStack>
   );
+
+  if (props.embeddedInNavigation) {
+    return content;
+  }
+
+  return <NavigationStack>{content}</NavigationStack>;
 }
 
 function OverallReportSheet(props: { tasks: Task[] }) {
@@ -1896,7 +1911,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
 
   async function toggleSelectedTimer() {
     if (running || paused) {
-      await stopTimer();
+      setShowFocusPage(true);
       return;
     }
     if (!selectedTask) {
@@ -2016,7 +2031,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
   const timelineOffset = Math.max(minTimelineOffset, Math.min(maxTimelineOffset, focusMinutes));
   const countdownMinutes = Math.max(0, timelineOffset);
   const targetClock = formatClockTime(new Date(Date.now() + timelineOffset * 60000));
-  const startButtonTitle = running || paused ? "Stop" : "Start";
+  const startButtonTitle = running || paused ? "计时中" : "Start";
   const timerModeText = countdownMinutes > 0
     ? formatCompactDuration(countdownMinutes * 60000)
     : "Count Up";
@@ -2063,6 +2078,10 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
     resetTimelineToNow();
   }
 
+  function returnToHomeFromFocusPage() {
+    setShowFocusPage(false);
+  }
+
   async function togglePauseFromFocusPage() {
     if (!activeTask) return;
     if (paused) {
@@ -2085,6 +2104,8 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
       statusText={running ? "计时中" : paused ? "已暂停" : "已停止"}
       paused={paused}
       saving={saving}
+      embeddedInNavigation={props.homeScreenMode}
+      onHome={withButtonHaptic(returnToHomeFromFocusPage)}
       onCancel={withButtonHaptic(cancelFromFocusPage)}
       onPause={withButtonHaptic(togglePauseFromFocusPage)}
       onStop={withButtonHaptic(stopFromFocusPage)}
@@ -2165,8 +2186,17 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
             </HStack>
           ),
         }}
+        navigationDestination={
+          props.homeScreenMode
+            ? {
+                isPresented: showFocusPage && Boolean(activeTask),
+                onChanged: (value: boolean) => setShowFocusPage(value),
+                content: focusPage,
+              }
+            : undefined
+        }
         fullScreenCover={{
-          isPresented: showFocusPage && Boolean(activeTask),
+          isPresented: !props.homeScreenMode && showFocusPage && Boolean(activeTask),
           onChanged: (value: boolean) => setShowFocusPage(value),
           content: focusPage,
         }}
