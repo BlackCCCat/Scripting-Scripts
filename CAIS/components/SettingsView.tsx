@@ -376,6 +376,14 @@ export function SettingsView(props: {
     props.onChanged({ ...settings, ...next });
   }
 
+  function renderToolbar() {
+    if (!props.leadingToolbar && !props.trailingToolbar) return undefined;
+    return {
+      topBarLeading: props.leadingToolbar,
+      topBarTrailing: props.trailingToolbar,
+    };
+  }
+
   function getOrderedBuiltinActions() {
     const order = settings.keyboardMenu.builtinOrder?.filter(
       (key) => !FIXED_BUILTIN_ACTION_KEYS.includes(key),
@@ -505,10 +513,7 @@ export function SettingsView(props: {
   return (
     <Form
       formStyle="grouped"
-      toolbar={{
-        topBarLeading: props.leadingToolbar,
-        topBarTrailing: props.trailingToolbar,
-      }}
+      toolbar={renderToolbar()}
     >
       <Section header={<Text>数据管理</Text>}>
         <Toggle

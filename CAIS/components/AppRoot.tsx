@@ -1,11 +1,14 @@
 import {
   Button,
+  DragGesture,
   EmptyView,
   Editor,
   Group,
   HStack,
   Image,
+  Menu,
   NavigationStack,
+  Picker,
   Section,
   Script,
   Tab,
@@ -78,6 +81,7 @@ type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
+type AppRootMode = "app" | "home"
 
 function renderClipOutput(item: ClipItem, content: string): string {
   return item.manualFavorite ? renderRuntimeTemplate(content) : content
@@ -266,7 +270,9 @@ function ImageViewerView(props: {
   )
 }
 
-export function AppRoot() {
+export function AppRoot(props: { mode?: AppRootMode } = {}) {
+  const mode = props.mode ?? "app"
+  const homeScreenMode = mode === "home"
   const releaseNotesSheet = useReleaseNotesSheet({
     title: "CAIS 更新说明",
     detents: ["medium", "large"],
@@ -315,7 +321,7 @@ export function AppRoot() {
     const previousResumeHandler = (globalThis as any)[CAIS_APP_RESUME_HANDLER]
     ;(globalThis as any)[CAIS_APP_RESUME_HANDLER] = handleScriptResume
     void boot()
-    const removeMinimize = Script.onMinimize?.(() => {
+    const removeMinimize = homeScreenMode ? undefined : Script.onMinimize?.(() => {
       if (intentionalMinimize) {
         intentionalMinimize = false
         return
@@ -818,7 +824,7 @@ export function AppRoot() {
   function deactivatePipFromExternal(options: { exitAfter?: boolean } = {}) {
     pipPresented.setValue(false)
     stopPipMonitor()
-    if (options.exitAfter) {
+    if (options.exitAfter && !homeScreenMode) {
       ;(globalThis as any).setTimeout?.(() => {
         Script.exit()
       }, 250)
@@ -998,6 +1004,7 @@ export function AppRoot() {
   }
 
   function toolbarLeading() {
+    if (homeScreenMode) return undefined
     return (
       <HStack spacing={10}>
         <Button
@@ -1022,6 +1029,46 @@ export function AppRoot() {
         />
       </HStack>
     )
+  }
+
+  function pagePicker() {
+    return (
+      <Picker
+        title="页面"
+        pickerStyle="segmented"
+        value={activeTab.value}
+        onChanged={(value: number) => activeTab.setValue(value)}
+        frame={{ width: 220 }}
+      >
+        <Text tag={TAB_FAVORITES}>收藏</Text>
+        <Text tag={TAB_CLIPS}>剪贴板</Text>
+        <Text tag={TAB_SETTINGS}>设置</Text>
+      </Picker>
+    )
+  }
+
+  function switchHomeTabBySwipe(direction: "previous" | "next") {
+    const tabs = [TAB_FAVORITES, TAB_CLIPS, TAB_SETTINGS]
+    const index = tabs.indexOf(activeTab.value)
+    if (index < 0) return
+    const nextIndex = direction === "next"
+      ? Math.min(tabs.length - 1, index + 1)
+      : Math.max(0, index - 1)
+    const nextTab = tabs[nextIndex]
+    if (nextTab !== activeTab.value) {
+      activeTab.setValue(nextTab)
+    }
+  }
+
+  function homeTabSwipeGesture() {
+    return DragGesture({ minDistance: 60, coordinateSpace: "local" })
+      .onEnded((gesture: any) => {
+        const dx = Number(gesture.translation?.width ?? 0)
+        const dy = Math.abs(Number(gesture.translation?.height ?? 0))
+        const absX = Math.abs(dx)
+        if (absX < 140 || absX < dy * 1.5) return
+        switchHomeTabBySwipe(dx < 0 ? "next" : "previous")
+      })
   }
 
   function clipToolbarButtons() {
@@ -1069,6 +1116,14 @@ export function AppRoot() {
         foregroundStyle={pipPresented.value ? "systemBlue" : undefined}
         action={withHaptic(togglePip)}
       />
+    )
+  }
+
+  function settingsToolbarButtons() {
+    return (
+      <HStack spacing={10}>
+        {pipToolbarButton()}
+      </HStack>
     )
   }
 
@@ -1133,14 +1188,10 @@ export function AppRoot() {
     )
   }
 
-  return (
-    <TabView
-      selection={activeTab as any}
-      tint="systemIndigo"
-      tabViewStyle="sidebarAdaptable"
-      tabBarMinimizeBehavior="onScrollDown"
-      sheet={releaseNotesSheet}
-      pip={{
+  function rootPresentationProps() {
+    return {
+      sheet: releaseNotesSheet,
+      pip: {
         isPresented: pipPresented,
         maximumUpdatesPerSecond: 2,
         content: (
@@ -1150,7 +1201,127 @@ export function AppRoot() {
             onStop={stopPipMonitor}
           />
         ),
-      }}
+      },
+    }
+  }
+
+  function homeToolbarLeading() {
+    return (
+      <Menu title="" systemImage="ellipsis.circle">
+        <Button
+          title={pipPresented.value ? "关闭 PiP" : "开启 PiP"}
+          systemImage={pipPresented.value ? "pip.exit" : "pip.enter"}
+          action={withHaptic(togglePip)}
+        />
+        {activeTab.value === TAB_FAVORITES ? (
+          <Button
+            title="添加常用语"
+            systemImage="plus"
+            action={withHaptic(async () => {
+              const result = await Navigation.present<{ title: string, content: string } | null>({
+                element: <AddFavoriteView />,
+                modalPresentationStyle: "pageSheet"
+              })
+              if (result) {
+                await addFavoriteFromInput(result.title, result.content)
+                showToast("已添加到收藏")
+                await refresh()
+              }
+            })}
+          />
+        ) : null}
+        {activeTab.value === TAB_CLIPS ? (
+          <Button
+            title="采集剪贴板"
+            systemImage="doc.badge.plus"
+            disabled={loading}
+            action={withHaptic(captureNow)}
+          />
+        ) : null}
+      </Menu>
+    )
+  }
+
+  function homePageToolbar() {
+    return {
+      topBarLeading: homeToolbarLeading(),
+      principal: pagePicker(),
+    }
+  }
+
+  function renderHomeCurrentPage() {
+    if (activeTab.value === TAB_FAVORITES) {
+      return (
+        <Form
+          formStyle="grouped"
+          listRowSpacing={10}
+          contentMargins={APP_SCROLL_CONTENT_MARGINS}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          simultaneousGesture={homeTabSwipeGesture() as any}
+          toast={toastOptions()}
+        >
+          {searchPanel()}
+          {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+        </Form>
+      )
+    }
+
+    if (activeTab.value === TAB_SETTINGS) {
+      return (
+        <VStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
+          simultaneousGesture={homeTabSwipeGesture() as any}
+          toast={toastOptions()}
+        >
+          <SettingsView
+            value={settings}
+            onChanged={updateSettings}
+            onClearFavorites={() => void requestClear("favorites")}
+            onClearClipboard={(range) => void requestClear(range)}
+          />
+        </VStack>
+      )
+    }
+
+    return (
+      <Form
+        formStyle="grouped"
+        listRowSpacing={10}
+        contentMargins={APP_SCROLL_CONTENT_MARGINS}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        simultaneousGesture={homeTabSwipeGesture() as any}
+        toast={toastOptions()}
+      >
+        {pipControlPanel()}
+        {searchPanel()}
+        {renderGroupedClipList(
+          clipboardGroups,
+          query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+          { allowDelete: (item) => !item.manualFavorite }
+        )}
+      </Form>
+    )
+  }
+
+  if (homeScreenMode) {
+    return (
+      <VStack
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        toolbar={homePageToolbar()}
+        {...rootPresentationProps()}
+      >
+        {renderHomeCurrentPage()}
+      </VStack>
+    )
+  }
+
+  return (
+    <TabView
+      selection={activeTab as any}
+      tint="systemIndigo"
+      tabViewStyle="sidebarAdaptable"
+      tabBarMinimizeBehavior="onScrollDown"
+      {...rootPresentationProps()}
     >
       <Tab title="收藏" systemImage="star" value={TAB_FAVORITES}>
         <NavigationStack>
@@ -1201,6 +1372,7 @@ export function AppRoot() {
               onClearFavorites={() => void requestClear("favorites")}
               onClearClipboard={(range) => void requestClear(range)}
               leadingToolbar={toolbarLeading()}
+              trailingToolbar={settingsToolbarButtons()}
             />
           </VStack>
         </NavigationStack>
