@@ -1,4 +1,4 @@
-import { Button, Device, DragGesture, GeometryReader, HStack, ScrollView, Text, useColorScheme, useRef, VStack, ZStack } from "scripting"
+import { Button, Device, DragGesture, ForEach, GeometryReader, HStack, LazyVStack, ScrollView, Text, useColorScheme, useMemo, useRef, VStack, ZStack } from "scripting"
 import type { CaisToken } from "../utils/tokenize"
 
 type TokenHitTarget = {
@@ -14,6 +14,16 @@ type TokenRow = {
   tokens: Array<{ token: CaisToken; width: number }>
   targets: TokenHitTarget[]
 }
+
+type TokenLayout = {
+  rows: TokenRow[]
+  rowHeight: number
+  spacing: number
+  targets: TokenHitTarget[]
+}
+
+const layoutCache = new Map<string, TokenLayout>()
+const MAX_LAYOUT_CACHE_SIZE = 8
 
 function estimatedTokenWidth(text: string, compact: boolean): number {
   let width = compact ? 28 : 34
@@ -31,7 +41,17 @@ function estimatedTokenWidth(text: string, compact: boolean): number {
   return Math.max(compact ? 32 : 40, width)
 }
 
-function layoutTokens(tokens: CaisToken[], width: number, compact: boolean) {
+function tokenLayoutCacheKey(tokens: CaisToken[], width: number, compact: boolean): string {
+  const first = tokens[0]?.id ?? ""
+  const last = tokens[tokens.length - 1]?.id ?? ""
+  return `${compact ? 1 : 0}:${Math.round(width)}:${tokens.length}:${first}:${last}`
+}
+
+function layoutTokens(tokens: CaisToken[], width: number, compact: boolean): TokenLayout {
+  const key = tokenLayoutCacheKey(tokens, width, compact)
+  const cached = layoutCache.get(key)
+  if (cached) return cached
+
   const spacing = 8
   const rowHeight = compact ? 32 : 40
   const maxWidth = Math.max(120, width)
@@ -52,7 +72,13 @@ function layoutTokens(tokens: CaisToken[], width: number, compact: boolean) {
     x += tokenWidth + spacing
   }
   if (current.tokens.length) rows.push(current)
-  return { rows, rowHeight, spacing }
+  const layout = { rows, rowHeight, spacing, targets: rows.flatMap((row) => row.targets) }
+  layoutCache.set(key, layout)
+  if (layoutCache.size > MAX_LAYOUT_CACHE_SIZE) {
+    const firstKey = layoutCache.keys().next().value
+    if (firstKey) layoutCache.delete(firstKey)
+  }
+  return layout
 }
 
 function hitToken(targets: TokenHitTarget[], x: number, y: number): CaisToken | null {
@@ -88,8 +114,10 @@ export function TokenSelectionPanel(props: {
   const suppressTapAfterDragRef = useRef(false)
   const draggedTokenIdsRef = useRef<Set<string>>(new Set())
   const nativeGlass = props.nativeGlassEffect !== false
+  const chipGlass = nativeGlass && props.tokens.length <= 180
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   const tokenFont = props.compact ? "subheadline" : "body"
+  const selectedIdSet = useMemo(() => new Set(props.selectedIds), [props.selectedIds.join("|")])
   const tokenPadding = props.compact
     ? { top: 6, bottom: 6, leading: 10, trailing: 10 }
     : { top: 8, bottom: 8, leading: 12, trailing: 12 }
@@ -128,9 +156,8 @@ export function TokenSelectionPanel(props: {
             const fallbackWidth = Math.max(120, Device.screen.width - (props.compact ? 48 : 56))
             const contentWidth = proxy.size.width > 40 ? proxy.size.width : fallbackWidth
             const layout = layoutTokens(props.tokens, contentWidth, Boolean(props.compact))
-            const targets = layout.rows.flatMap((row) => row.targets)
             const toggleHitToken = (x: number, y: number) => {
-              const token = hitToken(targets, x, y)
+              const token = hitToken(layout.targets, x, y)
               if (!token || draggedTokenIdsRef.current.has(token.id)) return
               suppressTapAfterDragRef.current = true
               draggedTokenIdsRef.current.add(token.id)
@@ -153,20 +180,25 @@ export function TokenSelectionPanel(props: {
             return (
               <ScrollView axes="vertical" scrollIndicator="hidden" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
                 {props.tokens.length ? (
-                  <VStack
+                  <LazyVStack
+                    alignment="leading"
                     spacing={layout.spacing}
                     frame={{ width: contentWidth, alignment: "topLeading" as any }}
                     simultaneousGesture={selectGesture}
                   >
-                    {layout.rows.map((row) => {
-                      return (
+                    <ForEach
+                      count={layout.rows.length}
+                      itemBuilder={(index) => {
+                        const row = layout.rows[index]
+                        if (!row) return null as any
+                        return (
                         <HStack
                           key={`row-${row.y}`}
                           spacing={layout.spacing}
                           frame={{ width: contentWidth, height: layout.rowHeight, alignment: "leading" as any }}
                         >
                           {row.tokens.map(({ token, width }) => {
-                            const selected = props.selectedIds.includes(token.id)
+                            const selected = selectedIdSet.has(token.id)
                             const chipFrame = { width, height: layout.rowHeight }
                             return (
                               <ZStack
@@ -175,18 +207,18 @@ export function TokenSelectionPanel(props: {
                                 background={
                                   selected
                                     ? { style: "systemBlue", shape: { type: "rect", cornerRadius: 8 } }
-                                    : nativeGlass
+                                    : chipGlass
                                     ? "clear"
                                     : { style: "tertiarySystemFill", shape: { type: "rect", cornerRadius: 8 } }
                                 }
-                                glassEffect={nativeGlass ? { type: "rect", cornerRadius: 8 } as any : undefined}
+                                glassEffect={chipGlass ? { type: "rect", cornerRadius: 8 } as any : undefined}
                                 clipShape={{ type: "rect", cornerRadius: 8 } as any}
-                                onTapGesture={!nativeGlass ? () => {
+                                onTapGesture={!chipGlass ? () => {
                                   if (suppressTapAfterDragRef.current) return
                                   props.onToggle(token)
                                 } : undefined}
                               >
-                                {nativeGlass ? (
+                                {chipGlass ? (
                                   <Button
                                     controlSize="mini"
                                     frame={chipFrame}
@@ -212,9 +244,10 @@ export function TokenSelectionPanel(props: {
                             )
                           })}
                         </HStack>
-                      )
-                    })}
-                  </VStack>
+                        )
+                      }}
+                    />
+                  </LazyVStack>
                 ) : (
                   <Text foregroundStyle="secondaryLabel">{props.emptyText ?? "没有可用的分词结果"}</Text>
                 )}

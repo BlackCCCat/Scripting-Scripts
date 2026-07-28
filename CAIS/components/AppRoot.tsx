@@ -888,6 +888,29 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   function renderClipRow(item: ClipItem, options: { allowDelete: boolean } = { allowDelete: true }) {
+    const trailingActions = [
+      <Button
+        title=""
+        systemImage={item.kind === "image" ? "photo" : "square.and.pencil"}
+        tint={item.kind === "image" ? "systemBlue" : "systemOrange"}
+        action={withHaptic(() => {
+          if (item.kind === "image") {
+            void viewImageItem(item)
+          } else {
+            void editItem(item)
+          }
+        })}
+      />,
+      ...(options.allowDelete ? [
+        <Button
+          title=""
+          systemImage="trash"
+          tint="systemRed"
+          action={withHaptic(() => requestDeleteItem(item))}
+        />,
+      ] : []),
+    ]
+
     return (
       <HStack
         key={item.id}
@@ -959,17 +982,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             />,
           ],
         }}
-        trailingSwipeActions={options.allowDelete ? {
+        trailingSwipeActions={{
           allowsFullSwipe: false,
-          actions: [
-            <Button
-              title=""
-              systemImage="trash"
-              tint="systemRed"
-              action={() => requestDeleteItem(item)}
-            />,
-          ],
-        } : undefined}
+          actions: trailingActions,
+        }}
         confirmationDialog={pendingDeleteItem?.id === item.id && pendingDeleteTab === activeTab.value ? {
           title: "是否删除？",
           isPresented: deleteDialogPresented,
