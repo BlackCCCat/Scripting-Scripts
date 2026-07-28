@@ -5,6 +5,7 @@ export type ClipPayload = {
   text?: string
   url?: string
   image?: UIImage
+  imageContentHash?: string
   sourceChangeCount?: number
 }
 

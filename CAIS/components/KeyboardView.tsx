@@ -32,7 +32,7 @@ import type {
   MonitorStatus,
 } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
-import { writeClipToPasteboard } from "../services/pasteboard_adapter"
+import { writeClipToPasteboard, writeImageToPasteboard } from "../services/pasteboard_adapter"
 import {
   addClipFromPayload,
   getClips,
@@ -608,7 +608,11 @@ function ClipTileMenu(props: {
       return savedCount
     }
     if (result.kind === "image") {
-      const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
+      const saved = await addClipFromPayload({
+        kind: "image",
+        image: result.image,
+        imageContentHash: result.imageContentHash,
+      }, saveSettings)
       await props.onRefresh()
       return saved.status !== "skipped" ? 1 : 0
     }
@@ -641,7 +645,7 @@ function ClipTileMenu(props: {
       props.onStatus(saved ? `已拆分保存 ${saved} 条` : "没有新的拆分结果")
       return
     }
-    await Pasteboard.setImage(result.image)
+    await writeImageToPasteboard(result.image)
     const saved = await saveMenuResult(result, source)
     props.onStatus(saved ? "已写入剪贴板并保存" : "已写入剪贴板")
   }

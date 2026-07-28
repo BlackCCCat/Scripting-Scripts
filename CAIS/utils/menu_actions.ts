@@ -4,6 +4,7 @@ import type {
   KeyboardMenuBuiltinAction,
 } from "../types"
 import { arabicNumberToChineseAmount, makeRegex, runJavaScriptTransform, runNetworkRequest } from "./custom_action"
+import { hashString } from "./common"
 import { renderRuntimeTemplate } from "./template"
 
 export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
@@ -22,7 +23,7 @@ export const CONFIGURABLE_MENU_BUILTIN_ACTIONS: KeyboardMenuBuiltinAction[] = [
 export type MenuActionResult =
   | { kind: "text"; text: string; writeToClipboard?: boolean }
   | { kind: "texts"; texts: string[] }
-  | { kind: "image"; image: UIImage }
+  | { kind: "image"; image: UIImage; imageContentHash?: string }
   | { kind: "openUrl"; url: string }
   | { kind: "none"; message?: string }
 
@@ -127,7 +128,11 @@ export function applyBuiltinMenuAction(options: {
       if (text) return { kind: "text", text }
       const image = UIImage.fromBase64String(stripDataUri(source))
       if (!image) throw new Error("Base64 内容无法识别为文本或图片")
-      return { kind: "image", image }
+      return {
+        kind: "image",
+        image,
+        imageContentHash: data ? hashString(data.toBase64String()) : undefined,
+      }
     }
     case "cleanWhitespace":
       if (isImage) return null

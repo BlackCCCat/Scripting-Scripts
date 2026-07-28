@@ -3,6 +3,8 @@ import { normalizeClipContent } from "../utils/common"
 
 let lastSelfWriteText = ""
 let lastSelfWriteAt = 0
+let lastSelfWriteImageChangeCount = -1
+let lastSelfWriteImageAt = 0
 
 function pasteboard(): any {
   return (globalThis as any).Pasteboard
@@ -28,6 +30,9 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
   const sourceChangeCount = await currentChangeCount()
   try {
     if (await pasteboardFlag(pb.hasImages)) {
+      if (sourceChangeCount === lastSelfWriteImageChangeCount && Date.now() - lastSelfWriteImageAt < 5000) {
+        return null
+      }
       const image = typeof pb.getImage === "function"
         ? await pb.getImage()
         : null
@@ -77,6 +82,8 @@ export async function writeClipToPasteboard(item: ClipItem, fullContent?: string
       const image = uiImage.fromFile(item.imagePath)
       if (image) {
         await pb.setImage(image)
+        lastSelfWriteImageChangeCount = await currentChangeCount()
+        lastSelfWriteImageAt = Date.now()
         return
       }
     }
@@ -99,4 +106,6 @@ export async function writeImageToPasteboard(image: UIImage): Promise<void> {
   const pb = pasteboard()
   if (!pb || typeof pb.setImage !== "function") throw new Error("Pasteboard 不可用")
   await pb.setImage(image)
+  lastSelfWriteImageChangeCount = await currentChangeCount()
+  lastSelfWriteImageAt = Date.now()
 }

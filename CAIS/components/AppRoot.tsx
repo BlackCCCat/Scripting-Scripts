@@ -1,6 +1,5 @@
 import {
   Button,
-  DragGesture,
   EmptyView,
   Editor,
   Group,
@@ -713,7 +712,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       return savedCount
     }
     if (result.kind === "image") {
-      const saved = await addClipFromPayload({ kind: "image", image: result.image }, saveSettings)
+      const saved = await addClipFromPayload({
+        kind: "image",
+        image: result.image,
+        imageContentHash: result.imageContentHash,
+      }, saveSettings)
       return saved.status !== "skipped" ? 1 : 0
     }
     return 0
@@ -1040,35 +1043,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         onChanged={(value: number) => activeTab.setValue(value)}
         frame={{ width: 220 }}
       >
-        <Text tag={TAB_FAVORITES}>收藏</Text>
-        <Text tag={TAB_CLIPS}>剪贴板</Text>
-        <Text tag={TAB_SETTINGS}>设置</Text>
+        <Image tag={TAB_FAVORITES} systemName="star" />
+        <Image tag={TAB_CLIPS} systemName="doc.on.clipboard" />
+        <Image tag={TAB_SETTINGS} systemName="gearshape" />
       </Picker>
     )
-  }
-
-  function switchHomeTabBySwipe(direction: "previous" | "next") {
-    const tabs = [TAB_FAVORITES, TAB_CLIPS, TAB_SETTINGS]
-    const index = tabs.indexOf(activeTab.value)
-    if (index < 0) return
-    const nextIndex = direction === "next"
-      ? Math.min(tabs.length - 1, index + 1)
-      : Math.max(0, index - 1)
-    const nextTab = tabs[nextIndex]
-    if (nextTab !== activeTab.value) {
-      activeTab.setValue(nextTab)
-    }
-  }
-
-  function homeTabSwipeGesture() {
-    return DragGesture({ minDistance: 60, coordinateSpace: "local" })
-      .onEnded((gesture: any) => {
-        const dx = Number(gesture.translation?.width ?? 0)
-        const dy = Math.abs(Number(gesture.translation?.height ?? 0))
-        const absX = Math.abs(dx)
-        if (absX < 140 || absX < dy * 1.5) return
-        switchHomeTabBySwipe(dx < 0 ? "next" : "previous")
-      })
   }
 
   function clipToolbarButtons() {
@@ -1257,7 +1236,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           listRowSpacing={10}
           contentMargins={APP_SCROLL_CONTENT_MARGINS}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-          simultaneousGesture={homeTabSwipeGesture() as any}
           toast={toastOptions()}
         >
           {searchPanel()}
@@ -1270,7 +1248,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       return (
         <VStack
           frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
-          simultaneousGesture={homeTabSwipeGesture() as any}
           toast={toastOptions()}
         >
           <SettingsView
@@ -1289,7 +1266,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         listRowSpacing={10}
         contentMargins={APP_SCROLL_CONTENT_MARGINS}
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        simultaneousGesture={homeTabSwipeGesture() as any}
         toast={toastOptions()}
       >
         {pipControlPanel()}

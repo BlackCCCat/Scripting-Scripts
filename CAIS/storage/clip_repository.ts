@@ -27,7 +27,7 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   if (kind === "image") {
     image = payload.image
     if (!image) return { status: "skipped", reason: "图片内容不可读取" }
-    imageHash = imageContentHash(image)
+    imageHash = payload.imageContentHash || imageContentHash(image)
     if (!imageHash) return { status: "skipped", reason: "图片内容不可读取" }
   }
   const contentHash = kind === "image"
