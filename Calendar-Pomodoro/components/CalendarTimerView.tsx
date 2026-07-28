@@ -651,7 +651,7 @@ function OverallReportSheet(props: { tasks: Task[] }) {
   return <OverallReportView tasks={props.tasks} onExit={() => dismiss()} />;
 }
 
-export function CalendarTimerView() {
+export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
   const releaseNotesSheet = useReleaseNotesSheet({
     markdownFile: "release-notes.md",
     title: "更新说明",
@@ -2094,11 +2094,77 @@ export function CalendarTimerView() {
     <Text> </Text>
   );
 
-  return (
-    <NavigationStack>
+  const content = (
       <ZStack
         alignment="bottom"
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        navigationTitle="日历番茄钟"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarLeading: props.homeScreenMode ? (
+            <Menu title="" systemImage="ellipsis.circle">
+              <Button
+                title="刷新实时活动"
+                action={withButtonHaptic(refreshLiveActivityManually)}
+              />
+              <Button
+                title="显示报告"
+                action={withButtonHaptic(openOverallReport)}
+              />
+              <Button
+                title="设置"
+                action={withButtonHaptic(openSettings)}
+              />
+            </Menu>
+          ) : (
+            <HStack>
+              <Button
+                title=""
+                systemImage="xmark.circle"
+                action={withButtonHaptic(() => Script.exit())}
+              />
+              {supportsMinimization ? (
+                <Button
+                  title=""
+                  systemImage="minus.circle"
+                  action={withButtonHaptic(minimizeScript)}
+                />
+              ) : null}
+            </HStack>
+          ),
+          principal: props.homeScreenMode ? (
+            <Text font="headline" fontWeight="semibold">日历番茄钟</Text>
+          ) : undefined,
+          topBarTrailing: props.homeScreenMode ? (
+            <Button
+              title=""
+              systemImage="plus.circle"
+              action={withButtonHaptic(addTask)}
+            />
+          ) : (
+            <HStack>
+              <Menu title="" systemImage="ellipsis.circle">
+                <Button
+                  title="刷新实时活动"
+                  action={withButtonHaptic(refreshLiveActivityManually)}
+                />
+                <Button
+                  title="显示报告"
+                  action={withButtonHaptic(openOverallReport)}
+                />
+                <Button
+                  title="设置"
+                  action={withButtonHaptic(openSettings)}
+                />
+              </Menu>
+              <Button
+                title=""
+                systemImage="plus.circle"
+                action={withButtonHaptic(addTask)}
+              />
+            </HStack>
+          ),
+        }}
         fullScreenCover={{
           isPresented: showFocusPage && Boolean(activeTask),
           onChanged: (value: boolean) => setShowFocusPage(value),
@@ -2107,50 +2173,7 @@ export function CalendarTimerView() {
         sheet={releaseNotesSheet}
       >
         <ScrollView
-          navigationTitle="日历番茄钟"
-          navigationBarTitleDisplayMode="inline"
           refreshable={refreshHome}
-          toolbar={{
-            topBarLeading: (
-              <HStack>
-                <Button
-                  title=""
-                  systemImage="xmark.circle"
-                  action={withButtonHaptic(() => Script.exit())}
-                />
-                {supportsMinimization ? (
-                  <Button
-                    title=""
-                    systemImage="minus.circle"
-                    action={withButtonHaptic(minimizeScript)}
-                  />
-                ) : null}
-              </HStack>
-            ),
-            topBarTrailing: (
-              <HStack>
-                <Menu title="" systemImage="ellipsis.circle">
-                  <Button
-                    title="刷新实时活动"
-                    action={withButtonHaptic(refreshLiveActivityManually)}
-                  />
-                  <Button
-                    title="显示报告"
-                    action={withButtonHaptic(openOverallReport)}
-                  />
-                  <Button
-                    title="设置"
-                    action={withButtonHaptic(openSettings)}
-                  />
-                </Menu>
-                <Button
-                  title=""
-                  systemImage="plus.circle"
-                  action={withButtonHaptic(addTask)}
-                />
-              </HStack>
-            ),
-          }}
         >
           <VStack
             spacing={20}
@@ -2269,6 +2292,11 @@ export function CalendarTimerView() {
           </VStack>
         </VStack>
       </ZStack>
-    </NavigationStack>
   );
+
+  if (props.homeScreenMode) {
+    return content;
+  }
+
+  return <NavigationStack>{content}</NavigationStack>;
 }
