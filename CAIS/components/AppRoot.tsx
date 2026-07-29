@@ -1123,10 +1123,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   function searchPanel() {
+    const outerPadding = homeScreenMode
+      ? { top: 2, bottom: 4, leading: 16, trailing: 16 }
+      : { top: 10, bottom: 6, leading: 16, trailing: 16 }
+
     return (
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
-        padding={{ top: 10, bottom: 6, leading: 16, trailing: 16 }}
+        padding={outerPadding}
         listRowInsets={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
         listRowSeparator="hidden"
         listRowBackground={<EmptyView />}
@@ -1299,6 +1303,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     return (
       <VStack
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        navigationBarTitleDisplayMode="inline"
+        toolbarTitleDisplayMode="inline"
         toolbar={homePageToolbar()}
         {...rootPresentationProps()}
       >

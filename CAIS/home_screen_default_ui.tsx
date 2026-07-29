@@ -1,5 +1,10 @@
+import { NavigationStack } from "scripting"
 import { AppRoot } from "./components/AppRoot"
 
 export default function HomeScreenView() {
-  return <AppRoot mode="home" />
+  return (
+    <NavigationStack>
+      <AppRoot mode="home" />
+    </NavigationStack>
+  )
 }
