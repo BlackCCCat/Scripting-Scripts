@@ -5,6 +5,9 @@ let lastSelfWriteText = ""
 let lastSelfWriteAt = 0
 let lastSelfWriteImageChangeCount = -1
 let lastSelfWriteImageAt = 0
+type ReadPasteboardOptions = {
+  includeSelfWrites?: boolean
+}
 
 function pasteboard(): any {
   return (globalThis as any).Pasteboard
@@ -24,13 +27,13 @@ export async function currentChangeCount(): Promise<number> {
   return Number(value) || 0
 }
 
-export async function readPasteboardPayload(): Promise<ClipPayload | null> {
+export async function readPasteboardPayload(options: ReadPasteboardOptions = {}): Promise<ClipPayload | null> {
   const pb = pasteboard()
   if (!pb) return null
   const sourceChangeCount = await currentChangeCount()
   try {
     if (await pasteboardFlag(pb.hasImages)) {
-      if (sourceChangeCount === lastSelfWriteImageChangeCount && Date.now() - lastSelfWriteImageAt < 5000) {
+      if (!options.includeSelfWrites && sourceChangeCount === lastSelfWriteImageChangeCount && Date.now() - lastSelfWriteImageAt < 5000) {
         return null
       }
       const image = typeof pb.getImage === "function"
@@ -50,7 +53,7 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
     if (await pasteboardFlag(pb.hasStrings) && typeof pb.getString === "function") {
       const text = normalizeClipContent(await pb.getString())
       if (!text.trim()) return null
-      if (text === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
+      if (!options.includeSelfWrites && text === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
         return null
       }
       return { kind: "text", text, sourceChangeCount }
@@ -62,7 +65,7 @@ export async function readPasteboardPayload(): Promise<ClipPayload | null> {
     if (await pasteboardFlag(pb.hasURLs) && typeof pb.getURL === "function") {
       const url = normalizeClipContent(await pb.getURL())
       if (!url.trim()) return null
-      if (url === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
+      if (!options.includeSelfWrites && url === lastSelfWriteText && Date.now() - lastSelfWriteAt < 5000) {
         return null
       }
       return { kind: "url", url, text: url, sourceChangeCount }

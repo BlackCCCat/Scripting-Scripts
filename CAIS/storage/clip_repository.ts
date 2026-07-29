@@ -1,6 +1,6 @@
 import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipListScope, ClipPayload, CaisSettings } from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeClipContent, normalizeText } from "../utils/common"
-import { deleteClipboardClipsByRange, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
+import { deleteClipboardClipsByRange, deleteClip, deleteFavoriteClips, findClipByHash, findTextClipsByContent, insertClip, isIgnoredClipboardHash, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 import { bumpClipDataVersion } from "./change_signal"
 
@@ -33,6 +33,9 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   const contentHash = kind === "image"
     ? hashString(`${kind}:${imageHash}`)
     : hashString(`text:${content}`)
+  if (await isIgnoredClipboardHash(contentHash, payload.sourceChangeCount)) {
+    return { status: "skipped", reason: "已忽略删除的当前剪贴板内容" }
+  }
   const textMatches = kind === "image" ? [] : await findTextClipsByContent(content)
   const existing = kind === "image"
     ? await findClipByHash(contentHash, kind)

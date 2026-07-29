@@ -92,6 +92,16 @@ async function ensureSchema(db: DB): Promise<void> {
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_clipboard_order ON clips(deleted_at, manual_favorite, pinned DESC, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_trim_order ON clips(deleted_at, pinned, favorite, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash)")
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS ignored_clipboard_hashes (
+      content_hash TEXT NOT NULL,
+      source_change_count INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (content_hash, source_change_count)
+    )
+  `)
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_ignored_clipboard_hashes_created ON ignored_clipboard_hashes(created_at)")
 }
 
 export async function initializeDatabase(): Promise<DB> {
@@ -130,6 +140,26 @@ export async function findTextClipsByContent(content: string): Promise<ClipItem[
     [content]
   )
   return rows.map(rowToClip)
+}
+
+export async function insertIgnoredClipboardHash(contentHash: string, sourceChangeCount: number, kind: string): Promise<void> {
+  const db = await initializeDatabase()
+  const now = Date.now()
+  await db.execute("DELETE FROM ignored_clipboard_hashes WHERE created_at < ?", [now - ONE_DAY_MS * 30])
+  await db.execute(
+    "INSERT OR REPLACE INTO ignored_clipboard_hashes (content_hash, source_change_count, kind, created_at) VALUES (?, ?, ?, ?)",
+    [contentHash, sourceChangeCount, kind, now]
+  )
+}
+
+export async function isIgnoredClipboardHash(contentHash: string, sourceChangeCount?: number): Promise<boolean> {
+  if (sourceChangeCount == null || !Number.isFinite(sourceChangeCount)) return false
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT 1 FROM ignored_clipboard_hashes WHERE content_hash = ? AND source_change_count = ? LIMIT 1",
+    [contentHash, sourceChangeCount]
+  )
+  return Boolean(rows[0])
 }
 
 async function fetchClipRows(db: DB, options: {
