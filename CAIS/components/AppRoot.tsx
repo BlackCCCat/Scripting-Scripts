@@ -65,7 +65,7 @@ import {
   menuBuiltinTitle,
   type MenuActionResult,
 } from "../utils/menu_actions"
-import { ignoreCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_ignore"
+import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
@@ -574,7 +574,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     const item = pendingDeleteItem
     dismissDeleteDialog()
     if (!item) return
-    await ignoreCurrentClipboardIfMatchesDeletedItem(item)
+    await clearCurrentClipboardIfMatchesDeletedItem(item)
     await softDeleteClip(item)
     await refresh()
   }

@@ -51,7 +51,7 @@ import { PipStatusView } from "./PipStatusView"
 import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
 import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
-import { ignoreCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_ignore"
+import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -700,7 +700,7 @@ function ClipTileMenu(props: {
   }
 
   async function deleteItem() {
-    await ignoreCurrentClipboardIfMatchesDeletedItem(item)
+    await clearCurrentClipboardIfMatchesDeletedItem(item)
     await softDeleteClip(item)
     await props.onRefresh()
     props.onStatus(`已删除：${item.title}`)

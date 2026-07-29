@@ -1,9 +1,8 @@
 import type { ClipItem, ClipKind, ClipPayload } from "../types"
-import { insertIgnoredClipboardHash } from "../storage/database"
 import { getFullClipContent } from "../storage/clip_repository"
 import { imageContentHash } from "../storage/image_store"
 import { hashString, isLikelyURL, normalizeClipContent } from "../utils/common"
-import { readPasteboardPayload } from "./pasteboard_adapter"
+import { clearPasteboardContent, readPasteboardPayload } from "./pasteboard_adapter"
 
 function payloadContent(payload: ClipPayload): string {
   if (payload.kind === "image") return ""
@@ -34,14 +33,14 @@ async function itemCaptureHash(item: ClipItem): Promise<string | undefined> {
   return textCaptureHash(await getFullClipContent(item.id))
 }
 
-export async function ignoreCurrentClipboardIfMatchesDeletedItem(item: ClipItem): Promise<boolean> {
+export async function clearCurrentClipboardIfMatchesDeletedItem(item: ClipItem): Promise<boolean> {
   try {
     const payload = await readPasteboardPayload({ includeSelfWrites: true })
-    if (!payload || payload.sourceChangeCount == null) return false
+    if (!payload) return false
     const currentHash = payloadCaptureHash(payload)
     const deletedHash = await itemCaptureHash(item)
     if (!currentHash || currentHash !== deletedHash) return false
-    await insertIgnoredClipboardHash(currentHash, payload.sourceChangeCount, payload.kind)
+    await clearPasteboardContent()
     return true
   } catch {
     return false

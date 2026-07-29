@@ -112,3 +112,20 @@ export async function writeImageToPasteboard(image: UIImage): Promise<void> {
   lastSelfWriteImageChangeCount = await currentChangeCount()
   lastSelfWriteImageAt = Date.now()
 }
+
+export async function clearPasteboardContent(): Promise<void> {
+  const pb = pasteboard()
+  if (!pb) throw new Error("Pasteboard 不可用")
+  if (typeof pb.setItems === "function") {
+    await pb.setItems([])
+  } else {
+    if (typeof pb.setString === "function") await pb.setString(null)
+    if (typeof pb.setURL === "function") await pb.setURL(null)
+    if (typeof pb.setImages === "function") await pb.setImages(null)
+    else if (typeof pb.setImage === "function") await pb.setImage(null)
+  }
+  lastSelfWriteText = ""
+  lastSelfWriteAt = Date.now()
+  lastSelfWriteImageChangeCount = await currentChangeCount()
+  lastSelfWriteImageAt = Date.now()
+}
