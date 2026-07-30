@@ -87,14 +87,13 @@ function KeyboardView() {
 
   async function copyImageSticker(sticker: CachedSticker) {
     try {
-      const image = imageForSticker(sticker.thumbnailPath ?? sticker.localPath)
+      const image = imageForSticker(sticker.localPath)
       if (!image) {
         setStatus("")
         return
       }
 
-      const safeImage = image.preparingThumbnail({ width: 240, height: 240 }) ?? image
-      await Pasteboard.setImage(safeImage)
+      await Pasteboard.setImage(image)
       const pasted = await tryPasteIntoHost()
       setRecentStickers(rememberRecentSticker(sticker))
       setStatus(pasted ? "已复制并尝试粘贴" : "已复制到剪贴板")
