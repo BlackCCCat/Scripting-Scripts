@@ -1,4 +1,8 @@
 ## 本次更新
+- 修复部分网站首次下载失败需重试的问题
+- 修复历史记录重复保存的问题
+
+## 最近更新
 
 - 新增通用媒体下载能力，支持 YouTube、m3u8 以及更多 yt-dlp 可识别的网站。
 - 下载页新增网站登录入口，可通过内置浏览器保存 Cookie 后重试需要登录的站点。
@@ -7,11 +11,16 @@
 - 保存到相册失败时，会自动尝试转换为 iOS 相册兼容的视频格式。
 - 新增关于页面，包含操作说明和 Yoinks 项目致谢。
 
-## Notes
+## 使用说明
 
-- Added generic media downloading for YouTube, m3u8, and more yt-dlp supported sites.
-- Added website login from the Download page so cookies can be reused for sites that require authentication.
-- History can now choose whether to keep local files, with optional cache size and record count limits.
-- Deleting history records now removes associated local files consistently.
-- Videos that cannot be saved to Photos directly are converted to an iOS-compatible format as a fallback.
-- Added an About page with usage notes and Yoinks acknowledgement.
+- 通用的媒体下载功能，支持YouTube、m3u8以及更多yt-dlp支持的网站。
+
+- 网站登录，以便可以重用需要认证的网站的cookies。
+
+- 历史记录现在可以选择是否保留本地文件，并可选设置缓存大小和记录数量限制。
+
+- 删除历史记录现在会一致地删除相关的本地文件。
+
+- 无法直接保存到照片的视频将转换为iOS兼容格式作为备选方案。
+
+- 关于页面，包含使用说明和Yoinks致谢。

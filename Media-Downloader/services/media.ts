@@ -9,7 +9,7 @@ import {
   type DownloadProgressFn,
   type DownloadSuccess,
 } from "./douyin"
-import { formatBytes, sanitizeFileName } from "../utils/common"
+import { formatBytes, sanitizeFileName, sleep } from "../utils/common"
 import { cancelBackgroundDownloads } from "./background-download"
 
 type ShellDownloadResult = {
@@ -147,6 +147,14 @@ function isCertificateVerifyFailure(output: string | undefined): boolean {
 
 function isInstagramEmptyMediaResponse(output: string | undefined): boolean {
   return /Instagram sent an empty media response/i.test(output || "")
+}
+
+function isTransientWebViewCleanupFailure(output: string | undefined): boolean {
+  return /webview.*viewmodel.*cleanup|viewmodel.*cleanup/i.test(output || "")
+}
+
+function isCookieAuthProbeFailure(output: string | undefined): boolean {
+  return /cookies?|login|logged in|sign in|authentication|unauthori[sz]ed|forbidden|HTTP Error 40[13]|private video|members-only|not available/i.test(output || "")
 }
 
 function normalizeInstagramURL(url: string): string {
@@ -955,23 +963,42 @@ async function probeYtDlpMedia(url: string, options: {
   let noCheckCertificate = false
   let effectiveURL = url
   let httpHeaders: Record<string, string> | undefined
-  const cookieFilePath = await writeYtDlpCookieFileForURL(effectiveURL, options.onLog)
-  let result = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, false, undefined, cookieFilePath)), { timeout: 180 })
-  logShellResult(options.onLog, `yt-dlp ${options.platform} probe`, result)
+  let cookieFilePath: string | undefined
+  const runProbe = async (label: string): Promise<ShellExecutionResult> => {
+    let attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath)), { timeout: 180 })
+    logShellResult(options.onLog, label, attempt)
+    if (attempt.exitCode !== 0 && isTransientWebViewCleanupFailure(attempt.output) && !FileManager.existsSync(CANCEL_FLAG_PATH)) {
+      options.onLog?.("检测到 WebView 清理中的临时异常，等待后自动重试媒体信息读取。")
+      options.onProgress?.({ fraction: 0.13, stage: `正在重试 ${options.platform} 媒体信息` })
+      await sleep(900)
+      attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath)), { timeout: 180 })
+      logShellResult(options.onLog, `${label} transient retry`, attempt)
+    }
+    return attempt
+  }
+
+  let result = await runProbe(`yt-dlp ${options.platform} probe`)
   if (result.exitCode !== 0 && isCertificateVerifyFailure(result.output)) {
     noCheckCertificate = true
     options.onLog?.("检测到 SSL 证书校验失败，使用 nocheckcertificate 自动重试一次。")
     options.onProgress?.({ fraction: 0.14, stage: `正在重试 ${options.platform} 媒体信息` })
-    result = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, true, undefined, cookieFilePath)), { timeout: 180 })
-    logShellResult(options.onLog, `yt-dlp ${options.platform} probe nocheckcertificate`, result)
+    result = await runProbe(`yt-dlp ${options.platform} probe nocheckcertificate`)
   }
   if (result.exitCode !== 0 && options.platform === "Instagram" && isInstagramEmptyMediaResponse(result.output)) {
     effectiveURL = normalizeInstagramURL(url)
     httpHeaders = instagramBrowserHeaders(effectiveURL)
+    cookieFilePath = await writeYtDlpCookieFileForURL(effectiveURL, options.onLog)
     options.onLog?.(`Instagram 返回空媒体数据，去除分享参数并使用浏览器 UA 重试：${effectiveURL}`)
     options.onProgress?.({ fraction: 0.16, stage: "正在重试 Instagram 媒体信息" })
-    result = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath)), { timeout: 180 })
-    logShellResult(options.onLog, "yt-dlp Instagram probe browser headers", result)
+    result = await runProbe("yt-dlp Instagram probe browser headers")
+  }
+  if (result.exitCode !== 0 && !cookieFilePath && isCookieAuthProbeFailure(result.output)) {
+    options.onLog?.("媒体信息读取提示可能需要登录 Cookie，正在导出 WebView Cookie 后自动重试。")
+    options.onProgress?.({ fraction: 0.17, stage: `正在重试 ${options.platform} 媒体信息` })
+    cookieFilePath = await writeYtDlpCookieFileForURL(effectiveURL, options.onLog)
+    if (cookieFilePath) {
+      result = await runProbe(`yt-dlp ${options.platform} probe cookies`)
+    }
   }
   if (result.exitCode === 130 || FileManager.existsSync(CANCEL_FLAG_PATH)) {
     throw new Error("下载已取消")

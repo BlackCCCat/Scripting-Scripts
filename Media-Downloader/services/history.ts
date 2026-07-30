@@ -125,6 +125,67 @@ async function listHistoryOldestFirst(): Promise<HistoryRecord[]> {
   `)
 }
 
+function normalizeHistoryURL(value: string | null | undefined): string | null {
+  const raw = (value || "").trim()
+  if (!raw) return null
+  const match = raw.match(/^(https?:)\/\/([^/?#]+)([^?#]*)(\?[^#]*)?/i)
+  if (!match) return raw.replace(/#.*$/, "").replace(/\/+$/, "")
+
+  const protocol = match[1].toLowerCase()
+  const host = match[2].toLowerCase().replace(/^www\./, "")
+  const path = (match[3] || "/").replace(/\/+$/, "") || "/"
+  const query = (match[4] || "").replace(/^\?/, "")
+  let nextQuery = query
+
+  if (host === "youtube.com" || host.endsWith(".youtube.com")) {
+    const videoParam = query.split("&").find((part) => part.split("=")[0] === "v")
+    nextQuery = videoParam || ""
+  } else if (host === "youtu.be" || host === "instagram.com" || host.endsWith(".instagram.com") || host === "x.com" || host.endsWith(".x.com") || host === "twitter.com" || host.endsWith(".twitter.com")) {
+    nextQuery = ""
+  } else if (query) {
+    nextQuery = query
+      .split("&")
+      .filter((part) => {
+        const key = decodeURIComponent(part.split("=")[0] || "").toLowerCase()
+        return !/^utm_/.test(key) && !["si", "feature", "igsh", "share_id"].includes(key)
+      })
+      .sort()
+      .join("&")
+  }
+
+  return `${protocol}//${host}${path}${nextQuery ? `?${nextQuery}` : ""}`
+}
+
+function historyIdentityURLs(record: Pick<HistoryRecord, "source_url" | "page_url" | "canonical_url">): Set<string> {
+  return new Set([
+    normalizeHistoryURL(record.source_url),
+    normalizeHistoryURL(record.page_url),
+    normalizeHistoryURL(record.canonical_url),
+  ].filter((url): url is string => Boolean(url)))
+}
+
+function downloadIdentityURLs(record: DownloadSuccess): Set<string> {
+  return new Set([
+    normalizeHistoryURL(record.sourceURL),
+    normalizeHistoryURL(record.extracted.pageURL),
+    normalizeHistoryURL(record.extracted.canonical),
+  ].filter((url): url is string => Boolean(url)))
+}
+
+async function listDuplicateHistoryRecords(record: DownloadSuccess): Promise<HistoryRecord[]> {
+  const nextURLs = downloadIdentityURLs(record)
+  if (!nextURLs.size) return []
+
+  const records = await listHistory()
+  return records.filter((item) => {
+    if (item.id === record.id) return false
+    for (const url of historyIdentityURLs(item)) {
+      if (nextURLs.has(url)) return true
+    }
+    return false
+  })
+}
+
 export function getHistoryFiles(record: HistoryRecord): DownloadedFile[] {
   const files: DownloadedFile[] = []
   const seen = new Set<string>()
@@ -165,7 +226,7 @@ export function getHistoryFiles(record: HistoryRecord): DownloadedFile[] {
   return files
 }
 
-export async function removeHistoryRecordFiles(record: HistoryRecord): Promise<{ deletedCount: number; deletedBytes: number }> {
+export async function removeHistoryRecordFiles(record: HistoryRecord, keepPaths = new Set<string>()): Promise<{ deletedCount: number; deletedBytes: number }> {
   const files = getHistoryFiles(record)
   const seen = new Set<string>()
   let deletedCount = 0
@@ -174,6 +235,7 @@ export async function removeHistoryRecordFiles(record: HistoryRecord): Promise<{
   for (const file of files) {
     if (!file.filePath || seen.has(file.filePath)) continue
     seen.add(file.filePath)
+    if (keepPaths.has(file.filePath)) continue
     try {
       if (!FileManager.existsSync(file.filePath)) continue
       const size = FileManager.statSync(file.filePath).size || 0
@@ -252,6 +314,21 @@ export async function pruneHistoryStorage(options: {
 export async function insertHistory(record: DownloadSuccess, options?: { preserveFiles?: boolean }) {
   const database = await getDatabase()
   const preserveFiles = options?.preserveFiles === true
+  const nextFiles = record.files?.length ? record.files : [{
+    filePath: record.filePath,
+    fileName: record.fileName,
+    finalURL: record.finalURL,
+    bytesWritten: record.bytesWritten,
+    mediaType: record.mediaType || "video",
+  }]
+  const nextFilePaths = new Set(nextFiles.map((file) => file.filePath).filter(Boolean))
+  const duplicates = await listDuplicateHistoryRecords(record)
+
+  for (const duplicate of duplicates) {
+    await removeHistoryRecordFiles(duplicate, nextFilePaths)
+    await deleteHistoryRecord(duplicate.id)
+  }
+
   await database.execute(
     `
       INSERT OR REPLACE INTO downloads (
@@ -275,7 +352,7 @@ export async function insertHistory(record: DownloadSuccess, options?: { preserv
       record.createdAt,
       record.matchedCandidateLabel,
       record.mediaType,
-      JSON.stringify(preserveFiles ? (record.files || []) : []),
+      JSON.stringify(preserveFiles ? nextFiles : []),
     ]
   )
 }
