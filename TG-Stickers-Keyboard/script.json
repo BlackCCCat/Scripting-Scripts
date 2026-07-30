@@ -1,0 +1,49 @@
+{
+  "color" : "rgba(28, 140, 255,1)",
+  "version" : "",
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/TG-Stickers-Keyboard.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "localizedNames" : {
+    "ja" : "",
+    "zh" : "TG 贴纸键盘",
+    "de" : "",
+    "it" : "",
+    "es" : "",
+    "pt" : "",
+    "fr" : "",
+    "en" : "TG Stickers Keyboard",
+    "ru" : ""
+  },
+  "contributors" : [
+
+  ],
+  "runInApp" : true,
+  "description" : "Import Telegram sticker sets and use them from a custom keyboard.",
+  "entry" : "index.tsx",
+  "icon" : "face.smiling",
+  "name" : "TG Stickers Keyboard",
+  "intentInputTypes" : [
+
+  ],
+  "iconImage" : null,
+  "localizedDescriptions" : {
+    "ja" : "",
+    "zh" : "导入 Telegram 贴纸包，在自定义键盘中按分组使用。",
+    "de" : "",
+    "it" : "",
+    "es" : "",
+    "pt" : "",
+    "fr" : "",
+    "en" : "Import Telegram sticker sets and use them from a custom keyboard.",
+    "ru" : ""
+  },
+  "author" : {
+    "name" : "BlackCCCat",
+    "homepage" : "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts",
+    "email" : null
+  },
+  "permissions" : null
+}
