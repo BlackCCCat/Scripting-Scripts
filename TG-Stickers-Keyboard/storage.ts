@@ -4,6 +4,7 @@ const PACKS_KEY = "tg-stickers-keyboard:packs:v1"
 const TOKEN_KEY = "tg-stickers-keyboard:bot-token:v1"
 const TARGET_SCRIPT_KEY = "tg-stickers-keyboard:target-keyboard-script:v1"
 const RECENT_STICKERS_KEY = "tg-stickers-keyboard:recent-stickers:v1"
+const SOUND_ENABLED_KEY = "tg-stickers-keyboard:sound-enabled:v1"
 const SCRIPT_NAME = "TG Stickers Keyboard"
 const ROOT_DIR = `${FileManager.appGroupDocumentsDirectory}/${SCRIPT_NAME}`
 const STICKERS_DIR = `${ROOT_DIR}/stickers`
@@ -26,6 +27,14 @@ export function loadTargetKeyboardScript(): string {
 
 export function saveTargetKeyboardScript(scriptName: string) {
   Storage.set(TARGET_SCRIPT_KEY, scriptName.trim(), { shared: true })
+}
+
+export function loadSoundEnabled(): boolean {
+  return Storage.get<boolean>(SOUND_ENABLED_KEY, { shared: true }) ?? true
+}
+
+export function saveSoundEnabled(enabled: boolean) {
+  Storage.set(SOUND_ENABLED_KEY, enabled, { shared: true })
 }
 
 export function loadPacks(): StickerPack[] {

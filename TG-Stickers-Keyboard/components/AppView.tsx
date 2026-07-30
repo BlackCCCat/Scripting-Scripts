@@ -14,6 +14,7 @@ import {
   Script,
   Text,
   TextField,
+  Toggle,
   VStack,
   ZStack,
   useEffect,
@@ -27,10 +28,12 @@ import {
   ensureThumbnailDirectory,
   loadBotToken,
   loadPacks,
+  loadSoundEnabled,
   loadTargetKeyboardScript,
   removePackDirectories,
   saveBotToken,
   savePacks,
+  saveSoundEnabled,
   saveTargetKeyboardScript,
   stickersDirectory,
   thumbnailLocalPath,
@@ -49,6 +52,7 @@ const GRID_COLUMNS = Array.from({ length: 4 }, () => ({
 export function AppView() {
   const [botToken, setBotToken] = useState("")
   const [targetScript, setTargetScript] = useState("")
+  const [soundEnabled, setSoundEnabled] = useState(true)
   const [packs, setPacks] = useState<StickerPack[]>([])
   const [status, setStatus] = useState("正在读取本地贴纸")
   const [busy, setBusy] = useState(false)
@@ -67,6 +71,7 @@ export function AppView() {
     const token = loadBotToken()
     setBotToken(token)
     setTargetScript(loadTargetKeyboardScript())
+    setSoundEnabled(loadSoundEnabled())
     const loaded = loadPacks()
     setPacks(loaded)
     setStatus(token ? (loaded.length ? "贴纸已准备好" : "点击右上角添加贴纸") : "未设置 Bot Token，请先打开右上角设置")
@@ -110,11 +115,13 @@ export function AppView() {
     }
   }
 
-  function saveSettings(nextToken: string, nextTargetScript: string) {
+  function saveSettings(nextToken: string, nextTargetScript: string, nextSoundEnabled: boolean) {
     setBotToken(nextToken)
     setTargetScript(nextTargetScript)
+    setSoundEnabled(nextSoundEnabled)
     saveBotToken(nextToken)
     saveTargetKeyboardScript(nextTargetScript)
+    saveSoundEnabled(nextSoundEnabled)
     setStatus(nextToken.trim() ? "设置已保存" : "未设置 Bot Token，请先打开右上角设置")
     setShowSettings(false)
   }
@@ -188,6 +195,7 @@ export function AppView() {
         <SettingsSheet
           botToken={botToken}
           targetScript={targetScript}
+          soundEnabled={soundEnabled}
           onCancel={() => setShowSettings(false)}
           onSave={saveSettings}
         />
@@ -308,12 +316,14 @@ function mergePack(existing: StickerPack, incoming: StickerPack): StickerPack {
 function SettingsSheet(props: {
   botToken: string
   targetScript: string
+  soundEnabled: boolean
   onCancel: () => void
-  onSave: (botToken: string, targetScript: string) => void
+  onSave: (botToken: string, targetScript: string, soundEnabled: boolean) => void
 }) {
   const dismiss = Navigation.useDismiss()
   const [token, setToken] = useState(props.botToken)
   const [targetScript, setTargetScript] = useState(props.targetScript)
+  const [soundEnabled, setSoundEnabled] = useState(props.soundEnabled)
 
   function cancel() {
     props.onCancel()
@@ -321,7 +331,7 @@ function SettingsSheet(props: {
   }
 
   function save() {
-    props.onSave(token, targetScript)
+    props.onSave(token, targetScript, soundEnabled)
     dismiss(null)
   }
 
@@ -353,6 +363,14 @@ function SettingsSheet(props: {
             value={targetScript}
             prompt="例如：Scripting Rime Keyboard"
             onChanged={setTargetScript}
+          />
+        </Section>
+        <Section footer={<Text>关闭后键盘点击不会播放按键音，但仍保留震动反馈。</Text>}>
+          <Toggle
+            title="声音"
+            systemImage="speaker.wave.2"
+            value={soundEnabled}
+            onChanged={setSoundEnabled}
           />
         </Section>
       </Form>

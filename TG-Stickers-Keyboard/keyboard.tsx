@@ -16,9 +16,11 @@ import {
   imageForSticker,
   loadPacks,
   loadRecentStickers,
+  loadSoundEnabled,
   loadTargetKeyboardScript,
   rememberRecentSticker,
 } from "./storage"
+import { prepareKeyboardFeedback, playKeyboardFeedback } from "./keyboardFeedback"
 import type { CachedSticker, StickerPack } from "./types"
 
 const GRID_COLUMNS = Array.from({ length: 4 }, () => ({
@@ -31,6 +33,7 @@ const SWIPE_THRESHOLD = 52
 const STICKER_CORNER = { type: "rect", cornerRadius: 6 } as any
 const CONTROL_BUTTON_SIZE = 56
 const CONTROL_ICON_SIZE = 48
+const KEYBOARD_EXIT_FEEDBACK_DELAY_MS = 70
 
 function run() {
   const keyboard = (globalThis as any).CustomKeyboard
@@ -48,13 +51,17 @@ function KeyboardView() {
   const [recentStickers, setRecentStickers] = useState<CachedSticker[]>([])
   const [activeName, setActiveName] = useState("")
   const [targetScript, setTargetScript] = useState("")
+  const [soundEnabled, setSoundEnabled] = useState(true)
   const [status, setStatus] = useState("")
 
   useEffect(() => {
     const loaded = loadPacks()
+    const nextSoundEnabled = loadSoundEnabled()
     setPacks(loaded)
     setRecentStickers(loadRecentStickers())
     setTargetScript(loadTargetKeyboardScript())
+    setSoundEnabled(nextSoundEnabled)
+    setTimeout(() => prepareKeyboardFeedback({ soundEnabled: nextSoundEnabled }), 0)
     setActiveName((current) => current || loaded[0]?.name || RECENT_PACK_NAME)
   }, [])
 
@@ -70,6 +77,7 @@ function KeyboardView() {
   const stickers = useMemo(() => activePack?.stickers ?? [], [activePack])
 
   async function handleStickerPress(sticker: CachedSticker) {
+    feedback()
     if (sticker.kind === "static") {
       await copyImageSticker(sticker)
       return
@@ -89,7 +97,6 @@ function KeyboardView() {
       await Pasteboard.setImage(safeImage)
       const pasted = await tryPasteIntoHost()
       setRecentStickers(rememberRecentSticker(sticker))
-      try { HapticFeedback.notificationSuccess() } catch {}
       setStatus(pasted ? "已复制并尝试粘贴" : "已复制到剪贴板")
     } catch {
       try { HapticFeedback.notificationError() } catch {}
@@ -121,12 +128,16 @@ function KeyboardView() {
   }
 
   function feedback() {
-    try { HapticFeedback.selection() } catch {}
+    playKeyboardFeedback({ soundEnabled })
   }
 
-  function withFeedback(action: () => void | Promise<void>) {
+  function withFeedback(action: () => void | Promise<void>, delayAction = false) {
     return () => {
       feedback()
+      if (delayAction) {
+        setTimeout(() => void action(), KEYBOARD_EXIT_FEEDBACK_DELAY_MS)
+        return
+      }
       void action()
     }
   }
@@ -162,14 +173,14 @@ function KeyboardView() {
         <Button
           buttonStyle="plain"
           frame={{ width: CONTROL_BUTTON_SIZE, height: CONTROL_BUTTON_SIZE }}
-          action={withFeedback(() => CustomKeyboard.dismissToHome())}
+          action={withFeedback(() => CustomKeyboard.dismissToHome(), true)}
         >
           <Image systemName="house" font={20} frame={{ width: CONTROL_ICON_SIZE, height: CONTROL_ICON_SIZE }} glassEffect={CONTROL_GLASS} />
         </Button>
         <Button
           buttonStyle="plain"
           frame={{ width: CONTROL_BUTTON_SIZE, height: CONTROL_BUTTON_SIZE }}
-          action={withFeedback(() => CustomKeyboard.nextKeyboard())}
+          action={withFeedback(() => CustomKeyboard.nextKeyboard(), true)}
         >
           <Image systemName="globe" font={20} frame={{ width: CONTROL_ICON_SIZE, height: CONTROL_ICON_SIZE }} glassEffect={CONTROL_GLASS} />
         </Button>
@@ -177,7 +188,7 @@ function KeyboardView() {
           <Button
             buttonStyle="plain"
             frame={{ width: CONTROL_BUTTON_SIZE, height: CONTROL_BUTTON_SIZE }}
-            action={withFeedback(() => void switchToTargetScript())}
+            action={withFeedback(() => void switchToTargetScript(), true)}
           >
             <Image systemName="keyboard" font={20} frame={{ width: CONTROL_ICON_SIZE, height: CONTROL_ICON_SIZE }} glassEffect={CONTROL_GLASS} />
           </Button>
