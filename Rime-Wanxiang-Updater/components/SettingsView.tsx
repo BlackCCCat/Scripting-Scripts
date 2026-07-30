@@ -343,7 +343,6 @@ export function SettingsView(props: {
       }
 
       const result = await picker.pickDirectoryBookmark({
-        preferredName: "Rime",
         initialDirectory: cfg.hamsterRootPath || undefined,
       })
       if (!result) return
