@@ -129,6 +129,7 @@ export type RimeKeyboardSettings = {
   haptics: boolean;
   hapticLevel: number;
   showNotifications: boolean;
+  performanceDiagnostics: boolean;
   autoDeployOnLaunch: boolean;
 };
 
@@ -592,6 +593,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   haptics: true,
   hapticLevel: 7,
   showNotifications: false,
+  performanceDiagnostics: false,
   autoDeployOnLaunch: false,
 };
 
@@ -1254,6 +1256,9 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     showNotifications: typeof raw?.showNotifications === "boolean"
       ? raw.showNotifications
       : DEFAULT_RIME_KEYBOARD_SETTINGS.showNotifications,
+    performanceDiagnostics: typeof raw?.performanceDiagnostics === "boolean"
+      ? raw.performanceDiagnostics
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.performanceDiagnostics,
     autoDeployOnLaunch: typeof raw?.autoDeployOnLaunch === "boolean"
       ? raw.autoDeployOnLaunch
       : false,

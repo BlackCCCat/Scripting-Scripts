@@ -75,6 +75,11 @@ import {
   prepareConfiguredHaptics,
 } from "./utils";
 import { ensureT9ProcessorLuaInstalled } from "../t9ProcessorInstall";
+import {
+  KeyboardPerformanceDiagnostics,
+  type PendingPerformanceDiagnosticSample,
+  performanceNow,
+} from "../performanceDiagnostics";
 
 function currentKeyboardAppearance(): KeyboardAppearance {
   const value = CustomKeyboard.traits?.keyboardAppearance;
@@ -137,11 +142,21 @@ type RefreshOptions = {
   suppressInlineMarkedText?: boolean;
   resetT9FilterFromPreedit?: boolean;
   preserveT9FilterState?: boolean;
+  performanceSample?: PendingPerformanceDiagnosticSample;
 };
 
 type RimeMetadata = {
   ascii: boolean;
   currentSchemaId: string | null;
+};
+
+type KeyboardRimeState = RimeMetadata & {
+  preedit: string;
+  preeditCursor: number;
+  candidates: Rime.Candidate[];
+  highlightedIdx: number;
+  pageNo: number;
+  rimePageSize: number;
 };
 
 type CandidateScrollTarget = {
@@ -411,7 +426,7 @@ function KeyboardContent(props: {
   });
 
   const [error, setError] = useState<string | null>(null);
-  const [rimeState, setRimeState] = useState({
+  const [rimeState, setRimeState] = useState<KeyboardRimeState>({
     preedit: "",
     preeditCursor: 0,
     candidates: [] as Rime.Candidate[],
@@ -419,8 +434,9 @@ function KeyboardContent(props: {
     pageNo: 0,
     rimePageSize: 5,
     ascii: false,
-    currentSchemaId: null as string | null,
+    currentSchemaId: null,
   });
+  const rimeStateRef = useRef(rimeState);
   const {
     preedit,
     preeditCursor,
@@ -505,6 +521,14 @@ function KeyboardContent(props: {
   const suppressSchemaMenuInlineRef = useRef(false);
   const rimeSetupStartedRef = useRef(false);
   const disposedRef = useRef(false);
+  const performanceDiagnosticsRef = useRef<
+    KeyboardPerformanceDiagnostics | null
+  >(null);
+  if (
+    settings.performanceDiagnostics && performanceDiagnosticsRef.current == null
+  ) {
+    performanceDiagnosticsRef.current = new KeyboardPerformanceDiagnostics();
+  }
   const metrics = useMemo(
     () =>
       keyboardMetrics(
@@ -578,6 +602,7 @@ function KeyboardContent(props: {
       pressedKeyIdsRef.current = new Set();
       setPressedKeyIds(new Set());
       stopRepeatingBackspace();
+      performanceDiagnosticsRef.current?.dispose();
       disposeConfiguredHaptics();
       sessionRef.current?.close();
       sessionRef.current = null;
@@ -610,20 +635,22 @@ function KeyboardContent(props: {
 
   function applyRimeMetadata(patch: Partial<RimeMetadata>) {
     cacheRimeMetadata(patch);
-    setRimeState((previous) => {
-      const nextAscii = patch.ascii ?? previous.ascii;
-      const nextSchemaId = patch.currentSchemaId === undefined
-        ? previous.currentSchemaId
-        : patch.currentSchemaId;
-      return previous.ascii === nextAscii &&
-          previous.currentSchemaId === nextSchemaId
-        ? previous
-        : {
-          ...previous,
-          ascii: nextAscii,
-          currentSchemaId: nextSchemaId,
-        };
-    });
+    const previous = rimeStateRef.current;
+    const nextAscii = patch.ascii ?? previous.ascii;
+    const nextSchemaId = patch.currentSchemaId === undefined
+      ? previous.currentSchemaId
+      : patch.currentSchemaId;
+    if (
+      previous.ascii === nextAscii &&
+      previous.currentSchemaId === nextSchemaId
+    ) return;
+    const next = {
+      ...previous,
+      ascii: nextAscii,
+      currentSchemaId: nextSchemaId,
+    };
+    rimeStateRef.current = next;
+    setRimeState(next);
   }
 
   function clearT9ProcessorSelection(session = sessionRef.current) {
@@ -707,9 +734,15 @@ function KeyboardContent(props: {
 
   function refresh(session = sessionRef.current, options: RefreshOptions = {}) {
     if (!session) return;
+    const performanceSample = options.performanceSample;
+    const refreshStartedAt = performanceSample ? performanceNow() : 0;
+    const contextStartedAt = performanceSample ? performanceNow() : 0;
     const ctx = session.context;
     const menu = ctx?.menu;
     const commit = session.commit;
+    const contextReadMs = performanceSample
+      ? performanceNow() - contextStartedAt
+      : 0;
     const committed = Boolean(commit && !options.suppressCommit);
     if (commit && !options.suppressCommit) insertTextReplacingSelectAll(commit);
     updateMarkedText(
@@ -735,18 +768,24 @@ function KeyboardContent(props: {
       currentSchemaId: metadata.currentSchemaId,
       ascii: metadata.ascii,
     };
-    setRimeState((previous) =>
-      previous.preedit === nextRimeState.preedit &&
-        previous.preeditCursor === nextRimeState.preeditCursor &&
-        previous.highlightedIdx === nextRimeState.highlightedIdx &&
-        previous.pageNo === nextRimeState.pageNo &&
-        previous.rimePageSize === nextRimeState.rimePageSize &&
-        previous.currentSchemaId === nextRimeState.currentSchemaId &&
-        previous.ascii === nextRimeState.ascii &&
-        sameCandidates(previous.candidates, nextRimeState.candidates)
-        ? previous
-        : nextRimeState
-    );
+    const previous = rimeStateRef.current;
+    const comparisonStartedAt = performanceSample ? performanceNow() : 0;
+    const unchanged = previous.preedit === nextRimeState.preedit &&
+      previous.preeditCursor === nextRimeState.preeditCursor &&
+      previous.highlightedIdx === nextRimeState.highlightedIdx &&
+      previous.pageNo === nextRimeState.pageNo &&
+      previous.rimePageSize === nextRimeState.rimePageSize &&
+      previous.currentSchemaId === nextRimeState.currentSchemaId &&
+      previous.ascii === nextRimeState.ascii &&
+      sameCandidates(previous.candidates, nextRimeState.candidates);
+    const candidateCompareMs = performanceSample
+      ? performanceNow() - comparisonStartedAt
+      : 0;
+    const stateChanged = !unchanged;
+    if (stateChanged) {
+      rimeStateRef.current = nextRimeState;
+      setRimeState(nextRimeState);
+    }
     if (isT9Keyboard) {
       setT9DelimiterVisualPositions((previous) => {
         const next = nextPreedit
@@ -777,6 +816,17 @@ function KeyboardContent(props: {
       setCandidateExpanded(false);
       setExpandedCandidates((previous) => previous.length > 0 ? [] : previous);
       setExpandedBatchHasMore(false);
+    }
+    if (performanceSample) {
+      const refreshMs = performanceNow() - refreshStartedAt;
+      performanceDiagnosticsRef.current?.complete(performanceSample, {
+        contextReadMs,
+        candidateCompareMs,
+        refreshMs,
+        stateChanged,
+        candidateCount: nextCandidates.length,
+        preeditLength: nextPreedit.length,
+      });
     }
   }
 
@@ -1432,6 +1482,30 @@ function KeyboardContent(props: {
     };
   }
 
+  function processSessionKey(
+    session: Rime.Session,
+    keyCode: number,
+    modifiers: number | undefined,
+    refreshOptions: RefreshOptions,
+    diagnosticAction: string,
+  ) {
+    const performanceSample = settings.performanceDiagnostics
+      ? performanceDiagnosticsRef.current?.begin(
+        diagnosticAction,
+        activeKeyboardType,
+      ) ?? null
+      : null;
+    const processStartedAt = performanceSample ? performanceNow() : 0;
+    const consumed = session.processKey(keyCode, modifiers);
+    if (performanceSample) {
+      performanceSample.processKeyMs = performanceNow() - processStartedAt;
+      refresh(session, { ...refreshOptions, performanceSample });
+    } else {
+      refresh(session, refreshOptions);
+    }
+    return consumed;
+  }
+
   function processKey(
     keyCode: number,
     fallback?: string,
@@ -1445,8 +1519,13 @@ function KeyboardContent(props: {
       if (fallback) insertTextReplacingSelectAll(fallback);
       return;
     }
-    const consumed = s.processKey(keyCode);
-    refresh(s, refreshOptions);
+    const consumed = processSessionKey(
+      s,
+      keyCode,
+      undefined,
+      refreshOptions,
+      "key",
+    );
     if (!consumed && fallback) insertTextReplacingSelectAll(fallback);
   }
 
@@ -1458,8 +1537,13 @@ function KeyboardContent(props: {
     clearSelectAllStateForExternalAction();
     const s = sessionRef.current;
     if (!s) return;
-    s.processKey(keyCode, modifiers);
-    refresh(s, refreshOptions);
+    processSessionKey(
+      s,
+      keyCode,
+      modifiers,
+      refreshOptions,
+      "modifiedKey",
+    );
   }
 
   function processRimeKeySpec(action: string): boolean {
@@ -1573,8 +1657,13 @@ function KeyboardContent(props: {
     const s = sessionRef.current;
     if (s && (s.context?.preedit?.length ?? 0) > 0) {
       if (isT9Keyboard) setT9CandidatePinyinFilter(null);
-      s.processKey(KEY_BACKSPACE);
-      refresh(s, { resetT9FilterFromPreedit: isT9Keyboard });
+      processSessionKey(
+        s,
+        KEY_BACKSPACE,
+        undefined,
+        { resetT9FilterFromPreedit: isT9Keyboard },
+        "backspace",
+      );
     } else {
       if (consumeSelectAllForDeletion()) return;
       const before = CustomKeyboard.textBeforeCursor ?? "";
@@ -1642,14 +1731,16 @@ function KeyboardContent(props: {
       } catch {}
       refresh(s);
     }
-    setRimeState((prev) => ({
-      ...prev,
+    const nextRimeState = {
+      ...rimeStateRef.current,
       preedit: "",
       preeditCursor: 0,
       candidates: [],
       highlightedIdx: 0,
       pageNo: 0,
-    }));
+    };
+    rimeStateRef.current = nextRimeState;
+    setRimeState(nextRimeState);
     setCandidateExpanded(false);
     setExpandedCandidates([]);
     setExpandedBatchHasMore(false);
@@ -1668,8 +1759,7 @@ function KeyboardContent(props: {
       return;
     }
     if (s && (s.context?.preedit?.length ?? 0) > 0) {
-      s.processKey(KEY_SPACE);
-      refresh(s);
+      processSessionKey(s, KEY_SPACE, undefined, {}, "space");
     } else {
       insertTextReplacingSelectAll(" ");
     }
@@ -1938,10 +2028,13 @@ function KeyboardContent(props: {
     }
     consumeSelectAllForReplacement();
     if (!s) return;
-    s.processKey(value.charCodeAt(0));
-    refresh(s, {
-      preserveT9FilterState: nextFilter != null,
-    });
+    processSessionKey(
+      s,
+      value.charCodeAt(0),
+      undefined,
+      { preserveT9FilterState: nextFilter != null },
+      "t9Digit",
+    );
     if (nextFilter != null && !s.context?.preedit) {
       setT9FilterState(nextFilter);
     }
@@ -2477,10 +2570,15 @@ function KeyboardContent(props: {
       ? "dismiss"
       : settings.candidateRightButtonMode;
   const candidateHomeButtonVisible = !composing;
-  const toolbarLeftButtons = candidateHomeButtonVisible
-    ? settings.toolbarLeftButtons.filter((item) => item.symbol && item.action)
-      .slice(0, TOOLBAR_LEFT_BUTTON_MAX)
-    : [];
+  const toolbarLeftButtons = useMemo(
+    () =>
+      candidateHomeButtonVisible
+        ? settings.toolbarLeftButtons.filter((item) =>
+          item.symbol && item.action
+        ).slice(0, TOOLBAR_LEFT_BUTTON_MAX)
+        : [],
+    [candidateHomeButtonVisible, settings.toolbarLeftButtons],
+  );
   const toolbarButtonWidth = 42;
   const candidateToolbarLeftWidth = toolbarLeftButtons.length *
     toolbarButtonWidth;
@@ -2497,25 +2595,44 @@ function KeyboardContent(props: {
     metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
   );
   const highlightedCandidate = candidates[highlightedIdx];
-  const highlightedCandidateComment = highlightedCandidate
-    ? candidateComment(highlightedCandidate)
-    : "";
-  const highlightedCandidateWidth =
-    highlightedCandidate && candidateBarWidth > 0
-      ? candidateButtonNaturalWidth({
-        text: highlightedCandidate.text,
-        comment: highlightedCandidateComment,
-        index: highlightedIdx,
-        showIndex: settings.showCandidateComment,
-        candidateFontSize: metrics.candidateFontSize,
-        commentFontSize: metrics.candidateCommentFontSize,
-      })
-      : 0;
-  const candidateItems = candidates.map((candidate, index) => ({
-    candidate,
-    pageIndex: index,
-    absoluteIndex: pageNo * rimePageSize + index,
-  }));
+  const highlightedCandidateComment = useMemo(
+    () =>
+      highlightedCandidate && settings.showCandidateComment
+        ? highlightedCandidate.comment?.trim() ?? ""
+        : "",
+    [highlightedCandidate, settings.showCandidateComment],
+  );
+  const highlightedCandidateWidth = useMemo(
+    () =>
+      highlightedCandidate && candidateBarWidth > 0
+        ? candidateButtonNaturalWidth({
+          text: highlightedCandidate.text,
+          comment: highlightedCandidateComment,
+          index: highlightedIdx,
+          showIndex: settings.showCandidateComment,
+          candidateFontSize: metrics.candidateFontSize,
+          commentFontSize: metrics.candidateCommentFontSize,
+        })
+        : 0,
+    [
+      candidateBarWidth,
+      highlightedCandidate,
+      highlightedCandidateComment,
+      highlightedIdx,
+      metrics.candidateCommentFontSize,
+      metrics.candidateFontSize,
+      settings.showCandidateComment,
+    ],
+  );
+  const candidateItems = useMemo(
+    () =>
+      candidates.map((candidate, index) => ({
+        candidate,
+        pageIndex: index,
+        absoluteIndex: pageNo * rimePageSize + index,
+      })),
+    [candidates, pageNo, rimePageSize],
+  );
   const visibleCandidateItems = candidateItems;
   const candidateAutoScrollKey = highlightedCandidate
     ? `${pageNo}-${highlightedIdx}-${highlightedCandidate.text}`

@@ -63,14 +63,26 @@ zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang zhui zhun zhuo zi zong zou zu
 zuan zui zun zuo
 `.trim().split(/\s+/);
 
-const T9_SYLLABLE_OPTIONS = Array.from(new Set(PINYIN_SYLLABLES)).map((
-  label,
-  index,
-) => ({
-  label,
-  digits: t9DigitsForPinyin(label),
-  index,
-}));
+type T9SyllableOption = {
+  label: string;
+  digits: string;
+  index: number;
+};
+
+let t9SyllableOptionsCache: T9SyllableOption[] | null = null;
+
+function t9SyllableOptions() {
+  if (t9SyllableOptionsCache) return t9SyllableOptionsCache;
+  t9SyllableOptionsCache = Array.from(new Set(PINYIN_SYLLABLES)).map((
+    label,
+    index,
+  ) => ({
+    label,
+    digits: t9DigitsForPinyin(label),
+    index,
+  }));
+  return t9SyllableOptionsCache;
+}
 
 export function t9DigitsForPinyin(text: string): string {
   let digits = "";
@@ -141,7 +153,7 @@ function t9PinyinOptionsForTail(
   tail: string,
 ): T9PinyinOption[] {
   const seen = new Set<string>();
-  return T9_SYLLABLE_OPTIONS
+  return t9SyllableOptions()
     .filter((option) => {
       if (!option.digits || !tail.startsWith(option.digits)) return false;
       if (seen.has(option.label)) return false;

@@ -3,6 +3,7 @@ import {
   ColorPicker,
   Editor,
   ForEach,
+  Group,
   HStack,
   Image,
   List,
@@ -74,6 +75,10 @@ import {
   T9_PROCESSOR_SCHEMA_ENTRY,
 } from "./t9ProcessorInstall";
 import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet";
+import {
+  clearPerformanceDiagnostics,
+  performanceDiagnosticsReport,
+} from "./performanceDiagnostics";
 
 const THEME_OPTIONS: Array<{ value: RimeKeyboardTheme; label: string }> = [
   { value: "system", label: "跟随系统" },
@@ -1646,6 +1651,37 @@ function SettingsView() {
     updateSettings(DEFAULT_RIME_KEYBOARD_SETTINGS);
   }
 
+  async function copyPerformanceReport() {
+    const report = performanceDiagnosticsReport();
+    if (!report) {
+      await Dialog.alert({
+        title: "暂无性能数据",
+        message: "开启性能诊断并重新打开键盘，输入一段内容后再复制报告。",
+      });
+      return;
+    }
+    await Pasteboard.setString(report);
+    await Dialog.alert({
+      title: "已复制",
+      message: "性能报告已复制到剪贴板。",
+    });
+  }
+
+  async function clearPerformanceReport() {
+    const confirmed = await Dialog.confirm({
+      title: "清除性能报告",
+      message: "确定清除当前已采集的性能数据吗？",
+      cancelLabel: "取消",
+      confirmLabel: "清除",
+    });
+    if (!confirmed) return;
+    clearPerformanceDiagnostics();
+    await Dialog.alert({
+      title: "已清除",
+      message: "性能数据已清除。",
+    });
+  }
+
   async function updateT9ProcessorLua() {
     try {
       const result = await ensureT9ProcessorLuaInstalled();
@@ -2559,6 +2595,31 @@ function SettingsView() {
             value={settings.autoDeployOnLaunch}
             onChanged={(value) => patchSettings({ autoDeployOnLaunch: value })}
           />
+        </Section>
+        <Section header={<Text>性能诊断</Text>}>
+          <Toggle
+            title="性能诊断"
+            systemImage="gauge.with.dots.needle.50percent"
+            value={settings.performanceDiagnostics}
+            onChanged={(value) =>
+              patchSettings({ performanceDiagnostics: value })}
+          />
+          {settings.performanceDiagnostics
+            ? (
+              <Group>
+                <Button
+                  title="复制性能报告"
+                  systemImage="doc.on.doc"
+                  action={() => void copyPerformanceReport()}
+                />
+                <Button
+                  title="清除性能报告"
+                  systemImage="trash"
+                  action={() => void clearPerformanceReport()}
+                />
+              </Group>
+            )
+            : null}
         </Section>
       </List>
     );
