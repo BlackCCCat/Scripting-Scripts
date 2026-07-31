@@ -139,6 +139,18 @@ type RefreshOptions = {
   preserveT9FilterState?: boolean;
 };
 
+type RimeMetadata = {
+  ascii: boolean;
+  currentSchemaId: string | null;
+};
+
+type CandidateScrollTarget = {
+  key: string;
+  pageNo: number;
+  highlightedIdx: number;
+  anchor: "leading" | "center" | "trailing";
+};
+
 const NOTIFIED_RIME_OPTIONS = new Set([
   "ascii_mode",
   "full_shape",
@@ -147,6 +159,7 @@ const NOTIFIED_RIME_OPTIONS = new Set([
 ]);
 const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
 const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
+const PREEDIT_SCROLL_ESTIMATED_CHARACTER_WIDTH = 10;
 const TOOLBAR_TEMPLATE_CLIPBOARD = "{clipboard}";
 const LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD = "{{clipboard}}";
 const T9_OPTION_LIMIT = 48;
@@ -164,6 +177,32 @@ function stopGlobalRepeatingDelete() {
   }
   globalRepeatingDeleteTimer = null;
   globalRepeatingDeleteSafetyTimer = null;
+}
+
+function sameCandidates(
+  previous: Rime.Candidate[],
+  next: Rime.Candidate[],
+) {
+  if (previous === next) return true;
+  if (previous.length !== next.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    if (
+      previous[index].text !== next[index].text ||
+      previous[index].comment !== next[index].comment
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameNumberArray(previous: number[], next: number[]) {
+  if (previous === next) return true;
+  if (previous.length !== next.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index] !== next[index]) return false;
+  }
+  return true;
 }
 
 function t9PreeditCore(preedit: string) {
@@ -356,11 +395,20 @@ function KeyboardContent(props: {
   const [keyboardTypeOverride, setKeyboardTypeOverride] = useState<
     KeyboardType | null
   >(null);
+  const activeKeyboardType = keyboardTypeOverride ?? settings.keyboardType;
+  const isT9Keyboard = activeKeyboardType === "t9";
   const [keyboardAppearance, setKeyboardAppearance] = useState<
     KeyboardAppearance
   >(() => currentKeyboardAppearance());
-  const palette = paletteFor(settings, keyboardAppearance);
+  const palette = useMemo(
+    () => paletteFor(settings, keyboardAppearance),
+    [settings, keyboardAppearance],
+  );
   const sessionRef = useRef<Rime.Session | null>(null);
+  const rimeMetadataRef = useRef<RimeMetadata>({
+    ascii: false,
+    currentSchemaId: null,
+  });
 
   const [error, setError] = useState<string | null>(null);
   const [rimeState, setRimeState] = useState({
@@ -444,6 +492,7 @@ function KeyboardContent(props: {
   const candidateScrollProxyRef = useRef<any>(null);
   const preeditScrollTimerRef = useRef<any>(null);
   const candidateScrollTimerRef = useRef<any>(null);
+  const candidateScrollTargetRef = useRef<CandidateScrollTarget | null>(null);
   const lastPressFeedbackAtRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
@@ -456,10 +505,14 @@ function KeyboardContent(props: {
   const suppressSchemaMenuInlineRef = useRef(false);
   const rimeSetupStartedRef = useRef(false);
   const disposedRef = useRef(false);
-  const metrics = keyboardMetrics(
-    settings,
-    props.availableHeight,
-    props.availableWidth,
+  const metrics = useMemo(
+    () =>
+      keyboardMetrics(
+        settings,
+        props.availableHeight,
+        props.availableWidth,
+      ),
+    [settings, props.availableHeight, props.availableWidth],
   );
 
   useEffect(() => {
@@ -541,6 +594,38 @@ function KeyboardContent(props: {
     setT9FilterStateValue(next);
   }
 
+  function readRimeMetadata(session: Rime.Session): RimeMetadata {
+    return {
+      currentSchemaId: session.currentSchema?.id ?? null,
+      ascii: session.getOption("ascii_mode"),
+    };
+  }
+
+  function cacheRimeMetadata(patch: Partial<RimeMetadata>) {
+    rimeMetadataRef.current = {
+      ...rimeMetadataRef.current,
+      ...patch,
+    };
+  }
+
+  function applyRimeMetadata(patch: Partial<RimeMetadata>) {
+    cacheRimeMetadata(patch);
+    setRimeState((previous) => {
+      const nextAscii = patch.ascii ?? previous.ascii;
+      const nextSchemaId = patch.currentSchemaId === undefined
+        ? previous.currentSchemaId
+        : patch.currentSchemaId;
+      return previous.ascii === nextAscii &&
+          previous.currentSchemaId === nextSchemaId
+        ? previous
+        : {
+          ...previous,
+          ascii: nextAscii,
+          currentSchemaId: nextSchemaId,
+        };
+    });
+  }
+
   function clearT9ProcessorSelection(session = sessionRef.current) {
     if (!session) return;
     try {
@@ -578,11 +663,12 @@ function KeyboardContent(props: {
         return;
       }
       sessionRef.current = s;
+      rimeMetadataRef.current = readRimeMetadata(s);
       refresh(s);
       if (settings.showNotifications) {
         refreshKnownRimeOptionStates(s);
-        installRimeNotificationHandler();
       }
+      installRimeNotificationHandler();
       setRimeReady(true);
     } catch (e) {
       setRimeReady(false);
@@ -637,28 +723,45 @@ function KeyboardContent(props: {
       nextPreedit,
       ctx?.cursorPos ?? nextPreedit.length,
     );
-    setRimeState({
+    const nextCandidates = menu?.candidates ?? [];
+    const metadata = rimeMetadataRef.current;
+    const nextRimeState = {
       preedit: nextPreedit,
       preeditCursor: nextCursor,
-      candidates: menu?.candidates ?? [],
+      candidates: nextCandidates,
       highlightedIdx: menu?.highlightedIndex ?? 0,
       pageNo: menu?.pageNo ?? 0,
       rimePageSize: menu?.pageSize ?? 5,
-      currentSchemaId: session.currentSchema?.id ?? null,
-      ascii: session.getOption("ascii_mode"),
-    });
-    setT9DelimiterVisualPositions((prev) =>
-      nextPreedit
-        ? prev.filter((position) => position <= nextPreedit.length)
-        : []
+      currentSchemaId: metadata.currentSchemaId,
+      ascii: metadata.ascii,
+    };
+    setRimeState((previous) =>
+      previous.preedit === nextRimeState.preedit &&
+        previous.preeditCursor === nextRimeState.preeditCursor &&
+        previous.highlightedIdx === nextRimeState.highlightedIdx &&
+        previous.pageNo === nextRimeState.pageNo &&
+        previous.rimePageSize === nextRimeState.rimePageSize &&
+        previous.currentSchemaId === nextRimeState.currentSchemaId &&
+        previous.ascii === nextRimeState.ascii &&
+        sameCandidates(previous.candidates, nextRimeState.candidates)
+        ? previous
+        : nextRimeState
     );
-    if (options.resetT9FilterFromPreedit) {
+    if (isT9Keyboard) {
+      setT9DelimiterVisualPositions((previous) => {
+        const next = nextPreedit
+          ? previous.filter((position) => position <= nextPreedit.length)
+          : [];
+        return sameNumberArray(previous, next) ? previous : next;
+      });
+    }
+    if (isT9Keyboard && options.resetT9FilterFromPreedit) {
       setT9FilterState(t9UnselectedFilterFromPreedit(nextPreedit));
       setT9CandidatePinyinFilter(null);
     }
     if (!nextPreedit) {
       setBackslashWrapMode(false);
-      if (!options.preserveT9FilterState) {
+      if (isT9Keyboard && !options.preserveT9FilterState) {
         setT9CandidatePinyinFilter(null);
         clearT9ProcessorSelection(session);
         if (
@@ -672,7 +775,7 @@ function KeyboardContent(props: {
     if (!nextPreedit) {
       suppressSchemaMenuInlineRef.current = false;
       setCandidateExpanded(false);
-      setExpandedCandidates([]);
+      setExpandedCandidates((previous) => previous.length > 0 ? [] : previous);
       setExpandedBatchHasMore(false);
     }
   }
@@ -748,12 +851,24 @@ function KeyboardContent(props: {
   function handleRimeNotification(event: Rime.Event) {
     if (event.type === "schemaChanged") {
       rimeOptionStateRef.current = {};
+      const session = sessionRef.current;
+      applyRimeMetadata({
+        currentSchemaId: session?.currentSchema?.id ?? event.schemaId,
+        ...(session ? { ascii: session.getOption("ascii_mode") } : {}),
+      });
+      if (!settings.showNotifications) return;
       const schemaName = event.schemaName ||
         schemasRef.current.find((schema) => schema.id === event.schemaId)
           ?.name ||
         event.schemaId;
       showRimeNotificationToast(schemaName);
     } else if (event.type === "optionChanged") {
+      if (event.option === "ascii_mode") {
+        applyRimeMetadata({
+          ascii: sessionRef.current?.getOption("ascii_mode") ?? event.enabled,
+        });
+      }
+      if (!settings.showNotifications) return;
       if (!shouldShowOptionNotification(event.option, event.enabled)) return;
       showRimeNotificationToast(
         optionNotificationText(event.option, event.enabled),
@@ -1321,6 +1436,7 @@ function KeyboardContent(props: {
     keyCode: number,
     fallback?: string,
     replaceSelectAll = false,
+    refreshOptions: RefreshOptions = {},
   ) {
     if (replaceSelectAll) consumeSelectAllForReplacement();
     else clearSelectAllStateForExternalAction();
@@ -1330,7 +1446,7 @@ function KeyboardContent(props: {
       return;
     }
     const consumed = s.processKey(keyCode);
-    refresh(s);
+    refresh(s, refreshOptions);
     if (!consumed && fallback) insertTextReplacingSelectAll(fallback);
   }
 
@@ -1401,7 +1517,11 @@ function KeyboardContent(props: {
       if (shifted && !capsLocked) setShifted(false);
       return;
     }
-    processKey(typed.charCodeAt(0), typed, true);
+    processKey(
+      typed.charCodeAt(0),
+      typed,
+      true,
+    );
     if (backslashWrapMode) setBackslashWrapMode(false);
     if (shifted && !capsLocked) setShifted(false);
   }
@@ -1412,7 +1532,11 @@ function KeyboardContent(props: {
       insertTextReplacingSelectAll(typed);
       return;
     }
-    processKey(typed.charCodeAt(0), typed, true);
+    processKey(
+      typed.charCodeAt(0),
+      typed,
+      true,
+    );
     if (backslashWrapMode) setBackslashWrapMode(false);
   }
 
@@ -1448,7 +1572,7 @@ function KeyboardContent(props: {
   function pressBackspace() {
     const s = sessionRef.current;
     if (s && (s.context?.preedit?.length ?? 0) > 0) {
-      setT9CandidatePinyinFilter(null);
+      if (isT9Keyboard) setT9CandidatePinyinFilter(null);
       s.processKey(KEY_BACKSPACE);
       refresh(s, { resetT9FilterFromPreedit: isT9Keyboard });
     } else {
@@ -1530,7 +1654,7 @@ function KeyboardContent(props: {
     setExpandedCandidates([]);
     setExpandedBatchHasMore(false);
     setBackslashWrapMode(false);
-    clearT9ProcessorSelection(s);
+    if (isT9Keyboard) clearT9ProcessorSelection(s);
     try {
       CustomKeyboard.setMarkedText("", 0, 0);
       CustomKeyboard.unmarkText();
@@ -1615,6 +1739,7 @@ function KeyboardContent(props: {
     if (preedit) clearComposition();
     const next = !ascii;
     s.setOption("ascii_mode", next);
+    cacheRimeMetadata({ ascii: next });
     setShifted(false);
     setCapsLocked(false);
     refresh(s);
@@ -1628,6 +1753,7 @@ function KeyboardContent(props: {
     if (preedit) clearComposition();
     if (!ascii) {
       s.setOption("ascii_mode", true);
+      cacheRimeMetadata({ ascii: true });
       setShifted(false);
       setCapsLocked(false);
       refresh(s);
@@ -1642,6 +1768,7 @@ function KeyboardContent(props: {
     if (preedit) clearComposition();
     if (ascii) {
       s.setOption("ascii_mode", false);
+      cacheRimeMetadata({ ascii: false });
       setShifted(false);
       setCapsLocked(false);
       refresh(s);
@@ -1673,7 +1800,7 @@ function KeyboardContent(props: {
     const s = sessionRef.current;
     if (!s) return;
     s.clearComposition();
-    s.selectSchema(id);
+    if (s.selectSchema(id)) cacheRimeMetadata({ currentSchemaId: id });
     if (settings.showNotifications) refreshKnownRimeOptionStates(s);
     refresh(s);
   }
@@ -1791,6 +1918,7 @@ function KeyboardContent(props: {
     const s = sessionRef.current;
     if (ascii) {
       s?.setOption("ascii_mode", false);
+      if (s) cacheRimeMetadata({ ascii: false });
       setShifted(false);
       setCapsLocked(false);
     }
@@ -2241,8 +2369,6 @@ function KeyboardContent(props: {
       : "";
   }
 
-  const activeKeyboardType = keyboardTypeOverride ?? settings.keyboardType;
-  const isT9Keyboard = activeKeyboardType === "t9";
   const t9LocalComposing = isT9Keyboard &&
     (preedit.length > 0 || t9FilterState.digits.length > 0);
   const composing = preedit.length > 0 || t9LocalComposing;
@@ -2271,12 +2397,15 @@ function KeyboardContent(props: {
       </Group>
     )
     : null;
-  const candidateMenuActions =
-    (settings.candidateMenuCustomEnabled
-      ? settings.candidateMenuActions
-      : DEFAULT_CANDIDATE_MENU_ACTIONS).filter((item) =>
-        item.name.trim().length > 0 && item.action.trim().length > 0
-      );
+  const candidateMenuActions = useMemo(
+    () =>
+      (settings.candidateMenuCustomEnabled
+        ? settings.candidateMenuActions
+        : DEFAULT_CANDIDATE_MENU_ACTIONS).filter((item) =>
+          item.name.trim().length > 0 && item.action.trim().length > 0
+        ),
+    [settings.candidateMenuCustomEnabled, settings.candidateMenuActions],
+  );
   function candidateContextMenu(absoluteIndex: number) {
     return candidateMenuActions.length > 0
       ? (
@@ -2336,6 +2465,10 @@ function KeyboardContent(props: {
   const preeditScrollTargetKey = showsPreeditCaret
     ? preeditCaretScrollKey
     : preeditTailScrollKey;
+  const preeditNeedsAutoScroll = showsPreeditRow &&
+    keyboardPreedit.length > 0 &&
+    keyboardPreedit.length * PREEDIT_SCROLL_ESTIMATED_CHARACTER_WIDTH >
+      metrics.width - 16;
   const candidateHeaderHeight = settings.inlinePreedit
     ? metrics.candidateBarHeight
     : metrics.candidateBarHeight + metrics.preeditRowHeight + 2;
@@ -2401,7 +2534,7 @@ function KeyboardContent(props: {
   const expandedPagerWidth = 42;
   const expandedCandidateWidth = metrics.width - expandedPagerWidth -
     KEY_SPACING;
-  const showNextKeyboardButton = Device.isiPad;
+  const showNextKeyboardButton = useMemo(() => Device.isiPad, []);
   const bodyRowSpacing = 6;
   const visibleBodyRowCount = (settings.showFunctionRow ? 1 : 0) + 4;
   const normalKeyboardBodyHeight =
@@ -2420,14 +2553,45 @@ function KeyboardContent(props: {
   const numericPanelTopInset = settings.showFunctionRow
     ? bodyRowSpacing / 2
     : 0;
-  const t9PanelHeight = metrics.keyHeight * 3 + numericRowSpacing * 2;
-  const t9PanelTopInset = settings.showFunctionRow ? bodyRowSpacing / 2 : 0;
-  const t9PanelBottomInset = bodyRowSpacing / 2;
-  const t9LeftWidth = Math.max(42, Math.min(58, metrics.width * 0.15));
-  const t9RightWidth = Math.max(48, Math.min(70, metrics.width * 0.17));
-  const t9CenterWidth = metrics.width - t9LeftWidth - t9RightWidth -
-    KEY_SPACING * 2;
-  const t9KeyWidth = (t9CenterWidth - KEY_SPACING * 2) / 3;
+  const {
+    panelHeight: t9PanelHeight,
+    panelTopInset: t9PanelTopInset,
+    panelBottomInset: t9PanelBottomInset,
+    leftWidth: t9LeftWidth,
+    rightWidth: t9RightWidth,
+    centerWidth: t9CenterWidth,
+    keyWidth: t9KeyWidth,
+  } = useMemo(() => {
+    if (!isT9Keyboard) {
+      return {
+        panelHeight: 0,
+        panelTopInset: 0,
+        panelBottomInset: 0,
+        leftWidth: 0,
+        rightWidth: 0,
+        centerWidth: 0,
+        keyWidth: 0,
+      };
+    }
+    const leftWidth = Math.max(42, Math.min(58, metrics.width * 0.15));
+    const rightWidth = Math.max(48, Math.min(70, metrics.width * 0.17));
+    const centerWidth = metrics.width - leftWidth - rightWidth -
+      KEY_SPACING * 2;
+    return {
+      panelHeight: metrics.keyHeight * 3 + numericRowSpacing * 2,
+      panelTopInset: settings.showFunctionRow ? bodyRowSpacing / 2 : 0,
+      panelBottomInset: bodyRowSpacing / 2,
+      leftWidth,
+      rightWidth,
+      centerWidth,
+      keyWidth: (centerWidth - KEY_SPACING * 2) / 3,
+    };
+  }, [
+    isT9Keyboard,
+    metrics.keyHeight,
+    metrics.width,
+    settings.showFunctionRow,
+  ]);
   const bottomNumbersWidth = isT9Keyboard
     ? t9LeftWidth
     : metrics.bottom.numbers;
@@ -2451,7 +2615,7 @@ function KeyboardContent(props: {
       clearTimeout(preeditScrollTimerRef.current);
       preeditScrollTimerRef.current = null;
     }
-    if (!showsPreeditRow || preedit.length === 0) return;
+    if (!preeditNeedsAutoScroll) return;
     preeditScrollTimerRef.current = setTimeout(() => {
       preeditScrollTimerRef.current = null;
       preeditScrollProxyRef.current?.scrollTo(
@@ -2461,9 +2625,9 @@ function KeyboardContent(props: {
     }, 20);
   }, [
     metrics.width,
-    preedit,
+    keyboardPreedit,
+    preeditNeedsAutoScroll,
     preeditScrollTargetKey,
-    showsPreeditRow,
   ]);
 
   useEffect(() => {
@@ -2471,7 +2635,28 @@ function KeyboardContent(props: {
       clearTimeout(candidateScrollTimerRef.current);
       candidateScrollTimerRef.current = null;
     }
-    if (!candidateAutoScrollKey) return;
+    if (!candidateAutoScrollKey) {
+      candidateScrollTargetRef.current = null;
+      return;
+    }
+    const currentTarget: CandidateScrollTarget = {
+      key: candidateAutoScrollKey,
+      pageNo,
+      highlightedIdx,
+      anchor: candidateAutoScrollAnchor,
+    };
+    const previousTarget = candidateScrollTargetRef.current;
+    candidateScrollTargetRef.current = currentTarget;
+    const targetMoved = previousTarget == null ||
+      previousTarget.pageNo !== currentTarget.pageNo ||
+      previousTarget.highlightedIdx !== currentTarget.highlightedIdx;
+    const alignmentChanged = previousTarget?.anchor !== currentTarget.anchor;
+    const changedNonLeadingCandidate =
+      previousTarget?.key !== currentTarget.key &&
+      currentTarget.anchor !== "leading";
+    if (!targetMoved && !alignmentChanged && !changedNonLeadingCandidate) {
+      return;
+    }
     candidateScrollTimerRef.current = setTimeout(() => {
       candidateScrollTimerRef.current = null;
       candidateScrollProxyRef.current?.scrollTo(
@@ -2483,7 +2668,9 @@ function KeyboardContent(props: {
     candidateAutoScrollAnchor,
     candidateAutoScrollKey,
     candidateBarWidth,
+    highlightedIdx,
     highlightedCandidateWidth,
+    pageNo,
   ]);
   const expandedPanelHeight = normalKeyboardBodyHeight;
 
@@ -3197,8 +3384,10 @@ function KeyboardContent(props: {
     visibleBodyRowCount - 1,
     metrics.keyHeight,
   );
-  const t9EnterOverlayHeight = metrics.keyHeight * 2 + t9PanelBottomInset +
-    bottomRowTouch.visualOffsetY;
+  const t9EnterOverlayHeight = isT9Keyboard
+    ? metrics.keyHeight * 2 + t9PanelBottomInset +
+      bottomRowTouch.visualOffsetY
+    : 0;
 
   hitTargetActionsRef.current = {
     nextKeyboard: () => CustomKeyboard.nextKeyboard(),
@@ -3301,10 +3490,10 @@ function KeyboardContent(props: {
       settings.modeComposingEnabled,
       isT9Keyboard,
       keyboardTypeOverride,
-      settings.t9SpaceSwipeUp,
-      settings.t9SpaceSwipeUpMode,
-      settings.t9SpaceSwipeDown,
-      settings.t9SpaceSwipeDownMode,
+      isT9Keyboard ? settings.t9SpaceSwipeUp : null,
+      isT9Keyboard ? settings.t9SpaceSwipeUpMode : null,
+      isT9Keyboard ? settings.t9SpaceSwipeDown : null,
+      isT9Keyboard ? settings.t9SpaceSwipeDownMode : null,
       preedit.length,
       candidates.length,
     ],
@@ -3334,8 +3523,9 @@ function KeyboardContent(props: {
     ],
   );
   const cachedT9HitTargets = useMemo(
-    () => T9_KEY_ROWS.map((row) => t9RowHitTargets(row)),
+    () => isT9Keyboard ? T9_KEY_ROWS.map((row) => t9RowHitTargets(row)) : [],
     [
+      isT9Keyboard,
       t9KeyWidth,
       t9RightWidth,
       settings.t9KeySwipeUp,
