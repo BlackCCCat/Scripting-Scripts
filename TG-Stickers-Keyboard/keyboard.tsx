@@ -211,8 +211,20 @@ function KeyboardView() {
         </HStack>
       </ScrollView>
 
-      <ScrollView axes="vertical" frame={{ maxWidth: "infinity", maxHeight: "infinity" }} gesture={swipeGesture}>
-        <LazyVGrid columns={GRID_COLUMNS} spacing={4}>
+      <ScrollView
+        axes="vertical"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        background={"rgba(0,0,0,0.001)" as any}
+        contentShape="rect"
+        simultaneousGesture={swipeGesture}
+      >
+        <LazyVGrid
+          columns={GRID_COLUMNS}
+          spacing={4}
+          frame={{ maxWidth: "infinity" }}
+          background={"rgba(0,0,0,0.001)" as any}
+          contentShape="rect"
+        >
           {stickers.map((sticker) => (
             <StickerKey
               key={sticker.id}
