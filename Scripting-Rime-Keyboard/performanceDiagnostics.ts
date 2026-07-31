@@ -1,4 +1,7 @@
+import { keyboardHasActiveTouches } from "./keyboard/utils";
+
 export type PerformanceDiagnosticSample = {
+  sampleId: number;
   timestamp: string;
   keyboardType: "qwerty" | "t9";
   action: string;
@@ -10,14 +13,18 @@ export type PerformanceDiagnosticSample = {
   stateChanged: boolean;
   candidateCount: number;
   preeditLength: number;
+  renderCommitMs?: number;
+  endToCommitMs?: number;
 };
 
 export type PendingPerformanceDiagnosticSample = {
+  sampleId: number;
   startedAt: number;
   timestamp: string;
   keyboardType: "qwerty" | "t9";
   action: string;
   processKeyMs: number;
+  renderScheduledAt?: number;
 };
 
 type StoredPerformanceDiagnostics = {
@@ -25,11 +32,13 @@ type StoredPerformanceDiagnostics = {
   sampleInterval: number;
   updatedAt: string;
   samples: PerformanceDiagnosticSample[];
+  pressVisualCommits: number[];
 };
 
 const STORAGE_KEY = "rime_keyboard_performance_diagnostics_v1";
 const SAMPLE_INTERVAL = 10;
 const SAMPLE_LIMIT = 240;
+const PRESS_VISUAL_SAMPLE_INTERVAL = 10;
 const FLUSH_DELAY_MS = 700;
 
 export function performanceNow() {
@@ -52,6 +61,9 @@ function loadStoredDiagnostics(): StoredPerformanceDiagnostics {
         sampleInterval: SAMPLE_INTERVAL,
         updatedAt: stored.updatedAt || new Date().toISOString(),
         samples: stored.samples.slice(-SAMPLE_LIMIT),
+        pressVisualCommits: Array.isArray(stored.pressVisualCommits)
+          ? stored.pressVisualCommits.slice(-SAMPLE_LIMIT)
+          : [],
       };
     }
   } catch {
@@ -62,11 +74,14 @@ function loadStoredDiagnostics(): StoredPerformanceDiagnostics {
     sampleInterval: SAMPLE_INTERVAL,
     updatedAt: new Date().toISOString(),
     samples: [],
+    pressVisualCommits: [],
   };
 }
 
 export class KeyboardPerformanceDiagnostics {
   private inputCount = 0;
+  private sampleId = 0;
+  private pressVisualCommitCount = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
   private stored: StoredPerformanceDiagnostics;
@@ -82,6 +97,7 @@ export class KeyboardPerformanceDiagnostics {
     this.inputCount += 1;
     if (this.inputCount % SAMPLE_INTERVAL !== 0) return null;
     return {
+      sampleId: ++this.sampleId,
       startedAt: performanceNow(),
       timestamp: new Date().toISOString(),
       keyboardType,
@@ -99,9 +115,13 @@ export class KeyboardPerformanceDiagnostics {
       | "action"
       | "processKeyMs"
       | "totalMs"
+      | "sampleId"
+      | "renderCommitMs"
+      | "endToCommitMs"
     >,
   ) {
     this.stored.samples.push({
+      sampleId: pending.sampleId,
       timestamp: pending.timestamp,
       keyboardType: pending.keyboardType,
       action: pending.action,
@@ -116,6 +136,42 @@ export class KeyboardPerformanceDiagnostics {
     });
     if (this.stored.samples.length > SAMPLE_LIMIT) {
       this.stored.samples.splice(0, this.stored.samples.length - SAMPLE_LIMIT);
+    }
+    this.dirty = true;
+    this.scheduleFlush();
+  }
+
+  recordRimeRenderCommit(pending: PendingPerformanceDiagnosticSample) {
+    if (pending.renderScheduledAt == null) return;
+    let sample: PerformanceDiagnosticSample | undefined;
+    for (let index = this.stored.samples.length - 1; index >= 0; index -= 1) {
+      const candidate = this.stored.samples[index];
+      if (candidate.sampleId === pending.sampleId) {
+        sample = candidate;
+        break;
+      }
+    }
+    if (!sample) return;
+    const committedAt = performanceNow();
+    sample.renderCommitMs = roundedMs(
+      committedAt - pending.renderScheduledAt,
+    );
+    sample.endToCommitMs = roundedMs(committedAt - pending.startedAt);
+    this.dirty = true;
+    this.scheduleFlush();
+  }
+
+  recordPressVisualCommit(durationMs: number) {
+    this.pressVisualCommitCount += 1;
+    if (this.pressVisualCommitCount % PRESS_VISUAL_SAMPLE_INTERVAL !== 0) {
+      return;
+    }
+    this.stored.pressVisualCommits.push(roundedMs(durationMs));
+    if (this.stored.pressVisualCommits.length > SAMPLE_LIMIT) {
+      this.stored.pressVisualCommits.splice(
+        0,
+        this.stored.pressVisualCommits.length - SAMPLE_LIMIT,
+      );
     }
     this.dirty = true;
     this.scheduleFlush();
@@ -144,6 +200,10 @@ export class KeyboardPerformanceDiagnostics {
     if (this.flushTimer != null) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
+      if (keyboardHasActiveTouches()) {
+        this.scheduleFlush();
+        return;
+      }
       this.flush();
     }, FLUSH_DELAY_MS);
   }
@@ -185,6 +245,12 @@ export function performanceDiagnosticsReport(): string | null {
   const samples = stored.samples;
   if (samples.length === 0) return null;
   const changedCount = samples.filter((sample) => sample.stateChanged).length;
+  const renderCommitSamples = samples.flatMap((sample) =>
+    sample.renderCommitMs == null ? [] : [sample.renderCommitMs]
+  );
+  const endToCommitSamples = samples.flatMap((sample) =>
+    sample.endToCommitMs == null ? [] : [sample.endToCommitMs]
+  );
   const lines = [
     "Scripting Rime Keyboard 性能报告",
     `更新时间: ${stored.updatedAt}`,
@@ -198,6 +264,9 @@ export function performanceDiagnosticsReport(): string | null {
     ),
     metricLine("refresh", samples.map((sample) => sample.refreshMs)),
     metricLine("total", samples.map((sample) => sample.totalMs)),
+    metricLine("renderCommit", renderCommitSamples),
+    metricLine("endToCommit", endToCommitSamples),
+    metricLine("pressVisualCommit", stored.pressVisualCommits),
     "",
     "最近样本:",
     ...samples.slice(-30).map((sample) =>
@@ -210,6 +279,8 @@ export function performanceDiagnosticsReport(): string | null {
         `compare=${sample.candidateCompareMs.toFixed(3)}`,
         `refresh=${sample.refreshMs.toFixed(3)}`,
         `total=${sample.totalMs.toFixed(3)}`,
+        `render=${sample.renderCommitMs?.toFixed(3) ?? "-"}`,
+        `endToCommit=${sample.endToCommitMs?.toFixed(3) ?? "-"}`,
         `changed=${sample.stateChanged ? 1 : 0}`,
         `candidates=${sample.candidateCount}`,
         `preeditLength=${sample.preeditLength}`,

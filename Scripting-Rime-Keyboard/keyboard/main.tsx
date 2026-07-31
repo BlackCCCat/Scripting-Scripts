@@ -51,6 +51,8 @@ import {
   CandidateButton,
   candidateButtonNaturalWidth,
   KeyFace,
+  KeyPressVisualContext,
+  KeyPressVisualController,
 } from "./components";
 import { KEY_SPACING, SIDE_PADDING } from "./constants";
 import { keyboardMetrics } from "./metrics";
@@ -65,14 +67,18 @@ import {
 } from "./t9Pinyin";
 import type { KeyHitTarget } from "./types";
 import {
+  clearKeyboardActionTouches,
+  clearQueuedKeyboardActions,
   createTouchIntentMachine,
   disposeConfiguredHaptics,
+  enqueueKeyboardAction,
   hapticInterval,
   nearestHitTarget,
   playConfiguredClick,
   playConfiguredHaptic,
   playPreparedConfiguredHaptic,
   prepareConfiguredHaptics,
+  setKeyboardActionTouchActive,
 } from "./utils";
 import { ensureT9ProcessorLuaInstalled } from "../t9ProcessorInstall";
 import {
@@ -94,7 +100,6 @@ const SPACE_CANDIDATE_DRAG_STEP = 24;
 const DELETE_LONG_PRESS_DURATION = 920;
 const DELETE_REPEAT_SAFETY_DURATION = 4200;
 const CURSOR_REPEAT_DURATION = 420;
-const PRESSED_RELEASE_DELAY = 260;
 const PRESSED_STUCK_RELEASE_DELAY = 1800;
 const LONG_PRESS_PRESSED_RELEASE_DELAY = 2600;
 const EXPANDED_RIME_PAGE_BATCH = 4;
@@ -474,10 +479,6 @@ function KeyboardContent(props: {
   const [t9CandidatePinyinFilter, setT9CandidatePinyinFilter] = useState<
     T9CandidatePinyinFilter | null
   >(null);
-  const [pressedKeyIds, setPressedKeyIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-
   const [schemas, setSchemas] = useState<Rime.Schema[]>([]);
   const lastShiftTapRef = useRef(0);
   const deletedTextRef = useRef("");
@@ -497,6 +498,12 @@ function KeyboardContent(props: {
   const rimeOptionStateRef = useRef<Record<string, boolean>>({});
   const t9FilterStateRef = useRef<T9FilterState>({ digits: "", selected: [] });
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
+  const pressVisualControllerRef = useRef<KeyPressVisualController | null>(
+    null,
+  );
+  if (pressVisualControllerRef.current == null) {
+    pressVisualControllerRef.current = new KeyPressVisualController();
+  }
   const letterLongPressPopupRef = useRef<LetterLongPressPopup | null>(null);
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
@@ -512,8 +519,6 @@ function KeyboardContent(props: {
   const lastPressFeedbackAtRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
-  const swipeTriggerDistanceRef = useRef(settings.swipeTriggerDistance);
-  const lastSwipeSettingsReloadAtRef = useRef(0);
   const suppressLetterLongPressUntilRef = useRef(
     Date.now() +
       LETTER_LONG_PRESS_LAYER_GRACE_MS,
@@ -524,6 +529,9 @@ function KeyboardContent(props: {
   const performanceDiagnosticsRef = useRef<
     KeyboardPerformanceDiagnostics | null
   >(null);
+  const pendingRimeRenderSamplesRef = useRef<
+    PendingPerformanceDiagnosticSample[]
+  >([]);
   if (
     settings.performanceDiagnostics && performanceDiagnosticsRef.current == null
   ) {
@@ -540,6 +548,7 @@ function KeyboardContent(props: {
   );
 
   useEffect(() => {
+    clearQueuedKeyboardActions();
     stopRepeatingBackspace();
     const syncKeyboardAppearance = (
       traits?: CustomKeyboard.TextInputTraits,
@@ -599,8 +608,9 @@ function KeyboardContent(props: {
         clearTimeout(timer);
       }
       pressedReleaseTimersRef.current.clear();
-      pressedKeyIdsRef.current = new Set();
-      setPressedKeyIds(new Set());
+      pressedKeyIdsRef.current.clear();
+      pressVisualControllerRef.current?.clear();
+      clearQueuedKeyboardActions();
       stopRepeatingBackspace();
       performanceDiagnosticsRef.current?.dispose();
       disposeConfiguredHaptics();
@@ -611,8 +621,29 @@ function KeyboardContent(props: {
   }, []);
 
   useEffect(() => {
+    const controller = pressVisualControllerRef.current;
+    controller?.setCommitListener(
+      settings.performanceDiagnostics
+        ? (durationMs) =>
+          performanceDiagnosticsRef.current?.recordPressVisualCommit(
+            durationMs,
+          )
+        : null,
+    );
+    return () => controller?.setCommitListener(null);
+  }, [settings.performanceDiagnostics]);
+
+  useEffect(() => {
     schemasRef.current = schemas;
   }, [schemas]);
+
+  useEffect(() => {
+    if (!settings.performanceDiagnostics) return;
+    const pending = pendingRimeRenderSamplesRef.current.splice(0);
+    for (const sample of pending) {
+      performanceDiagnosticsRef.current?.recordRimeRenderCommit(sample);
+    }
+  }, [settings.performanceDiagnostics ? rimeState : null]);
 
   function setT9FilterState(next: T9FilterState) {
     t9FilterStateRef.current = next;
@@ -784,6 +815,10 @@ function KeyboardContent(props: {
     const stateChanged = !unchanged;
     if (stateChanged) {
       rimeStateRef.current = nextRimeState;
+      if (performanceSample) {
+        performanceSample.renderScheduledAt = performanceNow();
+        pendingRimeRenderSamplesRef.current.push(performanceSample);
+      }
       setRimeState(nextRimeState);
     }
     if (isT9Keyboard) {
@@ -1002,26 +1037,20 @@ function KeyboardContent(props: {
     );
   }
 
-  function schedulePressedRelease(id: string) {
-    schedulePressedFallbackRelease(id, PRESSED_RELEASE_DELAY);
-  }
-
-  function setKeyPressed(id: string, pressed: boolean, fallback = true) {
+  function setKeyPressed(id: string, pressed: boolean) {
     const current = pressedKeyIdsRef.current;
     if (pressed) {
-      if (fallback) schedulePressedRelease(id);
-      else schedulePressedFallbackRelease(id, PRESSED_STUCK_RELEASE_DELAY);
+      schedulePressedFallbackRelease(id, PRESSED_STUCK_RELEASE_DELAY);
     } else clearPressedReleaseTimer(id);
     if (pressed === current.has(id)) return;
-    const next = new Set(current);
-    if (pressed) next.add(id);
-    else next.delete(id);
-    pressedKeyIdsRef.current = next;
-    setPressedKeyIds(next);
+    if (pressed) current.add(id);
+    else current.delete(id);
+    setKeyboardActionTouchActive(id, pressed);
+    pressVisualControllerRef.current?.setPressed(id, pressed);
   }
 
   function holdKeyPressedUntilRelease(id: string) {
-    setKeyPressed(id, true, false);
+    setKeyPressed(id, true);
     schedulePressedFallbackRelease(id, LONG_PRESS_PRESSED_RELEASE_DELAY);
   }
 
@@ -1031,9 +1060,13 @@ function KeyboardContent(props: {
     }
     pressedReleaseTimersRef.current.clear();
     setLetterLongPressPopup(null);
-    if (pressedKeyIdsRef.current.size === 0) return;
-    pressedKeyIdsRef.current = new Set();
-    setPressedKeyIds(new Set());
+    if (pressedKeyIdsRef.current.size === 0) {
+      clearKeyboardActionTouches();
+      return;
+    }
+    pressedKeyIdsRef.current.clear();
+    clearKeyboardActionTouches();
+    pressVisualControllerRef.current?.clear();
   }
 
   function cleanupContinuousActionForKey(id: string) {
@@ -1051,7 +1084,7 @@ function KeyboardContent(props: {
   }
 
   function isPressed(id: string) {
-    return pressedKeyIds.has(id);
+    return pressedKeyIdsRef.current.has(id);
   }
 
   function setLetterLongPressPopup(next: LetterLongPressPopup | null) {
@@ -1114,7 +1147,7 @@ function KeyboardContent(props: {
   function beginKeyTouch(id: string) {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
-    setKeyPressed(id, true, false);
+    setKeyPressed(id, true);
     playPressFeedback();
   }
 
@@ -1133,13 +1166,7 @@ function KeyboardContent(props: {
   }
 
   function currentSwipeTriggerDistance() {
-    const now = Date.now();
-    if (now - lastSwipeSettingsReloadAtRef.current > 1000) {
-      lastSwipeSettingsReloadAtRef.current = now;
-      swipeTriggerDistanceRef.current =
-        loadRimeKeyboardSettings().swipeTriggerDistance;
-    }
-    return swipeTriggerDistanceRef.current;
+    return settings.swipeTriggerDistance;
   }
 
   function isSpaceCursorKey(id: string | undefined) {
@@ -1255,7 +1282,7 @@ function KeyboardContent(props: {
         playReleaseFeedback();
         setKeyPressed(target.id, false);
         clearRowTracking(rowId, true);
-        action();
+        enqueueKeyboardAction(action);
         return true;
       },
       onPress: () => {
@@ -1264,7 +1291,7 @@ function KeyboardContent(props: {
         playReleaseFeedback();
         setKeyPressed(target.id, false);
         clearRowTracking(rowId, true);
-        target.onPress();
+        enqueueKeyboardAction(target.onPress);
       },
     });
     rowGestureMachineRef.current.set(rowId, machine);
@@ -1433,7 +1460,7 @@ function KeyboardContent(props: {
     if (target) activeHitTargetRef.current.set(rowId, target);
     else activeHitTargetRef.current.delete(rowId);
     if (target) {
-      setKeyPressed(target.id, true, false);
+      setKeyPressed(target.id, true);
       playPressFeedback();
       rowSpaceDragConsumedRef.current.set(rowId, false);
       spaceCursorDragXRef.current = null;
@@ -2475,21 +2502,27 @@ function KeyboardContent(props: {
   const usesComposingFunctionRow = composing && !symbolLayer &&
     settings.composingFunctionRowEnabled;
   const usesT9MixedFunctionRow = usesComposingFunctionRow && isT9Keyboard;
-  const schemaMenu = schemas.length > 1
-    ? (
-      <Group>
-        {schemas.map((schema) => (
-          <Button
-            key={schema.id}
-            title={`${schema.id === currentSchemaId ? "✓ " : ""}${schema.name}${
-              schema.name === schema.id ? "" : ` (${schema.id})`
-            }`}
-            action={() => switchSchema(schema.id)}
-          />
-        ))}
-      </Group>
-    )
-    : null;
+  const schemaMenu = useMemo(
+    () =>
+      schemas.length > 1
+        ? (
+          <Group>
+            {schemas.map((schema) => (
+              <Button
+                key={schema.id}
+                title={`${
+                  schema.id === currentSchemaId ? "✓ " : ""
+                }${schema.name}${
+                  schema.name === schema.id ? "" : ` (${schema.id})`
+                }`}
+                action={() => switchSchema(schema.id)}
+              />
+            ))}
+          </Group>
+        )
+        : null,
+    [currentSchemaId, schemas],
+  );
   const candidateMenuActions = useMemo(
     () =>
       (settings.candidateMenuCustomEnabled
@@ -2921,11 +2954,18 @@ function KeyboardContent(props: {
         system
         passive
         active={isPressed(id)}
-        onPress={() => runWithFeedback(() => runComposingFunctionPress(key))}
+        onPress={() =>
+          hitTargetActionsRef.current.runWithFeedback(() =>
+            hitTargetActionsRef.current.runComposingFunctionPress(key)
+          )}
         onSwipeUp={() =>
-          runWithFeedback(() => runComposingFunctionSwipe("up", key))}
+          hitTargetActionsRef.current.runWithFeedback(() =>
+            hitTargetActionsRef.current.runComposingFunctionSwipe("up", key)
+          )}
         onSwipeDown={() =>
-          runWithFeedback(() => runComposingFunctionSwipe("down", key))}
+          hitTargetActionsRef.current.runWithFeedback(() =>
+            hitTargetActionsRef.current.runComposingFunctionSwipe("down", key)
+          )}
       />
     );
   }
@@ -2950,21 +2990,29 @@ function KeyboardContent(props: {
         passive
         active={isPressed(id)}
         selected={key === "select" && selectAllActive}
-        onPress={() => runWithFeedback(() => runIdleFunctionPress(key))}
+        onPress={() =>
+          hitTargetActionsRef.current.runWithFeedback(() =>
+            hitTargetActionsRef.current.runIdleFunctionPress(key)
+          )}
         onLongPress={key === "left"
-          ? () => startRepeatingCursorMove(-1)
+          ? () => hitTargetActionsRef.current.startRepeatingCursorMove(-1)
           : key === "right"
-          ? () => startRepeatingCursorMove(1)
+          ? () => hitTargetActionsRef.current.startRepeatingCursorMove(1)
           : undefined}
         onLongPressEnd={key === "left" || key === "right"
-          ? stopRepeatingCursorMove
+          ? () => hitTargetActionsRef.current.stopRepeatingCursorMove()
           : undefined}
         longPressDuration={key === "left" || key === "right"
           ? CURSOR_REPEAT_DURATION
           : undefined}
-        onSwipeUp={() => runWithFeedback(() => runIdleFunctionSwipe("up", key))}
+        onSwipeUp={() =>
+          hitTargetActionsRef.current.runWithFeedback(() =>
+            hitTargetActionsRef.current.runIdleFunctionSwipe("up", key)
+          )}
         onSwipeDown={() =>
-          runWithFeedback(() => runIdleFunctionSwipe("down", key))}
+          hitTargetActionsRef.current.runWithFeedback(() =>
+            hitTargetActionsRef.current.runIdleFunctionSwipe("down", key)
+          )}
       />
     );
   }
@@ -3162,27 +3210,6 @@ function KeyboardContent(props: {
         onSwipeUp: () => hitTargetActionsRef.current.insertNewline(),
       },
     ];
-  }
-
-  function t9RowHitTargets(row: typeof T9_KEYS) {
-    return row.map((item, index) => {
-      const displayX = index * (t9KeyWidth + KEY_SPACING);
-      return {
-        id: `t9-${item.digit}`,
-        ...horizontalHitFrame(displayX, t9KeyWidth, index, row.length),
-        onPress: () => hitTargetActionsRef.current.pressT9Digit(item.digit),
-        onSwipeUp: () =>
-          hitTargetActionsRef.current.runConfiguredAction(
-            settings.t9KeySwipeUp[item.digit],
-            settings.t9KeySwipeUpModes[item.digit],
-          ),
-        onSwipeDown: () =>
-          hitTargetActionsRef.current.runConfiguredAction(
-            settings.t9KeySwipeDown[item.digit],
-            settings.t9KeySwipeDownModes[item.digit],
-          ),
-      };
-    });
   }
 
   function collectExpandedCandidateBatch(session = sessionRef.current) {
@@ -3507,6 +3534,20 @@ function KeyboardContent(props: {
     : 0;
 
   hitTargetActionsRef.current = {
+    runWithFeedback,
+    beginKeyTouch,
+    endKeyTouch,
+    pressShift,
+    shiftSwipeUp,
+    pressLetter,
+    startLetterLongPress: (ch: string) => {
+      setLetterLongPressPopup({ key: ch, selected: "upper" });
+      holdKeyPressedUntilRelease(ch);
+    },
+    updateLetterLongPressSelection,
+    finishLetterLongPress,
+    letterLongPressEnabled,
+    runLetterSwipe,
     nextKeyboard: () => CustomKeyboard.nextKeyboard(),
     toggleSymbolLayer,
     pressBacktick: () => pressSymbol("`"),
@@ -3556,7 +3597,12 @@ function KeyboardContent(props: {
     selectT9Pinyin,
     pressBackspace,
     startRepeatingBackspace,
+    startBackspaceLongPress: () => {
+      holdKeyPressedUntilRelease("backspace");
+      startRepeatingBackspace("backspace");
+    },
     stopRepeatingBackspace,
+    backspaceLongPressMove,
     backspaceSwipeLeft,
     backspaceSwipeUp,
     backspaceSwipeDown,
@@ -3611,7 +3657,7 @@ function KeyboardContent(props: {
       isT9Keyboard ? settings.t9SpaceSwipeUpMode : null,
       isT9Keyboard ? settings.t9SpaceSwipeDown : null,
       isT9Keyboard ? settings.t9SpaceSwipeDownMode : null,
-      preedit.length,
+      composing,
       candidates.length,
     ],
   );
@@ -3639,18 +3685,522 @@ function KeyboardContent(props: {
       numericRowSpacing,
     ],
   );
-  const cachedT9HitTargets = useMemo(
-    () => isT9Keyboard ? T9_KEY_ROWS.map((row) => t9RowHitTargets(row)) : [],
+  const cachedT9DigitRows = useMemo(
+    () =>
+      isT9Keyboard
+        ? T9_KEY_ROWS.map((row, rowIndex) => {
+          const rowTouch = t9TouchFrame(rowIndex);
+          return (
+            <HStack
+              key={`t9-row-${rowIndex}`}
+              spacing={0}
+              frame={{
+                width: t9CenterWidth,
+                height: rowTouch.touchHeight,
+              }}
+            >
+              {row.map((item, index) => {
+                const label = settings.uppercaseLetterLabels
+                  ? item.letters
+                  : item.letters.toLowerCase();
+                const touchWidth = t9KeyWidth +
+                  (index === 0 || index === row.length - 1
+                    ? KEY_SPACING / 2
+                    : KEY_SPACING);
+                return (
+                  <KeyFace
+                    key={`t9-${item.digit}`}
+                    id={`t9-${item.digit}`}
+                    label={label}
+                    topLeft={settings.t9KeySwipeUp[item.digit]}
+                    topRight={settings.t9KeySwipeDown[item.digit] || undefined}
+                    palette={palette}
+                    width={t9KeyWidth}
+                    height={metrics.keyHeight}
+                    touchWidth={touchWidth}
+                    touchHeight={rowTouch.touchHeight}
+                    visualOffsetX={index === 0 ? 0 : KEY_SPACING / 2}
+                    visualOffsetY={rowTouch.visualOffsetY}
+                    labelFontSize={item.letters.length > 3 ? 20 : 22}
+                    active={isPressed(`t9-${item.digit}`)}
+                    popupLabel={label}
+                    popupSwipeUpLabel={settings.t9KeySwipeUp[item.digit]}
+                    popupSwipeDownLabel={settings.t9KeySwipeDown[item.digit] ||
+                      undefined}
+                    showPopup={settings.showKeyPopups}
+                    onPress={() =>
+                      hitTargetActionsRef.current.pressT9Digit(item.digit)}
+                    onTouchStart={() =>
+                      hitTargetActionsRef.current.beginKeyTouch(
+                        `t9-${item.digit}`,
+                      )}
+                    onTouchEnd={() =>
+                      hitTargetActionsRef.current.endKeyTouch(
+                        `t9-${item.digit}`,
+                      )}
+                    onSwipeUp={() =>
+                      hitTargetActionsRef.current.runConfiguredAction(
+                        settings.t9KeySwipeUp[item.digit],
+                        settings.t9KeySwipeUpModes[item.digit],
+                      )}
+                    onSwipeDown={() =>
+                      hitTargetActionsRef.current.runConfiguredAction(
+                        settings.t9KeySwipeDown[item.digit],
+                        settings.t9KeySwipeDownModes[item.digit],
+                      )}
+                    swipeTriggerDistance={settings.swipeTriggerDistance}
+                  />
+                );
+              })}
+            </HStack>
+          );
+        })
+        : null,
     [
       isT9Keyboard,
+      metrics.keyHeight,
+      palette,
+      settings,
+      t9CenterWidth,
       t9KeyWidth,
-      t9RightWidth,
-      settings.t9KeySwipeUp,
-      settings.t9KeySwipeDown,
-      settings.t9KeySwipeUpModes,
-      settings.t9KeySwipeDownModes,
     ],
   );
+  const cachedQwertyLetterRows = useMemo(
+    () =>
+      isT9Keyboard ? null : LETTER_ROWS.map((row, rowIndex) => {
+        const sideInset = rowIndex === 1 ? metrics.secondRowInset : 0;
+        const rowTouch = bodyTouchFrame(
+          (settings.showFunctionRow ? 1 : 0) + rowIndex,
+          metrics.keyHeight,
+        );
+        const letterTouchWidth = (index: number) => {
+          if (rowIndex === 0) {
+            return metrics.letterWidth +
+              (index === 0 || index === row.length - 1
+                ? KEY_SPACING / 2
+                : KEY_SPACING);
+          }
+          if (rowIndex === 2) return metrics.letterWidth + KEY_SPACING;
+          if (index === 0) {
+            return sideInset + metrics.letterWidth + KEY_SPACING / 2;
+          }
+          if (index === row.length - 1) {
+            return metrics.letterWidth + sideInset + KEY_SPACING / 2;
+          }
+          return metrics.letterWidth + KEY_SPACING;
+        };
+        const letterVisualOffset = (index: number) =>
+          rowIndex === 0
+            ? index === 0 ? 0 : KEY_SPACING / 2
+            : rowIndex === 2
+            ? KEY_SPACING / 2
+            : index === 0
+            ? sideInset
+            : KEY_SPACING / 2;
+        return (
+          <HStack
+            key={`row-${rowIndex}`}
+            spacing={0}
+            frame={{
+              width: metrics.width,
+              height: rowTouch.touchHeight,
+            }}
+            zIndex={10 + rowIndex}
+          >
+            {rowIndex === 2
+              ? (
+                <KeyFace
+                  id="shift"
+                  image={composing && settings.shiftComposingEnabled
+                    ? settings.shiftComposingIcon
+                    : capsLocked
+                    ? "capslock.fill"
+                    : shifted
+                    ? "shift.fill"
+                    : "shift"}
+                  palette={palette}
+                  width={metrics.shiftWidth}
+                  height={metrics.keyHeight}
+                  touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
+                  touchHeight={rowTouch.touchHeight}
+                  visualOffsetX={0}
+                  visualOffsetY={rowTouch.visualOffsetY}
+                  system
+                  selected={shifted || capsLocked}
+                  active={isPressed("shift")}
+                  onPress={() => hitTargetActionsRef.current.pressShift()}
+                  onTouchStart={() =>
+                    hitTargetActionsRef.current.beginKeyTouch("shift")}
+                  onTouchEnd={() =>
+                    hitTargetActionsRef.current.endKeyTouch("shift")}
+                  onSwipeUp={() => hitTargetActionsRef.current.shiftSwipeUp()}
+                  onSwipeStart={() =>
+                    hitTargetActionsRef.current.stopRepeatingBackspace()}
+                  swipeTriggerDistance={settings.swipeTriggerDistance}
+                />
+              )
+              : null}
+            {row.map((ch, index) => {
+              const letterLabel = backslashWrapMode
+                ? BACKSLASH_SYMBOLS[ch]
+                : shifted || capsLocked || settings.uppercaseLetterLabels
+                ? ch.toUpperCase()
+                : ch;
+              const swipeUpImage = !backslashWrapMode &&
+                  settings.showHintSymbols
+                ? settings.letterSwipeUpSymbols[ch] || undefined
+                : undefined;
+              const swipeUpLabel = !backslashWrapMode &&
+                  settings.showHintSymbols && !swipeUpImage
+                ? settings.letterSwipeUp[ch]
+                : undefined;
+              const swipeDownImage = !backslashWrapMode &&
+                  settings.showHintSymbols
+                ? settings.letterSwipeDownSymbols[ch] || undefined
+                : undefined;
+              const swipeDownLabel = !backslashWrapMode &&
+                  settings.showHintSymbols && !swipeDownImage
+                ? settings.letterSwipeDown[ch]
+                : undefined;
+              return (
+                <KeyFace
+                  key={ch}
+                  id={ch}
+                  label={letterLabel}
+                  labelFontSize={backslashWrapMode
+                    ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
+                    : shifted || capsLocked || settings.uppercaseLetterLabels
+                    ? 24
+                    : 27}
+                  topLeft={swipeUpLabel}
+                  topLeftImage={swipeUpImage}
+                  topRight={swipeDownLabel}
+                  topRightImage={swipeDownImage}
+                  palette={palette}
+                  width={metrics.letterWidth}
+                  height={metrics.keyHeight}
+                  touchWidth={letterTouchWidth(index)}
+                  touchHeight={rowTouch.touchHeight}
+                  visualOffsetX={letterVisualOffset(index)}
+                  visualOffsetY={rowTouch.visualOffsetY}
+                  active={isPressed(ch)}
+                  popupLabel={letterLongPressPopup?.key === ch
+                    ? undefined
+                    : letterLabel}
+                  popupSwipeUpLabel={swipeUpLabel}
+                  popupSwipeUpImage={swipeUpImage}
+                  popupSwipeDownLabel={swipeDownLabel}
+                  popupSwipeDownImage={swipeDownImage}
+                  popupOptions={letterLongPressPopup?.key === ch
+                    ? [
+                      {
+                        label: ch,
+                        selected: letterLongPressPopup.selected === "lower",
+                      },
+                      {
+                        label: ch.toUpperCase(),
+                        selected: letterLongPressPopup.selected === "upper",
+                      },
+                    ]
+                    : undefined}
+                  showPopup={settings.showKeyPopups}
+                  onPress={() => hitTargetActionsRef.current.pressLetter(ch)}
+                  onTouchStart={() =>
+                    hitTargetActionsRef.current.beginKeyTouch(ch)}
+                  onTouchEnd={() => hitTargetActionsRef.current.endKeyTouch(ch)}
+                  onLongPress={() =>
+                    hitTargetActionsRef.current.startLetterLongPress(ch)}
+                  onLongPressMove={(details) =>
+                    hitTargetActionsRef.current.updateLetterLongPressSelection(
+                      ch,
+                      details,
+                    )}
+                  onLongPressEnd={() =>
+                    hitTargetActionsRef.current.finishLetterLongPress(ch)}
+                  longPressEnabled={() =>
+                    hitTargetActionsRef.current.letterLongPressEnabled()}
+                  longPressDuration={settings.letterLongPressDuration}
+                  onSwipeUp={() =>
+                    hitTargetActionsRef.current.runLetterSwipe("up", ch)}
+                  onSwipeDown={() =>
+                    hitTargetActionsRef.current.runLetterSwipe("down", ch)}
+                  swipeTriggerDistance={settings.swipeTriggerDistance}
+                />
+              );
+            })}
+            {rowIndex === 2
+              ? (
+                <KeyFace
+                  id="backspace"
+                  image="delete.left"
+                  palette={palette}
+                  width={metrics.shiftWidth}
+                  height={metrics.keyHeight}
+                  touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
+                  touchHeight={rowTouch.touchHeight}
+                  visualOffsetX={KEY_SPACING / 2}
+                  visualOffsetY={rowTouch.visualOffsetY}
+                  system
+                  active={isPressed("backspace")}
+                  onPress={() => hitTargetActionsRef.current.pressBackspace()}
+                  onTouchStart={() =>
+                    hitTargetActionsRef.current.beginKeyTouch("backspace")}
+                  onTouchEnd={() =>
+                    hitTargetActionsRef.current.endKeyTouch("backspace")}
+                  onLongPress={() =>
+                    hitTargetActionsRef.current.startBackspaceLongPress()}
+                  onLongPressEnd={() =>
+                    hitTargetActionsRef.current.stopRepeatingBackspace()}
+                  onLongPressMove={(details) =>
+                    hitTargetActionsRef.current.backspaceLongPressMove(details)}
+                  longPressDuration={DELETE_LONG_PRESS_DURATION}
+                  onSwipeLeft={() =>
+                    hitTargetActionsRef.current.backspaceSwipeLeft()}
+                  onSwipeUp={() =>
+                    hitTargetActionsRef.current.backspaceSwipeUp()}
+                  onSwipeDown={() =>
+                    hitTargetActionsRef.current.backspaceSwipeDown()}
+                  onSwipeStart={() =>
+                    hitTargetActionsRef.current.stopRepeatingBackspace()}
+                  swipeTriggerDistance={settings.swipeTriggerDistance}
+                />
+              )
+              : null}
+          </HStack>
+        );
+      }),
+    [
+      backslashWrapMode,
+      bodyRowSpacing,
+      capsLocked,
+      composing,
+      isT9Keyboard,
+      letterLongPressPopup,
+      metrics,
+      palette,
+      settings,
+      shifted,
+      visibleBodyRowCount,
+    ],
+  );
+  const cachedFunctionRow = useMemo(() => {
+    if (!settings.showFunctionRow) return null;
+    if (usesComposingFunctionRow) {
+      return (
+        <HStack
+          spacing={KEY_SPACING}
+          frame={{
+            width: metrics.width,
+            height: functionRowTouch.touchHeight,
+          }}
+          contentShape="rect"
+          highPriorityGesture={hitRowGesture(
+            "func-comp",
+            cachedComposingFunctionHitTargets,
+          )}
+        >
+          {settings.composingFunctionOrder.map(
+            usesT9MixedFunctionRow
+              ? renderT9MixedFunctionKey
+              : renderComposingFunctionKey,
+          )}
+        </HStack>
+      );
+    }
+    return (
+      <HStack
+        spacing={KEY_SPACING}
+        frame={{
+          width: metrics.width,
+          height: functionRowTouch.touchHeight,
+        }}
+        contentShape="rect"
+        highPriorityGesture={hitRowGesture(
+          "func-idle",
+          cachedIdleFunctionHitTargets,
+        )}
+      >
+        {settings.idleFunctionOrder.map(renderIdleFunctionKey)}
+      </HStack>
+    );
+  }, [
+    cachedComposingFunctionHitTargets,
+    cachedIdleFunctionHitTargets,
+    functionRowTouch.touchHeight,
+    metrics,
+    palette,
+    selectAllActive,
+    settings,
+    usesComposingFunctionRow,
+    usesT9MixedFunctionRow,
+  ]);
+  const cachedQwertyBottomRow = useMemo(() => {
+    if (symbolLayer || isT9Keyboard) return null;
+    const run = (action: () => void) =>
+      hitTargetActionsRef.current.runWithFeedback(action);
+    return (
+      <HStack
+        spacing={KEY_SPACING}
+        frame={{
+          width: metrics.width,
+          height: bottomRowTouch.touchHeight,
+        }}
+        contentShape="rect"
+        highPriorityGesture={hitRowGesture(
+          "bottom-row",
+          cachedBottomRowHitTargets,
+        )}
+      >
+        {showNextKeyboardButton
+          ? (
+            <KeyFace
+              id="next-keyboard"
+              image="globe"
+              palette={palette}
+              width={bottomSplitButtonWidth}
+              height={metrics.keyHeight}
+              touchHeight={bottomRowTouch.touchHeight}
+              visualOffsetY={bottomRowTouch.visualOffsetY}
+              system
+              passive
+              active={isPressed("next-keyboard")}
+              onPress={() =>
+                run(() => hitTargetActionsRef.current.nextKeyboard())}
+            />
+          )
+          : null}
+        <KeyFace
+          id="numbers"
+          label="123"
+          palette={palette}
+          width={showNextKeyboardButton
+            ? bottomSplitButtonWidth
+            : bottomNumbersWidth}
+          height={metrics.keyHeight}
+          touchHeight={bottomRowTouch.touchHeight}
+          visualOffsetY={bottomRowTouch.visualOffsetY}
+          system
+          passive
+          active={isPressed("numbers")}
+          onPress={() =>
+            run(() => hitTargetActionsRef.current.toggleSymbolLayer())}
+          onSwipeUp={() =>
+            run(() => hitTargetActionsRef.current.pressBacktick())}
+        />
+        <KeyFace
+          id="comma"
+          label=","
+          topCenter="."
+          topCenterForeground={palette.primary}
+          palette={palette}
+          width={bottomCommaWidth}
+          height={metrics.keyHeight}
+          touchHeight={bottomRowTouch.touchHeight}
+          visualOffsetY={bottomRowTouch.visualOffsetY}
+          passive
+          active={isPressed("comma")}
+          onPress={() => run(() => hitTargetActionsRef.current.pressComma())}
+          onSwipeUp={() => run(() => hitTargetActionsRef.current.pressPeriod())}
+        />
+        <KeyFace
+          id="space"
+          image="space"
+          bottomRight={settings.showWanxiangLabel
+            ? settings.spaceLabel
+            : undefined}
+          bottomRightFontSize={settings.spaceLabel.length > 4
+            ? 8
+            : settings.spaceLabel.length > 2
+            ? 10
+            : 12}
+          palette={palette}
+          width={bottomSpaceWidth}
+          height={metrics.keyHeight}
+          touchHeight={bottomRowTouch.touchHeight}
+          visualOffsetY={bottomRowTouch.visualOffsetY}
+          system
+          passive
+          active={isPressed("space")}
+          onPress={() => run(() => hitTargetActionsRef.current.pressSpace())}
+          onSwipeUp={() =>
+            run(() =>
+              hitTargetActionsRef.current.processSpaceSwipeCandidate("2")
+            )}
+          onSwipeDown={() =>
+            run(() =>
+              hitTargetActionsRef.current.processSpaceSwipeCandidate("3")
+            )}
+          onSwipeLeft={() =>
+            run(() => hitTargetActionsRef.current.moveCursorSafely(-1))}
+          onSwipeRight={() =>
+            run(() => hitTargetActionsRef.current.moveCursorSafely(1))}
+        />
+        <KeyFace
+          id="mode"
+          image={composing && settings.modeComposingEnabled
+            ? settings.modeComposingIcon
+            : undefined}
+          modeTopLeft={composing && settings.modeComposingEnabled
+            ? undefined
+            : "中"}
+          modeBottomRight={composing && settings.modeComposingEnabled
+            ? undefined
+            : "英"}
+          modeTopLeftActive={!ascii}
+          palette={palette}
+          width={bottomModeWidth}
+          height={metrics.keyHeight}
+          touchHeight={bottomRowTouch.touchHeight}
+          visualOffsetY={bottomRowTouch.visualOffsetY}
+          system
+          passive
+          active={isPressed("mode")}
+          labelFontSize={18}
+          onPress={() => run(() => hitTargetActionsRef.current.pressMode())}
+          onSwipeUp={() => run(() => hitTargetActionsRef.current.modeSwipeUp())}
+          onSwipeDown={() =>
+            run(() => hitTargetActionsRef.current.modeSwipeDown())}
+          contextMenu={schemaMenu != null
+            ? { menuItems: schemaMenu }
+            : undefined}
+        />
+        <KeyFace
+          id="enter"
+          image="paperplane.fill"
+          palette={palette}
+          width={bottomEnterWidth}
+          height={metrics.keyHeight}
+          touchHeight={bottomRowTouch.touchHeight}
+          visualOffsetY={bottomRowTouch.visualOffsetY}
+          system
+          passive
+          active={isPressed("enter")}
+          onPress={() => run(() => hitTargetActionsRef.current.pressReturn())}
+          onSwipeUp={() =>
+            run(() => hitTargetActionsRef.current.insertNewline())}
+        />
+      </HStack>
+    );
+  }, [
+    ascii,
+    bottomCommaWidth,
+    bottomEnterWidth,
+    bottomModeWidth,
+    bottomNumbersWidth,
+    bottomRowTouch.touchHeight,
+    bottomRowTouch.visualOffsetY,
+    bottomSpaceWidth,
+    bottomSplitButtonWidth,
+    cachedBottomRowHitTargets,
+    composing,
+    isT9Keyboard,
+    metrics,
+    palette,
+    schemaMenu,
+    settings,
+    showNextKeyboardButton,
+    symbolLayer,
+  ]);
 
   function renderT9LeftColumn() {
     const bg = palette.keyOverrides["t9-left-column"] ?? palette.keyBg;
@@ -3724,557 +4274,518 @@ function KeyboardContent(props: {
   }
 
   return (
-    <VStack
-      spacing={6}
-      padding={{ horizontal: SIDE_PADDING, top: 4, bottom: 2 }}
-      frame={{
-        width: metrics.width + SIDE_PADDING * 2,
-        maxHeight: "infinity" as any,
-      }}
-    >
-      <ZStack
+    <KeyPressVisualContext.Provider value={pressVisualControllerRef.current}>
+      <VStack
+        spacing={6}
+        padding={{ horizontal: SIDE_PADDING, top: 4, bottom: 2 }}
         frame={{
-          width: metrics.width,
-          height: candidateHeaderHeight,
-          alignment: "bottomTrailing" as any,
+          width: metrics.width + SIDE_PADDING * 2,
+          maxHeight: "infinity" as any,
         }}
       >
-        <VStack
-          spacing={showsPreeditRow ? 2 : 0}
+        <ZStack
           frame={{
             width: metrics.width,
             height: candidateHeaderHeight,
-            alignment: "leading" as any,
+            alignment: "bottomTrailing" as any,
           }}
         >
-          {showsPreeditRow
-            ? (
+          <VStack
+            spacing={showsPreeditRow ? 2 : 0}
+            frame={{
+              width: metrics.width,
+              height: candidateHeaderHeight,
+              alignment: "leading" as any,
+            }}
+          >
+            {showsPreeditRow
+              ? (
+                <ScrollViewReader>
+                  {(proxy) => {
+                    preeditScrollProxyRef.current = proxy;
+                    return (
+                      <ScrollView
+                        axes="horizontal"
+                        scrollIndicator="hidden"
+                        frame={{
+                          width: metrics.width,
+                          height: metrics.preeditRowHeight,
+                        }}
+                      >
+                        <HStack
+                          spacing={1}
+                          padding={{ leading: 8, trailing: 8 }}
+                          frame={{
+                            height: metrics.preeditRowHeight,
+                            alignment: "bottomLeading" as any,
+                          }}
+                        >
+                          <Text
+                            font="caption"
+                            lineLimit={1}
+                            fixedSize={{ horizontal: true, vertical: true }}
+                            foregroundStyle={palette.primary as any}
+                          >
+                            {preeditBeforeCaret}
+                          </Text>
+                          {showsPreeditCaret
+                            ? (
+                              <Text
+                                font="caption2"
+                                baselineOffset={-7}
+                                foregroundStyle={palette.primary as any}
+                                padding={{ bottom: -2 }}
+                              >
+                                ^
+                              </Text>
+                            )
+                            : null}
+                          {showsPreeditCaret
+                            ? (
+                              <VStack
+                                key={preeditCaretScrollKey}
+                                frame={{
+                                  width: 1,
+                                  height: metrics.preeditRowHeight,
+                                }}
+                              />
+                            )
+                            : null}
+                          {preeditAfterCaret
+                            ? (
+                              <Text
+                                font="caption"
+                                lineLimit={1}
+                                fixedSize={{ horizontal: true, vertical: true }}
+                                foregroundStyle={palette.primary as any}
+                              >
+                                {preeditAfterCaret}
+                              </Text>
+                            )
+                            : null}
+                          <VStack
+                            key={preeditTailScrollKey}
+                            frame={{
+                              width: 1,
+                              height: metrics.preeditRowHeight,
+                            }}
+                          />
+                        </HStack>
+                      </ScrollView>
+                    );
+                  }}
+                </ScrollViewReader>
+              )
+              : null}
+            <HStack
+              spacing={KEY_SPACING}
+              frame={{
+                width: metrics.width,
+                height: metrics.candidateBarHeight,
+              }}
+            >
+              {toolbarLeftButtons.map((item) => (
+                <KeyFace
+                  key={`toolbar-left-${item.id}`}
+                  id={`toolbar-left-${item.id}`}
+                  image={item.symbol}
+                  palette={palette}
+                  width={toolbarButtonWidth}
+                  height={metrics.candidateButtonHeight}
+                  system
+                  plain
+                  foregroundStyle={palette.primaryOverrides?.[
+                    `toolbar-left-${item.id}`
+                  ] ?? palette.primary}
+                  onPress={() =>
+                    runWithFeedbackBeforeAction(
+                      () => runToolbarAction(item.action),
+                      EXIT_ACTION_FEEDBACK_DELAY,
+                    )}
+                  contextMenu={toolbarContextMenuProps(item)}
+                />
+              ))}
               <ScrollViewReader>
                 {(proxy) => {
-                  preeditScrollProxyRef.current = proxy;
+                  candidateScrollProxyRef.current = proxy;
                   return (
                     <ScrollView
                       axes="horizontal"
                       scrollIndicator="hidden"
                       frame={{
-                        width: metrics.width,
-                        height: metrics.preeditRowHeight,
+                        width: candidateBarWidth,
+                        height: metrics.candidateBarHeight,
                       }}
                     >
                       <HStack
-                        spacing={1}
-                        padding={{ leading: 8, trailing: 8 }}
+                        spacing={5}
+                        buttonStyle="plain"
                         frame={{
-                          height: metrics.preeditRowHeight,
-                          alignment: "bottomLeading" as any,
+                          minWidth: candidateBarWidth,
+                          height: metrics.candidateBarHeight,
+                          alignment: "leading" as any,
                         }}
+                        background={"rgba(0,0,0,0.001)" as any}
+                        contentShape="rect"
                       >
-                        <Text
-                          font="caption"
-                          lineLimit={1}
-                          fixedSize={{ horizontal: true, vertical: true }}
-                          foregroundStyle={palette.primary as any}
-                        >
-                          {preeditBeforeCaret}
-                        </Text>
-                        {showsPreeditCaret
-                          ? (
-                            <Text
-                              font="caption2"
-                              baselineOffset={-7}
-                              foregroundStyle={palette.primary as any}
-                              padding={{ bottom: -2 }}
-                            >
-                              ^
-                            </Text>
-                          )
-                          : null}
-                        {showsPreeditCaret
-                          ? (
-                            <VStack
-                              key={preeditCaretScrollKey}
-                              frame={{
-                                width: 1,
-                                height: metrics.preeditRowHeight,
-                              }}
-                            />
-                          )
-                          : null}
-                        {preeditAfterCaret
-                          ? (
-                            <Text
-                              font="caption"
-                              lineLimit={1}
-                              fixedSize={{ horizontal: true, vertical: true }}
-                              foregroundStyle={palette.primary as any}
-                            >
-                              {preeditAfterCaret}
-                            </Text>
-                          )
-                          : null}
-                        <VStack
-                          key={preeditTailScrollKey}
-                          frame={{
-                            width: 1,
-                            height: metrics.preeditRowHeight,
-                          }}
-                        />
+                        {visibleCandidateItems.map(({
+                          candidate,
+                          pageIndex,
+                          absoluteIndex,
+                        }) => (
+                          <CandidateButton
+                            key={`${pageNo}-${pageIndex}-${candidate.text}`}
+                            index={pageIndex}
+                            candidate={candidate}
+                            comment={candidateComment(candidate)}
+                            showIndex={settings.showCandidateComment}
+                            selected={pageIndex === highlightedIdx}
+                            palette={palette}
+                            height={metrics.candidateButtonHeight}
+                            candidateFontSize={metrics.candidateFontSize}
+                            commentFontSize={metrics.candidateCommentFontSize}
+                            contextMenu={candidateContextMenuProps(
+                              absoluteIndex,
+                            )}
+                            onPress={() =>
+                              runWithFeedback(() =>
+                                selectCandidateAbsolute(absoluteIndex)
+                              )}
+                          />
+                        ))}
                       </HStack>
                     </ScrollView>
                   );
                 }}
               </ScrollViewReader>
+              {candidateRightButtonVisible
+                ? (
+                  <KeyFace
+                    id="candidate-right"
+                    image={candidateRightButtonImage}
+                    palette={palette}
+                    width={candidateRightButtonWidth}
+                    height={metrics.candidateButtonHeight}
+                    system
+                    plain
+                    foregroundStyle={palette.primaryOverrides
+                      ?.["candidate-right"] ??
+                      palette.primary}
+                    onPress={() =>
+                      runWithFeedbackBeforeAction(
+                        pressCandidateRightButton,
+                        effectiveCandidateRightButtonMode === "dismiss"
+                          ? EXIT_ACTION_FEEDBACK_DELAY
+                          : 0,
+                      )}
+                  />
+                )
+                : null}
+            </HStack>
+          </VStack>
+          {rimeNotificationToast
+            ? (
+              <HStack
+                allowsHitTesting={false}
+                frame={{
+                  width: metrics.width,
+                  height: candidateHeaderHeight,
+                  alignment: "bottomTrailing" as any,
+                }}
+              >
+                {renderRimeNotificationToast()}
+              </HStack>
             )
             : null}
-          <HStack
-            spacing={KEY_SPACING}
-            frame={{ width: metrics.width, height: metrics.candidateBarHeight }}
+        </ZStack>
+
+        <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
+          <VStack
+            spacing={0}
+            frame={{
+              width: metrics.width,
+              height: expandedPanelHeight,
+              alignment: "top" as any,
+            }}
+            opacity={candidateExpanded ? 0 : 1}
           >
-            {toolbarLeftButtons.map((item) => (
-              <KeyFace
-                key={`toolbar-left-${item.id}`}
-                id={`toolbar-left-${item.id}`}
-                image={item.symbol}
-                palette={palette}
-                width={toolbarButtonWidth}
-                height={metrics.candidateButtonHeight}
-                system
-                plain
-                foregroundStyle={palette.primaryOverrides?.[
-                  `toolbar-left-${item.id}`
-                ] ?? palette.primary}
-                onPress={() =>
-                  runWithFeedbackBeforeAction(
-                    () => runToolbarAction(item.action),
-                    EXIT_ACTION_FEEDBACK_DELAY,
-                  )}
-                contextMenu={toolbarContextMenuProps(item)}
-              />
-            ))}
-            <ScrollViewReader>
-              {(proxy) => {
-                candidateScrollProxyRef.current = proxy;
-                return (
-                  <ScrollView
-                    axes="horizontal"
-                    scrollIndicator="hidden"
+            <Group>
+              {cachedFunctionRow}
+
+              {symbolLayer
+                ? (
+                  <VStack
+                    spacing={0}
                     frame={{
-                      width: candidateBarWidth,
-                      height: metrics.candidateBarHeight,
+                      width: metrics.width,
+                      height: numericPanelHeight + numericPanelTopInset,
+                      alignment: "topLeading" as any,
                     }}
                   >
-                    <HStack
-                      spacing={5}
-                      buttonStyle="plain"
-                      frame={{
-                        minWidth: candidateBarWidth,
-                        height: metrics.candidateBarHeight,
-                        alignment: "leading" as any,
-                      }}
-                      background={"rgba(0,0,0,0.001)" as any}
-                      contentShape="rect"
-                    >
-                      {visibleCandidateItems.map(({
-                        candidate,
-                        pageIndex,
-                        absoluteIndex,
-                      }) => (
-                        <CandidateButton
-                          key={`${pageNo}-${pageIndex}-${candidate.text}`}
-                          index={pageIndex}
-                          candidate={candidate}
-                          comment={candidateComment(candidate)}
-                          showIndex={settings.showCandidateComment}
-                          selected={pageIndex === highlightedIdx}
-                          palette={palette}
-                          height={metrics.candidateButtonHeight}
-                          candidateFontSize={metrics.candidateFontSize}
-                          commentFontSize={metrics.candidateCommentFontSize}
-                          contextMenu={candidateContextMenuProps(
-                            absoluteIndex,
-                          )}
-                          onPress={() =>
-                            runWithFeedback(() =>
-                              selectCandidateAbsolute(absoluteIndex)
-                            )}
+                    {numericPanelTopInset > 0
+                      ? (
+                        <VStack
+                          frame={{
+                            width: metrics.width,
+                            height: numericPanelTopInset,
+                          }}
                         />
-                      ))}
-                    </HStack>
-                  </ScrollView>
-                );
-              }}
-            </ScrollViewReader>
-            {candidateRightButtonVisible
-              ? (
-                <KeyFace
-                  id="candidate-right"
-                  image={candidateRightButtonImage}
-                  palette={palette}
-                  width={candidateRightButtonWidth}
-                  height={metrics.candidateButtonHeight}
-                  system
-                  plain
-                  foregroundStyle={palette.primaryOverrides
-                    ?.["candidate-right"] ??
-                    palette.primary}
-                  onPress={() =>
-                    runWithFeedbackBeforeAction(
-                      pressCandidateRightButton,
-                      effectiveCandidateRightButtonMode === "dismiss"
-                        ? EXIT_ACTION_FEEDBACK_DELAY
-                        : 0,
-                    )}
-                />
-              )
-              : null}
-          </HStack>
-        </VStack>
-        {rimeNotificationToast
-          ? (
-            <HStack
-              allowsHitTesting={false}
-              frame={{
-                width: metrics.width,
-                height: candidateHeaderHeight,
-                alignment: "bottomTrailing" as any,
-              }}
-            >
-              {renderRimeNotificationToast()}
-            </HStack>
-          )
-          : null}
-      </ZStack>
-
-      <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
-        <VStack
-          spacing={0}
-          frame={{
-            width: metrics.width,
-            height: expandedPanelHeight,
-            alignment: "top" as any,
-          }}
-          opacity={candidateExpanded ? 0 : 1}
-        >
-          <Group>
-            {settings.showFunctionRow
-              ? (
-                usesComposingFunctionRow
-                  ? (
+                      )
+                      : null}
                     <HStack
                       spacing={KEY_SPACING}
                       frame={{
                         width: metrics.width,
-                        height: functionRowTouch.touchHeight,
-                      }}
-                      contentShape="rect"
-                      highPriorityGesture={hitRowGesture(
-                        "func-comp",
-                        cachedComposingFunctionHitTargets,
-                      )}
-                    >
-                      {settings.composingFunctionOrder.map(
-                        usesT9MixedFunctionRow
-                          ? renderT9MixedFunctionKey
-                          : renderComposingFunctionKey,
-                      )}
-                    </HStack>
-                  )
-                  : (
-                    <HStack
-                      spacing={KEY_SPACING}
-                      frame={{
-                        width: metrics.width,
-                        height: functionRowTouch.touchHeight,
-                      }}
-                      contentShape="rect"
-                      highPriorityGesture={hitRowGesture(
-                        "func-idle",
-                        cachedIdleFunctionHitTargets,
-                      )}
-                    >
-                      {settings.idleFunctionOrder.map(renderIdleFunctionKey)}
-                    </HStack>
-                  )
-              )
-              : null}
-
-            {symbolLayer
-              ? (
-                <VStack
-                  spacing={0}
-                  frame={{
-                    width: metrics.width,
-                    height: numericPanelHeight + numericPanelTopInset,
-                    alignment: "topLeading" as any,
-                  }}
-                >
-                  {numericPanelTopInset > 0
-                    ? (
-                      <VStack
-                        frame={{
-                          width: metrics.width,
-                          height: numericPanelTopInset,
-                        }}
-                      />
-                    )
-                    : null}
-                  <HStack
-                    spacing={KEY_SPACING}
-                    frame={{ width: metrics.width, height: numericPanelHeight }}
-                  >
-                    <ZStack
-                      frame={{
-                        width: numericLeftWidth,
                         height: numericPanelHeight,
                       }}
-                      background={palette.nativeKeyStyle
-                        ? "clear" as any
-                        : palette.keyBg as any}
-                      foregroundStyle={palette.primary as any}
-                      glassEffect={(palette.nativeKeyStyle
-                        ? { type: "rect", cornerRadius: 8 }
-                        : undefined) as any}
-                      clipShape={{ type: "rect", cornerRadius: 8 }}
-                      shadow={palette.nativeKeyStyle ? undefined : {
-                        color: palette.shadow as any,
-                        radius: 1,
-                        y: 1,
-                      }}
                     >
-                      <ScrollView
-                        axes="vertical"
-                        scrollIndicator="hidden"
+                      <ZStack
                         frame={{
                           width: numericLeftWidth,
                           height: numericPanelHeight,
                         }}
+                        background={palette.nativeKeyStyle
+                          ? "clear" as any
+                          : palette.keyBg as any}
+                        foregroundStyle={palette.primary as any}
+                        glassEffect={(palette.nativeKeyStyle
+                          ? { type: "rect", cornerRadius: 8 }
+                          : undefined) as any}
+                        clipShape={{ type: "rect", cornerRadius: 8 }}
+                        shadow={palette.nativeKeyStyle ? undefined : {
+                          color: palette.shadow as any,
+                          radius: 1,
+                          y: 1,
+                        }}
                       >
-                        <VStack
-                          spacing={0}
+                        <ScrollView
+                          axes="vertical"
+                          scrollIndicator="hidden"
                           frame={{
                             width: numericLeftWidth,
-                            alignment: "top" as any,
+                            height: numericPanelHeight,
                           }}
                         >
-                          {NUMERIC_SYMBOLS.map((item) => (
-                            <Text
-                              key={`numeric-symbol-${item.label}`}
-                              font={18}
-                              frame={{
-                                width: numericLeftWidth,
-                                height: numericPanelHeight / 5,
-                                alignment: "center" as any,
-                              }}
-                              contentShape="rect"
-                              onTapGesture={() =>
-                                runWithFeedback(() => pressSymbol(item.value))}
-                            >
-                              {item.label}
-                            </Text>
-                          ))}
-                        </VStack>
-                      </ScrollView>
-                    </ZStack>
-
-                    <VStack
-                      spacing={0}
-                      frame={{
-                        width: numericCenterWidth,
-                        height: numericPanelHeight,
-                      }}
-                    >
-                      {NUMERIC_DIGIT_ROWS.map((row, rowIndex) => {
-                        const hitTargets =
-                          cachedNumericDigitHitTargets[rowIndex] ?? [];
-                        const rowTouch = numericTouchFrame(rowIndex);
-                        return (
-                          <HStack
-                            key={`numeric-row-${rowIndex}`}
-                            spacing={KEY_SPACING}
+                          <VStack
+                            spacing={0}
                             frame={{
-                              width: numericCenterWidth,
-                              height: rowTouch.touchHeight,
+                              width: numericLeftWidth,
+                              alignment: "top" as any,
                             }}
-                            contentShape="rect"
-                            highPriorityGesture={hitRowGesture(
-                              `num-row-${rowIndex}`,
-                              hitTargets,
-                            )}
                           >
-                            {row.map((value) => (
-                              <KeyFace
-                                key={`numeric-${value}`}
-                                id={`numeric-${value}`}
-                                label={value}
-                                palette={palette}
-                                width={numericKeyWidth}
-                                height={metrics.keyHeight}
-                                touchHeight={rowTouch.touchHeight}
-                                visualOffsetY={rowTouch.visualOffsetY}
-                                labelFontSize={24}
-                                passive
-                                active={isPressed(`numeric-${value}`)}
-                                popupLabel={value}
-                                showPopup={settings.showKeyPopups}
-                                onPress={() =>
+                            {NUMERIC_SYMBOLS.map((item) => (
+                              <Text
+                                key={`numeric-symbol-${item.label}`}
+                                font={18}
+                                frame={{
+                                  width: numericLeftWidth,
+                                  height: numericPanelHeight / 5,
+                                  alignment: "center" as any,
+                                }}
+                                contentShape="rect"
+                                onTapGesture={() =>
                                   runWithFeedback(() =>
-                                    pressNumericDigit(value)
+                                    pressSymbol(item.value)
                                   )}
-                              />
+                              >
+                                {item.label}
+                              </Text>
                             ))}
-                          </HStack>
-                        );
-                      })}
-                      <HStack
-                        spacing={KEY_SPACING}
+                          </VStack>
+                        </ScrollView>
+                      </ZStack>
+
+                      <VStack
+                        spacing={0}
                         frame={{
                           width: numericCenterWidth,
-                          height: numericBottomTouch.touchHeight,
+                          height: numericPanelHeight,
+                        }}
+                      >
+                        {NUMERIC_DIGIT_ROWS.map((row, rowIndex) => {
+                          const hitTargets =
+                            cachedNumericDigitHitTargets[rowIndex] ?? [];
+                          const rowTouch = numericTouchFrame(rowIndex);
+                          return (
+                            <HStack
+                              key={`numeric-row-${rowIndex}`}
+                              spacing={KEY_SPACING}
+                              frame={{
+                                width: numericCenterWidth,
+                                height: rowTouch.touchHeight,
+                              }}
+                              contentShape="rect"
+                              highPriorityGesture={hitRowGesture(
+                                `num-row-${rowIndex}`,
+                                hitTargets,
+                              )}
+                            >
+                              {row.map((value) => (
+                                <KeyFace
+                                  key={`numeric-${value}`}
+                                  id={`numeric-${value}`}
+                                  label={value}
+                                  palette={palette}
+                                  width={numericKeyWidth}
+                                  height={metrics.keyHeight}
+                                  touchHeight={rowTouch.touchHeight}
+                                  visualOffsetY={rowTouch.visualOffsetY}
+                                  labelFontSize={24}
+                                  passive
+                                  active={isPressed(`numeric-${value}`)}
+                                  popupLabel={value}
+                                  showPopup={settings.showKeyPopups}
+                                  onPress={() =>
+                                    runWithFeedback(() =>
+                                      pressNumericDigit(value)
+                                    )}
+                                />
+                              ))}
+                            </HStack>
+                          );
+                        })}
+                        <HStack
+                          spacing={KEY_SPACING}
+                          frame={{
+                            width: numericCenterWidth,
+                            height: numericBottomTouch.touchHeight,
+                          }}
+                          contentShape="rect"
+                          highPriorityGesture={hitRowGesture(
+                            "num-row-zero",
+                            cachedNumericBottomHitTargets,
+                          )}
+                        >
+                          <KeyFace
+                            id="numeric-abc"
+                            label="ABC"
+                            palette={palette}
+                            width={numericKeyWidth}
+                            height={metrics.keyHeight}
+                            touchHeight={numericBottomTouch.touchHeight}
+                            visualOffsetY={numericBottomTouch.visualOffsetY}
+                            system
+                            labelFontSize={16}
+                            passive
+                            active={isPressed("numeric-abc")}
+                            onPress={() => runWithFeedback(switchToLetterLayer)}
+                          />
+                          <KeyFace
+                            id="numeric-0"
+                            label="0"
+                            palette={palette}
+                            width={numericKeyWidth}
+                            height={metrics.keyHeight}
+                            touchHeight={numericBottomTouch.touchHeight}
+                            visualOffsetY={numericBottomTouch.visualOffsetY}
+                            labelFontSize={24}
+                            passive
+                            active={isPressed("numeric-0")}
+                            popupLabel="0"
+                            showPopup={settings.showKeyPopups}
+                            onPress={() =>
+                              runWithFeedback(() => pressNumericDigit("0"))}
+                          />
+                          <KeyFace
+                            id="numeric-space"
+                            image="space"
+                            palette={palette}
+                            width={numericKeyWidth}
+                            height={metrics.keyHeight}
+                            touchHeight={numericBottomTouch.touchHeight}
+                            visualOffsetY={numericBottomTouch.visualOffsetY}
+                            system
+                            passive
+                            active={isPressed("numeric-space")}
+                            onPress={() => runWithFeedback(pressSpace)}
+                          />
+                        </HStack>
+                      </VStack>
+
+                      <VStack
+                        spacing={0}
+                        frame={{
+                          width: numericRightWidth,
+                          height: numericPanelHeight,
                         }}
                         contentShape="rect"
                         highPriorityGesture={hitRowGesture(
-                          "num-row-zero",
-                          cachedNumericBottomHitTargets,
+                          "num-row-right",
+                          cachedNumericRightHitTargets,
                         )}
                       >
                         <KeyFace
-                          id="numeric-abc"
-                          label="ABC"
+                          id="numeric-backspace"
+                          image="delete.left"
                           palette={palette}
-                          width={numericKeyWidth}
+                          width={numericRightWidth}
                           height={metrics.keyHeight}
-                          touchHeight={numericBottomTouch.touchHeight}
-                          visualOffsetY={numericBottomTouch.visualOffsetY}
+                          touchHeight={numericTouchFrame(0).touchHeight}
+                          visualOffsetY={numericTouchFrame(0).visualOffsetY}
                           system
-                          labelFontSize={16}
                           passive
-                          active={isPressed("numeric-abc")}
-                          onPress={() => runWithFeedback(switchToLetterLayer)}
+                          active={isPressed("numeric-backspace")}
+                          onPress={() => runWithFeedback(pressBackspace)}
+                          onSwipeLeft={() =>
+                            runWithFeedback(backspaceSwipeLeft)}
+                          onSwipeUp={() => runWithFeedback(backspaceSwipeUp)}
+                          onSwipeDown={() =>
+                            runWithFeedback(backspaceSwipeDown)}
                         />
                         <KeyFace
-                          id="numeric-0"
-                          label="0"
+                          id="numeric-dot"
+                          label="."
                           palette={palette}
-                          width={numericKeyWidth}
+                          width={numericRightWidth}
                           height={metrics.keyHeight}
-                          touchHeight={numericBottomTouch.touchHeight}
-                          visualOffsetY={numericBottomTouch.visualOffsetY}
-                          labelFontSize={24}
+                          touchHeight={numericTouchFrame(1).touchHeight}
+                          visualOffsetY={numericTouchFrame(1).visualOffsetY}
                           passive
-                          active={isPressed("numeric-0")}
-                          popupLabel="0"
-                          showPopup={settings.showKeyPopups}
+                          active={isPressed("numeric-dot")}
+                          onPress={() => runWithFeedback(pressNumericDot)}
+                        />
+                        <KeyFace
+                          id="numeric-equal"
+                          label="="
+                          palette={palette}
+                          width={numericRightWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={numericTouchFrame(2).touchHeight}
+                          visualOffsetY={numericTouchFrame(2).visualOffsetY}
+                          passive
+                          active={isPressed("numeric-equal")}
                           onPress={() =>
-                            runWithFeedback(() => pressNumericDigit("0"))}
-                        />
-                        <KeyFace
-                          id="numeric-space"
-                          image="space"
-                          palette={palette}
-                          width={numericKeyWidth}
-                          height={metrics.keyHeight}
-                          touchHeight={numericBottomTouch.touchHeight}
-                          visualOffsetY={numericBottomTouch.visualOffsetY}
-                          system
-                          passive
-                          active={isPressed("numeric-space")}
-                          onPress={() => runWithFeedback(pressSpace)}
-                        />
-                      </HStack>
-                    </VStack>
-
-                    <VStack
-                      spacing={0}
-                      frame={{
-                        width: numericRightWidth,
-                        height: numericPanelHeight,
-                      }}
-                      contentShape="rect"
-                      highPriorityGesture={hitRowGesture(
-                        "num-row-right",
-                        cachedNumericRightHitTargets,
-                      )}
-                    >
-                      <KeyFace
-                        id="numeric-backspace"
-                        image="delete.left"
-                        palette={palette}
-                        width={numericRightWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={numericTouchFrame(0).touchHeight}
-                        visualOffsetY={numericTouchFrame(0).visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("numeric-backspace")}
-                        onPress={() => runWithFeedback(pressBackspace)}
-                        onSwipeLeft={() => runWithFeedback(backspaceSwipeLeft)}
-                        onSwipeUp={() => runWithFeedback(backspaceSwipeUp)}
-                        onSwipeDown={() => runWithFeedback(backspaceSwipeDown)}
-                      />
-                      <KeyFace
-                        id="numeric-dot"
-                        label="."
-                        palette={palette}
-                        width={numericRightWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={numericTouchFrame(1).touchHeight}
-                        visualOffsetY={numericTouchFrame(1).visualOffsetY}
-                        passive
-                        active={isPressed("numeric-dot")}
-                        onPress={() => runWithFeedback(pressNumericDot)}
-                      />
-                      <KeyFace
-                        id="numeric-equal"
-                        label="="
-                        palette={palette}
-                        width={numericRightWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={numericTouchFrame(2).touchHeight}
-                        visualOffsetY={numericTouchFrame(2).visualOffsetY}
-                        passive
-                        active={isPressed("numeric-equal")}
-                        onPress={() => runWithFeedback(() => pressSymbol("="))}
-                        onSwipeUp={() =>
-                          runWithFeedback(() =>
-                            runConfiguredAction(
+                            runWithFeedback(() => pressSymbol("="))}
+                          onSwipeUp={() =>
+                            runWithFeedback(() => runConfiguredAction(
                               settings.numericEqualsSwipeUp,
                               "rime",
-                            )
-                          )}
-                      />
-                      <KeyFace
-                        id="numeric-enter"
-                        image="paperplane.fill"
-                        palette={palette}
-                        width={numericRightWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={numericBottomTouch.touchHeight}
-                        visualOffsetY={numericBottomTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("numeric-enter")}
-                        onPress={() => runWithFeedback(pressReturn)}
-                        onSwipeUp={() => runWithFeedback(insertNewline)}
-                      />
-                    </VStack>
-                  </HStack>
-                </VStack>
-              )
-              : isT9Keyboard
-              ? (
-                <HStack
-                  spacing={KEY_SPACING}
-                  frame={{
-                    width: metrics.width,
-                    height: t9PanelHeight + t9PanelTopInset +
-                      t9PanelBottomInset + bottomRowTouch.touchHeight,
-                    alignment: "topLeading" as any,
-                  }}
-                >
-                  <VStack
-                    spacing={0}
+                            ))}
+                        />
+                        <KeyFace
+                          id="numeric-enter"
+                          image="paperplane.fill"
+                          palette={palette}
+                          width={numericRightWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={numericBottomTouch.touchHeight}
+                          visualOffsetY={numericBottomTouch.visualOffsetY}
+                          system
+                          passive
+                          active={isPressed("numeric-enter")}
+                          onPress={() => runWithFeedback(pressReturn)}
+                          onSwipeUp={() => runWithFeedback(insertNewline)}
+                        />
+                      </VStack>
+                    </HStack>
+                  </VStack>
+                )
+                : isT9Keyboard
+                ? (
+                  <HStack
+                    spacing={KEY_SPACING}
                     frame={{
-                      width: metrics.width - t9RightWidth - KEY_SPACING,
+                      width: metrics.width,
                       height: t9PanelHeight + t9PanelTopInset +
                         t9PanelBottomInset + bottomRowTouch.touchHeight,
                       alignment: "topLeading" as any,
@@ -4285,7 +4796,211 @@ function KeyboardContent(props: {
                       frame={{
                         width: metrics.width - t9RightWidth - KEY_SPACING,
                         height: t9PanelHeight + t9PanelTopInset +
-                          t9PanelBottomInset,
+                          t9PanelBottomInset + bottomRowTouch.touchHeight,
+                        alignment: "topLeading" as any,
+                      }}
+                    >
+                      <VStack
+                        spacing={0}
+                        frame={{
+                          width: metrics.width - t9RightWidth - KEY_SPACING,
+                          height: t9PanelHeight + t9PanelTopInset +
+                            t9PanelBottomInset,
+                          alignment: "topLeading" as any,
+                        }}
+                      >
+                        {t9PanelTopInset > 0
+                          ? (
+                            <VStack
+                              frame={{
+                                width: metrics.width - t9RightWidth -
+                                  KEY_SPACING,
+                                height: t9PanelTopInset,
+                              }}
+                            />
+                          )
+                          : null}
+                        <HStack
+                          spacing={KEY_SPACING}
+                          frame={{
+                            width: metrics.width - t9RightWidth - KEY_SPACING,
+                            height: t9PanelHeight,
+                          }}
+                        >
+                          {renderT9LeftColumn()}
+                          <VStack
+                            spacing={0}
+                            frame={{
+                              width: t9CenterWidth,
+                              height: t9PanelHeight,
+                            }}
+                          >
+                            {cachedT9DigitRows}
+                          </VStack>
+                        </HStack>
+                        {t9PanelBottomInset > 0
+                          ? (
+                            <VStack
+                              frame={{
+                                width: metrics.width - t9RightWidth -
+                                  KEY_SPACING,
+                                height: t9PanelBottomInset,
+                              }}
+                            />
+                          )
+                          : null}
+                      </VStack>
+                      <HStack
+                        spacing={KEY_SPACING}
+                        frame={{
+                          width: metrics.width - t9RightWidth - KEY_SPACING,
+                          height: bottomRowTouch.touchHeight,
+                        }}
+                        contentShape="rect"
+                        highPriorityGesture={hitRowGesture(
+                          "bottom-row",
+                          cachedBottomRowHitTargets,
+                        )}
+                      >
+                        {showNextKeyboardButton
+                          ? (
+                            <KeyFace
+                              id="next-keyboard"
+                              image="globe"
+                              palette={palette}
+                              width={bottomSplitButtonWidth}
+                              height={metrics.keyHeight}
+                              touchHeight={bottomRowTouch.touchHeight}
+                              visualOffsetY={bottomRowTouch.visualOffsetY}
+                              system
+                              passive
+                              active={isPressed("next-keyboard")}
+                              onPress={() =>
+                                runWithFeedback(() =>
+                                  CustomKeyboard.nextKeyboard()
+                                )}
+                            />
+                          )
+                          : null}
+                        <KeyFace
+                          id="numbers"
+                          label={symbolLayer ? "ABC" : "123"}
+                          palette={palette}
+                          width={showNextKeyboardButton
+                            ? bottomSplitButtonWidth
+                            : bottomNumbersWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={bottomRowTouch.touchHeight}
+                          visualOffsetY={bottomRowTouch.visualOffsetY}
+                          system
+                          selected={symbolLayer}
+                          passive
+                          active={isPressed("numbers")}
+                          onPress={() => runWithFeedback(toggleSymbolLayer)}
+                          onSwipeUp={() =>
+                            runWithFeedback(() => pressSymbol("`"))}
+                        />
+                        <KeyFace
+                          id="comma"
+                          label=","
+                          topCenter="."
+                          topCenterForeground={palette.primary}
+                          palette={palette}
+                          width={bottomCommaWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={bottomRowTouch.touchHeight}
+                          visualOffsetY={bottomRowTouch.visualOffsetY}
+                          passive
+                          active={isPressed("comma")}
+                          onPress={() => runWithFeedback(pressKeyboardComma)}
+                          onSwipeUp={() => runWithFeedback(pressKeyboardPeriod)}
+                        />
+                        <KeyFace
+                          id="space"
+                          image="space"
+                          bottomRight={settings.showWanxiangLabel
+                            ? settings.spaceLabel
+                            : undefined}
+                          bottomRightFontSize={settings.spaceLabel.length > 4
+                            ? 8
+                            : settings.spaceLabel.length > 2
+                            ? 10
+                            : 12}
+                          palette={palette}
+                          width={bottomSpaceWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={bottomRowTouch.touchHeight}
+                          visualOffsetY={bottomRowTouch.visualOffsetY}
+                          system
+                          passive
+                          active={isPressed("space")}
+                          onPress={() => runWithFeedback(pressSpace)}
+                          onSwipeUp={() =>
+                            runWithFeedback(() => runT9SpaceSwipe("up"))}
+                          onSwipeDown={() =>
+                            runWithFeedback(() => runT9SpaceSwipe("down"))}
+                          onSwipeLeft={() =>
+                            runWithFeedback(() => moveCursorSafely(-1))}
+                          onSwipeRight={() =>
+                            runWithFeedback(() => moveCursorSafely(1))}
+                        />
+                        <KeyFace
+                          id="mode"
+                          image={composing && settings.modeComposingEnabled
+                            ? settings.modeComposingIcon
+                            : undefined}
+                          modeTopLeft={composing &&
+                              settings.modeComposingEnabled
+                            ? undefined
+                            : "中"}
+                          modeBottomRight={composing &&
+                              settings.modeComposingEnabled
+                            ? undefined
+                            : "英"}
+                          modeTopLeftActive={!ascii}
+                          palette={palette}
+                          width={bottomModeWidth}
+                          height={metrics.keyHeight}
+                          touchHeight={bottomRowTouch.touchHeight}
+                          visualOffsetY={bottomRowTouch.visualOffsetY}
+                          system
+                          passive
+                          active={isPressed("mode")}
+                          labelFontSize={18}
+                          onPress={() =>
+                            runWithFeedback(() =>
+                              hitTargetActionsRef.current.pressMode()
+                            )}
+                          onSwipeUp={() =>
+                            runWithFeedback(() => {
+                              if (composing && settings.modeComposingEnabled) {
+                                runConfiguredAction(
+                                  settings.modeComposingSwipeUp,
+                                  settings.modeComposingSwipeUpMode,
+                                );
+                              }
+                            })}
+                          onSwipeDown={() =>
+                            runWithFeedback(() => {
+                              if (composing && settings.modeComposingEnabled) {
+                                runConfiguredAction(
+                                  settings.modeComposingSwipeDown,
+                                  settings.modeComposingSwipeDownMode,
+                                );
+                              }
+                            })}
+                          contextMenu={schemaMenu != null
+                            ? { menuItems: schemaMenu }
+                            : undefined}
+                        />
+                      </HStack>
+                    </VStack>
+                    <VStack
+                      spacing={0}
+                      frame={{
+                        width: t9RightWidth,
+                        height: t9PanelHeight + t9PanelTopInset +
+                          t9PanelBottomInset + bottomRowTouch.touchHeight,
                         alignment: "topLeading" as any,
                       }}
                     >
@@ -4293,839 +5008,213 @@ function KeyboardContent(props: {
                         ? (
                           <VStack
                             frame={{
-                              width: metrics.width - t9RightWidth -
-                                KEY_SPACING,
+                              width: t9RightWidth,
                               height: t9PanelTopInset,
                             }}
                           />
                         )
                         : null}
-                      <HStack
-                        spacing={KEY_SPACING}
-                        frame={{
-                          width: metrics.width - t9RightWidth - KEY_SPACING,
-                          height: t9PanelHeight,
+                      <KeyFace
+                        id="t9-backspace"
+                        image="delete.left"
+                        palette={palette}
+                        width={t9RightWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={t9TouchFrame(0).touchHeight}
+                        visualOffsetY={t9TouchFrame(0).visualOffsetY}
+                        system
+                        active={isPressed("t9-backspace")}
+                        onPress={pressBackspace}
+                        onTouchStart={() => beginKeyTouch("t9-backspace")}
+                        onTouchEnd={() => endKeyTouch("t9-backspace")}
+                        onLongPress={() => {
+                          holdKeyPressedUntilRelease("t9-backspace");
+                          startRepeatingBackspace("t9-backspace");
                         }}
-                      >
-                        {renderT9LeftColumn()}
-                        <VStack
-                          spacing={0}
-                          frame={{
-                            width: t9CenterWidth,
-                            height: t9PanelHeight,
-                          }}
-                        >
-                          {T9_KEY_ROWS.map((row, rowIndex) => {
-                            const rowTouch = t9TouchFrame(rowIndex);
-                            return (
-                              <HStack
-                                key={`t9-row-${rowIndex}`}
-                                spacing={KEY_SPACING}
-                                frame={{
-                                  width: t9CenterWidth,
-                                  height: rowTouch.touchHeight,
-                                }}
-                                contentShape="rect"
-                                highPriorityGesture={hitRowGesture(
-                                  `t9-row-${rowIndex}`,
-                                  cachedT9HitTargets[rowIndex] ?? [],
-                                )}
-                              >
-                                {row.map((item) => (
-                                  (() => {
-                                    const label = settings.uppercaseLetterLabels
-                                      ? item.letters
-                                      : item.letters.toLowerCase();
-                                    return (
-                                      <KeyFace
-                                        key={`t9-${item.digit}`}
-                                        id={`t9-${item.digit}`}
-                                        label={label}
-                                        topLeft={settings.t9KeySwipeUp[
-                                          item.digit
-                                        ]}
-                                        topRight={settings.t9KeySwipeDown[
-                                          item.digit
-                                        ] || undefined}
-                                        palette={palette}
-                                        width={t9KeyWidth}
-                                        height={metrics.keyHeight}
-                                        touchHeight={rowTouch.touchHeight}
-                                        visualOffsetY={rowTouch.visualOffsetY}
-                                        labelFontSize={item.letters.length > 3
-                                          ? 20
-                                          : 22}
-                                        passive
-                                        active={isPressed(`t9-${item.digit}`)}
-                                        popupLabel={label}
-                                        popupSwipeUpLabel={settings
-                                          .t9KeySwipeUp[
-                                            item.digit
-                                          ]}
-                                        popupSwipeDownLabel={settings
-                                          .t9KeySwipeDown[
-                                            item.digit
-                                          ] || undefined}
-                                        showPopup={settings.showKeyPopups}
-                                        onPress={() =>
-                                          runWithFeedback(() =>
-                                            pressT9Digit(item.digit)
-                                          )}
-                                        onSwipeUp={() =>
-                                          runWithFeedback(() =>
-                                            runConfiguredAction(
-                                              settings.t9KeySwipeUp[item.digit],
-                                              settings.t9KeySwipeUpModes[
-                                                item.digit
-                                              ],
-                                            )
-                                          )}
-                                        onSwipeDown={() =>
-                                          runWithFeedback(() =>
-                                            runConfiguredAction(
-                                              settings.t9KeySwipeDown[
-                                                item.digit
-                                              ],
-                                              settings.t9KeySwipeDownModes[
-                                                item.digit
-                                              ],
-                                            )
-                                          )}
-                                      />
-                                    );
-                                  })()
-                                ))}
-                              </HStack>
-                            );
-                          })}
-                        </VStack>
-                      </HStack>
-                      {t9PanelBottomInset > 0
-                        ? (
-                          <VStack
-                            frame={{
-                              width: metrics.width - t9RightWidth -
-                                KEY_SPACING,
-                              height: t9PanelBottomInset,
-                            }}
-                          />
-                        )
-                        : null}
+                        onLongPressEnd={stopRepeatingBackspace}
+                        onLongPressMove={backspaceLongPressMove}
+                        longPressDuration={DELETE_LONG_PRESS_DURATION}
+                        onSwipeLeft={backspaceSwipeLeft}
+                        onSwipeUp={backspaceSwipeUp}
+                        onSwipeDown={backspaceSwipeDown}
+                        onSwipeStart={stopRepeatingBackspace}
+                        swipeTriggerDistance={currentSwipeTriggerDistance}
+                      />
+                      <KeyFace
+                        id="t9-delimiter"
+                        label="'"
+                        palette={palette}
+                        width={t9RightWidth}
+                        height={metrics.keyHeight}
+                        touchHeight={t9TouchFrame(1).touchHeight}
+                        visualOffsetY={t9TouchFrame(1).visualOffsetY}
+                        active={isPressed("t9-delimiter")}
+                        onPress={pressT9Delimiter}
+                        onTouchStart={() => beginKeyTouch("t9-delimiter")}
+                        onTouchEnd={() => endKeyTouch("t9-delimiter")}
+                      />
+                      <KeyFace
+                        id="t9-enter"
+                        image="paperplane.fill"
+                        palette={palette}
+                        width={t9RightWidth}
+                        height={t9EnterOverlayHeight}
+                        touchHeight={t9TouchFrame(2).touchHeight +
+                          t9PanelBottomInset + bottomRowTouch.touchHeight}
+                        visualOffsetY={t9TouchFrame(2).visualOffsetY}
+                        system
+                        active={isPressed("t9-enter")}
+                        onPress={pressReturn}
+                        onTouchStart={() => beginKeyTouch("t9-enter")}
+                        onTouchEnd={() => endKeyTouch("t9-enter")}
+                        onSwipeUp={insertNewline}
+                        swipeTriggerDistance={currentSwipeTriggerDistance}
+                      />
                     </VStack>
-                    <HStack
-                      spacing={KEY_SPACING}
-                      frame={{
-                        width: metrics.width - t9RightWidth - KEY_SPACING,
-                        height: bottomRowTouch.touchHeight,
-                      }}
-                      contentShape="rect"
-                      highPriorityGesture={hitRowGesture(
-                        "bottom-row",
-                        cachedBottomRowHitTargets,
-                      )}
-                    >
-                      {showNextKeyboardButton
-                        ? (
-                          <KeyFace
-                            id="next-keyboard"
-                            image="globe"
-                            palette={palette}
-                            width={bottomSplitButtonWidth}
-                            height={metrics.keyHeight}
-                            touchHeight={bottomRowTouch.touchHeight}
-                            visualOffsetY={bottomRowTouch.visualOffsetY}
-                            system
-                            passive
-                            active={isPressed("next-keyboard")}
-                            onPress={() =>
-                              runWithFeedback(() =>
-                                CustomKeyboard.nextKeyboard()
-                              )}
-                          />
-                        )
-                        : null}
-                      <KeyFace
-                        id="numbers"
-                        label={symbolLayer ? "ABC" : "123"}
-                        palette={palette}
-                        width={showNextKeyboardButton
-                          ? bottomSplitButtonWidth
-                          : bottomNumbersWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={bottomRowTouch.touchHeight}
-                        visualOffsetY={bottomRowTouch.visualOffsetY}
-                        system
-                        selected={symbolLayer}
-                        passive
-                        active={isPressed("numbers")}
-                        onPress={() => runWithFeedback(toggleSymbolLayer)}
-                        onSwipeUp={() =>
-                          runWithFeedback(() => pressSymbol("`"))}
-                      />
-                      <KeyFace
-                        id="comma"
-                        label=","
-                        topCenter="."
-                        topCenterForeground={palette.primary}
-                        palette={palette}
-                        width={bottomCommaWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={bottomRowTouch.touchHeight}
-                        visualOffsetY={bottomRowTouch.visualOffsetY}
-                        passive
-                        active={isPressed("comma")}
-                        onPress={() => runWithFeedback(pressKeyboardComma)}
-                        onSwipeUp={() => runWithFeedback(pressKeyboardPeriod)}
-                      />
-                      <KeyFace
-                        id="space"
-                        image="space"
-                        bottomRight={settings.showWanxiangLabel
-                          ? settings.spaceLabel
-                          : undefined}
-                        bottomRightFontSize={settings.spaceLabel.length > 4
-                          ? 8
-                          : settings.spaceLabel.length > 2
-                          ? 10
-                          : 12}
-                        palette={palette}
-                        width={bottomSpaceWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={bottomRowTouch.touchHeight}
-                        visualOffsetY={bottomRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("space")}
-                        onPress={() => runWithFeedback(pressSpace)}
-                        onSwipeUp={() =>
-                          runWithFeedback(() => runT9SpaceSwipe("up"))}
-                        onSwipeDown={() =>
-                          runWithFeedback(() => runT9SpaceSwipe("down"))}
-                        onSwipeLeft={() =>
-                          runWithFeedback(() => moveCursorSafely(-1))}
-                        onSwipeRight={() =>
-                          runWithFeedback(() => moveCursorSafely(1))}
-                      />
-                      <KeyFace
-                        id="mode"
-                        image={composing && settings.modeComposingEnabled
-                          ? settings.modeComposingIcon
-                          : undefined}
-                        modeTopLeft={composing && settings.modeComposingEnabled
-                          ? undefined
-                          : "中"}
-                        modeBottomRight={composing &&
-                            settings.modeComposingEnabled
-                          ? undefined
-                          : "英"}
-                        modeTopLeftActive={!ascii}
-                        palette={palette}
-                        width={bottomModeWidth}
-                        height={metrics.keyHeight}
-                        touchHeight={bottomRowTouch.touchHeight}
-                        visualOffsetY={bottomRowTouch.visualOffsetY}
-                        system
-                        passive
-                        active={isPressed("mode")}
-                        labelFontSize={18}
-                        onPress={() =>
-                          runWithFeedback(() =>
-                            hitTargetActionsRef.current.pressMode()
-                          )}
-                        onSwipeUp={() =>
-                          runWithFeedback(() => {
-                            if (composing && settings.modeComposingEnabled) {
-                              runConfiguredAction(
-                                settings.modeComposingSwipeUp,
-                                settings.modeComposingSwipeUpMode,
-                              );
-                            }
-                          })}
-                        onSwipeDown={() =>
-                          runWithFeedback(() => {
-                            if (composing && settings.modeComposingEnabled) {
-                              runConfiguredAction(
-                                settings.modeComposingSwipeDown,
-                                settings.modeComposingSwipeDownMode,
-                              );
-                            }
-                          })}
-                        contextMenu={schemaMenu != null
-                          ? { menuItems: schemaMenu }
-                          : undefined}
-                      />
-                    </HStack>
-                  </VStack>
-                  <VStack
-                    spacing={0}
-                    frame={{
-                      width: t9RightWidth,
-                      height: t9PanelHeight + t9PanelTopInset +
-                        t9PanelBottomInset + bottomRowTouch.touchHeight,
-                      alignment: "topLeading" as any,
-                    }}
-                  >
-                    {t9PanelTopInset > 0
-                      ? (
-                        <VStack
-                          frame={{
-                            width: t9RightWidth,
-                            height: t9PanelTopInset,
-                          }}
-                        />
-                      )
-                      : null}
-                    <KeyFace
-                      id="t9-backspace"
-                      image="delete.left"
-                      palette={palette}
-                      width={t9RightWidth}
-                      height={metrics.keyHeight}
-                      touchHeight={t9TouchFrame(0).touchHeight}
-                      visualOffsetY={t9TouchFrame(0).visualOffsetY}
-                      system
-                      active={isPressed("t9-backspace")}
-                      onPress={pressBackspace}
-                      onTouchStart={() => beginKeyTouch("t9-backspace")}
-                      onTouchEnd={() => endKeyTouch("t9-backspace")}
-                      onLongPress={() => {
-                        holdKeyPressedUntilRelease("t9-backspace");
-                        startRepeatingBackspace("t9-backspace");
-                      }}
-                      onLongPressEnd={stopRepeatingBackspace}
-                      onLongPressMove={backspaceLongPressMove}
-                      longPressDuration={DELETE_LONG_PRESS_DURATION}
-                      onSwipeLeft={backspaceSwipeLeft}
-                      onSwipeUp={backspaceSwipeUp}
-                      onSwipeDown={backspaceSwipeDown}
-                      onSwipeStart={stopRepeatingBackspace}
-                      swipeTriggerDistance={currentSwipeTriggerDistance}
-                    />
-                    <KeyFace
-                      id="t9-delimiter"
-                      label="'"
-                      palette={palette}
-                      width={t9RightWidth}
-                      height={metrics.keyHeight}
-                      touchHeight={t9TouchFrame(1).touchHeight}
-                      visualOffsetY={t9TouchFrame(1).visualOffsetY}
-                      active={isPressed("t9-delimiter")}
-                      onPress={pressT9Delimiter}
-                      onTouchStart={() => beginKeyTouch("t9-delimiter")}
-                      onTouchEnd={() => endKeyTouch("t9-delimiter")}
-                    />
-                    <KeyFace
-                      id="t9-enter"
-                      image="paperplane.fill"
-                      palette={palette}
-                      width={t9RightWidth}
-                      height={t9EnterOverlayHeight}
-                      touchHeight={t9TouchFrame(2).touchHeight +
-                        t9PanelBottomInset + bottomRowTouch.touchHeight}
-                      visualOffsetY={t9TouchFrame(2).visualOffsetY}
-                      system
-                      active={isPressed("t9-enter")}
-                      onPress={pressReturn}
-                      onTouchStart={() => beginKeyTouch("t9-enter")}
-                      onTouchEnd={() => endKeyTouch("t9-enter")}
-                      onSwipeUp={insertNewline}
-                      swipeTriggerDistance={currentSwipeTriggerDistance}
-                    />
-                  </VStack>
-                </HStack>
-              )
-              : (
-                LETTER_ROWS.map((row, rowIndex) => {
-                  const sideInset = rowIndex === 1 ? metrics.secondRowInset : 0;
-                  const rowTouch = bodyTouchFrame(
-                    (settings.showFunctionRow ? 1 : 0) + rowIndex,
-                    metrics.keyHeight,
-                  );
-                  const letterTouchWidth = (index: number) => {
-                    if (rowIndex === 0) {
-                      return metrics.letterWidth +
-                        (index === 0 || index === row.length - 1
-                          ? KEY_SPACING / 2
-                          : KEY_SPACING);
-                    }
-                    if (rowIndex === 2) {
-                      return metrics.letterWidth + KEY_SPACING;
-                    }
-                    if (index === 0) {
-                      return sideInset + metrics.letterWidth + KEY_SPACING / 2;
-                    }
-                    if (index === row.length - 1) {
-                      return metrics.letterWidth + sideInset + KEY_SPACING / 2;
-                    }
-                    return metrics.letterWidth + KEY_SPACING;
-                  };
-                  const letterVisualOffset = (index: number) =>
-                    rowIndex === 0
-                      ? index === 0 ? 0 : KEY_SPACING / 2
-                      : rowIndex === 2
-                      ? KEY_SPACING / 2
-                      : index === 0
-                      ? sideInset
-                      : KEY_SPACING / 2;
-                  return (
-                    <HStack
-                      key={`row-${rowIndex}`}
-                      spacing={0}
-                      frame={{
-                        width: metrics.width,
-                        height: rowTouch.touchHeight,
-                      }}
-                      zIndex={10 + rowIndex}
-                    >
-                      {rowIndex === 2
-                        ? (
-                          <KeyFace
-                            id="shift"
-                            image={composing && settings.shiftComposingEnabled
-                              ? settings.shiftComposingIcon
-                              : capsLocked
-                              ? "capslock.fill"
-                              : shifted
-                              ? "shift.fill"
-                              : "shift"}
-                            palette={palette}
-                            width={metrics.shiftWidth}
-                            height={metrics.keyHeight}
-                            touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
-                            touchHeight={rowTouch.touchHeight}
-                            visualOffsetX={0}
-                            visualOffsetY={rowTouch.visualOffsetY}
-                            system
-                            selected={shifted || capsLocked}
-                            active={isPressed("shift")}
-                            onPress={pressShift}
-                            onTouchStart={() => beginKeyTouch("shift")}
-                            onTouchEnd={() => endKeyTouch("shift")}
-                            onSwipeUp={shiftSwipeUp}
-                            onSwipeStart={stopRepeatingBackspace}
-                            swipeTriggerDistance={currentSwipeTriggerDistance}
-                          />
-                        )
-                        : null}
-                      {row.map((ch, index) => {
-                        const letterLabel = backslashWrapMode
-                          ? BACKSLASH_SYMBOLS[ch]
-                          : shifted || capsLocked ||
-                              settings.uppercaseLetterLabels
-                          ? ch.toUpperCase()
-                          : ch;
-                        const swipeUpImage = !backslashWrapMode &&
-                            settings.showHintSymbols
-                          ? settings.letterSwipeUpSymbols[ch] || undefined
-                          : undefined;
-                        const swipeUpLabel = !backslashWrapMode &&
-                            settings.showHintSymbols && !swipeUpImage
-                          ? settings.letterSwipeUp[ch]
-                          : undefined;
-                        const swipeDownImage = !backslashWrapMode &&
-                            settings.showHintSymbols
-                          ? settings.letterSwipeDownSymbols[ch] || undefined
-                          : undefined;
-                        const swipeDownLabel = !backslashWrapMode &&
-                            settings.showHintSymbols && !swipeDownImage
-                          ? settings.letterSwipeDown[ch]
-                          : undefined;
-                        return (
-                          <KeyFace
-                            key={ch}
-                            id={ch}
-                            label={letterLabel}
-                            labelFontSize={backslashWrapMode
-                              ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
-                              : shifted || capsLocked ||
-                                  settings.uppercaseLetterLabels
-                              ? 24
-                              : 27}
-                            topLeft={swipeUpLabel}
-                            topLeftImage={swipeUpImage}
-                            topRight={swipeDownLabel}
-                            topRightImage={swipeDownImage}
-                            palette={palette}
-                            width={metrics.letterWidth}
-                            height={metrics.keyHeight}
-                            touchWidth={letterTouchWidth(index)}
-                            touchHeight={rowTouch.touchHeight}
-                            visualOffsetX={letterVisualOffset(index)}
-                            visualOffsetY={rowTouch.visualOffsetY}
-                            active={isPressed(ch)}
-                            popupLabel={letterLongPressPopup?.key === ch
-                              ? undefined
-                              : letterLabel}
-                            popupSwipeUpLabel={swipeUpLabel}
-                            popupSwipeUpImage={swipeUpImage}
-                            popupSwipeDownLabel={swipeDownLabel}
-                            popupSwipeDownImage={swipeDownImage}
-                            popupOptions={letterLongPressPopup?.key === ch
-                              ? [
-                                {
-                                  label: ch,
-                                  selected:
-                                    letterLongPressPopup.selected === "lower",
-                                },
-                                {
-                                  label: ch.toUpperCase(),
-                                  selected:
-                                    letterLongPressPopup.selected === "upper",
-                                },
-                              ]
-                              : undefined}
-                            showPopup={settings.showKeyPopups}
-                            onPress={() => pressLetter(ch)}
-                            onTouchStart={() => beginKeyTouch(ch)}
-                            onTouchEnd={() => endKeyTouch(ch)}
-                            onLongPress={() => {
-                              setLetterLongPressPopup({
-                                key: ch,
-                                selected: "upper",
-                              });
-                              holdKeyPressedUntilRelease(ch);
-                            }}
-                            onLongPressMove={(details) =>
-                              updateLetterLongPressSelection(ch, details)}
-                            onLongPressEnd={() => finishLetterLongPress(ch)}
-                            longPressEnabled={letterLongPressEnabled}
-                            longPressDuration={settings.letterLongPressDuration}
-                            onSwipeUp={() => runLetterSwipe("up", ch)}
-                            onSwipeDown={() => runLetterSwipe("down", ch)}
-                            swipeTriggerDistance={currentSwipeTriggerDistance}
-                          />
-                        );
-                      })}
-                      {rowIndex === 2
-                        ? (
-                          <KeyFace
-                            id="backspace"
-                            image="delete.left"
-                            palette={palette}
-                            width={metrics.shiftWidth}
-                            height={metrics.keyHeight}
-                            touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
-                            touchHeight={rowTouch.touchHeight}
-                            visualOffsetX={KEY_SPACING / 2}
-                            visualOffsetY={rowTouch.visualOffsetY}
-                            system
-                            active={isPressed("backspace")}
-                            onPress={pressBackspace}
-                            onTouchStart={() => beginKeyTouch("backspace")}
-                            onTouchEnd={() => endKeyTouch("backspace")}
-                            onLongPress={() => {
-                              holdKeyPressedUntilRelease("backspace");
-                              startRepeatingBackspace("backspace");
-                            }}
-                            onLongPressEnd={stopRepeatingBackspace}
-                            onLongPressMove={backspaceLongPressMove}
-                            longPressDuration={DELETE_LONG_PRESS_DURATION}
-                            onSwipeLeft={backspaceSwipeLeft}
-                            onSwipeUp={backspaceSwipeUp}
-                            onSwipeDown={backspaceSwipeDown}
-                            onSwipeStart={stopRepeatingBackspace}
-                            swipeTriggerDistance={currentSwipeTriggerDistance}
-                          />
-                        )
-                        : null}
-                    </HStack>
-                  );
-                })
-              )}
-          </Group>
-
-          {symbolLayer || isT9Keyboard ? null : (
-            <HStack
-              spacing={KEY_SPACING}
-              frame={{
-                width: metrics.width,
-                height: bottomRowTouch.touchHeight,
-              }}
-              contentShape="rect"
-              highPriorityGesture={hitRowGesture(
-                "bottom-row",
-                cachedBottomRowHitTargets,
-              )}
-            >
-              {showNextKeyboardButton
-                ? (
-                  <KeyFace
-                    id="next-keyboard"
-                    image="globe"
-                    palette={palette}
-                    width={bottomSplitButtonWidth}
-                    height={metrics.keyHeight}
-                    touchHeight={bottomRowTouch.touchHeight}
-                    visualOffsetY={bottomRowTouch.visualOffsetY}
-                    system
-                    passive
-                    active={isPressed("next-keyboard")}
-                    onPress={() =>
-                      runWithFeedback(() => CustomKeyboard.nextKeyboard())}
-                  />
+                  </HStack>
                 )
-                : null}
-              <KeyFace
-                id="numbers"
-                label={symbolLayer ? "ABC" : "123"}
-                palette={palette}
-                width={showNextKeyboardButton
-                  ? bottomSplitButtonWidth
-                  : bottomNumbersWidth}
-                height={metrics.keyHeight}
-                touchHeight={bottomRowTouch.touchHeight}
-                visualOffsetY={bottomRowTouch.visualOffsetY}
-                system
-                selected={symbolLayer}
-                passive
-                active={isPressed("numbers")}
-                onPress={() => runWithFeedback(toggleSymbolLayer)}
-                onSwipeUp={() => runWithFeedback(() => pressSymbol("`"))}
-              />
-              <KeyFace
-                id="comma"
-                label=","
-                topCenter="."
-                topCenterForeground={palette.primary}
-                palette={palette}
-                width={bottomCommaWidth}
-                height={metrics.keyHeight}
-                touchHeight={bottomRowTouch.touchHeight}
-                visualOffsetY={bottomRowTouch.visualOffsetY}
-                passive
-                active={isPressed("comma")}
-                onPress={() => runWithFeedback(pressKeyboardComma)}
-                onSwipeUp={() => runWithFeedback(pressKeyboardPeriod)}
-              />
-              <KeyFace
-                id="space"
-                image="space"
-                bottomRight={settings.showWanxiangLabel
-                  ? settings.spaceLabel
-                  : undefined}
-                bottomRightFontSize={settings.spaceLabel.length > 4
-                  ? 8
-                  : settings.spaceLabel.length > 2
-                  ? 10
-                  : 12}
-                palette={palette}
-                width={bottomSpaceWidth}
-                height={metrics.keyHeight}
-                touchHeight={bottomRowTouch.touchHeight}
-                visualOffsetY={bottomRowTouch.visualOffsetY}
-                system
-                passive
-                active={isPressed("space")}
-                onPress={() => runWithFeedback(pressSpace)}
-                onSwipeUp={() =>
-                  runWithFeedback(() => {
-                    if (isT9Keyboard) runT9SpaceSwipe("up");
-                    else processSpaceSwipeCandidate("2");
-                  })}
-                onSwipeDown={() =>
-                  runWithFeedback(() => {
-                    if (isT9Keyboard) runT9SpaceSwipe("down");
-                    else processSpaceSwipeCandidate("3");
-                  })}
-                onSwipeLeft={() => runWithFeedback(() => moveCursorSafely(-1))}
-                onSwipeRight={() => runWithFeedback(() => moveCursorSafely(1))}
-              />
-              <KeyFace
-                id="mode"
-                image={composing && settings.modeComposingEnabled
-                  ? settings.modeComposingIcon
-                  : undefined}
-                modeTopLeft={composing && settings.modeComposingEnabled
-                  ? undefined
-                  : "中"}
-                modeBottomRight={composing && settings.modeComposingEnabled
-                  ? undefined
-                  : "英"}
-                modeTopLeftActive={!ascii}
-                palette={palette}
-                width={bottomModeWidth}
-                height={metrics.keyHeight}
-                touchHeight={bottomRowTouch.touchHeight}
-                visualOffsetY={bottomRowTouch.visualOffsetY}
-                system
-                passive
-                active={isPressed("mode")}
-                labelFontSize={18}
-                onPress={() =>
-                  runWithFeedback(() =>
-                    hitTargetActionsRef.current.pressMode()
-                  )}
-                onSwipeUp={() =>
-                  runWithFeedback(() => {
-                    if (composing && settings.modeComposingEnabled) {
-                      runConfiguredAction(
-                        settings.modeComposingSwipeUp,
-                        settings.modeComposingSwipeUpMode,
-                      );
-                    }
-                  })}
-                onSwipeDown={() =>
-                  runWithFeedback(() => {
-                    if (composing && settings.modeComposingEnabled) {
-                      runConfiguredAction(
-                        settings.modeComposingSwipeDown,
-                        settings.modeComposingSwipeDownMode,
-                      );
-                    }
-                  })}
-                contextMenu={schemaMenu != null
-                  ? { menuItems: schemaMenu }
-                  : undefined}
-              />
-              <KeyFace
-                id="enter"
-                image="paperplane.fill"
-                palette={palette}
-                width={bottomEnterWidth}
-                height={metrics.keyHeight}
-                touchHeight={bottomRowTouch.touchHeight}
-                visualOffsetY={bottomRowTouch.visualOffsetY}
-                system
-                passive
-                active={isPressed("enter")}
-                onPress={() => runWithFeedback(pressReturn)}
-                onSwipeUp={() => runWithFeedback(insertNewline)}
-              />
-            </HStack>
-          )}
-        </VStack>
+                : cachedQwertyLetterRows}
+            </Group>
 
-        {candidateExpanded
-          ? (
-            <HStack
-              spacing={KEY_SPACING}
-              frame={{ width: metrics.width, height: expandedPanelHeight }}
-              background={"rgba(0,0,0,0.001)" as any}
-              contentShape="rect"
-            >
-              <ScrollView
-                axes="vertical"
-                scrollIndicator="hidden"
-                frame={{
-                  width: expandedCandidateWidth,
-                  height: expandedPanelHeight,
-                }}
+            {cachedQwertyBottomRow}
+          </VStack>
+
+          {candidateExpanded
+            ? (
+              <HStack
+                spacing={KEY_SPACING}
+                frame={{ width: metrics.width, height: expandedPanelHeight }}
                 background={"rgba(0,0,0,0.001)" as any}
                 contentShape="rect"
               >
-                <VStack
-                  spacing={KEY_SPACING}
+                <ScrollView
+                  axes="vertical"
+                  scrollIndicator="hidden"
                   frame={{
                     width: expandedCandidateWidth,
-                    minHeight: expandedPanelHeight,
-                    alignment: "top" as any,
+                    height: expandedPanelHeight,
                   }}
                   background={"rgba(0,0,0,0.001)" as any}
                   contentShape="rect"
                 >
-                  <FlowLayout
+                  <VStack
                     spacing={KEY_SPACING}
                     frame={{
                       width: expandedCandidateWidth,
-                      alignment: "leading" as any,
+                      minHeight: expandedPanelHeight,
+                      alignment: "top" as any,
                     }}
+                    background={"rgba(0,0,0,0.001)" as any}
+                    contentShape="rect"
                   >
-                    {(expandedCandidates.length > 0
-                      ? expandedCandidates
-                      : visibleCandidateItems.map((
-                        { candidate, absoluteIndex },
-                      ) => ({
-                        candidate,
-                        absoluteIndex,
-                      }))).map(({ candidate, absoluteIndex }) => {
-                        const comment = candidateComment(candidate);
-                        const naturalWidth = candidateButtonNaturalWidth({
-                          text: candidate.text,
-                          comment,
-                          index: absoluteIndex,
-                          showIndex: settings.showCandidateComment,
-                          candidateFontSize: metrics.candidateFontSize,
-                          commentFontSize: metrics.candidateCommentFontSize,
-                          expanded: true,
-                        });
-                        const width = naturalWidth > expandedCandidateWidth
-                          ? expandedCandidateWidth
-                          : undefined;
-                        return (
-                          <CandidateButton
-                            key={`expanded-${absoluteIndex}-${candidate.text}`}
-                            index={absoluteIndex}
-                            candidate={candidate}
-                            comment={comment}
-                            showIndex={settings.showCandidateComment}
-                            selected={absoluteIndex ===
-                              highlightedAbsoluteIndex}
-                            palette={palette}
-                            width={width}
-                            height={Math.max(
-                              52,
-                              metrics.candidateButtonHeight + 12,
-                            )}
-                            candidateFontSize={metrics.candidateFontSize}
-                            commentFontSize={metrics.candidateCommentFontSize}
-                            expanded
-                            contextMenu={candidateContextMenuProps(
-                              absoluteIndex,
-                            )}
-                            onPress={() =>
-                              runWithFeedback(() => {
-                                selectCandidateAbsolute(absoluteIndex);
-                                setCandidateExpanded(false);
-                                setExpandedCandidates([]);
-                                setExpandedBatchHasMore(false);
-                              })}
-                          />
-                        );
-                      })}
-                  </FlowLayout>
+                    <FlowLayout
+                      spacing={KEY_SPACING}
+                      frame={{
+                        width: expandedCandidateWidth,
+                        alignment: "leading" as any,
+                      }}
+                    >
+                      {(expandedCandidates.length > 0
+                        ? expandedCandidates
+                        : visibleCandidateItems.map((
+                          { candidate, absoluteIndex },
+                        ) => ({
+                          candidate,
+                          absoluteIndex,
+                        }))).map(({ candidate, absoluteIndex }) => {
+                          const comment = candidateComment(candidate);
+                          const naturalWidth = candidateButtonNaturalWidth({
+                            text: candidate.text,
+                            comment,
+                            index: absoluteIndex,
+                            showIndex: settings.showCandidateComment,
+                            candidateFontSize: metrics.candidateFontSize,
+                            commentFontSize: metrics.candidateCommentFontSize,
+                            expanded: true,
+                          });
+                          const width = naturalWidth > expandedCandidateWidth
+                            ? expandedCandidateWidth
+                            : undefined;
+                          return (
+                            <CandidateButton
+                              key={`expanded-${absoluteIndex}-${candidate.text}`}
+                              index={absoluteIndex}
+                              candidate={candidate}
+                              comment={comment}
+                              showIndex={settings.showCandidateComment}
+                              selected={absoluteIndex ===
+                                highlightedAbsoluteIndex}
+                              palette={palette}
+                              width={width}
+                              height={Math.max(
+                                52,
+                                metrics.candidateButtonHeight + 12,
+                              )}
+                              candidateFontSize={metrics.candidateFontSize}
+                              commentFontSize={metrics.candidateCommentFontSize}
+                              expanded
+                              contextMenu={candidateContextMenuProps(
+                                absoluteIndex,
+                              )}
+                              onPress={() =>
+                                runWithFeedback(() => {
+                                  selectCandidateAbsolute(absoluteIndex);
+                                  setCandidateExpanded(false);
+                                  setExpandedCandidates([]);
+                                  setExpandedBatchHasMore(false);
+                                })}
+                            />
+                          );
+                        })}
+                    </FlowLayout>
+                  </VStack>
+                </ScrollView>
+                <VStack
+                  spacing={KEY_SPACING}
+                  frame={{
+                    width: expandedPagerWidth,
+                    height: expandedPanelHeight,
+                  }}
+                >
+                  <KeyFace
+                    id="expanded-page-up"
+                    image="chevron.up"
+                    palette={palette}
+                    width={expandedPagerWidth}
+                    height={(expandedPanelHeight - KEY_SPACING) / 2}
+                    system
+                    foregroundStyle={pageNo > 0
+                      ? palette.primary
+                      : palette.hint}
+                    onPress={pageNo > 0
+                      ? () =>
+                        runWithFeedback(() => moveExpandedCandidateBatch("up"))
+                      : () => {}}
+                  />
+                  <KeyFace
+                    id="expanded-page-down"
+                    image="chevron.down"
+                    palette={palette}
+                    width={expandedPagerWidth}
+                    height={(expandedPanelHeight - KEY_SPACING) / 2}
+                    system
+                    foregroundStyle={expandedBatchHasMore
+                      ? palette.primary
+                      : palette.hint}
+                    onPress={expandedBatchHasMore
+                      ? () =>
+                        runWithFeedback(() =>
+                          moveExpandedCandidateBatch("down")
+                        )
+                      : () => {}}
+                  />
                 </VStack>
-              </ScrollView>
-              <VStack
-                spacing={KEY_SPACING}
-                frame={{
-                  width: expandedPagerWidth,
-                  height: expandedPanelHeight,
-                }}
-              >
-                <KeyFace
-                  id="expanded-page-up"
-                  image="chevron.up"
-                  palette={palette}
-                  width={expandedPagerWidth}
-                  height={(expandedPanelHeight - KEY_SPACING) / 2}
-                  system
-                  foregroundStyle={pageNo > 0 ? palette.primary : palette.hint}
-                  onPress={pageNo > 0
-                    ? () =>
-                      runWithFeedback(() => moveExpandedCandidateBatch("up"))
-                    : () => {}}
-                />
-                <KeyFace
-                  id="expanded-page-down"
-                  image="chevron.down"
-                  palette={palette}
-                  width={expandedPagerWidth}
-                  height={(expandedPanelHeight - KEY_SPACING) / 2}
-                  system
-                  foregroundStyle={expandedBatchHasMore
-                    ? palette.primary
-                    : palette.hint}
-                  onPress={expandedBatchHasMore
-                    ? () =>
-                      runWithFeedback(() => moveExpandedCandidateBatch("down"))
-                    : () => {}}
-                />
-              </VStack>
-            </HStack>
-          )
-          : null}
-      </ZStack>
-    </VStack>
+              </HStack>
+            )
+            : null}
+        </ZStack>
+      </VStack>
+    </KeyPressVisualContext.Provider>
   );
 }
 

@@ -1,11 +1,14 @@
 import {
+  createContext,
   DragGesture,
   Group,
   HStack,
   Image,
   Spacer,
   Text,
+  useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   VStack,
@@ -16,6 +19,7 @@ import type { Palette } from "./types";
 import {
   createTouchIntentMachine,
   dragDirection,
+  enqueueKeyboardAction,
   estimatedTextWidth,
 } from "./utils";
 
@@ -31,6 +35,85 @@ const HIT_TEST_BACKGROUND = "rgba(0,0,0,0.001)";
 const CANDIDATE_WIDTH_CACHE_LIMIT = 360;
 const candidateWidthCache = new Map<string, number>();
 type KeyPopupEdge = "center" | "left" | "right";
+
+type PressVisualSubscriber = (pressed: boolean) => void;
+
+type ManualKeyTouchOwner = {
+  settle: () => void;
+};
+
+let activeManualKeyTouch: ManualKeyTouchOwner | null = null;
+
+function claimManualKeyTouch(owner: ManualKeyTouchOwner) {
+  if (activeManualKeyTouch === owner) return;
+  const previous = activeManualKeyTouch;
+  activeManualKeyTouch = owner;
+  previous?.settle();
+}
+
+function releaseManualKeyTouch(owner: ManualKeyTouchOwner) {
+  if (activeManualKeyTouch === owner) activeManualKeyTouch = null;
+}
+
+export class KeyPressVisualController {
+  private pressedKeys = new Set<string>();
+  private subscribers = new Map<string, Set<PressVisualSubscriber>>();
+  private pendingCommits = new Map<
+    string,
+    { pressed: boolean; startedAt: number }
+  >();
+  private commitListener: ((durationMs: number) => void) | null = null;
+
+  setCommitListener(listener: ((durationMs: number) => void) | null) {
+    this.commitListener = listener;
+    if (!listener) this.pendingCommits.clear();
+  }
+
+  isPressed(id: string) {
+    return this.pressedKeys.has(id);
+  }
+
+  setPressed(id: string, pressed: boolean) {
+    if (pressed === this.pressedKeys.has(id)) return;
+    if (pressed) this.pressedKeys.add(id);
+    else this.pressedKeys.delete(id);
+    if (this.commitListener) {
+      this.pendingCommits.set(id, { pressed, startedAt: Date.now() });
+    }
+    for (const subscriber of this.subscribers.get(id) ?? []) {
+      subscriber(pressed);
+    }
+  }
+
+  subscribe(id: string, subscriber: PressVisualSubscriber) {
+    let subscribers = this.subscribers.get(id);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.subscribers.set(id, subscribers);
+    }
+    subscribers.add(subscriber);
+    subscriber(this.isPressed(id));
+    return () => {
+      subscribers?.delete(subscriber);
+      if (subscribers?.size === 0) this.subscribers.delete(id);
+    };
+  }
+
+  markCommitted(id: string, pressed: boolean) {
+    const pending = this.pendingCommits.get(id);
+    if (!pending || pending.pressed !== pressed) return;
+    this.pendingCommits.delete(id);
+    this.commitListener?.(Date.now() - pending.startedAt);
+  }
+
+  clear() {
+    for (const id of [...this.pressedKeys]) this.setPressed(id, false);
+  }
+}
+
+export const KeyPressVisualContext = createContext<
+  KeyPressVisualController | null
+>();
 
 function KeyPopup(props: {
   title: string;
@@ -202,7 +285,8 @@ export function candidateButtonNaturalWidth(params: {
   );
   candidateWidthCache.set(cacheKey, width);
   if (candidateWidthCache.size > CANDIDATE_WIDTH_CACHE_LIMIT) {
-    candidateWidthCache.delete(candidateWidthCache.keys().next().value);
+    const oldestKey = candidateWidthCache.keys().next().value;
+    if (oldestKey !== undefined) candidateWidthCache.delete(oldestKey);
   }
   return width;
 }
@@ -271,13 +355,25 @@ export function KeyFace(props: {
   showPopup?: boolean;
   contextMenu?: any;
 }) {
+  const pressVisualController = useContext(KeyPressVisualContext);
+  const [managedActive, setManagedActive] = useState(() =>
+    pressVisualController?.isPressed(props.id) ?? false
+  );
   const propsRef = useRef(props);
   propsRef.current = props;
   const gestureMachineRef = useRef<any>(null);
+  const touchOwnerRef = useRef<ManualKeyTouchOwner | null>(null);
+  if (touchOwnerRef.current == null) {
+    touchOwnerRef.current = {
+      settle: () => gestureMachineRef.current?.settle?.(),
+    };
+  }
   const immediateDragConsumedRef = useRef(false);
+  const touchEndedRef = useRef(true);
   const [swipePopup, setSwipePopupState] = useState<
     { label?: string; image?: string; key: string } | null
   >(null);
+  const swipePopupKeyRef = useRef("");
   const overrideFallbackId = props.id === "t9-enter" ? "enter" : props.id;
   const usesEnterColor = props.id === "enter" ||
     props.id === "numeric-enter" ||
@@ -329,16 +425,15 @@ export function KeyFace(props: {
     Math.min(9, visualHeight * 0.13),
   );
   const showPopup = props.showPopup ?? true;
-  const hasSwipePopup = showPopup && props.active && swipePopup !== null;
-  const popupTitle = showPopup && props.active
+  const active = pressVisualController ? managedActive : props.active === true;
+  const hasSwipePopup = showPopup && active && swipePopup !== null;
+  const popupTitle = showPopup && active
     ? hasSwipePopup ? swipePopup?.label : props.popupLabel
     : undefined;
-  const popupImage = showPopup && props.active
+  const popupImage = showPopup && active
     ? hasSwipePopup ? swipePopup?.image : props.popupImage
     : undefined;
-  const popupOptions = showPopup && props.active
-    ? props.popupOptions
-    : undefined;
+  const popupOptions = showPopup && active ? props.popupOptions : undefined;
   const popupForeground = hasSwipePopup ? hintFg : fg;
   const popupVisible = showPopup &&
     !!(popupTitle || popupImage || popupOptions);
@@ -402,12 +497,24 @@ export function KeyFace(props: {
     return typeof value === "function" ? value() : value ?? true;
   }
 
+  function beginTouch() {
+    touchEndedRef.current = false;
+    claimManualKeyTouch(touchOwnerRef.current!);
+    propsRef.current.onTouchStart?.();
+  }
+
+  function endTouchOnce() {
+    if (touchEndedRef.current) return;
+    touchEndedRef.current = true;
+    releaseManualKeyTouch(touchOwnerRef.current!);
+    propsRef.current.onTouchEnd?.();
+  }
+
   function setSwipePopup(next: { label?: string; image?: string } | null) {
     const key = next ? `${next.label ?? ""}:${next.image ?? ""}` : "";
-    setSwipePopupState((current) => {
-      if ((current?.key ?? "") === key) return current;
-      return next ? { ...next, key } : null;
-    });
+    if (swipePopupKeyRef.current === key) return;
+    swipePopupKeyRef.current = key;
+    setSwipePopupState(next ? { ...next, key } : null);
   }
 
   function updateSwipePopup(details: any) {
@@ -447,8 +554,8 @@ export function KeyFace(props: {
       isLongPressEnabled,
       shouldCancelLongPress: (details: any) =>
         !!propsRef.current.onLongPress && dragIntent(details),
-      onTouchStart: () => propsRef.current.onTouchStart?.(),
-      onTouchEnd: () => propsRef.current.onTouchEnd?.(),
+      onTouchStart: beginTouch,
+      onTouchEnd: endTouchOnce,
       onLongPress: () => propsRef.current.onLongPress?.(),
       onLongPressEnd: () => propsRef.current.onLongPressEnd?.(),
       onLongPressMove: (details: any) =>
@@ -457,67 +564,83 @@ export function KeyFace(props: {
       onResolveSwipe: (
         direction: "up" | "down" | "left" | "right",
       ) => {
-        if (direction === "up" && propsRef.current.onSwipeUp) {
-          propsRef.current.onSwipeUp();
-          return true;
-        }
-        if (direction === "down" && propsRef.current.onSwipeDown) {
-          propsRef.current.onSwipeDown();
-          return true;
-        }
-        if (direction === "left" && propsRef.current.onSwipeLeft) {
-          propsRef.current.onSwipeLeft();
-          return true;
-        }
-        if (direction === "right" && propsRef.current.onSwipeRight) {
-          propsRef.current.onSwipeRight();
-          return true;
-        }
-        return false;
+        const action = direction === "up"
+          ? propsRef.current.onSwipeUp
+          : direction === "down"
+          ? propsRef.current.onSwipeDown
+          : direction === "left"
+          ? propsRef.current.onSwipeLeft
+          : propsRef.current.onSwipeRight;
+        if (!action) return false;
+        endTouchOnce();
+        enqueueKeyboardAction(action);
+        return true;
       },
-      onPress: () => propsRef.current.onPress(),
+      onPress: () => {
+        const action = propsRef.current.onPress;
+        endTouchOnce();
+        enqueueKeyboardAction(action);
+      },
     });
   }
 
   useEffect(() => {
+    if (!pressVisualController) return;
+    return pressVisualController.subscribe(props.id, setManagedActive);
+  }, [pressVisualController, props.id]);
+
+  useEffect(() => {
+    pressVisualController?.markCommitted(props.id, managedActive);
+  }, [managedActive, pressVisualController, props.id]);
+
+  useEffect(() => {
     return () => {
+      releaseManualKeyTouch(touchOwnerRef.current!);
       gestureMachineRef.current?.dispose?.();
     };
   }, []);
 
-  const manualGesture = needsManualGesture
-    ? {
-      gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
-        .onChanged((details: any) => {
-          gestureMachineRef.current?.start();
-          updateSwipePopup(details);
-          if (immediateDragConsumedRef.current) {
-            propsRef.current.onImmediateDrag?.(details);
-            gestureMachineRef.current?.cancel?.();
-            return;
-          }
-          if (propsRef.current.onImmediateDrag?.(details)) {
-            immediateDragConsumedRef.current = true;
-            gestureMachineRef.current?.cancel?.();
-            return;
-          }
-          gestureMachineRef.current?.update(details);
-        })
-        .onEnded((details: any) => {
-          setSwipePopup(null);
-          if (immediateDragConsumedRef.current) {
-            immediateDragConsumedRef.current = false;
-            propsRef.current.onTouchEnd?.();
-            return;
-          }
-          gestureMachineRef.current?.end(details);
-        }),
-      mask: "gesture" as any,
-    }
-    : undefined;
-  const tapGesture = !props.passive && !needsManualGesture
-    ? { onTapGesture: () => props.onPress() }
-    : {};
+  const manualGesture = useMemo(
+    () =>
+      needsManualGesture
+        ? {
+          gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
+            .onChanged((details: any) => {
+              gestureMachineRef.current?.start();
+              updateSwipePopup(details);
+              if (immediateDragConsumedRef.current) {
+                propsRef.current.onImmediateDrag?.(details);
+                gestureMachineRef.current?.cancel?.();
+                return;
+              }
+              if (propsRef.current.onImmediateDrag?.(details)) {
+                immediateDragConsumedRef.current = true;
+                gestureMachineRef.current?.cancel?.();
+                return;
+              }
+              gestureMachineRef.current?.update(details);
+            })
+            .onEnded((details: any) => {
+              setSwipePopup(null);
+              if (immediateDragConsumedRef.current) {
+                immediateDragConsumedRef.current = false;
+                endTouchOnce();
+                return;
+              }
+              gestureMachineRef.current?.end(details);
+            }),
+          mask: "gesture" as any,
+        }
+        : undefined,
+    [needsManualGesture],
+  );
+  const tapGesture = useMemo(
+    () =>
+      !props.passive && !needsManualGesture
+        ? { onTapGesture: () => propsRef.current.onPress() }
+        : {},
+    [needsManualGesture, props.passive],
+  );
 
   return (
     <ZStack
@@ -526,7 +649,7 @@ export function KeyFace(props: {
       frame={{ width: touchWidth, height: touchHeight }}
       background={HIT_TEST_BACKGROUND as any}
       contentShape="rect"
-      zIndex={popupVisible ? 50 : props.active ? 5 : 0}
+      zIndex={popupVisible ? 50 : active ? 5 : 0}
       {...tapGesture}
       {...(manualGesture ? { highPriorityGesture: manualGesture } : {})}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
@@ -593,7 +716,7 @@ export function KeyFace(props: {
                 : props.plain
                 ? undefined
                 : KEY_VISUAL_SHAPE}
-              overlay={props.active && !props.plain
+              overlay={active && !props.plain
                 ? {
                   alignment: "center" as any,
                   content: (
@@ -608,7 +731,7 @@ export function KeyFace(props: {
                 }
                 : undefined}
               shadow={keyVisualShadow}
-              scaleEffect={props.active && !props.plain ? 0.965 : 1}
+              scaleEffect={active && !props.plain ? 0.965 : 1}
             >
               {props.topCenter
                 ? (

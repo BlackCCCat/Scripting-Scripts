@@ -28,6 +28,59 @@ const reusableHapticPlayers = new Map<string, HapticPlayerPool>();
 let reusableClickPlayers: HapticPlayerPool | null = null;
 let lastSystemClickAt = 0;
 let cachedGraphemeSegmenter: any = null;
+const queuedKeyboardActions: Array<() => void> = [];
+const activeKeyboardActionTouches = new Set<string>();
+let queuedKeyboardActionTimer: ReturnType<typeof setTimeout> | null = null;
+let keyboardActionSequence = 0;
+
+function scheduleNextKeyboardAction() {
+  if (queuedKeyboardActionTimer != null || queuedKeyboardActions.length === 0) {
+    return;
+  }
+  queuedKeyboardActionTimer = setTimeout(() => {
+    queuedKeyboardActionTimer = null;
+    const action = queuedKeyboardActions.shift();
+    if (action) {
+      keyboardActionSequence += 1;
+      try {
+        action();
+      } catch (error) {
+        console.error("Keyboard action failed", error);
+      }
+    }
+    scheduleNextKeyboardAction();
+  }, 0);
+}
+
+export function enqueueKeyboardAction(action: () => void) {
+  queuedKeyboardActions.push(action);
+  scheduleNextKeyboardAction();
+}
+
+export function setKeyboardActionTouchActive(id: string, active: boolean) {
+  if (active) {
+    activeKeyboardActionTouches.add(id);
+    return;
+  }
+  activeKeyboardActionTouches.delete(id);
+}
+
+export function clearKeyboardActionTouches() {
+  activeKeyboardActionTouches.clear();
+}
+
+export function keyboardHasActiveTouches() {
+  return activeKeyboardActionTouches.size > 0;
+}
+
+export function clearQueuedKeyboardActions() {
+  if (queuedKeyboardActionTimer != null) {
+    clearTimeout(queuedKeyboardActionTimer);
+    queuedKeyboardActionTimer = null;
+  }
+  queuedKeyboardActions.length = 0;
+  activeKeyboardActionTouches.clear();
+}
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -313,8 +366,7 @@ export type TouchIntentState =
   | "pending"
   | "longpress_locked"
   | "swipe_locked"
-  | "tap_locked"
-  | "cancelled";
+  | "tap_locked";
 
 export function createTouchIntentMachine(options: {
   longPressDuration?: number | (() => number);
@@ -338,11 +390,17 @@ export function createTouchIntentMachine(options: {
   let state: TouchIntentState = "idle";
   let latestDetails: any = null;
   let longPressTimer: any = null;
+  let longPressActivationTimer: any = null;
+  let longPressActionSequence = keyboardActionSequence;
   let safetyTimer: any = null;
 
   function clearLongPressTimer() {
     if (longPressTimer != null) clearTimeout(longPressTimer);
+    if (longPressActivationTimer != null) {
+      clearTimeout(longPressActivationTimer);
+    }
     longPressTimer = null;
+    longPressActivationTimer = null;
   }
 
   function clearSafetyTimer() {
@@ -357,6 +415,21 @@ export function createTouchIntentMachine(options: {
     state = "idle";
   }
 
+  function finishLifecycle(
+    invokeTouchEnd: boolean,
+    invokeLongPressEnd: boolean,
+  ) {
+    try {
+      if (invokeLongPressEnd) options.onLongPressEnd?.();
+    } finally {
+      try {
+        if (invokeTouchEnd) options.onTouchEnd?.();
+      } finally {
+        reset();
+      }
+    }
+  }
+
   function isLongPressEnabled() {
     return options.isLongPressEnabled ? options.isLongPressEnabled() : true;
   }
@@ -367,15 +440,26 @@ export function createTouchIntentMachine(options: {
       : false;
   }
 
+  function resolvePendingIntent(details: any) {
+    const swipeTriggerDistance =
+      typeof options.swipeTriggerDistance === "function"
+        ? options.swipeTriggerDistance()
+        : options.swipeTriggerDistance;
+    const direction = dragDirection(details, swipeTriggerDistance);
+    if (direction) {
+      state = "swipe_locked";
+      options.onSwipeStart?.();
+      if (options.onResolveSwipe?.(direction, details)) return;
+    }
+    state = "tap_locked";
+    options.onPress?.();
+  }
+
   function scheduleSafetyRelease(delay: number) {
     clearSafetyTimer();
     safetyTimer = setTimeout(() => {
       if (state !== "pending" && state !== "longpress_locked") return;
-      const wasLongPress = state === "longpress_locked";
-      if (wasLongPress) options.onLongPressEnd?.();
-      options.onTouchEnd?.();
-      state = "cancelled";
-      reset();
+      settleCurrentIntent(latestDetails);
     }, delay);
   }
 
@@ -386,23 +470,49 @@ export function createTouchIntentMachine(options: {
       ? options.longPressDuration()
       : options.longPressDuration;
     longPressTimer = setTimeout(() => {
+      longPressTimer = null;
       if (state !== "pending") return;
-      if (isLongPressEnabled() === false) {
-        clearLongPressTimer();
-        return;
-      }
-      if (latestDetails && shouldCancelLongPress(latestDetails)) {
-        clearLongPressTimer();
-        return;
-      }
-      state = "longpress_locked";
-      options.onLongPress?.();
-      const longPressSafetyDelay =
-        typeof options.longPressSafetyReleaseDelay === "function"
-          ? options.longPressSafetyReleaseDelay()
-          : options.longPressSafetyReleaseDelay;
-      scheduleSafetyRelease(longPressSafetyDelay ?? 2600);
+      if (longPressActionSequence !== keyboardActionSequence) return;
+      if (isLongPressEnabled() === false) return;
+      if (latestDetails && shouldCancelLongPress(latestDetails)) return;
+      // Let an already queued touch-end event cancel this after a synchronous
+      // engine operation has delayed gesture delivery.
+      longPressActivationTimer = setTimeout(() => {
+        longPressActivationTimer = null;
+        if (state !== "pending" || isLongPressEnabled() === false) return;
+        if (longPressActionSequence !== keyboardActionSequence) return;
+        if (latestDetails && shouldCancelLongPress(latestDetails)) return;
+        state = "longpress_locked";
+        try {
+          options.onLongPress?.();
+        } finally {
+          const longPressSafetyDelay =
+            typeof options.longPressSafetyReleaseDelay === "function"
+              ? options.longPressSafetyReleaseDelay()
+              : options.longPressSafetyReleaseDelay;
+          scheduleSafetyRelease(longPressSafetyDelay ?? 2600);
+        }
+      }, 0);
     }, duration ?? 360);
+  }
+
+  function settleCurrentIntent(details: any) {
+    latestDetails = details;
+    clearLongPressTimer();
+    clearSafetyTimer();
+    if (state === "longpress_locked") {
+      finishLifecycle(true, true);
+      return;
+    }
+    if (state !== "pending") {
+      reset();
+      return;
+    }
+    try {
+      resolvePendingIntent(details);
+    } finally {
+      finishLifecycle(true, false);
+    }
   }
 
   return {
@@ -412,12 +522,18 @@ export function createTouchIntentMachine(options: {
     start() {
       if (state !== "idle") return;
       state = "pending";
-      options.onTouchStart?.();
-      const safetyDelay = typeof options.safetyReleaseDelay === "function"
-        ? options.safetyReleaseDelay()
-        : options.safetyReleaseDelay;
-      scheduleSafetyRelease(safetyDelay ?? 1500);
-      scheduleLongPress();
+      longPressActionSequence = keyboardActionSequence;
+      try {
+        options.onTouchStart?.();
+        const safetyDelay = typeof options.safetyReleaseDelay === "function"
+          ? options.safetyReleaseDelay()
+          : options.safetyReleaseDelay;
+        scheduleSafetyRelease(safetyDelay ?? 1500);
+        scheduleLongPress();
+      } catch (error) {
+        finishLifecycle(true, false);
+        throw error;
+      }
     },
     update(details: any) {
       if (state !== "pending" && state !== "longpress_locked") return;
@@ -431,56 +547,20 @@ export function createTouchIntentMachine(options: {
       }
     },
     end(details: any) {
-      latestDetails = details;
-      clearLongPressTimer();
-      clearSafetyTimer();
-      if (state === "longpress_locked") {
-        options.onLongPressEnd?.();
-        options.onTouchEnd?.();
-        state = "cancelled";
-        reset();
-        return;
-      }
-      if (state !== "pending") {
-        reset();
-        return;
-      }
-      const swipeTriggerDistance =
-        typeof options.swipeTriggerDistance === "function"
-          ? options.swipeTriggerDistance()
-          : options.swipeTriggerDistance;
-      const direction = dragDirection(details, swipeTriggerDistance);
-      if (direction) {
-        state = "swipe_locked";
-        options.onSwipeStart?.();
-        if (options.onResolveSwipe?.(direction, details)) {
-          options.onTouchEnd?.();
-          state = "cancelled";
-          reset();
-          return;
-        }
-      }
-      state = "tap_locked";
-      options.onPress?.();
-      options.onTouchEnd?.();
-      state = "cancelled";
-      reset();
+      settleCurrentIntent(details);
+    },
+    settle() {
+      settleCurrentIntent(latestDetails);
     },
     cancel(opts?: { invokeTouchEnd?: boolean; invokeLongPressEnd?: boolean }) {
       const wasPending = state === "pending";
       const wasLongPress = state === "longpress_locked";
       clearLongPressTimer();
       clearSafetyTimer();
-      if ((wasPending || wasLongPress) && opts?.invokeTouchEnd) {
-        if (wasLongPress && opts?.invokeLongPressEnd) {
-          options.onLongPressEnd?.();
-        }
-        options.onTouchEnd?.();
-      } else if (wasLongPress && opts?.invokeLongPressEnd) {
-        options.onLongPressEnd?.();
-      }
-      state = "cancelled";
-      reset();
+      finishLifecycle(
+        (wasPending || wasLongPress) && opts?.invokeTouchEnd === true,
+        wasLongPress && opts?.invokeLongPressEnd === true,
+      );
     },
     dispose() {
       this.cancel({ invokeTouchEnd: true, invokeLongPressEnd: true });
