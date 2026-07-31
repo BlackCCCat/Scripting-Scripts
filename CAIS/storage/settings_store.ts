@@ -2,10 +2,22 @@ import { Device } from "scripting"
 import { DEFAULT_CAIS_SETTINGS, type CaisSettings, type KeyboardCustomAction, type KeyboardMenuBuiltinAction } from "../types"
 
 const SETTINGS_KEY = "cais_settings_v1"
-const SHARED_OPTIONS = { shared: true }
+const LEGACY_SHARED_OPTIONS = { shared: true }
 
 function getStorage(): any {
   return (globalThis as any).Storage
+}
+
+function writeSettingsRaw(raw: string): void {
+  const st = getStorage()
+  try {
+    if (typeof st?.set === "function") {
+      st.set(SETTINGS_KEY, raw)
+    } else if (typeof st?.setString === "function") {
+      st.setString(SETTINGS_KEY, raw)
+    }
+  } catch {
+  }
 }
 
 function sanitizeCustomActionMode(value: any): KeyboardCustomAction["mode"] {
@@ -91,13 +103,17 @@ function sanitizeSettings(raw: any): CaisSettings {
 export function loadSettings(): CaisSettings {
   const st = getStorage()
   try {
-    const raw = st?.get?.(SETTINGS_KEY, SHARED_OPTIONS) ?? st?.getString?.(SETTINGS_KEY, SHARED_OPTIONS)
+    const raw = st?.get?.(SETTINGS_KEY) ?? st?.getString?.(SETTINGS_KEY)
     if (raw != null) return sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
   } catch {
   }
   try {
-    const raw = st?.get?.(SETTINGS_KEY) ?? st?.getString?.(SETTINGS_KEY)
-    if (raw != null) return sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
+    const raw = st?.get?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS) ?? st?.getString?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS)
+    if (raw != null) {
+      const fixed = sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
+      writeSettingsRaw(JSON.stringify(fixed))
+      return fixed
+    }
   } catch {
   }
   return sanitizeSettings({})
@@ -105,17 +121,6 @@ export function loadSettings(): CaisSettings {
 
 export function saveSettings(settings: CaisSettings): CaisSettings {
   const fixed = sanitizeSettings(settings)
-  const raw = JSON.stringify(fixed)
-  const st = getStorage()
-  try {
-    if (typeof st?.set === "function") {
-      st.set(SETTINGS_KEY, raw)
-      st.set(SETTINGS_KEY, raw, SHARED_OPTIONS)
-    } else if (typeof st?.setString === "function") {
-      st.setString(SETTINGS_KEY, raw)
-      st.setString(SETTINGS_KEY, raw, SHARED_OPTIONS)
-    }
-  } catch {
-  }
+  writeSettingsRaw(JSON.stringify(fixed))
   return fixed
 }

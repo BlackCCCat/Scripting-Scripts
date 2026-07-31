@@ -71,7 +71,7 @@ const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_LAYOUT_KEY = "cais_keyboard_row_count_v1"
 const RIME_KEYBOARD_SCRIPT_NAME = "Scripting Rime Keyboard"
 const KEYBOARD_EXIT_FEEDBACK_DELAY_MS = 90
-const SHARED_STORAGE_OPTIONS = { shared: true }
+const LEGACY_SHARED_STORAGE_OPTIONS = { shared: true }
 let deleteRepeatTimer: any = null
 let lastPastedText = ""
 let keyboardRefreshGeneration = 0
@@ -120,13 +120,15 @@ function storage(): any {
 function readKeyboardLayout(): KeyboardLayoutMode {
   const st = storage()
   try {
-    const raw = st?.get?.(KEYBOARD_LAYOUT_KEY, SHARED_STORAGE_OPTIONS) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY, SHARED_STORAGE_OPTIONS)
-    return normalizeKeyboardLayout(raw)
+    const raw = st?.get?.(KEYBOARD_LAYOUT_KEY) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY)
+    if (raw != null) return normalizeKeyboardLayout(raw)
   } catch {
   }
   try {
-    const raw = st?.get?.(KEYBOARD_LAYOUT_KEY) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY)
-    return normalizeKeyboardLayout(raw)
+    const raw = st?.get?.(KEYBOARD_LAYOUT_KEY, LEGACY_SHARED_STORAGE_OPTIONS) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+    const value = normalizeKeyboardLayout(raw)
+    writeKeyboardLayout(value)
+    return value
   } catch {
     return "twoByTwo"
   }
@@ -143,10 +145,8 @@ function writeKeyboardLayout(value: KeyboardLayoutMode) {
   try {
     if (typeof st?.set === "function") {
       st.set(KEYBOARD_LAYOUT_KEY, value)
-      st.set(KEYBOARD_LAYOUT_KEY, value, SHARED_STORAGE_OPTIONS)
     } else if (typeof st?.setString === "function") {
       st.setString(KEYBOARD_LAYOUT_KEY, value)
-      st.setString(KEYBOARD_LAYOUT_KEY, value, SHARED_STORAGE_OPTIONS)
     }
   } catch {
   }

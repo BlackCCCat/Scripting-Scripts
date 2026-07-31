@@ -1,5 +1,4 @@
 const PIP_CONTROL_KEY = "cais_pip_control_v1"
-const SHARED_OPTIONS = { shared: true }
 
 export type PipControlState = {
   active: boolean
@@ -14,7 +13,7 @@ function getStorage(): any {
 export function readPipControlState(): PipControlState {
   const st = getStorage()
   try {
-    const raw = st?.get?.(PIP_CONTROL_KEY, SHARED_OPTIONS) ?? st?.getString?.(PIP_CONTROL_KEY, SHARED_OPTIONS)
+    const raw = st?.get?.(PIP_CONTROL_KEY) ?? st?.getString?.(PIP_CONTROL_KEY)
     if (!raw) throw new Error("empty")
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
     return {
@@ -37,9 +36,9 @@ export function writePipControlState(patch: Partial<PipControlState>): PipContro
   const raw = JSON.stringify(next)
   try {
     if (typeof st?.set === "function") {
-      st.set(PIP_CONTROL_KEY, raw, SHARED_OPTIONS)
+      st.set(PIP_CONTROL_KEY, raw)
     } else {
-      st?.setString?.(PIP_CONTROL_KEY, raw, SHARED_OPTIONS)
+      st?.setString?.(PIP_CONTROL_KEY, raw)
     }
   } catch {
   }
