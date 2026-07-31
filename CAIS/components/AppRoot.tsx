@@ -1208,12 +1208,18 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   function homeToolbarLeading() {
     return (
-      <Menu title="" systemImage="ellipsis.circle">
-        <Button
-          title={pipPresented.value ? "关闭 PiP" : "开启 PiP"}
-          systemImage={pipPresented.value ? "pip.exit" : "pip.enter"}
-          action={withHaptic(togglePip)}
-        />
+      <Button
+        title={pipPresented.value ? "关闭 PiP" : "开启 PiP"}
+        systemImage={pipPresented.value ? "pip.exit" : "pip.enter"}
+        foregroundStyle={pipPresented.value ? "systemBlue" : undefined}
+        action={withHaptic(togglePip)}
+      />
+    )
+  }
+
+  function homeToolbarTrailing() {
+    return (
+      <HStack spacing={8}>
         {activeTab.value === TAB_FAVORITES ? (
           <Button
             title="添加常用语"
@@ -1231,7 +1237,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             })}
           />
         ) : null}
-        {activeTab.value === TAB_CLIPS ? (
+        {activeTab.value !== TAB_FAVORITES ? (
           <Button
             title="采集剪贴板"
             systemImage="doc.badge.plus"
@@ -1239,13 +1245,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             action={withHaptic(captureNow)}
           />
         ) : null}
-      </Menu>
+      </HStack>
     )
   }
 
   function homePageToolbar() {
     return {
       topBarLeading: homeToolbarLeading(),
+      topBarTrailing: homeToolbarTrailing(),
       principal: pagePicker(),
     }
   }
