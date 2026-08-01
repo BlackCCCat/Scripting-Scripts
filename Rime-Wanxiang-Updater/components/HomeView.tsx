@@ -945,7 +945,6 @@ async function deleteFileBrowserPath(path: string) {
 
 function FileBrowserRow(props: {
   entry: FileBrowserEntry;
-  rootPath: string;
   onOpenFile: (filePath: string) => void;
   onError: (message: string) => void;
   onDeleted: () => void;
@@ -1009,7 +1008,6 @@ function FileBrowserRow(props: {
         key={props.entry.path}
         destination={
           <FileBrowserDirectoryView
-            rootPath={props.rootPath}
             currentPath={props.entry.path}
             onOpenFile={props.onOpenFile}
             onError={props.onError}
@@ -1039,7 +1037,6 @@ function FileBrowserRow(props: {
 }
 
 function FileBrowserDirectoryView(props: {
-  rootPath: string;
   currentPath: string;
   onOpenFile: (filePath: string) => void;
   onError: (message: string) => void;
@@ -1088,7 +1085,6 @@ function FileBrowserDirectoryView(props: {
             <FileBrowserRow
               key={entry.path}
               entry={entry}
-              rootPath={props.rootPath}
               onOpenFile={props.onOpenFile}
               onError={props.onError}
               onDeleted={() => {
@@ -2222,7 +2218,6 @@ export function HomeView() {
     return (
       <NavigationStack>
         <FileBrowserDirectoryView
-          rootPath={editorRootPath}
           currentPath={editorRootPath}
           onOpenFile={(filePath) => {
             void openEditorFile(filePath);
