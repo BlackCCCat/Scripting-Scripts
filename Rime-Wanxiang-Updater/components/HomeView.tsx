@@ -5,6 +5,7 @@ import {
   Image,
   List,
   Navigation,
+  NavigationLink,
   NavigationStack,
   Script,
   Rectangle,
@@ -924,6 +925,208 @@ async function listFileBrowserEntries(
   });
 }
 
+async function deleteFileBrowserPath(path: string) {
+  const fm: any = (globalThis as any).FileManager;
+  if (!fm) throw new Error("FileManager 不可用");
+  if (typeof fm.removeSync === "function") {
+    fm.removeSync(path);
+    return;
+  }
+  if (typeof fm.remove === "function") {
+    await fm.remove(path);
+    return;
+  }
+  if (typeof fm.delete === "function") {
+    await fm.delete(path);
+    return;
+  }
+  throw new Error("当前 FileManager 不支持删除操作");
+}
+
+function FileBrowserRow(props: {
+  entry: FileBrowserEntry;
+  rootPath: string;
+  onOpenFile: (filePath: string) => void;
+  onError: (message: string) => void;
+  onDeleted: () => void;
+}) {
+  async function confirmDeleteEntry() {
+    try {
+      try {
+        (globalThis as any).HapticFeedback?.mediumImpact?.();
+      } catch {}
+      const ok = await Dialog.confirm({
+        title: props.entry.isDirectory ? "删除文件夹" : "删除文件",
+        message: `确定删除“${props.entry.name}”吗？${props.entry.isDirectory ? "\n文件夹内的内容也会被删除。" : ""}`,
+        confirmLabel: "删除",
+        cancelLabel: "取消",
+      });
+      if (!ok) return;
+      await deleteFileBrowserPath(props.entry.path);
+      props.onDeleted();
+    } catch (error: any) {
+      props.onError(`删除失败：${String(error?.message ?? error)}`);
+    }
+  }
+
+  const row = (
+    <HStack>
+      <Image
+        systemName={props.entry.isDirectory ? "folder" : "doc.text"}
+        foregroundStyle={
+          props.entry.isDirectory ? "systemBlue" : "secondaryLabel"
+        }
+      />
+      <Text
+        frame={{
+          maxWidth: "infinity",
+          alignment: "leading" as any,
+        }}
+      >
+        {props.entry.name}
+      </Text>
+    </HStack>
+  );
+
+  const swipeActions = {
+    allowsFullSwipe: false,
+    actions: [
+      <Button
+        title="删除"
+        systemImage="trash"
+        role="destructive"
+        tint="systemRed"
+        action={() => {
+          void confirmDeleteEntry();
+        }}
+      />,
+    ],
+  };
+
+  if (props.entry.isDirectory) {
+    return (
+      <NavigationLink
+        key={props.entry.path}
+        destination={
+          <FileBrowserDirectoryView
+            rootPath={props.rootPath}
+            currentPath={props.entry.path}
+            onOpenFile={props.onOpenFile}
+            onError={props.onError}
+          />
+        }
+        trailingSwipeActions={swipeActions}
+      >
+        {row}
+      </NavigationLink>
+    );
+  }
+
+  return (
+    <Button
+      key={props.entry.path}
+      action={() => {
+        try {
+          (globalThis as any).HapticFeedback?.mediumImpact?.();
+        } catch {}
+        props.onOpenFile(props.entry.path);
+      }}
+      trailingSwipeActions={swipeActions}
+    >
+      {row}
+    </Button>
+  );
+}
+
+function FileBrowserDirectoryView(props: {
+  rootPath: string;
+  currentPath: string;
+  onOpenFile: (filePath: string) => void;
+  onError: (message: string) => void;
+  rootToolbar?: any;
+}) {
+  const [entries, setEntries] = useState<FileBrowserEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const title = props.currentPath
+    ? Path.basename(props.currentPath) || "文件"
+    : "文件";
+
+  async function refreshEntries() {
+    if (!props.currentPath) {
+      setEntries([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      setEntries(await listFileBrowserEntries(props.currentPath));
+    } catch {
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshEntries();
+  }, [props.currentPath]);
+
+  const browserList = (
+    <List listStyle={"insetGroup"}>
+      <Section header={<Text>当前目录</Text>}>
+        <Text>{props.currentPath || "未选择文件夹"}</Text>
+      </Section>
+
+      <Section header={<Text>目录内容</Text>}>
+        {!props.currentPath ? (
+          <Text foregroundStyle="secondaryLabel">
+            当前没有可浏览的书签目录。
+          </Text>
+        ) : loading ? (
+          <Text foregroundStyle="secondaryLabel">加载中...</Text>
+        ) : entries.length ? (
+          entries.map((entry) => (
+            <FileBrowserRow
+              key={entry.path}
+              entry={entry}
+              rootPath={props.rootPath}
+              onOpenFile={props.onOpenFile}
+              onError={props.onError}
+              onDeleted={() => {
+                void refreshEntries();
+              }}
+            />
+          ))
+        ) : (
+          <Text foregroundStyle="secondaryLabel">当前目录为空。</Text>
+        )}
+      </Section>
+    </List>
+  );
+
+  if (!props.rootToolbar) {
+    return (
+      <VStack
+        navigationTitle={title}
+        navigationBarTitleDisplayMode={"inline"}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      >
+        {browserList}
+      </VStack>
+    );
+  }
+
+  return (
+    <VStack
+      navigationTitle={title}
+      navigationBarTitleDisplayMode={"inline"}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      toolbar={props.rootToolbar}
+    >
+      {browserList}
+    </VStack>
+  );
+}
+
 async function resolveEditorRootFromConfig(
   current: AppConfig,
 ): Promise<string> {
@@ -941,35 +1144,6 @@ async function resolveEditorRootFromConfig(
     } catch {}
   }
   return root;
-}
-
-function editorPathVariants(path: string): string[] {
-  const normalized = normalizePath(path);
-  if (!normalized) return [];
-  const set = new Set<string>([normalized]);
-  if (normalized.startsWith("/private/"))
-    set.add(normalized.slice("/private".length));
-  else if (normalized.startsWith("/")) set.add(`/private${normalized}`);
-  return Array.from(set);
-}
-
-function isAtOrBelowEditorRoot(path: string, root: string): boolean {
-  const pathVariants = editorPathVariants(path);
-  const rootVariants = editorPathVariants(root);
-  if (!pathVariants.length || !rootVariants.length) return false;
-  for (const p of pathVariants) {
-    for (const r of rootVariants) {
-      if (p === r || p.startsWith(`${r}/`)) return true;
-    }
-  }
-  return false;
-}
-
-function isSameEditorPath(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  const av = editorPathVariants(a);
-  const bv = new Set(editorPathVariants(b));
-  return av.some((item) => bv.has(item));
 }
 
 function FileEditorSheet(props: {
@@ -1034,11 +1208,6 @@ export function HomeView() {
   const [editorRootPath, setEditorRootPath] = useState(() =>
     String(loadConfig().hamsterRootPath ?? "").trim(),
   );
-  const [editorCurrentPath, setEditorCurrentPath] = useState(() =>
-    String(loadConfig().hamsterRootPath ?? "").trim(),
-  );
-  const [editorEntries, setEditorEntries] = useState<FileBrowserEntry[]>([]);
-  const [editorLoading, setEditorLoading] = useState(false);
   const [activeActionGroup, setActiveActionGroup] = useState<"rime" | "update" | null>(null);
 
   // 本地信息
@@ -1092,43 +1261,11 @@ export function HomeView() {
       const root = await resolveEditorRootFromConfig(cfg);
       if (disposed) return;
       setEditorRootPath(root);
-      setEditorCurrentPath(root);
     })();
     return () => {
       disposed = true;
     };
   }, [cfg.hamsterRootPath, cfg.hamsterBookmarkName]);
-
-  useEffect(() => {
-    let disposed = false;
-    void (async () => {
-      if (!editorCurrentPath) {
-        setEditorEntries([]);
-        return;
-      }
-      setEditorLoading(true);
-      try {
-        const items = await listFileBrowserEntries(editorCurrentPath);
-        if (!disposed) setEditorEntries(items);
-      } catch {
-        if (!disposed) setEditorEntries([]);
-      } finally {
-        if (!disposed) setEditorLoading(false);
-      }
-    })();
-    return () => {
-      disposed = true;
-    };
-  }, [editorCurrentPath]);
-
-  useEffect(() => {
-    const root = normalizePath(editorRootPath);
-    const current = normalizePath(editorCurrentPath);
-    if (!root || !current) return;
-    if (!isAtOrBelowEditorRoot(current, root)) {
-      setEditorCurrentPath(root);
-    }
-  }, [editorCurrentPath, editorRootPath]);
 
   function resetRemote() {
     setRemoteSchemeVer(DEFAULT_HOME_SESSION_STATE.remoteSchemeVer);
@@ -1543,8 +1680,6 @@ export function HomeView() {
       if (nextContent != null && nextContent !== content) {
         await FileManager.writeAsString(filePath, nextContent, "utf-8");
       }
-      const items = await listFileBrowserEntries(editorCurrentPath);
-      setEditorEntries(items);
     } catch (error: any) {
       setStageAndMaybeLog(
         `打开编辑器失败：${String(error?.message ?? error)}`,
@@ -1558,14 +1693,13 @@ export function HomeView() {
   async function reselectEditorFolder() {
     try {
       const initialDirectory =
-        editorCurrentPath || editorRootPath || cfg.hamsterRootPath || undefined;
+        editorRootPath || cfg.hamsterRootPath || undefined;
       const picked = await (DocumentPicker as any).pickDirectory?.(
         initialDirectory,
       );
       const nextPath = String(picked ?? "").trim();
       if (!nextPath) return;
       setEditorRootPath(nextPath);
-      setEditorCurrentPath(nextPath);
     } catch (error: any) {
       setStageAndMaybeLog(
         `选择文件夹失败：${String(error?.message ?? error)}`,
@@ -2085,105 +2219,22 @@ export function HomeView() {
   }
 
   function renderEditorTab() {
-    const atRoot =
-      !editorRootPath || isSameEditorPath(editorCurrentPath, editorRootPath);
-    const title = editorCurrentPath
-      ? Path.basename(editorCurrentPath) || "编辑"
-      : "编辑";
-    const goEditorParent = () => {
-      const root = normalizePath(editorRootPath);
-      const current = normalizePath(editorCurrentPath);
-      if (!current || !root) return;
-      const parent = normalizePath(Path.dirname(current));
-      if (!parent || !isAtOrBelowEditorRoot(parent, root)) {
-        setEditorCurrentPath(root);
-        return;
-      }
-      setEditorCurrentPath(parent);
-    };
     return (
       <NavigationStack>
-        <List
-          navigationTitle={title}
-          navigationBarTitleDisplayMode={"inline"}
-          listStyle={"insetGroup"}
-          toolbar={{
+        <FileBrowserDirectoryView
+          rootPath={editorRootPath}
+          currentPath={editorRootPath}
+          onOpenFile={(filePath) => {
+            void openEditorFile(filePath);
+          }}
+          onError={(message) => {
+            setStageAndMaybeLog(message, "SYSTEM", "ERROR", true);
+          }}
+          rootToolbar={{
             topBarLeading: renderLeadingToolbar(),
             topBarTrailing: renderEditorTrailingToolbar(),
           }}
-        >
-          <Section header={<Text>当前目录</Text>}>
-            <Text>{editorCurrentPath || "未选择文件夹"}</Text>
-          </Section>
-
-          <Section
-            header={
-              <HStack
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-              >
-                <Text>目录内容</Text>
-                <Spacer />
-                {editorCurrentPath && !atRoot ? (
-                  <Button action={goEditorParent}>
-                    <Image
-                      systemName="arrow.up.circle"
-                      foregroundStyle="systemBlue"
-                    />
-                  </Button>
-                ) : null}
-              </HStack>
-            }
-          >
-            {!editorCurrentPath ? (
-              <Text foregroundStyle="secondaryLabel">
-                当前没有可浏览的书签目录。
-              </Text>
-            ) : editorLoading ? (
-              <Text foregroundStyle="secondaryLabel">加载中...</Text>
-            ) : editorEntries.length ? (
-              editorEntries.map((entry) => (
-                <Button
-                  key={entry.path}
-                  action={() => {
-                    try {
-                      (globalThis as any).HapticFeedback?.mediumImpact?.();
-                    } catch {}
-                    if (entry.isDirectory) {
-                      setEditorCurrentPath(entry.path);
-                    } else {
-                      void openEditorFile(entry.path);
-                    }
-                  }}
-                >
-                  <HStack>
-                    <Image
-                      systemName={entry.isDirectory ? "folder" : "doc.text"}
-                      foregroundStyle={
-                        entry.isDirectory ? "systemBlue" : "secondaryLabel"
-                      }
-                    />
-                    <Text
-                      frame={{
-                        maxWidth: "infinity",
-                        alignment: "leading" as any,
-                      }}
-                    >
-                      {entry.name}
-                    </Text>
-                    {entry.isDirectory ? (
-                      <Image
-                        systemName="chevron.right"
-                        foregroundStyle="tertiaryLabel"
-                      />
-                    ) : null}
-                  </HStack>
-                </Button>
-              ))
-            ) : (
-              <Text foregroundStyle="secondaryLabel">当前目录为空。</Text>
-            )}
-          </Section>
-        </List>
+        />
       </NavigationStack>
     );
   }
