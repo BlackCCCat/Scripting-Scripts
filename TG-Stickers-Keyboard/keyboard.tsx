@@ -56,9 +56,14 @@ function KeyboardView() {
 
   useEffect(() => {
     const loaded = loadPacks()
+      .map((pack) => ({
+        ...pack,
+        stickers: pack.stickers.filter((sticker) => sticker.kind === "static"),
+      }))
+      .filter((pack) => pack.stickers.length > 0)
     const nextSoundEnabled = loadSoundEnabled()
     setPacks(loaded)
-    setRecentStickers(loadRecentStickers())
+    setRecentStickers(loadRecentStickers().filter((sticker) => sticker.kind === "static"))
     setTargetScript(loadTargetKeyboardScript())
     setSoundEnabled(nextSoundEnabled)
     setTimeout(() => prepareKeyboardFeedback({ soundEnabled: nextSoundEnabled }), 0)
@@ -78,11 +83,7 @@ function KeyboardView() {
 
   async function handleStickerPress(sticker: CachedSticker) {
     feedback()
-    if (sticker.kind === "static") {
-      await copyImageSticker(sticker)
-      return
-    }
-    setStatus("")
+    await copyImageSticker(sticker)
   }
 
   async function copyImageSticker(sticker: CachedSticker) {
@@ -244,11 +245,8 @@ function PackButton(props: {
   recent?: boolean
   onPress: () => void
 }) {
-  const first = props.recent
-    ? props.pack.stickers[0]
-    : props.pack.stickers.find((sticker) => sticker.kind === "static") ?? props.pack.stickers[0]
+  const first = props.pack.stickers[0]
   const image = first ? imageForSticker(first.thumbnailPath ?? first.localPath) : null
-  const gifPath = first ? stickerGifPath(first) : undefined
   return (
     <Button
       action={props.onPress}
@@ -260,7 +258,7 @@ function PackButton(props: {
       >
         {props.recent && !first
           ? <Image systemName="clock.arrow.circlepath" font="title3" foregroundStyle="secondaryLabel" frame={{ width: 38, height: 38 }} />
-          : <StickerImage image={image} gifPath={gifPath} kind={first?.kind ?? "unknown"} size={38} />
+          : <StickerImage image={image} kind={first?.kind ?? "unknown"} size={38} />
         }
       </VStack>
     </Button>
@@ -268,10 +266,7 @@ function PackButton(props: {
 }
 
 function StickerKey(props: { sticker: CachedSticker; action: () => void | Promise<void> }) {
-  const image = props.sticker.kind === "static"
-    ? imageForSticker(props.sticker.thumbnailPath ?? props.sticker.localPath)
-    : null
-  const gifPath = stickerGifPath(props.sticker)
+  const image = imageForSticker(props.sticker.thumbnailPath ?? props.sticker.localPath)
   return (
     <Button
       action={props.action}
@@ -280,7 +275,6 @@ function StickerKey(props: { sticker: CachedSticker; action: () => void | Promis
       <VStack spacing={1} padding={{ top: 3, bottom: 3, leading: 2, trailing: 2 }}>
         <StickerImage
           image={image}
-          gifPath={gifPath}
           kind={props.sticker.kind}
           size={52}
         />
@@ -292,29 +286,11 @@ function StickerKey(props: { sticker: CachedSticker; action: () => void | Promis
   )
 }
 
-function stickerGifPath(sticker: CachedSticker): string | undefined {
-  if (sticker.gifPath) return sticker.gifPath
-  if (sticker.fileName.toLowerCase().endsWith(".gif")) return sticker.localPath
-  return undefined
-}
-
 function StickerImage(props: {
   image: UIImage | null
-  gifPath?: string
   kind: string
   size: number
 }) {
-  if (props.gifPath && FileManager.existsSync(props.gifPath)) {
-    return (
-      <Image
-        filePath={props.gifPath}
-        resizable
-        scaleToFit
-        frame={{ width: props.size, height: props.size }}
-        clipShape={STICKER_CORNER}
-      />
-    )
-  }
   if (props.image) {
     return (
       <Image

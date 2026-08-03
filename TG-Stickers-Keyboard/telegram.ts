@@ -3,11 +3,14 @@ import {
   ensurePackDirectory,
   ensurePreviewDirectory,
   ensureThumbnailDirectory,
+  previewGifPath,
   previewLocalPath,
+  stickerGifPath,
   stickerLocalPath,
   thumbnailLocalPath,
 } from "./storage"
-import type { CachedSticker, ImportProgress, PreviewSticker, StickerKind, StickerPack, StickerPackPreview } from "./types"
+import { convertWebmToGif } from "./gifConverter"
+import type { ImportProgress, PreviewSticker, StickerKind, StickerPack, StickerPackPreview } from "./types"
 
 type TelegramResponse<T> = {
   ok: boolean
@@ -16,24 +19,17 @@ type TelegramResponse<T> = {
 }
 
 type TelegramFile = {
-  file_id: string
-  file_unique_id: string
-  file_size?: number
   file_path?: string
 }
 
 type TelegramPhotoSize = {
   file_id: string
   file_unique_id: string
-  file_size?: number
-  width?: number
-  height?: number
 }
 
 type TelegramSticker = {
   file_id: string
   file_unique_id: string
-  type?: string
   width?: number
   height?: number
   is_animated?: boolean
@@ -45,7 +41,6 @@ type TelegramSticker = {
 type TelegramStickerSet = {
   name: string
   title: string
-  sticker_type?: string
   stickers: TelegramSticker[]
 }
 
@@ -73,6 +68,7 @@ export async function fetchStickerSetPreview(
   botToken: string,
   input: string,
   onProgress?: (progress: ImportProgress) => void,
+  includeDynamic = false,
 ): Promise<StickerPackPreview> {
   const name = extractStickerSetName(input)
   if (!name) throw new Error("请输入 Telegram 贴纸链接或贴纸包短名称")
@@ -80,35 +76,26 @@ export async function fetchStickerSetPreview(
   onProgress?.({ current: 0, total: 0, message: "正在读取贴纸包信息" })
   const set = await callTelegram<TelegramStickerSet>(botToken, "getStickerSet", { name })
   await ensurePreviewDirectory(set.name)
-  await ensurePackDirectory(set.name)
   await ensureThumbnailDirectory(set.name)
 
-  const staticCandidates = set.stickers.filter(isStaticStickerCandidate)
-  const stickers = await mapWithConcurrency(staticCandidates, 8, async (sticker, index) => {
+  const candidates = set.stickers.filter((sticker) => (
+    isStaticStickerCandidate(sticker) || (includeDynamic && isVideoStickerCandidate(sticker))
+  ))
+  const stickers = await mapWithConcurrency(candidates, includeDynamic ? 3 : 8, async (sticker, index) => {
     onProgress?.({
       current: index + 1,
-      total: staticCandidates.length,
-      message: `正在准备静态贴纸预览 ${index + 1}/${staticCandidates.length}`,
+      total: candidates.length,
+      message: `正在准备贴纸预览 ${index + 1}/${candidates.length}`,
     })
     return await buildPreviewSticker(botToken, set.name, sticker)
   })
-  const staticStickers = stickers.filter((sticker) => sticker.kind === "static")
 
   return {
     name: set.name,
     title: set.title,
     sourceLink: input.trim(),
-    stickers: staticStickers,
+    stickers,
   }
-}
-
-export async function importStickerSet(
-  botToken: string,
-  input: string,
-  onProgress?: (progress: ImportProgress) => void,
-): Promise<StickerPack> {
-  const preview = await fetchStickerSetPreview(botToken, input, onProgress)
-  return await downloadStickerSelection(botToken, preview, preview.stickers.map((sticker) => sticker.id), onProgress)
 }
 
 export async function downloadStickerSelection(
@@ -116,11 +103,15 @@ export async function downloadStickerSelection(
   preview: StickerPackPreview,
   selectedIds: string[],
   onProgress?: (progress: ImportProgress) => void,
+  includeDynamic = false,
 ): Promise<StickerPack> {
   await ensurePackDirectory(preview.name)
   await ensureThumbnailDirectory(preview.name)
 
-  const selected = preview.stickers.filter((sticker) => selectedIds.includes(sticker.id) && sticker.kind === "static")
+  const selected = preview.stickers.filter((sticker) => (
+    selectedIds.includes(sticker.id)
+    && (sticker.kind === "static" || (includeDynamic && sticker.kind === "video"))
+  ))
   const total = selected.length
   let completed = 0
   const stickers = await mapWithConcurrency(selected, 6, async (sticker) => {
@@ -134,13 +125,44 @@ export async function downloadStickerSelection(
       file_id: sticker.fileId,
     })).file_path
 
-    if (!(await FileManager.exists(sticker.localPath))) {
+    let localPath = sticker.localPath
+    let fileName = sticker.fileName
+    let gifPath: string | undefined
+
+    if (sticker.kind === "video") {
+      gifPath = stickerGifPath(preview.name, sticker.fileUniqueId)
+      if (!(await FileManager.exists(gifPath))) {
+        if (sticker.gifPath && await FileManager.exists(sticker.gifPath)) {
+          await FileManager.copyFile(sticker.gifPath, gifPath)
+        } else {
+          if (!remotePath) throw new Error(`无法获取动态贴纸：${sticker.emoji || sticker.fileUniqueId}`)
+          if (!(await FileManager.exists(localPath))) {
+            await downloadTelegramFile(botToken, remotePath, localPath)
+          }
+          onProgress?.({
+            current: completed,
+            total,
+            message: `正在转换动态贴纸 ${completed + 1}/${total}`,
+          })
+          await convertWebmToGif(localPath, gifPath)
+        }
+      }
+      try {
+        if (localPath !== gifPath && await FileManager.exists(localPath)) await FileManager.remove(localPath)
+      } catch {}
+      localPath = gifPath
+      fileName = `${sticker.fileUniqueId}.gif`
+    } else if (!(await FileManager.exists(localPath))) {
       if (sticker.previewPath && sticker.previewIsOriginal && await FileManager.exists(sticker.previewPath)) {
-        await FileManager.copyFile(sticker.previewPath, sticker.localPath)
+        await FileManager.copyFile(sticker.previewPath, localPath)
       } else if (remotePath) {
-        await downloadTelegramFile(botToken, remotePath, sticker.localPath)
+        await downloadTelegramFile(botToken, remotePath, localPath)
       }
     }
+
+    const thumbnailSource = sticker.previewPath && await FileManager.exists(sticker.previewPath)
+      ? sticker.previewPath
+      : localPath
 
     completed += 1
     onProgress?.({
@@ -157,9 +179,10 @@ export async function downloadStickerSelection(
       kind: sticker.kind,
       width: sticker.width,
       height: sticker.height,
-      fileName: sticker.fileName,
-      localPath: sticker.localPath,
-      thumbnailPath: await createThumbnail(sticker.localPath, thumbnailLocalPath(preview.name, sticker.fileUniqueId)),
+      fileName,
+      localPath,
+      thumbnailPath: await createThumbnail(thumbnailSource, thumbnailLocalPath(preview.name, sticker.fileUniqueId)),
+      gifPath,
       remotePath,
     }
   })
@@ -211,16 +234,20 @@ async function buildPreviewSticker(
   })
   const remotePath = file.file_path
   const extension = extensionFromFilePath(remotePath)
+  const kind = stickerKind(sticker, extension)
   const localPath = stickerLocalPath(setName, sticker.file_unique_id, extension)
   const thumbnailPath = thumbnailLocalPath(setName, sticker.file_unique_id)
   const preview = await downloadPreviewImage(botToken, setName, sticker, remotePath, extension)
+  const animatedPreviewPath = kind === "video" && remotePath
+    ? await buildVideoPreview(botToken, setName, sticker.file_unique_id, remotePath, extension)
+    : undefined
 
   return {
     id: sticker.file_unique_id,
     fileId: sticker.file_id,
     fileUniqueId: sticker.file_unique_id,
     emoji: sticker.emoji ?? "",
-    kind: stickerKind(sticker, extension),
+    kind,
     width: sticker.width,
     height: sticker.height,
     fileName: `${sticker.file_unique_id}.${extension}`,
@@ -228,10 +255,35 @@ async function buildPreviewSticker(
     thumbnailPath: preview.isOriginal && preview.path
       ? await createThumbnail(preview.path, thumbnailPath)
       : undefined,
+    gifPath: animatedPreviewPath,
     remotePath,
-    previewPath: preview.path,
-    previewIsOriginal: preview.isOriginal,
+    previewPath: animatedPreviewPath ?? preview.path,
+    previewIsOriginal: animatedPreviewPath ? false : preview.isOriginal,
   }
+}
+
+async function buildVideoPreview(
+  botToken: string,
+  setName: string,
+  uniqueId: string,
+  remotePath: string,
+  extension: string,
+): Promise<string> {
+  const gifPath = previewGifPath(setName, uniqueId)
+  if (await FileManager.exists(gifPath)) return gifPath
+
+  const sourcePath = previewLocalPath(setName, uniqueId, extension)
+  if (!(await FileManager.exists(sourcePath))) {
+    await downloadTelegramFile(botToken, remotePath, sourcePath)
+  }
+  try {
+    await convertWebmToGif(sourcePath, gifPath)
+  } finally {
+    try {
+      if (await FileManager.exists(sourcePath)) await FileManager.remove(sourcePath)
+    } catch {}
+  }
+  return gifPath
 }
 
 async function downloadPreviewImage(
@@ -278,6 +330,10 @@ function stickerKind(sticker: TelegramSticker, extension: string): StickerKind {
 
 function isStaticStickerCandidate(sticker: TelegramSticker): boolean {
   return !sticker.is_animated && !sticker.is_video
+}
+
+function isVideoStickerCandidate(sticker: TelegramSticker): boolean {
+  return !!sticker.is_video
 }
 
 async function mapWithConcurrency<T, R>(

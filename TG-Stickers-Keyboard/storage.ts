@@ -5,6 +5,7 @@ const TOKEN_KEY = "tg-stickers-keyboard:bot-token:v1"
 const TARGET_SCRIPT_KEY = "tg-stickers-keyboard:target-keyboard-script:v1"
 const RECENT_STICKERS_KEY = "tg-stickers-keyboard:recent-stickers:v1"
 const SOUND_ENABLED_KEY = "tg-stickers-keyboard:sound-enabled:v1"
+const DYNAMIC_STICKERS_ENABLED_KEY = "tg-stickers-keyboard:dynamic-stickers-enabled:v1"
 const SCRIPT_NAME = "TG Stickers Keyboard"
 const ROOT_DIR = `${FileManager.appGroupDocumentsDirectory}/${SCRIPT_NAME}`
 const STICKERS_DIR = `${ROOT_DIR}/stickers`
@@ -35,6 +36,14 @@ export function loadSoundEnabled(): boolean {
 
 export function saveSoundEnabled(enabled: boolean) {
   Storage.set(SOUND_ENABLED_KEY, enabled, { shared: true })
+}
+
+export function loadDynamicStickersEnabled(): boolean {
+  return Storage.get<boolean>(DYNAMIC_STICKERS_ENABLED_KEY, { shared: true }) ?? false
+}
+
+export function saveDynamicStickersEnabled(enabled: boolean) {
+  Storage.set(DYNAMIC_STICKERS_ENABLED_KEY, enabled, { shared: true })
 }
 
 export function loadPacks(): StickerPack[] {
@@ -115,6 +124,10 @@ export function stickerLocalPath(setName: string, uniqueId: string, extension: s
   return `${packDirectory(setName)}/${sanitizePathComponent(uniqueId)}.${ext}`
 }
 
+export function stickerGifPath(setName: string, uniqueId: string): string {
+  return `${packDirectory(setName)}/${sanitizePathComponent(uniqueId)}.gif`
+}
+
 export async function ensurePackDirectory(name: string) {
   await FileManager.createDirectory(packDirectory(name), true)
 }
@@ -130,6 +143,10 @@ export async function ensureThumbnailDirectory(name: string) {
 export function previewLocalPath(setName: string, uniqueId: string, extension: string): string {
   const ext = sanitizeExtension(extension)
   return `${previewDirectory(setName)}/${sanitizePathComponent(uniqueId)}.${ext}`
+}
+
+export function previewGifPath(setName: string, uniqueId: string): string {
+  return `${previewDirectory(setName)}/${sanitizePathComponent(uniqueId)}.gif`
 }
 
 export function thumbnailLocalPath(setName: string, uniqueId: string): string {
