@@ -1006,7 +1006,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   function renderGroupedClipList(groups: ClipGroup[], emptyMessage: string, options: { allowDelete?: (item: ClipItem) => boolean } = {}) {
     if (!groups.some((group) => group.items.length)) {
-      return <EmptyState title="暂无内容" message={emptyMessage} systemImage="doc.on.clipboard" />
+      return (
+        <Section listSectionSeparator="hidden">
+          <EmptyState title="暂无内容" message={emptyMessage} systemImage="doc.on.clipboard" />
+        </Section>
+      )
     }
     return (
       <Group>
