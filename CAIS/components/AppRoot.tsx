@@ -55,7 +55,6 @@ import { SettingsView } from "./SettingsView"
 import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, writePipControlState } from "../services/pip_control"
 import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
-import { prepareCaisFeedback } from "../utils/feedback"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -305,7 +304,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   useEffect(() => {
     settingsRef.current = settings
-    prepareCaisFeedback(settings)
   }, [settings])
 
   useEffect(() => {
@@ -922,9 +920,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         background="rgba(0,0,0,0.001)"
         contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
-        listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
-        listRowSeparator="hidden"
-        listRowBackground={<EmptyView />}
         onTapGesture={withHaptic(() => copyItem(item))}
         contextMenu={{
           menuItems: (
@@ -1001,6 +996,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             </Group>
           ),
         } : undefined}
+        listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
+        listRowBackground={<EmptyView />}
+        listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
+        listRowSeparatorTint={{ color: "clear", edges: "all" as any }}
       >
         {settings.appClipRowGlassEffect ? (
           <ClipRow
@@ -1020,7 +1019,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   function renderGroupedClipList(groups: ClipGroup[], emptyMessage: string, options: { allowDelete?: (item: ClipItem) => boolean } = {}) {
     if (!groups.some((group) => group.items.length)) {
       return (
-        <Section listSectionSeparator="hidden">
+        <Section
+          listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+          listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
+        >
           <EmptyState title="暂无内容" message={emptyMessage} systemImage="doc.on.clipboard" />
         </Section>
       )
@@ -1032,7 +1034,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             <Section
               key={group.title}
               header={<Text>{group.title}</Text>}
-              listSectionSeparator="hidden"
+              listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+              listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
             >
               {group.items.map((item) => renderClipRow(item, { allowDelete: options.allowDelete?.(item) ?? true }))}
             </Section>

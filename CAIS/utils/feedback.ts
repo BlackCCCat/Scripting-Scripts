@@ -159,7 +159,7 @@ export function prepareCaisFeedback(settings?: Pick<CaisSettings, "hapticEngineC
     if (!reusableHapticEngine) {
       reusableHapticEngine = new HapticEngine()
       try { reusableHapticEngine.autoShutdownEnabled = false } catch {}
-      try { reusableHapticEngine.playsHapticsOnly = false } catch {}
+      try { reusableHapticEngine.playsHapticsOnly = !useCoreClick } catch {}
       try { reusableHapticEngine.playsAudioOnly = false } catch {}
       try { reusableHapticEngine.isMutedForAudio = !useCoreClick } catch {}
       reusableHapticEngine.onStopped = () => {
