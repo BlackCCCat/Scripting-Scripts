@@ -670,6 +670,13 @@ export function SettingsView(props: {
           </HStack>
         </Stepper>
         <Toggle
+          value={settings.appClipRowGlassEffect}
+          onChanged={(appClipRowGlassEffect: boolean) => update({ appClipRowGlassEffect })}
+          toggleStyle="switch"
+        >
+          <Text>条目卡片玻璃效果</Text>
+        </Toggle>
+        <Toggle
           value={settings.keyboardShowTitle}
           onChanged={(keyboardShowTitle: boolean) => update({ keyboardShowTitle })}
           toggleStyle="switch"

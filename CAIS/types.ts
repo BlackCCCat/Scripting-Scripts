@@ -51,6 +51,7 @@ export type CaisSettings = {
   iCloudSync: boolean
   iCloudSyncImages: boolean
   appContentLineLimit: number
+  appClipRowGlassEffect: boolean
   keyboardShowTitle: boolean
   keyboardNativeGlassEffect: boolean
   showRimeKeyboardSwitch: boolean
@@ -111,6 +112,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   iCloudSync: false,
   iCloudSyncImages: false,
   appContentLineLimit: 3,
+  appClipRowGlassEffect: true,
   keyboardShowTitle: true,
   keyboardNativeGlassEffect: true,
   showRimeKeyboardSwitch: false,

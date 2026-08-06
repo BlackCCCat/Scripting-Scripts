@@ -48,7 +48,7 @@ import { applyICloudSyncSettings } from "../storage/icloud_sync"
 import { formatDateTime, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
-import { ClipRow } from "./ClipRow"
+import { ClipRow, NonGlassClipRow } from "./ClipRow"
 import { PipStatusView } from "./PipStatusView"
 import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SettingsView } from "./SettingsView"
@@ -999,7 +999,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           ),
         } : undefined}
       >
-        <ClipRow item={item} contentLineLimit={settings.appContentLineLimit} />
+        {settings.appClipRowGlassEffect ? (
+          <ClipRow
+            item={item}
+            contentLineLimit={settings.appContentLineLimit}
+          />
+        ) : (
+          <NonGlassClipRow
+            item={item}
+            contentLineLimit={settings.appContentLineLimit}
+          />
+        )}
       </HStack>
     )
   }

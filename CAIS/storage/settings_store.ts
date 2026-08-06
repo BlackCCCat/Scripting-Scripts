@@ -34,7 +34,7 @@ function systemMajorVersion(): number {
   return match ? Number(match[0]) : 0
 }
 
-function defaultKeyboardNativeGlassEffect(): boolean {
+function defaultNativeGlassEffect(): boolean {
   return systemMajorVersion() >= 26
 }
 
@@ -84,8 +84,9 @@ function sanitizeSettings(raw: any): CaisSettings {
     iCloudSync: Boolean(raw?.iCloudSync ?? DEFAULT_CAIS_SETTINGS.iCloudSync),
     iCloudSyncImages: Boolean(raw?.iCloudSyncImages ?? DEFAULT_CAIS_SETTINGS.iCloudSyncImages),
     appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
+    appClipRowGlassEffect: Boolean(raw?.appClipRowGlassEffect ?? defaultNativeGlassEffect()),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
-    keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? defaultKeyboardNativeGlassEffect()),
+    keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? defaultNativeGlassEffect()),
     showRimeKeyboardSwitch: Boolean(raw?.showRimeKeyboardSwitch ?? DEFAULT_CAIS_SETTINGS.showRimeKeyboardSwitch),
     inputClicks: Boolean(raw?.hapticEngineClicks ?? DEFAULT_CAIS_SETTINGS.hapticEngineClicks)
       ? false
