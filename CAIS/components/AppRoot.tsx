@@ -285,6 +285,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
+  const [homeInitialDataReady, setHomeInitialDataReady] = useState(!homeScreenMode)
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
   const [query, setQuery] = useState("")
@@ -423,6 +424,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         await activatePipFromApp()
       }
     } catch {
+      if (homeScreenMode) setHomeInitialDataReady(true)
     } finally {
       setLoading(false)
     }
@@ -480,6 +482,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     if (generation !== appRefreshGeneration) return
     setFavoriteGroups(nextFavoriteGroups)
     setClipboardGroups(nextClipboardGroups)
+    if (homeScreenMode) setHomeInitialDataReady(true)
   }
 
   async function updateSettings(nextSettings: CaisSettings) {
@@ -1282,7 +1285,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           toast={toastOptions()}
         >
           {searchPanel()}
-          {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+          {homeInitialDataReady
+            ? renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")
+            : null}
         </Form>
       )
     }
@@ -1313,11 +1318,13 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       >
         {pipControlPanel()}
         {searchPanel()}
-        {renderGroupedClipList(
-          clipboardGroups,
-          query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-          { allowDelete: (item) => !item.manualFavorite }
-        )}
+        {homeInitialDataReady
+          ? renderGroupedClipList(
+            clipboardGroups,
+            query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+            { allowDelete: (item) => !item.manualFavorite }
+          )
+          : null}
       </Form>
     )
   }
