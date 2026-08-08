@@ -4,6 +4,7 @@ import {
   Editor,
   Image,
   List,
+  Menu,
   Navigation,
   NavigationLink,
   NavigationStack,
@@ -919,10 +920,78 @@ async function listFileBrowserEntries(
     } catch {}
     entries.push({ name, path, isDirectory });
   }
-  return entries.sort((a, b) => {
+  return sortFileBrowserEntries(entries);
+}
+
+function sortFileBrowserEntries(entries: FileBrowserEntry[]) {
+  return [...entries].sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
     return a.name.localeCompare(b.name, "zh-Hans-CN");
   });
+}
+
+function fileBrowserEntryName(value: any): string {
+  const name = String(value ?? "").trim();
+  if (!name) throw new Error("名称不能为空");
+  if (
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\")
+  ) {
+    throw new Error("名称不能包含路径分隔符");
+  }
+  return name;
+}
+
+async function fileBrowserPathExists(path: string): Promise<boolean> {
+  const fm: any = (globalThis as any).FileManager;
+  if (!fm) throw new Error("FileManager 不可用");
+  if (typeof fm.exists === "function") return !!(await fm.exists(path));
+  if (typeof fm.existsSync === "function") return !!fm.existsSync(path);
+  throw new Error("当前 FileManager 不支持检查文件是否存在");
+}
+
+async function createFileBrowserDirectory(path: string) {
+  const fm: any = (globalThis as any).FileManager;
+  if (!fm) throw new Error("FileManager 不可用");
+  if (typeof fm.createDirectory === "function") {
+    await fm.createDirectory(path);
+    return;
+  }
+  if (typeof fm.createDirectorySync === "function") {
+    fm.createDirectorySync(path);
+    return;
+  }
+  throw new Error("当前 FileManager 不支持创建文件夹");
+}
+
+async function createFileBrowserFile(path: string) {
+  const fm: any = (globalThis as any).FileManager;
+  if (!fm) throw new Error("FileManager 不可用");
+  if (typeof fm.writeAsString === "function") {
+    await fm.writeAsString(path, "");
+    return;
+  }
+  if (typeof fm.writeAsStringSync === "function") {
+    fm.writeAsStringSync(path, "");
+    return;
+  }
+  throw new Error("当前 FileManager 不支持创建文件");
+}
+
+async function renameFileBrowserPath(path: string, newPath: string) {
+  const fm: any = (globalThis as any).FileManager;
+  if (!fm) throw new Error("FileManager 不可用");
+  if (typeof fm.rename === "function") {
+    await fm.rename(path, newPath);
+    return;
+  }
+  if (typeof fm.renameSync === "function") {
+    fm.renameSync(path, newPath);
+    return;
+  }
+  throw new Error("当前 FileManager 不支持重命名");
 }
 
 async function deleteFileBrowserPath(path: string) {
@@ -945,9 +1014,11 @@ async function deleteFileBrowserPath(path: string) {
 
 function FileBrowserRow(props: {
   entry: FileBrowserEntry;
+  parentPath: string;
   onOpenFile: (filePath: string) => void;
   onError: (message: string) => void;
-  onDeleted: () => void;
+  onDeleted: (path: string) => void;
+  onRenamed: (path: string, next: FileBrowserEntry) => void;
 }) {
   async function confirmDeleteEntry() {
     try {
@@ -962,9 +1033,39 @@ function FileBrowserRow(props: {
       });
       if (!ok) return;
       await deleteFileBrowserPath(props.entry.path);
-      props.onDeleted();
+      props.onDeleted(props.entry.path);
     } catch (error: any) {
       props.onError(`删除失败：${String(error?.message ?? error)}`);
+    }
+  }
+
+  async function renameEntry() {
+    try {
+      try {
+        (globalThis as any).HapticFeedback?.mediumImpact?.();
+      } catch {}
+      const input = await Dialog.prompt({
+        title: props.entry.isDirectory ? "重命名文件夹" : "重命名文件",
+        message: "请输入新名称。",
+        defaultValue: props.entry.name,
+        confirmLabel: "重命名",
+        cancelLabel: "取消",
+      });
+      if (input == null) return;
+      const name = fileBrowserEntryName(input);
+      if (name === props.entry.name) return;
+      const nextPath = Path.join(props.parentPath, name);
+      if (await fileBrowserPathExists(nextPath)) {
+        throw new Error("当前目录已有同名文件或文件夹");
+      }
+      await renameFileBrowserPath(props.entry.path, nextPath);
+      props.onRenamed(props.entry.path, {
+        ...props.entry,
+        name,
+        path: nextPath,
+      });
+    } catch (error: any) {
+      props.onError(`重命名失败：${String(error?.message ?? error)}`);
     }
   }
 
@@ -991,9 +1092,16 @@ function FileBrowserRow(props: {
     allowsFullSwipe: false,
     actions: [
       <Button
+        title="重命名"
+        systemImage="pencil"
+        tint="systemBlue"
+        action={() => {
+          void renameEntry();
+        }}
+      />,
+      <Button
         title="删除"
         systemImage="trash"
-        role="destructive"
         tint="systemRed"
         action={() => {
           void confirmDeleteEntry();
@@ -1067,6 +1175,70 @@ function FileBrowserDirectoryView(props: {
     void refreshEntries();
   }, [props.currentPath]);
 
+  async function createEntry(isDirectory: boolean) {
+    try {
+      if (!props.currentPath) throw new Error("请先选择文件夹");
+      try {
+        (globalThis as any).HapticFeedback?.mediumImpact?.();
+      } catch {}
+      const input = await Dialog.prompt({
+        title: isDirectory ? "添加文件夹" : "添加文件",
+        message: isDirectory
+          ? "请输入文件夹名称。"
+          : "请输入文件名称（包含后缀）。",
+        placeholder: isDirectory ? "新建文件夹" : "example.txt",
+        confirmLabel: "添加",
+        cancelLabel: "取消",
+      });
+      if (input == null) return;
+      const name = fileBrowserEntryName(input);
+      const path = Path.join(props.currentPath, name);
+      if (await fileBrowserPathExists(path)) {
+        throw new Error("当前目录已有同名文件或文件夹");
+      }
+      if (isDirectory) await createFileBrowserDirectory(path);
+      else await createFileBrowserFile(path);
+      setEntries((current) =>
+        sortFileBrowserEntries([...current, { name, path, isDirectory }]),
+      );
+    } catch (error: any) {
+      props.onError(`添加失败：${String(error?.message ?? error)}`);
+    }
+  }
+
+  const addMenu = (
+    <Menu title="" systemImage="plus">
+      <Button
+        title="添加文件夹"
+        systemImage="folder.badge.plus"
+        disabled={!props.currentPath}
+        action={() => {
+          void createEntry(true);
+        }}
+      />
+      <Button
+        title="添加文件"
+        systemImage="doc.badge.plus"
+        disabled={!props.currentPath}
+        action={() => {
+          void createEntry(false);
+        }}
+      />
+    </Menu>
+  );
+
+  const toolbar = {
+    ...(props.rootToolbar ?? {}),
+    topBarTrailing: props.rootToolbar?.topBarTrailing ? (
+      <HStack spacing={8}>
+        {props.rootToolbar.topBarTrailing}
+        {addMenu}
+      </HStack>
+    ) : (
+      addMenu
+    ),
+  };
+
   const browserList = (
     <List listStyle={"insetGroup"}>
       <Section header={<Text>当前目录</Text>}>
@@ -1085,10 +1257,22 @@ function FileBrowserDirectoryView(props: {
             <FileBrowserRow
               key={entry.path}
               entry={entry}
+              parentPath={props.currentPath}
               onOpenFile={props.onOpenFile}
               onError={props.onError}
-              onDeleted={() => {
-                void refreshEntries();
+              onDeleted={(deletedPath) => {
+                setEntries((current) =>
+                  current.filter((item) => item.path !== deletedPath),
+                );
+              }}
+              onRenamed={(oldPath, next) => {
+                setEntries((current) =>
+                  sortFileBrowserEntries(
+                    current.map((item) =>
+                      item.path === oldPath ? next : item,
+                    ),
+                  ),
+                );
               }}
             />
           ))
@@ -1099,24 +1283,12 @@ function FileBrowserDirectoryView(props: {
     </List>
   );
 
-  if (!props.rootToolbar) {
-    return (
-      <VStack
-        navigationTitle={title}
-        navigationBarTitleDisplayMode={"inline"}
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      >
-        {browserList}
-      </VStack>
-    );
-  }
-
   return (
     <VStack
       navigationTitle={title}
       navigationBarTitleDisplayMode={"inline"}
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      toolbar={props.rootToolbar}
+      toolbar={toolbar}
     >
       {browserList}
     </VStack>
