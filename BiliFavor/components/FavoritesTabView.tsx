@@ -28,8 +28,8 @@ import type {
 } from "../types"
 
 const DOUBLE_CARD_COLUMNS = [
-  { size: { type: "flexible" as const, min: 0, max: 192 }, spacing: 12 },
-  { size: { type: "flexible" as const, min: 0, max: 192 } },
+  { size: { type: "flexible" as const, min: 0 }, spacing: 12 },
+  { size: { type: "flexible" as const, min: 0 } },
 ]
 
 function compactMetaText(item: VideoDynamicItem): string {
@@ -105,11 +105,9 @@ function FavoriteVideoCard(props: {
   const videoUrl = resolveVideoUrl(props.item)
   const compact = Boolean(props.compact)
   const cardCornerRadius = compact ? 16 : 18
-  const compactCardHeight = 202
   const cardShape = { type: "rect" as const, cornerRadius: cardCornerRadius, style: "continuous" as const }
   const avatarSize = compact ? 22 : 38
   const avatarRadius = compact ? 8 : 10
-  const compactCoverHeight = 108
 
   const compactAuthorRow = (
     <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
@@ -155,9 +153,7 @@ function FavoriteVideoCard(props: {
 
   const cardBody = (
     <ZStack
-      frame={compact
-        ? { maxWidth: "infinity", height: compactCardHeight, alignment: "leading" as any }
-        : { maxWidth: "infinity", alignment: "leading" as any }}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       contentShape={cardShape}
       clipShape={cardShape}
       contextMenu={compact && props.embedded ? undefined : cardContextMenu}
@@ -165,16 +161,18 @@ function FavoriteVideoCard(props: {
       <VideoCardBackground dominantColor={artwork.dominantColor} cornerRadius={cardCornerRadius} />
 
       {compact ? (
-        <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+        <VStack spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
           <VStack
             frame={{ maxWidth: "infinity" }}
             onTapGesture={props.onPlayInline ?? props.onOpenVideo}
           >
-            <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+            <ZStack
+              frame={{ maxWidth: "infinity" }}
+              aspectRatio={{ value: 16 / 9, contentMode: "fit" }}
+            >
                 <CompactVideoCoverImage
                   artwork={artwork}
                   coverUrl={props.item.cover}
-                  height={compactCoverHeight}
                 />
               <VStack
                 frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
@@ -398,6 +396,9 @@ export function FavoritesTabView(props: {
       <FeedContainer
         navigationTitle="收藏"
         navigationBarTitleDisplayMode="large"
+        contentMargins={props.cardLayoutMode === "single"
+          ? { edges: "horizontal", insets: 0, placement: "scrollContent" }
+          : undefined}
         listRowSpacing={6}
         listSectionSpacing="compact"
         listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}

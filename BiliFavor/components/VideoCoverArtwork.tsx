@@ -353,9 +353,8 @@ export function VideoCoverImage(props: {
 export function CompactVideoCoverImage(props: {
   artwork: VideoCoverArtworkState
   coverUrl?: string | null
-  height: number
 }) {
-  const frame = { maxWidth: "infinity" as const, height: props.height }
+  const frame = { maxWidth: "infinity" as const, maxHeight: "infinity" as const }
   const frameFill = makeVideoCoverFrameFill(props.artwork.dominantColor)
   const placeholder = (
     <ZStack frame={frame} background={frameFill}>

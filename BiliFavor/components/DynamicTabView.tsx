@@ -50,8 +50,8 @@ function subtitleText(item: VideoDynamicItem): string {
 }
 
 const DOUBLE_CARD_COLUMNS = [
-  { size: { type: "flexible" as const, min: 0, max: 192 }, spacing: 12 },
-  { size: { type: "flexible" as const, min: 0, max: 192 } },
+  { size: { type: "flexible" as const, min: 0 }, spacing: 12 },
+  { size: { type: "flexible" as const, min: 0 } },
 ]
 
 function resolveVideoUrl(item: VideoDynamicItem): string {
@@ -136,11 +136,9 @@ function VideoDynamicCard(props: {
   const artwork = useVideoCoverArtwork(item.cover)
   const compact = Boolean(props.compact)
   const cardCornerRadius = compact ? 16 : 18
-  const compactCardHeight = 202
   const cardShape = { type: "rect" as const, cornerRadius: cardCornerRadius, style: "continuous" as const }
   const avatarSize = compact ? 22 : 38
   const avatarRadius = compact ? 8 : 10
-  const compactCoverHeight = 108
   const subtitle = subtitleText(item)
   const footerStats = compact
     ? compactMetaText(item)
@@ -290,9 +288,7 @@ function VideoDynamicCard(props: {
 
   const cardBody = (
     <ZStack
-      frame={compact
-        ? { maxWidth: "infinity", height: compactCardHeight, alignment: "leading" as any }
-        : { maxWidth: "infinity", alignment: "leading" as any }}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       contentShape={cardShape}
       clipShape={cardShape}
       contextMenu={compact && props.embedded ? undefined : cardContextMenu}
@@ -300,17 +296,19 @@ function VideoDynamicCard(props: {
       <VideoCardBackground dominantColor={artwork.dominantColor} cornerRadius={cardCornerRadius} />
 
       {compact ? (
-        <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+        <VStack spacing={0} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
           {props.onPress ? (
             <VStack
               frame={{ maxWidth: "infinity" }}
               onTapGesture={props.onPress}
             >
-              <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+              <ZStack
+                frame={{ maxWidth: "infinity" }}
+                aspectRatio={{ value: 16 / 9, contentMode: "fit" }}
+              >
                 <CompactVideoCoverImage
                   artwork={artwork}
                   coverUrl={item.cover}
-                  height={compactCoverHeight}
                 />
                 <VStack
                   frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
@@ -335,11 +333,13 @@ function VideoDynamicCard(props: {
               frame={{ maxWidth: "infinity" }}
               onTapGesture={props.onOpenExternalUrl}
             >
-              <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+              <ZStack
+                frame={{ maxWidth: "infinity" }}
+                aspectRatio={{ value: 16 / 9, contentMode: "fit" }}
+              >
                 <CompactVideoCoverImage
                   artwork={artwork}
                   coverUrl={item.cover}
-                  height={compactCoverHeight}
                 />
                 <VStack
                   frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
@@ -360,11 +360,13 @@ function VideoDynamicCard(props: {
               </ZStack>
             </VStack>
           ) : (
-            <ZStack frame={{ maxWidth: "infinity", height: compactCoverHeight }}>
+            <ZStack
+              frame={{ maxWidth: "infinity" }}
+              aspectRatio={{ value: 16 / 9, contentMode: "fit" }}
+            >
               <CompactVideoCoverImage
                 artwork={artwork}
                 coverUrl={item.cover}
-                height={compactCoverHeight}
               />
               <VStack
                 frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
@@ -574,6 +576,9 @@ export function DynamicTabView(props: {
             <FeedContainer
               navigationTitle="动态"
               navigationBarTitleDisplayMode="large"
+              contentMargins={props.cardLayoutMode === "single"
+                ? { edges: "horizontal", insets: 0, placement: "scrollContent" }
+                : undefined}
               listRowSpacing={6}
               listSectionSpacing="compact"
               listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
