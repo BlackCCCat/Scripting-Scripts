@@ -1,6 +1,6 @@
 // WLOC 类型定义
 
-/** 地理坐标，等价于 MapKit 的 CLLocationCoordinate2D */
+/** 经纬度容器；业务状态使用 WGS-84，Apple 地图显示坐标只保留在地图边界。 */
 export interface Coordinate {
   latitude: number;
   longitude: number;

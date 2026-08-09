@@ -470,12 +470,25 @@ export function toWgs84(latitude: number, longitude: number, source?: MapSource)
   return { latitude, longitude };
 }
 
+/** Apple 中国大陆地图界面坐标转为 WLOC 使用的 WGS-84。 */
+export function appleMapDisplayToWgs84(latitude: number, longitude: number): Coordinate {
+  return toWgs84(latitude, longitude, "apple");
+}
+
+/** WGS-84 转为 Apple 中国大陆地图界面的显示坐标。 */
+export function wgs84ToAppleMapDisplay(latitude: number, longitude: number): Coordinate {
+  if (usesWgs84Locally(latitude, longitude, "apple")) return { latitude, longitude };
+  return wgs84ToGcj02(latitude, longitude);
+}
+
 /** 解析链接并按来源转换到 WGS-84。 */
-export async function parseAndConvert(raw: string): Promise<ParsedCoord> {
+export async function parseAndConvert(raw: string, textSource: MapSource = "text"): Promise<ParsedCoord> {
   const result = await parseCoordsAsync(raw);
-  const converted = toWgs84(result.latitude, result.longitude, result.src);
+  const source = result.src === "text" ? textSource : result.src;
+  const converted = toWgs84(result.latitude, result.longitude, source);
   return {
     ...result,
+    src: source,
     latitude: round6(converted.latitude),
     longitude: round6(converted.longitude),
   };

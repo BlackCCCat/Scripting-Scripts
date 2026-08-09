@@ -1,12 +1,6 @@
 // WLOC 常量定义
 import type { AppSettings, MapLayerId } from "./types";
 
-/** 默认坐标：深圳 */
-export const DEFAULT_COORDINATE = {
-  latitude: 22.544577,
-  longitude: 113.94114,
-};
-
 /** 默认地图缩放跨度 */
 export const DEFAULT_SPAN = {
   latitudeDelta: 0.02,
@@ -40,7 +34,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const STORAGE_KEYS = {
   favorites: "wloc_favorites",
   settings: "wloc_settings",
-  activeCache: "wloc_active_cache",
 } as const;
 
 /** 地图图层可选项（id → 显示名） */

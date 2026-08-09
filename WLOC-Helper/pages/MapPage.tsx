@@ -1,4 +1,4 @@
-// 地图展示组件：纯地图 + 标记 + 图层切换按钮（右下角）。
+// 地图展示组件：相机、选点和 Marker 使用 Apple 地图显示坐标。
 // 坐标显示和操作按钮已移至 index.tsx App 层；顶部工具栏已统一到 index.tsx。
 
 import {
@@ -6,22 +6,13 @@ import {
   useObservable,
   Map,
   Marker,
-  MapUserLocationButton,
   MapCompass,
   MapScaleView,
-  VStack,
-  HStack,
-  Button,
-  Spacer,
-  RoundedRectangle,
-  Image,
   ZStack,
   type MapSelectionValue,
 } from "scripting";
-import type { AppSettings, Coordinate, ActiveLocation, MapLayerId } from "../types";
+import type { Coordinate, MapLayerId } from "../types";
 import { DEFAULT_SPAN } from "../constants";
-import { clearActiveCache } from "../utils/storage";
-import { queryDevice } from "../api/deviceApi";
 
 // 从 MapCameraPosition 中提取中心坐标
 function getCoordFromPosition(pos: MapCameraPosition): Coordinate | null {
@@ -33,29 +24,21 @@ function getCoordFromPosition(pos: MapCameraPosition): Coordinate | null {
 }
 
 interface MapPageProps {
-  settings: AppSettings;
-  pendingCoord: Observable<Coordinate | null>;
-  coordLat: Observable<number>;
-  coordLng: Observable<number>;
+  pendingMapCoord: Observable<Coordinate | null>;
+  mapLat: Observable<number>;
+  mapLng: Observable<number>;
   layer: Observable<MapLayerId>;
-  onCycleLayer: () => void;
-  onCoordChange: (lat: number, lng: number) => void;
-  onActiveLocChange: (loc: ActiveLocation | null) => void;
+  onMapCoordChange: (lat: number, lng: number, userInitiated?: boolean) => void;
 }
 
 export function MapPage({
-  settings,
-  pendingCoord,
-  coordLat,
-  coordLng,
+  pendingMapCoord,
+  mapLat,
+  mapLng,
   layer,
-  onCycleLayer,
-  onCoordChange,
-  onActiveLocChange,
+  onMapCoordChange,
 }: MapPageProps) {
   const cameraPosition = useObservable<MapCameraPosition>(MapCameraPosition.automatic());
-
-
 
   // POI 选点
   const mapSelection = useObservable<MapSelectionValue | null>(null);
@@ -83,7 +66,7 @@ export function MapPage({
       if (c && (Math.abs(c.latitude - lastLat) > 0.000001 || Math.abs(c.longitude - lastLng) > 0.000001)) {
         lastLat = c.latitude;
         lastLng = c.longitude;
-        onCoordChange(c.latitude, c.longitude);
+        onMapCoordChange(c.latitude, c.longitude, pos.positionedByUser);
       }
       setTimeout(poll, 300);
     }
@@ -91,17 +74,17 @@ export function MapPage({
     return () => { stopped = true; };
   }, []);
 
-  // 外部跳转（搜索/收藏/链接解析）— 使用 subscribe 保证可靠监听
+  // 外部跳转在 App 层已从 WGS-84 转为 Apple 地图显示坐标。
   useEffect(() => {
     const cb = (target: Coordinate | null) => {
       if (target) {
         moveCameraTo(target.latitude, target.longitude);
-        onCoordChange(target.latitude, target.longitude);
-        pendingCoord.setValue(null);
+        onMapCoordChange(target.latitude, target.longitude, false);
+        pendingMapCoord.setValue(null);
       }
     };
-    pendingCoord.subscribe(cb);
-    return () => pendingCoord.unsubscribe(cb);
+    pendingMapCoord.subscribe(cb);
+    return () => pendingMapCoord.unsubscribe(cb);
   }, []);
 
   // POI 选点 — 使用 subscribe 保证可靠监听
@@ -109,51 +92,14 @@ export function MapPage({
     const cb = (sel: MapSelectionValue | null) => {
       if (sel && sel.type === "feature" && sel.coordinate) {
         moveCameraTo(sel.coordinate.latitude, sel.coordinate.longitude);
-        onCoordChange(sel.coordinate.latitude, sel.coordinate.longitude);
+        onMapCoordChange(sel.coordinate.latitude, sel.coordinate.longitude, true);
       }
     };
     mapSelection.subscribe(cb);
     return () => mapSelection.unsubscribe(cb);
   }, []);
 
-  // 启动时：查询设备持久化坐标 → GPS 定位。当前生效坐标只以 WLOC 模块查询结果为准。
-  useEffect(() => {
-    (async () => {
-      clearActiveCache();
-
-      try {
-        const loc = await queryDevice(settings.saveApi);
-        onActiveLocChange(loc);
-        if (loc) {
-          moveCameraTo(loc.latitude, loc.longitude);
-          onCoordChange(loc.latitude, loc.longitude);
-          return;
-        }
-      } catch {
-        onActiveLocChange(null);
-      }
-
-      try {
-        const gps = await Location.requestCurrent({ forceRequest: true });
-        if (gps) {
-          moveCameraTo(gps.latitude, gps.longitude);
-          onCoordChange(gps.latitude, gps.longitude);
-        }
-      } catch {}
-    })();
-  }, []);
-
   const mapStyle = layerToStyle(layer.value);
-
-  // 图层对应图标
-  function layerIcon(id: MapLayerId): string {
-    switch (id) {
-      case "imagery": return "globe.europe.africa.fill";
-      case "hybrid": return "map.fill";
-      case "standard":
-      default: return "map";
-    }
-  }
 
   return (
     <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
@@ -171,9 +117,9 @@ export function MapPage({
         }
       >
         {/* 坐标就绪后才显示标记，避免初始 (0,0) 位置闪烁 */}
-        {(coordLat.value !== 0 || coordLng.value !== 0) && (
+        {(mapLat.value !== 0 || mapLng.value !== 0) && (
           <Marker
-            coordinate={{ latitude: coordLat.value, longitude: coordLng.value }}
+            coordinate={{ latitude: mapLat.value, longitude: mapLng.value }}
             tint="systemRed"
             systemImage="mappin.circle.fill"
           />

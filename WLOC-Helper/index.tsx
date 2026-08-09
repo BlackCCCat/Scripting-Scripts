@@ -9,6 +9,7 @@ import {
   NavigationStack,
   useEffect,
   useObservable,
+  useRef,
   useState,
   ZStack,
   VStack,
@@ -26,7 +27,7 @@ import {
   type VirtualNode,
   type Color,
 } from "scripting";
-import type { AppSettings, Coordinate, FavoriteLocation, ActiveLocation, MapLayerId } from "./types";
+import type { AppSettings, Coordinate, FavoriteLocation, ActiveLocation, MapLayerId, MapSource } from "./types";
 import {
   loadFavorites,
   addFavorite,
@@ -39,7 +40,13 @@ import { MapPage } from "./pages/MapPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
 import { useMarkdownReleaseNotesSheet } from "./components/ReleaseNotesSheet";
-import { parseAndConvert } from "./utils/coords";
+import {
+  appleMapDisplayToWgs84,
+  extractFromString,
+  parseAndConvert,
+  wgs84ToAppleMapDisplay,
+} from "./utils/coords";
+import { queryDevice } from "./api/deviceApi";
 
 type SheetKind = "settings" | "favorites" | "surge" | null;
 type SurgeStatus = "checking" | "disconnected" | "missing" | "ready";
@@ -456,10 +463,13 @@ function App() {
   const [selectedProxyApp, setSelectedProxyApp] = useState<ProxyAppId>(() => loadSelectedProxyApp());
   const [showCredit, setShowCredit] = useState(true);
 
-  // 当前选点（来自搜索/链接解析/收藏），供 MapPage 监听并跳转
-  const pendingCoord = useObservable<Coordinate | null>(null);
+  // Apple 地图界面的显示坐标与 WLOC 使用的 WGS-84 分开保存。
+  const pendingMapCoord = useObservable<Coordinate | null>(null);
+  const mapCoordLat = useObservable(0);
+  const mapCoordLng = useObservable(0);
+  const coordinateRevision = useRef(0);
 
-  // 坐标状态（App 层管理）
+  // 当前目标坐标统一为 WGS-84，用于卡片、收藏和写入设备。
   const coordLat = useObservable(0);
   const coordLng = useObservable(0);
   const coordReady = useObservable(false);
@@ -527,6 +537,36 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    let stopped = false;
+    const initialRevision = coordinateRevision.current;
+    (async () => {
+      try {
+        const loc = await queryDevice(settings.saveApi);
+        if (stopped) return;
+        activeLoc.setValue(loc);
+        if (loc) {
+          if (coordinateRevision.current === initialRevision) {
+            setWgsCoordinate(loc, false);
+          }
+          return;
+        }
+      } catch {
+        if (!stopped) activeLoc.setValue(null);
+      }
+
+      try {
+        const gps = await Location.requestCurrent({ forceRequest: true });
+        if (!stopped && gps && coordinateRevision.current === initialRevision) {
+          setWgsCoordinate({ latitude: gps.latitude, longitude: gps.longitude }, false);
+        }
+      } catch {}
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [settings.saveApi]);
+
   function openSheet(kind: SheetKind) {
     sheetKind.setValue(kind);
     showSheet.setValue(true);
@@ -568,23 +608,35 @@ function App() {
     }
   }
 
-  function handlePick(coord: Coordinate) {
+  function setWgsCoordinate(coord: Coordinate, userInitiated = true) {
+    if (userInitiated) coordinateRevision.current += 1;
     coordLat.setValue(coord.latitude);
     coordLng.setValue(coord.longitude);
     coordReady.setValue(true);
-    pendingCoord.setValue(coord);
+    const displayCoord = wgs84ToAppleMapDisplay(coord.latitude, coord.longitude);
+    mapCoordLat.setValue(displayCoord.latitude);
+    mapCoordLng.setValue(displayCoord.longitude);
+    pendingMapCoord.setValue(displayCoord);
+  }
+
+  function handlePick(coord: Coordinate) {
+    setWgsCoordinate(coord);
     closeSheet();
     fireToast("已定位到该坐标");
   }
 
-  function handleCoordChange(lat: number, lng: number) {
-    coordLat.setValue(lat);
-    coordLng.setValue(lng);
+  function setAppleMapCoordinate(coord: Coordinate, userInitiated = true) {
+    if (userInitiated) coordinateRevision.current += 1;
+    mapCoordLat.setValue(coord.latitude);
+    mapCoordLng.setValue(coord.longitude);
+    const wgsCoord = appleMapDisplayToWgs84(coord.latitude, coord.longitude);
+    coordLat.setValue(wgsCoord.latitude);
+    coordLng.setValue(wgsCoord.longitude);
     coordReady.setValue(true);
   }
 
-  function handleActiveLocChange(loc: ActiveLocation | null) {
-    activeLoc.setValue(loc);
+  function handleMapCoordChange(lat: number, lng: number, userInitiated = false) {
+    setAppleMapCoordinate({ latitude: lat, longitude: lng }, userInitiated);
   }
 
   async function handleAddFavorite(coord: Coordinate) {
@@ -622,7 +674,24 @@ function App() {
     if (!trimmed) return;
 
     try {
-      const result = await parseAndConvert(trimmed);
+      let textSource: MapSource = "text";
+      const direct = extractFromString(trimmed);
+      if (!/https?:\/\//i.test(trimmed) && direct?.src === "text") {
+        const sourceIndex = await Dialog.actionSheet({
+          title: "选择坐标系",
+          message: "纯经纬度无法自动判断来源。请选择复制该坐标的地图或坐标系。",
+          cancelButton: true,
+          actions: [
+            { label: "WGS-84（GPS／国际坐标）" },
+            { label: "GCJ-02（Apple／高德大陆）" },
+            { label: "BD-09（百度地图）" },
+          ],
+        });
+        if (sourceIndex == null) return;
+        textSource = sourceIndex === 1 ? "amap" : sourceIndex === 2 ? "baidu" : "text";
+      }
+
+      const result = await parseAndConvert(trimmed, textSource);
       handlePick({ latitude: result.latitude, longitude: result.longitude });
       fireToast(result.name ? `已定位到：${result.name}` : "已成功定位");
     } catch (e) {
@@ -638,7 +707,11 @@ function App() {
     try {
       const picked = await Location.pickFromMap();
       if (picked) {
-        handlePick({ latitude: picked.latitude, longitude: picked.longitude });
+        // 系统选点属于 Apple 地图显示坐标：主页 Marker 保留原值，写入前转换为 WGS-84。
+        const displayCoord = { latitude: picked.latitude, longitude: picked.longitude };
+        setAppleMapCoordinate(displayCoord);
+        pendingMapCoord.setValue(displayCoord);
+        fireToast("已定位到该坐标");
       }
     } catch (e) {
       showErrorAlert(`选点失败：${e instanceof Error ? e.message : String(e)}`);
@@ -971,14 +1044,11 @@ function App() {
       }
     >
       <MapPage
-        settings={settings}
-        pendingCoord={pendingCoord}
-        coordLat={coordLat}
-        coordLng={coordLng}
+        pendingMapCoord={pendingMapCoord}
+        mapLat={mapCoordLat}
+        mapLng={mapCoordLng}
         layer={layer}
-        onCycleLayer={cycleLayer}
-        onCoordChange={handleCoordChange}
-        onActiveLocChange={handleActiveLocChange}
+        onMapCoordChange={handleMapCoordChange}
       />
 
       <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }} alignment="leading">
