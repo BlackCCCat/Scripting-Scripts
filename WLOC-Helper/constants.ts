@@ -19,11 +19,21 @@ export const DEFAULT_SAVE_API = "https://gs-loc.apple.com/wloc-settings/save";
 /** 默认精度（米） */
 export const DEFAULT_ACCURACY = 25;
 
+/** 默认随机扰动半径（米），0 表示关闭 */
+export const DEFAULT_RANDOM_RADIUS = 0;
+
+/** 开启随机扰动时使用的初始半径（米） */
+export const DEFAULT_ENABLED_RANDOM_RADIUS = 25;
+
+/** WLOC 选点页允许的最大随机扰动半径（米） */
+export const MAX_RANDOM_RADIUS = 5000;
+
 /** 默认应用设置 */
 export const DEFAULT_SETTINGS: AppSettings = {
   saveApi: DEFAULT_SAVE_API,
   defaultLayer: "imagery",
   accuracy: DEFAULT_ACCURACY,
+  randomRadius: DEFAULT_RANDOM_RADIUS,
 };
 
 /** Storage 持久化键 */

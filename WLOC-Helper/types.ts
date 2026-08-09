@@ -21,19 +21,25 @@ export interface ActiveLocation {
   longitude: number;
   latitude: number;
   accuracy?: number;
+  /** 每次定位响应的随机扰动半径（米），0 表示关闭 */
+  randomRadius?: number;
 }
 
 /** 设备代理 save/query/clear 的统一响应 */
 export interface DeviceApiResponse {
   success: boolean;
-  longitude?: string;
-  latitude?: string;
-  accuracy?: string;
+  longitude?: number | string;
+  latitude?: number | string;
+  accuracy?: number | string;
+  randomRadius?: number | string;
   error?: string;
 }
 
 /** 地图样式标识（对应 MapKit 样式集合） */
 export type MapLayerId = "standard" | "imagery" | "hybrid";
+
+/** 坐标来源，用于选择正确的坐标系转换规则 */
+export type MapSource = "apple" | "google" | "amap" | "baidu" | "text";
 
 /** 应用持久化设置 */
 export interface AppSettings {
@@ -43,6 +49,8 @@ export interface AppSettings {
   defaultLayer: MapLayerId;
   /** 写入时使用的精度（米） */
   accuracy: number;
+  /** 每次定位响应的随机扰动半径（米），0 表示关闭 */
+  randomRadius: number;
 }
 
 /** 地图链接解析结果 */
@@ -50,5 +58,5 @@ export interface ParsedCoord {
   latitude: number;
   longitude: number;
   name?: string;
-  src?: string;
+  src?: MapSource;
 }

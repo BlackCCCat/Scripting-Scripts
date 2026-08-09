@@ -1,9 +1,15 @@
-// 设置页：编辑设备代理写入接口、默认地图图层、写入精度。
+// 设置页：编辑设备代理写入接口、默认地图图层、写入精度和随机扰动半径。
 // 保存后写回 Storage，并通知主页面刷新。
 
-import { useState, NavigationStack, List, HStack, Text, Button, TextField, Section, Stepper, Image, Spacer } from "scripting";
+import { useState, NavigationStack, List, HStack, Text, Button, TextField, Section, Stepper, Toggle, Image, Spacer } from "scripting";
 import type { AppSettings, MapLayerId } from "../types";
-import { MAP_LAYER_OPTIONS, DEFAULT_SAVE_API, DEFAULT_ACCURACY } from "../constants";
+import {
+  MAP_LAYER_OPTIONS,
+  DEFAULT_SAVE_API,
+  DEFAULT_ACCURACY,
+  DEFAULT_ENABLED_RANDOM_RADIUS,
+  MAX_RANDOM_RADIUS,
+} from "../constants";
 
 interface SettingsPageProps {
   settings: AppSettings;
@@ -14,15 +20,41 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
   const [saveApi, setSaveApi] = useState(settings.saveApi);
   const [defaultLayer, setDefaultLayer] = useState<MapLayerId>(settings.defaultLayer);
   const [accuracy, setAccuracy] = useState(settings.accuracy);
+  const [randomRadiusEnabled, setRandomRadiusEnabled] = useState(settings.randomRadius > 0);
+  const [randomRadiusText, setRandomRadiusText] = useState(
+    String(settings.randomRadius > 0 ? settings.randomRadius : DEFAULT_ENABLED_RANDOM_RADIUS),
+  );
+
+  function normalizedRandomRadius(): number {
+    const parsed = Number.parseInt(randomRadiusText, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_ENABLED_RANDOM_RADIUS;
+    return Math.min(MAX_RANDOM_RADIUS, parsed);
+  }
+
+  function handleRandomRadiusChanged(value: string) {
+    const digits = value.replace(/\D/g, "");
+    if (!digits) {
+      setRandomRadiusText("");
+      return;
+    }
+    setRandomRadiusText(String(Math.min(MAX_RANDOM_RADIUS, Number.parseInt(digits, 10))));
+  }
 
   function handleSave() {
-    onSave({ saveApi: saveApi.trim() || DEFAULT_SAVE_API, defaultLayer, accuracy });
+    onSave({
+      saveApi: saveApi.trim() || DEFAULT_SAVE_API,
+      defaultLayer,
+      accuracy,
+      randomRadius: randomRadiusEnabled ? normalizedRandomRadius() : 0,
+    });
   }
 
   function handleReset() {
     setSaveApi(DEFAULT_SAVE_API);
     setDefaultLayer("imagery");
     setAccuracy(DEFAULT_ACCURACY);
+    setRandomRadiusEnabled(false);
+    setRandomRadiusText(String(DEFAULT_ENABLED_RANDOM_RADIUS));
   }
 
   return (
@@ -78,6 +110,40 @@ export function SettingsPage({ settings, onSave }: SettingsPageProps) {
               <Text foregroundStyle="secondaryLabel">{accuracy} m</Text>
             </Stepper>
           </HStack>
+        </Section>
+
+        <Section
+          header={<Text>随机扰动</Text>}
+          footer={<Text foregroundStyle="tertiaryLabel">启用后，每次定位会在目标点周围指定半径内随机偏移。范围 1–5000m；保存设置后，下次点击“储存到设备”时写入，关闭则写入 0。</Text>}
+        >
+          <HStack frame={{ maxWidth: "infinity" }} spacing={10}>
+            <Image systemName="circle.dotted" foregroundStyle="secondaryLabel" frame={{ width: 22 }} />
+            <Text foregroundStyle="label">启用随机扰动</Text>
+            <Spacer />
+            <Toggle
+              title=""
+              toggleStyle="switch"
+              value={randomRadiusEnabled}
+              onChanged={setRandomRadiusEnabled}
+            />
+          </HStack>
+
+          {randomRadiusEnabled ? (
+            <HStack frame={{ maxWidth: "infinity", alignment: "leading" }} spacing={10}>
+              <Image systemName="ruler" foregroundStyle="secondaryLabel" frame={{ width: 22 }} />
+              <Text foregroundStyle="label" frame={{ width: 72, alignment: "leading" }}>扰动半径</Text>
+              <Spacer />
+              <TextField
+                title=""
+                value={randomRadiusText}
+                onChanged={handleRandomRadiusChanged}
+                onBlur={() => setRandomRadiusText(String(normalizedRandomRadius()))}
+                keyboardType="numberPad"
+                frame={{ width: 72, alignment: "trailing" }}
+              />
+              <Text foregroundStyle="secondaryLabel">m</Text>
+            </HStack>
+          ) : null}
         </Section>
 
         <Section>

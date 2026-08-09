@@ -610,7 +610,7 @@ function App() {
   async function handleLinkParse() {
     const rawUrl = await Dialog.prompt({
       title: "解析地图链接或坐标",
-      message: "支持 苹果/Google/高德/百度 地图链接或经纬度文本。高德坐标会自动转为 WGS-84。",
+      message: "支持苹果、Google、高德、百度地图链接或经纬度文本，并根据地图来源和地区自动转换为 WGS-84。",
       placeholder: "在此粘贴地图链接或经纬度",
       selectAll: true,
       confirmLabel: "解析并定位",
@@ -700,7 +700,13 @@ function App() {
   async function handleSave() {
     try {
       const { saveToDevice } = await import("./api/deviceApi");
-      const loc = await saveToDevice(settings.saveApi, coordLat.value, coordLng.value, settings.accuracy);
+      const loc = await saveToDevice(
+        settings.saveApi,
+        coordLat.value,
+        coordLng.value,
+        settings.accuracy,
+        settings.randomRadius,
+      );
       activeLoc.setValue(loc);
       fireToast("✓ 坐标已写入设备，下次定位生效");
     } catch (e) {
