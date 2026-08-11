@@ -39,7 +39,6 @@ export type PreviewSticker = {
   height?: number
   fileName: string
   localPath: string
-  thumbnailPath?: string
   gifPath?: string
   remotePath?: string
   previewPath?: string

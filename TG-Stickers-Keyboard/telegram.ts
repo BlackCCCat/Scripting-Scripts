@@ -12,6 +12,10 @@ import {
 import { convertWebmToGif } from "./gifConverter"
 import type { ImportProgress, PreviewSticker, StickerKind, StickerPack, StickerPackPreview } from "./types"
 
+const STATIC_PREVIEW_CONCURRENCY = 12
+const VIDEO_PREVIEW_CONCURRENCY = 2
+const DOWNLOAD_CONCURRENCY = 10
+
 type TelegramResponse<T> = {
   ok: boolean
   result?: T
@@ -22,11 +26,6 @@ type TelegramFile = {
   file_path?: string
 }
 
-type TelegramPhotoSize = {
-  file_id: string
-  file_unique_id: string
-}
-
 type TelegramSticker = {
   file_id: string
   file_unique_id: string
@@ -35,7 +34,6 @@ type TelegramSticker = {
   is_animated?: boolean
   is_video?: boolean
   emoji?: string
-  thumbnail?: TelegramPhotoSize
 }
 
 type TelegramStickerSet = {
@@ -76,19 +74,34 @@ export async function fetchStickerSetPreview(
   onProgress?.({ current: 0, total: 0, message: "正在读取贴纸包信息" })
   const set = await callTelegram<TelegramStickerSet>(botToken, "getStickerSet", { name })
   await ensurePreviewDirectory(set.name)
-  await ensureThumbnailDirectory(set.name)
 
-  const candidates = set.stickers.filter((sticker) => (
-    isStaticStickerCandidate(sticker) || (includeDynamic && isVideoStickerCandidate(sticker))
-  ))
-  const stickers = await mapWithConcurrency(candidates, includeDynamic ? 3 : 8, async (sticker, index) => {
+  const candidates = set.stickers
+    .map((sticker, index) => ({ sticker, index }))
+    .filter(({ sticker }) => (
+      isStaticStickerCandidate(sticker) || (includeDynamic && isVideoStickerCandidate(sticker))
+    ))
+  const staticCandidates = candidates.filter(({ sticker }) => isStaticStickerCandidate(sticker))
+  const videoCandidates = candidates.filter(({ sticker }) => isVideoStickerCandidate(sticker))
+  let completed = 0
+
+  const prepareSticker = async ({ sticker, index }: { sticker: TelegramSticker; index: number }) => {
+    const previewSticker = await buildPreviewSticker(botToken, set.name, sticker)
+    completed += 1
     onProgress?.({
-      current: index + 1,
+      current: completed,
       total: candidates.length,
-      message: `正在准备贴纸预览 ${index + 1}/${candidates.length}`,
+      message: `正在准备贴纸预览 ${completed}/${candidates.length}`,
     })
-    return await buildPreviewSticker(botToken, set.name, sticker)
-  })
+    return { index, sticker: previewSticker }
+  }
+
+  const [staticStickers, videoStickers] = await Promise.all([
+    mapWithConcurrency(staticCandidates, STATIC_PREVIEW_CONCURRENCY, prepareSticker),
+    mapWithConcurrency(videoCandidates, VIDEO_PREVIEW_CONCURRENCY, prepareSticker),
+  ])
+  const stickers = [...staticStickers, ...videoStickers]
+    .sort((left, right) => left.index - right.index)
+    .map(({ sticker }) => sticker)
 
   return {
     name: set.name,
@@ -108,19 +121,14 @@ export async function downloadStickerSelection(
   await ensurePackDirectory(preview.name)
   await ensureThumbnailDirectory(preview.name)
 
+  const selectedIdSet = new Set(selectedIds)
   const selected = preview.stickers.filter((sticker) => (
-    selectedIds.includes(sticker.id)
+    selectedIdSet.has(sticker.id)
     && (sticker.kind === "static" || (includeDynamic && sticker.kind === "video"))
   ))
   const total = selected.length
   let completed = 0
-  const stickers = await mapWithConcurrency(selected, 6, async (sticker) => {
-    onProgress?.({
-      current: completed,
-      total,
-      message: `正在下载 ${completed}/${total}`,
-    })
-
+  const stickers = await mapWithConcurrency(selected, DOWNLOAD_CONCURRENCY, async (sticker) => {
     const remotePath = sticker.remotePath ?? (await callTelegram<TelegramFile>(botToken, "getFile", {
       file_id: sticker.fileId,
     })).file_path
@@ -163,6 +171,10 @@ export async function downloadStickerSelection(
     const thumbnailSource = sticker.previewPath && await FileManager.exists(sticker.previewPath)
       ? sticker.previewPath
       : localPath
+    const thumbnailPath = await createThumbnail(
+      thumbnailSource,
+      thumbnailLocalPath(preview.name, sticker.fileUniqueId),
+    )
 
     completed += 1
     onProgress?.({
@@ -181,7 +193,7 @@ export async function downloadStickerSelection(
       height: sticker.height,
       fileName,
       localPath,
-      thumbnailPath: await createThumbnail(thumbnailSource, thumbnailLocalPath(preview.name, sticker.fileUniqueId)),
+      thumbnailPath,
       gifPath,
       remotePath,
     }
@@ -236,8 +248,9 @@ async function buildPreviewSticker(
   const extension = extensionFromFilePath(remotePath)
   const kind = stickerKind(sticker, extension)
   const localPath = stickerLocalPath(setName, sticker.file_unique_id, extension)
-  const thumbnailPath = thumbnailLocalPath(setName, sticker.file_unique_id)
-  const preview = await downloadPreviewImage(botToken, setName, sticker, remotePath, extension)
+  const previewPath = kind === "static"
+    ? await cacheStaticPreview(botToken, setName, sticker.file_unique_id, remotePath, extension)
+    : undefined
   const animatedPreviewPath = kind === "video" && remotePath
     ? await buildVideoPreview(botToken, setName, sticker.file_unique_id, remotePath, extension)
     : undefined
@@ -252,13 +265,10 @@ async function buildPreviewSticker(
     height: sticker.height,
     fileName: `${sticker.file_unique_id}.${extension}`,
     localPath,
-    thumbnailPath: preview.isOriginal && preview.path
-      ? await createThumbnail(preview.path, thumbnailPath)
-      : undefined,
     gifPath: animatedPreviewPath,
     remotePath,
-    previewPath: animatedPreviewPath ?? preview.path,
-    previewIsOriginal: animatedPreviewPath ? false : preview.isOriginal,
+    previewPath: animatedPreviewPath ?? previewPath,
+    previewIsOriginal: !!previewPath,
   }
 }
 
@@ -271,6 +281,8 @@ async function buildVideoPreview(
 ): Promise<string> {
   const gifPath = previewGifPath(setName, uniqueId)
   if (await FileManager.exists(gifPath)) return gifPath
+  const downloadedGifPath = stickerGifPath(setName, uniqueId)
+  if (await FileManager.exists(downloadedGifPath)) return downloadedGifPath
 
   const sourcePath = previewLocalPath(setName, uniqueId, extension)
   if (!(await FileManager.exists(sourcePath))) {
@@ -286,34 +298,24 @@ async function buildVideoPreview(
   return gifPath
 }
 
-async function downloadPreviewImage(
+async function cacheStaticPreview(
   botToken: string,
   setName: string,
-  sticker: TelegramSticker,
+  uniqueId: string,
   remotePath: string | undefined,
-  stickerExtension: string,
-): Promise<{ path?: string; isOriginal?: boolean }> {
-  const thumb = sticker.thumbnail
-  if (!thumb) {
-    if (!remotePath || stickerKind(sticker, stickerExtension) !== "static") return {}
-    const localPath = previewLocalPath(setName, sticker.file_unique_id, stickerExtension)
-    if (!(await FileManager.exists(localPath))) {
-      await downloadTelegramFile(botToken, remotePath, localPath)
-    }
-    return { path: localPath, isOriginal: true }
+  extension: string,
+): Promise<string | undefined> {
+  const downloadedPath = stickerLocalPath(setName, uniqueId, extension)
+  if (await FileManager.exists(downloadedPath)) {
+    return downloadedPath
   }
+  if (!remotePath) return undefined
 
-  const file = await callTelegram<TelegramFile>(botToken, "getFile", {
-    file_id: thumb.file_id,
-  })
-  if (!file.file_path) return {}
-
-  const thumbExtension = extensionFromFilePath(file.file_path)
-  const localPath = previewLocalPath(setName, thumb.file_unique_id, thumbExtension)
+  const localPath = previewLocalPath(setName, uniqueId, extension)
   if (!(await FileManager.exists(localPath))) {
-    await downloadTelegramFile(botToken, file.file_path, localPath)
+    await downloadTelegramFile(botToken, remotePath, localPath)
   }
-  return { path: localPath, isOriginal: false }
+  return localPath
 }
 
 function extensionFromFilePath(path?: string): string {

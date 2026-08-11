@@ -652,11 +652,9 @@ function PreviewStickerTile(props: {
   selected: boolean
   onToggle: () => void
 }) {
-  const image = props.sticker.thumbnailPath
-    ? imageForSticker(props.sticker.thumbnailPath)
-    : props.sticker.previewPath
-      ? imageForSticker(props.sticker.previewPath)
-      : imageForSticker(props.sticker.localPath)
+  const image = props.sticker.previewPath
+    ? imageForSticker(props.sticker.previewPath)
+    : imageForSticker(props.sticker.localPath)
   return (
     <Button action={props.onToggle} glassEffect={TILE} frame={{ maxWidth: "infinity", minHeight: 98 }}>
       <VStack spacing={4} padding={{ top: 8, bottom: 8, leading: 4, trailing: 4 }}>
