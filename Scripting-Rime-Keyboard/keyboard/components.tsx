@@ -21,6 +21,7 @@ import {
   dragDirection,
   enqueueKeyboardAction,
   estimatedTextWidth,
+  keyboardActionDiagnosticTimestamp,
 } from "./utils";
 
 const CANDIDATE_LEADING_PADDING = 7;
@@ -37,6 +38,12 @@ const candidateWidthCache = new Map<string, number>();
 type KeyPopupEdge = "center" | "left" | "right";
 
 type PressVisualSubscriber = (pressed: boolean) => void;
+
+export type PressVisualCommit = {
+  keyId: string;
+  pressed: boolean;
+  durationMs: number;
+};
 
 type ManualKeyTouchOwner = {
   settle: () => void;
@@ -62,9 +69,9 @@ export class KeyPressVisualController {
     string,
     { pressed: boolean; startedAt: number }
   >();
-  private commitListener: ((durationMs: number) => void) | null = null;
+  private commitListener: ((commit: PressVisualCommit) => void) | null = null;
 
-  setCommitListener(listener: ((durationMs: number) => void) | null) {
+  setCommitListener(listener: ((commit: PressVisualCommit) => void) | null) {
     this.commitListener = listener;
     if (!listener) this.pendingCommits.clear();
   }
@@ -103,7 +110,11 @@ export class KeyPressVisualController {
     const pending = this.pendingCommits.get(id);
     if (!pending || pending.pressed !== pressed) return;
     this.pendingCommits.delete(id);
-    this.commitListener?.(Date.now() - pending.startedAt);
+    this.commitListener?.({
+      keyId: id,
+      pressed,
+      durationMs: Date.now() - pending.startedAt,
+    });
   }
 
   clear() {
@@ -370,6 +381,7 @@ export function KeyFace(props: {
   }
   const immediateDragConsumedRef = useRef(false);
   const touchEndedRef = useRef(true);
+  const touchStartedAtRef = useRef<number | undefined>(undefined);
   const [swipePopup, setSwipePopupState] = useState<
     { label?: string; image?: string; key: string } | null
   >(null);
@@ -499,6 +511,7 @@ export function KeyFace(props: {
 
   function beginTouch() {
     touchEndedRef.current = false;
+    touchStartedAtRef.current = keyboardActionDiagnosticTimestamp();
     claimManualKeyTouch(touchOwnerRef.current!);
     propsRef.current.onTouchStart?.();
   }
@@ -573,13 +586,25 @@ export function KeyFace(props: {
           : propsRef.current.onSwipeRight;
         if (!action) return false;
         endTouchOnce();
-        enqueueKeyboardAction(action);
+        enqueueKeyboardAction(
+          action,
+          propsRef.current.id,
+          `swipe-${direction}`,
+          touchStartedAtRef.current,
+        );
+        touchStartedAtRef.current = undefined;
         return true;
       },
       onPress: () => {
         const action = propsRef.current.onPress;
         endTouchOnce();
-        enqueueKeyboardAction(action);
+        enqueueKeyboardAction(
+          action,
+          propsRef.current.id,
+          "tap",
+          touchStartedAtRef.current,
+        );
+        touchStartedAtRef.current = undefined;
       },
     });
   }

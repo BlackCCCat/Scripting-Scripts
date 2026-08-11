@@ -29,57 +29,184 @@ let reusableClickPlayers: HapticPlayerPool | null = null;
 let lastSystemClickAt = 0;
 let cachedGraphemeSegmenter: any = null;
 const queuedKeyboardActions: Array<() => void> = [];
-const activeKeyboardActionTouches = new Set<string>();
+const queuedKeyboardActionNeedsRunLoopYield: boolean[] = [];
 let queuedKeyboardActionTimer: ReturnType<typeof setTimeout> | null = null;
+let queuedKeyboardActionHead = 0;
+let keyboardActionMicrotaskScheduled = false;
+let keyboardActionBatchRunning = false;
+let keyboardActionQueueGeneration = 0;
 let keyboardActionSequence = 0;
+let keyboardActionDiagnosticsEnabled = false;
+let currentKeyboardActionDiagnosticContext:
+  | KeyboardActionDiagnosticContext
+  | null = null;
 
-function scheduleNextKeyboardAction() {
-  if (queuedKeyboardActionTimer != null || queuedKeyboardActions.length === 0) {
-    return;
-  }
-  queuedKeyboardActionTimer = setTimeout(() => {
-    queuedKeyboardActionTimer = null;
-    const action = queuedKeyboardActions.shift();
-    if (action) {
-      keyboardActionSequence += 1;
-      try {
-        action();
-      } catch (error) {
-        console.error("Keyboard action failed", error);
-      }
-    }
-    scheduleNextKeyboardAction();
-  }, 0);
+export type KeyboardActionDiagnosticContext = {
+  keyId: string;
+  gesture: string;
+  touchStartedAt?: number;
+  touchEndedAt: number;
+  enqueuedAt: number;
+  actionStartedAt: number;
+  queueDepthAtEnqueue: number;
+  actionSequence: number;
+};
+
+function keyboardActionNow() {
+  const clock = (globalThis as unknown as {
+    performance?: { now?: () => number };
+  }).performance;
+  return typeof clock?.now === "function" ? clock.now() : Date.now();
 }
 
-export function enqueueKeyboardAction(action: () => void) {
-  queuedKeyboardActions.push(action);
+const KEYBOARD_ACTION_BATCH_BUDGET_MS = 8;
+const KEYBOARD_ACTION_BATCH_LIMIT = 3;
+
+function pendingKeyboardActionCount() {
+  return queuedKeyboardActions.length - queuedKeyboardActionHead;
+}
+
+function resetConsumedKeyboardActions() {
+  queuedKeyboardActions.length = 0;
+  queuedKeyboardActionNeedsRunLoopYield.length = 0;
+  queuedKeyboardActionHead = 0;
+}
+
+function actionNeedsRunLoopYield(keyId?: string) {
+  return keyId === "space" || keyId === "numeric-space" || keyId === "comma";
+}
+
+function scheduleKeyboardActionTimer() {
+  queuedKeyboardActionTimer = setTimeout(runKeyboardActionBatch, 0);
+}
+
+function runKeyboardActionBatch() {
+  queuedKeyboardActionTimer = null;
+  keyboardActionMicrotaskScheduled = false;
+  keyboardActionBatchRunning = true;
+  const batchStartedAt = keyboardActionNow();
+  let processed = 0;
+  while (queuedKeyboardActionHead < queuedKeyboardActions.length) {
+    const actionIndex = queuedKeyboardActionHead++;
+    const action = queuedKeyboardActions[actionIndex];
+    const needsRunLoopYield =
+      queuedKeyboardActionNeedsRunLoopYield[actionIndex] === true;
+    keyboardActionSequence += 1;
+    try {
+      action();
+    } catch (error) {
+      console.error("Keyboard action failed", error);
+    }
+    processed += 1;
+    if (
+      needsRunLoopYield &&
+      queuedKeyboardActionHead < queuedKeyboardActions.length
+    ) {
+      keyboardActionBatchRunning = false;
+      scheduleKeyboardActionTimer();
+      return;
+    }
+    if (
+      queuedKeyboardActionHead < queuedKeyboardActions.length &&
+      (queuedKeyboardActionNeedsRunLoopYield[queuedKeyboardActionHead] ===
+          true ||
+        processed >= KEYBOARD_ACTION_BATCH_LIMIT ||
+        keyboardActionNow() - batchStartedAt >=
+          KEYBOARD_ACTION_BATCH_BUDGET_MS)
+    ) {
+      keyboardActionBatchRunning = false;
+      scheduleKeyboardActionTimer();
+      return;
+    }
+  }
+  resetConsumedKeyboardActions();
+  keyboardActionBatchRunning = false;
+}
+
+function scheduleNextKeyboardAction() {
+  if (
+    queuedKeyboardActionTimer != null || keyboardActionMicrotaskScheduled ||
+    keyboardActionBatchRunning ||
+    pendingKeyboardActionCount() === 0
+  ) {
+    return;
+  }
+  const generation = keyboardActionQueueGeneration;
+  if (
+    queuedKeyboardActionNeedsRunLoopYield[queuedKeyboardActionHead] === true
+  ) {
+    scheduleKeyboardActionTimer();
+    return;
+  }
+  keyboardActionMicrotaskScheduled = true;
+  void Promise.resolve().then(() => {
+    if (generation !== keyboardActionQueueGeneration) return;
+    runKeyboardActionBatch();
+  });
+}
+
+export function enqueueKeyboardAction(
+  action: () => void,
+  keyId?: string,
+  gesture = "tap",
+  touchStartedAt?: number,
+) {
+  const needsRunLoopYield = actionNeedsRunLoopYield(keyId);
+  if (!keyboardActionDiagnosticsEnabled) {
+    queuedKeyboardActions.push(action);
+    queuedKeyboardActionNeedsRunLoopYield.push(needsRunLoopYield);
+    scheduleNextKeyboardAction();
+    return;
+  }
+  const enqueuedAt = keyboardActionNow();
+  const queueDepthAtEnqueue = pendingKeyboardActionCount();
+  queuedKeyboardActions.push(() => {
+    const context: KeyboardActionDiagnosticContext = {
+      keyId: keyId || "unknown",
+      gesture,
+      touchStartedAt,
+      touchEndedAt: enqueuedAt,
+      enqueuedAt,
+      actionStartedAt: keyboardActionNow(),
+      queueDepthAtEnqueue,
+      actionSequence: keyboardActionSequence,
+    };
+    currentKeyboardActionDiagnosticContext = context;
+    try {
+      action();
+    } finally {
+      currentKeyboardActionDiagnosticContext = null;
+    }
+  });
+  queuedKeyboardActionNeedsRunLoopYield.push(needsRunLoopYield);
   scheduleNextKeyboardAction();
 }
 
-export function setKeyboardActionTouchActive(id: string, active: boolean) {
-  if (active) {
-    activeKeyboardActionTouches.add(id);
-    return;
-  }
-  activeKeyboardActionTouches.delete(id);
+export function setKeyboardActionDiagnosticsEnabled(enabled: boolean) {
+  keyboardActionDiagnosticsEnabled = enabled;
+  if (!enabled) currentKeyboardActionDiagnosticContext = null;
 }
 
-export function clearKeyboardActionTouches() {
-  activeKeyboardActionTouches.clear();
+export function getCurrentKeyboardActionDiagnosticContext() {
+  return currentKeyboardActionDiagnosticContext;
 }
 
-export function keyboardHasActiveTouches() {
-  return activeKeyboardActionTouches.size > 0;
+export function keyboardActionDiagnosticTimestamp() {
+  return keyboardActionDiagnosticsEnabled ? keyboardActionNow() : undefined;
 }
 
 export function clearQueuedKeyboardActions() {
+  keyboardActionQueueGeneration += 1;
+  keyboardActionMicrotaskScheduled = false;
+  keyboardActionBatchRunning = false;
   if (queuedKeyboardActionTimer != null) {
     clearTimeout(queuedKeyboardActionTimer);
     queuedKeyboardActionTimer = null;
   }
   queuedKeyboardActions.length = 0;
-  activeKeyboardActionTouches.clear();
+  queuedKeyboardActionNeedsRunLoopYield.length = 0;
+  queuedKeyboardActionHead = 0;
+  currentKeyboardActionDiagnosticContext = null;
 }
 
 export function clamp(value: number, min: number, max: number) {

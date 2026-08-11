@@ -53,6 +53,7 @@ import {
   KeyFace,
   KeyPressVisualContext,
   KeyPressVisualController,
+  type PressVisualCommit,
 } from "./components";
 import { KEY_SPACING, SIDE_PADDING } from "./constants";
 import { keyboardMetrics } from "./metrics";
@@ -67,18 +68,19 @@ import {
 } from "./t9Pinyin";
 import type { KeyHitTarget } from "./types";
 import {
-  clearKeyboardActionTouches,
   clearQueuedKeyboardActions,
   createTouchIntentMachine,
   disposeConfiguredHaptics,
   enqueueKeyboardAction,
+  getCurrentKeyboardActionDiagnosticContext,
   hapticInterval,
+  keyboardActionDiagnosticTimestamp,
   nearestHitTarget,
   playConfiguredClick,
   playConfiguredHaptic,
   playPreparedConfiguredHaptic,
   prepareConfiguredHaptics,
-  setKeyboardActionTouchActive,
+  setKeyboardActionDiagnosticsEnabled,
 } from "./utils";
 import { ensureT9ProcessorLuaInstalled } from "../t9ProcessorInstall";
 import {
@@ -509,6 +511,9 @@ function KeyboardContent(props: {
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowGestureMachineRef = useRef(new Map<string, any>());
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
+  const rowDiagnosticTouchStartedAtRef = useRef(
+    new Map<string, number | undefined>(),
+  );
   const hitTargetActionsRef = useRef<Record<string, any>>({});
   const spaceCursorDragXRef = useRef<number | null>(null);
   const preeditScrollProxyRef = useRef<any>(null);
@@ -603,6 +608,7 @@ function KeyboardContent(props: {
       }
       rowGestureMachineRef.current.clear();
       rowSpaceDragConsumedRef.current.clear();
+      rowDiagnosticTouchStartedAtRef.current.clear();
       stopRepeatingCursorMove();
       for (const timer of pressedReleaseTimersRef.current.values()) {
         clearTimeout(timer);
@@ -613,6 +619,7 @@ function KeyboardContent(props: {
       clearQueuedKeyboardActions();
       stopRepeatingBackspace();
       performanceDiagnosticsRef.current?.dispose();
+      setKeyboardActionDiagnosticsEnabled(false);
       disposeConfiguredHaptics();
       sessionRef.current?.close();
       sessionRef.current = null;
@@ -621,12 +628,16 @@ function KeyboardContent(props: {
   }, []);
 
   useEffect(() => {
+    setKeyboardActionDiagnosticsEnabled(settings.performanceDiagnostics);
+  }, [settings.performanceDiagnostics]);
+
+  useEffect(() => {
     const controller = pressVisualControllerRef.current;
     controller?.setCommitListener(
       settings.performanceDiagnostics
-        ? (durationMs) =>
+        ? (commit: PressVisualCommit) =>
           performanceDiagnosticsRef.current?.recordPressVisualCommit(
-            durationMs,
+            commit,
           )
         : null,
     );
@@ -1045,7 +1056,6 @@ function KeyboardContent(props: {
     if (pressed === current.has(id)) return;
     if (pressed) current.add(id);
     else current.delete(id);
-    setKeyboardActionTouchActive(id, pressed);
     pressVisualControllerRef.current?.setPressed(id, pressed);
   }
 
@@ -1060,12 +1070,9 @@ function KeyboardContent(props: {
     }
     pressedReleaseTimersRef.current.clear();
     setLetterLongPressPopup(null);
-    if (pressedKeyIdsRef.current.size === 0) {
-      clearKeyboardActionTouches();
-      return;
-    }
+    performanceDiagnosticsRef.current?.cancelOpenTouches();
+    if (pressedKeyIdsRef.current.size === 0) return;
     pressedKeyIdsRef.current.clear();
-    clearKeyboardActionTouches();
     pressVisualControllerRef.current?.clear();
   }
 
@@ -1145,6 +1152,9 @@ function KeyboardContent(props: {
   }
 
   function beginKeyTouch(id: string) {
+    if (settings.performanceDiagnostics) {
+      performanceDiagnosticsRef.current?.recordTouchStart(id);
+    }
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
     setKeyPressed(id, true);
@@ -1152,6 +1162,9 @@ function KeyboardContent(props: {
   }
 
   function endKeyTouch(id: string) {
+    if (settings.performanceDiagnostics) {
+      performanceDiagnosticsRef.current?.recordTouchEnd(id);
+    }
     if (
       id === "backspace" || id === "numeric-backspace" ||
       id === "t9-backspace"
@@ -1279,19 +1292,35 @@ function KeyboardContent(props: {
           ? target.onSwipeRight
           : null;
         if (!action) return false;
+        const touchStartedAt = settings.performanceDiagnostics
+          ? rowDiagnosticTouchStartedAtRef.current.get(rowId)
+          : undefined;
         playReleaseFeedback();
         setKeyPressed(target.id, false);
         clearRowTracking(rowId, true);
-        enqueueKeyboardAction(action);
+        enqueueKeyboardAction(
+          action,
+          target.id,
+          `swipe-${direction}`,
+          touchStartedAt,
+        );
         return true;
       },
       onPress: () => {
         const target = activeHitTargetRef.current.get(rowId);
         if (!target) return;
+        const touchStartedAt = settings.performanceDiagnostics
+          ? rowDiagnosticTouchStartedAtRef.current.get(rowId)
+          : undefined;
         playReleaseFeedback();
         setKeyPressed(target.id, false);
         clearRowTracking(rowId, true);
-        enqueueKeyboardAction(target.onPress);
+        enqueueKeyboardAction(
+          target.onPress,
+          target.id,
+          "tap",
+          touchStartedAt,
+        );
       },
     });
     rowGestureMachineRef.current.set(rowId, machine);
@@ -1304,12 +1333,17 @@ function KeyboardContent(props: {
     }
     rowGestureMachineRef.current.clear();
     rowSpaceDragConsumedRef.current.clear();
+    rowDiagnosticTouchStartedAtRef.current.clear();
     activeHitTargetRef.current.clear();
     spaceCursorDragXRef.current = null;
   }
 
   function clearRowTracking(rowId: string, keepVisual = false) {
     const target = activeHitTargetRef.current.get(rowId);
+    if (target && settings.performanceDiagnostics) {
+      performanceDiagnosticsRef.current?.recordTouchEnd(target.id);
+      rowDiagnosticTouchStartedAtRef.current.delete(rowId);
+    }
     if (target && !keepVisual) setKeyPressed(target.id, false);
     rowSpaceDragConsumedRef.current.delete(rowId);
     activeHitTargetRef.current.delete(rowId);
@@ -1460,6 +1494,13 @@ function KeyboardContent(props: {
     if (target) activeHitTargetRef.current.set(rowId, target);
     else activeHitTargetRef.current.delete(rowId);
     if (target) {
+      if (settings.performanceDiagnostics) {
+        performanceDiagnosticsRef.current?.recordTouchStart(target.id);
+        rowDiagnosticTouchStartedAtRef.current.set(
+          rowId,
+          keyboardActionDiagnosticTimestamp(),
+        );
+      }
       setKeyPressed(target.id, true);
       playPressFeedback();
       rowSpaceDragConsumedRef.current.set(rowId, false);
@@ -1520,6 +1561,7 @@ function KeyboardContent(props: {
       ? performanceDiagnosticsRef.current?.begin(
         diagnosticAction,
         activeKeyboardType,
+        getCurrentKeyboardActionDiagnosticContext(),
       ) ?? null
       : null;
     const processStartedAt = performanceSample ? performanceNow() : 0;
@@ -2628,13 +2670,20 @@ function KeyboardContent(props: {
     metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
   );
   const highlightedCandidate = candidates[highlightedIdx];
-  const highlightedCandidateComment = useMemo(
+  const candidateItems = useMemo(
     () =>
-      highlightedCandidate && settings.showCandidateComment
-        ? highlightedCandidate.comment?.trim() ?? ""
-        : "",
-    [highlightedCandidate, settings.showCandidateComment],
+      candidates.map((candidate, index) => ({
+        candidate,
+        comment: settings.showCandidateComment
+          ? candidate.comment?.trim() ?? ""
+          : "",
+        pageIndex: index,
+        absoluteIndex: pageNo * rimePageSize + index,
+      })),
+    [candidates, pageNo, rimePageSize, settings.showCandidateComment],
   );
+  const highlightedCandidateComment = candidateItems[highlightedIdx]?.comment ??
+    "";
   const highlightedCandidateWidth = useMemo(
     () =>
       highlightedCandidate && candidateBarWidth > 0
@@ -2657,17 +2706,36 @@ function KeyboardContent(props: {
       settings.showCandidateComment,
     ],
   );
-  const candidateItems = useMemo(
+  const normalCandidateContextMenus = useMemo(
     () =>
-      candidates.map((candidate, index) => ({
-        candidate,
-        pageIndex: index,
-        absoluteIndex: pageNo * rimePageSize + index,
-      })),
-    [candidates, pageNo, rimePageSize],
+      Array.from({ length: rimePageSize }, (_, pageIndex) => {
+        if (candidateMenuActions.length === 0) return undefined;
+        const absoluteIndex = pageNo * rimePageSize + pageIndex;
+        return {
+          menuItems: (
+            <Group>
+              {candidateMenuActions.map((item, index) => (
+                <Button
+                  key={`${index}-${item.name}-${item.action}`}
+                  title={item.name}
+                  action={() =>
+                    hitTargetActionsRef.current.runCandidateMenuAction(
+                      absoluteIndex,
+                      item.action,
+                    )}
+                />
+              ))}
+            </Group>
+          ),
+        };
+      }),
+    [candidateMenuActions, pageNo, rimePageSize],
   );
   const visibleCandidateItems = candidateItems;
-  const candidateAutoScrollKey = highlightedCandidate
+  const candidateAutoScrollTargetKey = highlightedCandidate
+    ? `${pageNo}-${highlightedIdx}`
+    : null;
+  const candidateAutoScrollContentKey = highlightedCandidate
     ? `${pageNo}-${highlightedIdx}-${highlightedCandidate.text}`
     : null;
   const candidateAutoScrollAnchor = highlightedCandidateWidth >
@@ -2781,16 +2849,16 @@ function KeyboardContent(props: {
   ]);
 
   useEffect(() => {
-    if (candidateScrollTimerRef.current != null) {
-      clearTimeout(candidateScrollTimerRef.current);
-      candidateScrollTimerRef.current = null;
-    }
-    if (!candidateAutoScrollKey) {
+    if (!candidateAutoScrollTargetKey || !candidateAutoScrollContentKey) {
+      if (candidateScrollTimerRef.current != null) {
+        clearTimeout(candidateScrollTimerRef.current);
+        candidateScrollTimerRef.current = null;
+      }
       candidateScrollTargetRef.current = null;
       return;
     }
     const currentTarget: CandidateScrollTarget = {
-      key: candidateAutoScrollKey,
+      key: candidateAutoScrollContentKey,
       pageNo,
       highlightedIdx,
       anchor: candidateAutoScrollAnchor,
@@ -2807,16 +2875,21 @@ function KeyboardContent(props: {
     if (!targetMoved && !alignmentChanged && !changedNonLeadingCandidate) {
       return;
     }
+    if (candidateScrollTimerRef.current != null) {
+      clearTimeout(candidateScrollTimerRef.current);
+      candidateScrollTimerRef.current = null;
+    }
     candidateScrollTimerRef.current = setTimeout(() => {
       candidateScrollTimerRef.current = null;
       candidateScrollProxyRef.current?.scrollTo(
-        candidateAutoScrollKey,
+        candidateAutoScrollTargetKey,
         candidateAutoScrollAnchor,
       );
     }, 20);
   }, [
     candidateAutoScrollAnchor,
-    candidateAutoScrollKey,
+    candidateAutoScrollContentKey,
+    candidateAutoScrollTargetKey,
     candidateBarWidth,
     highlightedIdx,
     highlightedCandidateWidth,
@@ -3535,6 +3608,7 @@ function KeyboardContent(props: {
 
   hitTargetActionsRef.current = {
     runWithFeedback,
+    runCandidateMenuAction,
     beginKeyTouch,
     endKeyTouch,
     pressShift,
@@ -3662,19 +3736,24 @@ function KeyboardContent(props: {
     ],
   );
   const cachedNumericDigitHitTargets = useMemo(
-    () => NUMERIC_DIGIT_ROWS.map((row) => numericRowHitTargets(row)),
+    () =>
+      symbolLayer
+        ? NUMERIC_DIGIT_ROWS.map((row) => numericRowHitTargets(row))
+        : [],
     [
       numericKeyWidth,
-      preedit.length,
-      candidates.length,
+      symbolLayer,
+      symbolLayer ? preedit.length : 0,
+      symbolLayer ? candidates.length : 0,
     ],
   );
   const cachedNumericBottomHitTargets = useMemo(
-    () => numericRowHitTargets(NUMERIC_BOTTOM_ROW),
+    () => symbolLayer ? numericRowHitTargets(NUMERIC_BOTTOM_ROW) : [],
     [
       numericKeyWidth,
-      preedit.length,
-      candidates.length,
+      symbolLayer,
+      symbolLayer ? preedit.length : 0,
+      symbolLayer ? candidates.length : 0,
     ],
   );
   const cachedNumericRightHitTargets = useMemo(
@@ -4430,23 +4509,22 @@ function KeyboardContent(props: {
                       >
                         {visibleCandidateItems.map(({
                           candidate,
+                          comment,
                           pageIndex,
                           absoluteIndex,
                         }) => (
                           <CandidateButton
-                            key={`${pageNo}-${pageIndex}-${candidate.text}`}
+                            key={`${pageNo}-${pageIndex}`}
                             index={pageIndex}
                             candidate={candidate}
-                            comment={candidateComment(candidate)}
+                            comment={comment}
                             showIndex={settings.showCandidateComment}
                             selected={pageIndex === highlightedIdx}
                             palette={palette}
                             height={metrics.candidateButtonHeight}
                             candidateFontSize={metrics.candidateFontSize}
                             commentFontSize={metrics.candidateCommentFontSize}
-                            contextMenu={candidateContextMenuProps(
-                              absoluteIndex,
-                            )}
+                            contextMenu={normalCandidateContextMenus[pageIndex]}
                             onPress={() =>
                               runWithFeedback(() =>
                                 selectCandidateAbsolute(absoluteIndex)
@@ -5137,7 +5215,7 @@ function KeyboardContent(props: {
                             : undefined;
                           return (
                             <CandidateButton
-                              key={`expanded-${absoluteIndex}-${candidate.text}`}
+                              key={`expanded-${absoluteIndex}`}
                               index={absoluteIndex}
                               candidate={candidate}
                               comment={comment}
