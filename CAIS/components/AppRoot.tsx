@@ -1,5 +1,7 @@
 import {
   Button,
+  ControlGroup,
+  Divider,
   EmptyView,
   Editor,
   Group,
@@ -664,6 +666,19 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     })
   }
 
+  async function shareItem(item: ClipItem) {
+    try {
+      const value = item.kind === "image" ? item.imagePath : await itemSource(item)
+      if (!value) {
+        showToast("当前条目无法分享")
+        return
+      }
+      await ShareSheet.present([value])
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "分享失败") })
+    }
+  }
+
   async function itemSource(item: ClipItem): Promise<string> {
     if (item.kind === "image") return ""
     return renderClipOutput(item, await getFullClipContent(item.id))
@@ -924,12 +939,16 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         contextMenu={{
           menuItems: (
             <Group>
-              <Button title="增加标题" systemImage="textformat" action={() => void editItemTitle(item)} />
-              {item.kind === "image" ? (
-                <Button title="查看" systemImage="photo" action={() => void viewImageItem(item)} />
-              ) : (
-                <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
-              )}
+              <ControlGroup controlSize="large">
+                <Button title="增加标题" systemImage="textformat" action={() => void editItemTitle(item)} />
+                {item.kind === "image" ? (
+                  <Button title="查看" systemImage="photo" action={() => void viewImageItem(item)} />
+                ) : (
+                  <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
+                )}
+                <Button title="分享" systemImage="square.and.arrow.up" action={() => void shareItem(item)} />
+              </ControlGroup>
+              <Divider />
               {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
                 <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
               ) : null}
@@ -1212,17 +1231,19 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   function rootPresentationProps() {
     return {
       sheet: releaseNotesSheet,
-      pip: {
-        isPresented: pipPresented,
-        maximumUpdatesPerSecond: 2,
-        content: (
-          <PipStatusView
-            status={monitorStatus}
-            onStart={startPipMonitor}
-            onStop={stopPipMonitor}
-          />
-        ),
-      },
+      ...(pipPresented.value ? {
+        pip: {
+          isPresented: pipPresented,
+          maximumUpdatesPerSecond: 2,
+          content: (
+            <PipStatusView
+              status={monitorStatus}
+              onStart={startPipMonitor}
+              onStop={stopPipMonitor}
+            />
+          ),
+        },
+      } : {}),
     }
   }
 
