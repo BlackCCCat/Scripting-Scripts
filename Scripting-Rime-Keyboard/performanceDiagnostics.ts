@@ -1,4 +1,8 @@
-import { type KeyboardActionDiagnosticContext } from "./keyboard/utils";
+import {
+  isPriorityDiagnosticKey,
+  KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL,
+  type KeyboardActionDiagnosticContext,
+} from "./keyboard/utils";
 
 type PerformanceDiagnosticSample = {
   sampleId: number;
@@ -84,10 +88,9 @@ const LEGACY_STORAGE_KEYS = [
   "rime_keyboard_performance_diagnostics_v2",
   "rime_keyboard_performance_diagnostics_v1",
 ];
-const SAMPLE_INTERVAL = 4;
+const SAMPLE_INTERVAL = KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL;
 const SAMPLE_LIMIT = 400;
 const FLUSH_DELAY_MS = 15000;
-const SLOW_QUEUE_SAMPLE_THRESHOLD_MS = 8;
 const SLOW_VISUAL_SAMPLE_THRESHOLD_MS = 50;
 const CHINA_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -108,12 +111,6 @@ function chinaTime(value: string | number) {
   return new Date(timestamp + CHINA_TIME_OFFSET_MS).toISOString()
     .replace("T", " ")
     .replace("Z", " +08:00");
-}
-
-function isPriorityDiagnosticKey(keyId: string) {
-  return keyId === "space" || keyId === "numeric-space" ||
-    keyId === "comma" || keyId === "backspace" ||
-    keyId === "numeric-backspace" || keyId === "t9-backspace";
 }
 
 function loadStoredDiagnostics(): StoredPerformanceDiagnostics {
@@ -149,7 +146,6 @@ function loadStoredDiagnostics(): StoredPerformanceDiagnostics {
 export class KeyboardPerformanceDiagnostics {
   private sampleId: number;
   private touchId: number;
-  private actionCount = 0;
   private touchCount = 0;
   private pressVisualCount = 0;
   private previousKeyId: string | null = null;
@@ -182,14 +178,13 @@ export class KeyboardPerformanceDiagnostics {
     const keyId = context?.keyId || action;
     const previousKeyId = this.previousKeyId;
     this.previousKeyId = keyId;
-    this.actionCount += 1;
     const queueWait = context == null
       ? 0
       : context.actionStartedAt - context.enqueuedAt;
-    const shouldSample = this.actionCount % SAMPLE_INTERVAL === 0 ||
-      isPriorityDiagnosticKey(keyId) || context?.gesture !== "tap" ||
-      queueWait >= SLOW_QUEUE_SAMPLE_THRESHOLD_MS;
+    const shouldSample = context == null || context.forceSample ||
+      context.sampleRequested && !context.sampleConsumed;
     if (!shouldSample) return null;
+    if (context && !context.forceSample) context.sampleConsumed = true;
     const startedAt = performanceNow();
     const keyPair = previousKeyId ? `${previousKeyId}→${keyId}` : undefined;
     return {

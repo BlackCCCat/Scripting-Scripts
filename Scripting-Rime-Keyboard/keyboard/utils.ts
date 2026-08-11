@@ -30,12 +30,16 @@ let lastSystemClickAt = 0;
 let cachedGraphemeSegmenter: any = null;
 const queuedKeyboardActions: Array<() => void> = [];
 const queuedKeyboardActionNeedsRunLoopYield: boolean[] = [];
+const queuedKeyboardActionDiagnostics: Array<
+  QueuedKeyboardActionDiagnosticEnvelope | null
+> = [];
 let queuedKeyboardActionTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedKeyboardActionHead = 0;
 let keyboardActionMicrotaskScheduled = false;
 let keyboardActionBatchRunning = false;
 let keyboardActionQueueGeneration = 0;
 let keyboardActionSequence = 0;
+let keyboardActionDiagnosticSequence = 0;
 let keyboardActionDiagnosticsEnabled = false;
 let currentKeyboardActionDiagnosticContext:
   | KeyboardActionDiagnosticContext
@@ -50,6 +54,20 @@ export type KeyboardActionDiagnosticContext = {
   actionStartedAt: number;
   queueDepthAtEnqueue: number;
   actionSequence: number;
+  sampleRequested: boolean;
+  sampleConsumed: boolean;
+  forceSample: boolean;
+};
+
+type QueuedKeyboardActionDiagnosticEnvelope = {
+  keyId: string;
+  gesture: string;
+  touchStartedAt?: number;
+  touchEndedAt: number;
+  enqueuedAt: number;
+  queueDepthAtEnqueue: number;
+  sampleRequestedAtEnqueue: boolean;
+  forceSampleAtEnqueue: boolean;
 };
 
 function keyboardActionNow() {
@@ -61,6 +79,14 @@ function keyboardActionNow() {
 
 const KEYBOARD_ACTION_BATCH_BUDGET_MS = 8;
 const KEYBOARD_ACTION_BATCH_LIMIT = 3;
+const SLOW_QUEUE_SAMPLE_THRESHOLD_MS = 8;
+export const KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL = 4;
+
+export function isPriorityDiagnosticKey(keyId: string) {
+  return keyId === "space" || keyId === "numeric-space" ||
+    keyId === "comma" || keyId === "backspace" ||
+    keyId === "numeric-backspace" || keyId === "t9-backspace";
+}
 
 function pendingKeyboardActionCount() {
   return queuedKeyboardActions.length - queuedKeyboardActionHead;
@@ -69,6 +95,7 @@ function pendingKeyboardActionCount() {
 function resetConsumedKeyboardActions() {
   queuedKeyboardActions.length = 0;
   queuedKeyboardActionNeedsRunLoopYield.length = 0;
+  queuedKeyboardActionDiagnostics.length = 0;
   queuedKeyboardActionHead = 0;
 }
 
@@ -89,11 +116,34 @@ function runKeyboardActionBatch() {
   while (queuedKeyboardActionHead < queuedKeyboardActions.length) {
     const actionIndex = queuedKeyboardActionHead++;
     const action = queuedKeyboardActions[actionIndex];
+    const diagnosticEnvelope = queuedKeyboardActionDiagnostics[actionIndex];
     const needsRunLoopYield =
       queuedKeyboardActionNeedsRunLoopYield[actionIndex] === true;
-    keyboardActionSequence += 1;
     try {
-      action();
+      if (diagnosticEnvelope) {
+        keyboardActionSequence += 1;
+        const actionStartedAt = keyboardActionNow();
+        currentKeyboardActionDiagnosticContext = {
+          keyId: diagnosticEnvelope.keyId,
+          gesture: diagnosticEnvelope.gesture,
+          touchStartedAt: diagnosticEnvelope.touchStartedAt,
+          touchEndedAt: diagnosticEnvelope.touchEndedAt,
+          enqueuedAt: diagnosticEnvelope.enqueuedAt,
+          actionStartedAt,
+          queueDepthAtEnqueue: diagnosticEnvelope.queueDepthAtEnqueue,
+          actionSequence: keyboardActionSequence,
+          sampleRequested: diagnosticEnvelope.sampleRequestedAtEnqueue,
+          sampleConsumed: false,
+          forceSample: diagnosticEnvelope.forceSampleAtEnqueue ||
+            actionStartedAt - diagnosticEnvelope.enqueuedAt >=
+              SLOW_QUEUE_SAMPLE_THRESHOLD_MS,
+        };
+        try {
+          action();
+        } finally {
+          currentKeyboardActionDiagnosticContext = null;
+        }
+      } else action();
     } catch (error) {
       console.error("Keyboard action failed", error);
     }
@@ -152,37 +202,40 @@ export function enqueueKeyboardAction(
   touchStartedAt?: number,
 ) {
   const needsRunLoopYield = actionNeedsRunLoopYield(keyId);
-  if (!keyboardActionDiagnosticsEnabled) {
-    queuedKeyboardActions.push(action);
-    queuedKeyboardActionNeedsRunLoopYield.push(needsRunLoopYield);
-    scheduleNextKeyboardAction();
-    return;
-  }
-  const enqueuedAt = keyboardActionNow();
-  const queueDepthAtEnqueue = pendingKeyboardActionCount();
-  queuedKeyboardActions.push(() => {
-    const context: KeyboardActionDiagnosticContext = {
-      keyId: keyId || "unknown",
+  let diagnosticEnvelope: QueuedKeyboardActionDiagnosticEnvelope | null = null;
+  if (keyboardActionDiagnosticsEnabled) {
+    const enqueuedAt = keyboardActionNow();
+    const resolvedKeyId = keyId || "unknown";
+    const queueDepthAtEnqueue = pendingKeyboardActionCount();
+    keyboardActionDiagnosticSequence += 1;
+    const forceSampleAtEnqueue = isPriorityDiagnosticKey(resolvedKeyId) ||
+      gesture !== "tap";
+    diagnosticEnvelope = {
+      keyId: resolvedKeyId,
       gesture,
       touchStartedAt,
       touchEndedAt: enqueuedAt,
       enqueuedAt,
-      actionStartedAt: keyboardActionNow(),
       queueDepthAtEnqueue,
-      actionSequence: keyboardActionSequence,
+      sampleRequestedAtEnqueue: forceSampleAtEnqueue ||
+        keyboardActionDiagnosticSequence %
+              KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL === 0,
+      forceSampleAtEnqueue,
     };
-    currentKeyboardActionDiagnosticContext = context;
-    try {
-      action();
-    } finally {
-      currentKeyboardActionDiagnosticContext = null;
-    }
-  });
+  }
+  queuedKeyboardActions.push(action);
   queuedKeyboardActionNeedsRunLoopYield.push(needsRunLoopYield);
+  if (diagnosticEnvelope) {
+    queuedKeyboardActionDiagnostics[queuedKeyboardActions.length - 1] =
+      diagnosticEnvelope;
+  }
   scheduleNextKeyboardAction();
 }
 
 export function setKeyboardActionDiagnosticsEnabled(enabled: boolean) {
+  if (enabled !== keyboardActionDiagnosticsEnabled) {
+    keyboardActionDiagnosticSequence = 0;
+  }
   keyboardActionDiagnosticsEnabled = enabled;
   if (!enabled) currentKeyboardActionDiagnosticContext = null;
 }
@@ -205,6 +258,7 @@ export function clearQueuedKeyboardActions() {
   }
   queuedKeyboardActions.length = 0;
   queuedKeyboardActionNeedsRunLoopYield.length = 0;
+  queuedKeyboardActionDiagnostics.length = 0;
   queuedKeyboardActionHead = 0;
   currentKeyboardActionDiagnosticContext = null;
 }

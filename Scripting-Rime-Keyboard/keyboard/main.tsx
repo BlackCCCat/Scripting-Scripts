@@ -2,14 +2,13 @@ import {
   Button,
   Device,
   DragGesture,
-  FlowLayout,
   GeometryReader,
   Group,
   HStack,
   Script,
   ScrollView,
-  ScrollViewReader,
   Text,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -24,8 +23,6 @@ import {
   loadRimeKeyboardSettings,
   type RimeKeyboardSettings,
   type T9PunctuationItem,
-  TOOLBAR_LEFT_BUTTON_MAX,
-  type ToolbarButtonConfig,
 } from "../settings";
 import {
   KEY_BACKSPACE,
@@ -48,13 +45,17 @@ import {
   T9_KEYS,
 } from "../keyboardLayout";
 import {
-  CandidateButton,
-  candidateButtonNaturalWidth,
   KeyFace,
   KeyPressVisualContext,
   KeyPressVisualController,
   type PressVisualCommit,
 } from "./components";
+import {
+  CandidateHeader,
+  type ExpandedCandidateItem,
+  ExpandedCandidatePanel,
+  type RimeNotificationToast,
+} from "./candidateSurface";
 import { KEY_SPACING, SIDE_PADDING } from "./constants";
 import { keyboardMetrics } from "./metrics";
 import { type KeyboardAppearance, paletteFor } from "./palette";
@@ -67,6 +68,11 @@ import {
   t9SelectedDigitPrefix,
 } from "./t9Pinyin";
 import type { KeyHitTarget } from "./types";
+import {
+  EMPTY_KEYBOARD_RIME_STATE,
+  type KeyboardRimeState,
+  RimeViewStateController,
+} from "./rimeViewState";
 import {
   clearQueuedKeyboardActions,
   createTouchIntentMachine,
@@ -119,19 +125,9 @@ const T9_KEY_ROWS = [
   T9_KEYS.slice(6, 9),
 ];
 
-type ExpandedCandidateItem = {
-  candidate: Rime.Candidate;
-  absoluteIndex: number;
-};
-
 type SelectAllSnapshot = {
   text: string;
   cursorBefore: number;
-};
-
-type RimeNotificationToast = {
-  id: number;
-  text: string;
 };
 
 type LetterLongPressPopup = {
@@ -157,20 +153,13 @@ type RimeMetadata = {
   currentSchemaId: string | null;
 };
 
-type KeyboardRimeState = RimeMetadata & {
-  preedit: string;
-  preeditCursor: number;
-  candidates: Rime.Candidate[];
-  highlightedIdx: number;
-  pageNo: number;
-  rimePageSize: number;
-};
-
-type CandidateScrollTarget = {
-  key: string;
-  pageNo: number;
-  highlightedIdx: number;
-  anchor: "leading" | "center" | "trailing";
+type KeyboardBodyRimeProjection = RimeMetadata & {
+  composing: boolean;
+  hasSecondCandidate: boolean;
+  hasThirdCandidate: boolean;
+  t9Preedit: string;
+  t9PreeditCursor: number;
+  schemas: Rime.Schema[];
 };
 
 const NOTIFIED_RIME_OPTIONS = new Set([
@@ -181,7 +170,6 @@ const NOTIFIED_RIME_OPTIONS = new Set([
 ]);
 const RIME_NOTIFICATION_TOAST_DURATION_MS = 1400;
 const RIME_NOTIFICATION_MIN_INTERVAL_MS = 180;
-const PREEDIT_SCROLL_ESTIMATED_CHARACTER_WIDTH = 10;
 const TOOLBAR_TEMPLATE_CLIPBOARD = "{clipboard}";
 const LEGACY_TOOLBAR_TEMPLATE_CLIPBOARD = "{{clipboard}}";
 const T9_OPTION_LIMIT = 48;
@@ -419,6 +407,8 @@ function KeyboardContent(props: {
   >(null);
   const activeKeyboardType = keyboardTypeOverride ?? settings.keyboardType;
   const isT9Keyboard = activeKeyboardType === "t9";
+  const isT9KeyboardRef = useRef(isT9Keyboard);
+  isT9KeyboardRef.current = isT9Keyboard;
   const [keyboardAppearance, setKeyboardAppearance] = useState<
     KeyboardAppearance
   >(() => currentKeyboardAppearance());
@@ -433,27 +423,37 @@ function KeyboardContent(props: {
   });
 
   const [error, setError] = useState<string | null>(null);
-  const [rimeState, setRimeState] = useState<KeyboardRimeState>({
-    preedit: "",
-    preeditCursor: 0,
-    candidates: [] as Rime.Candidate[],
-    highlightedIdx: 0,
-    pageNo: 0,
-    rimePageSize: 5,
+  const rimeViewStateControllerRef = useRef<RimeViewStateController | null>(
+    null,
+  );
+  if (rimeViewStateControllerRef.current == null) {
+    rimeViewStateControllerRef.current = new RimeViewStateController();
+  }
+  const rimeStateRef = useRef<KeyboardRimeState>(EMPTY_KEYBOARD_RIME_STATE);
+  const schemasRef = useRef<Rime.Schema[]>([]);
+  const rimeProjectionRef = useRef<KeyboardBodyRimeProjection>({
+    composing: false,
+    hasSecondCandidate: false,
+    hasThirdCandidate: false,
+    t9Preedit: "",
+    t9PreeditCursor: 0,
     ascii: false,
     currentSchemaId: null,
+    schemas: schemasRef.current,
   });
-  const rimeStateRef = useRef(rimeState);
+  const [rimeProjection, setRimeProjection] = useState<
+    KeyboardBodyRimeProjection
+  >(rimeProjectionRef.current);
   const {
-    preedit,
-    preeditCursor,
-    candidates,
-    highlightedIdx,
-    pageNo,
-    rimePageSize,
+    composing: rimeComposing,
+    hasSecondCandidate,
+    hasThirdCandidate,
+    t9Preedit,
+    t9PreeditCursor,
     ascii,
     currentSchemaId,
-  } = rimeState;
+    schemas,
+  } = rimeProjection;
   const [shifted, setShifted] = useState(false);
   const [capsLocked, setCapsLocked] = useState(false);
   const [letterLongPressPopup, setLetterLongPressPopupState] = useState<
@@ -461,7 +461,7 @@ function KeyboardContent(props: {
   >(null);
   const [symbolLayer, setSymbolLayer] = useState(false);
   const [backslashWrapMode, setBackslashWrapMode] = useState(false);
-  const [rimeReady, setRimeReady] = useState(false);
+  const rimeReadyRef = useRef(false);
   const [candidateExpanded, setCandidateExpanded] = useState(false);
   const [expandedCandidates, setExpandedCandidates] = useState<
     ExpandedCandidateItem[]
@@ -481,7 +481,6 @@ function KeyboardContent(props: {
   const [t9CandidatePinyinFilter, setT9CandidatePinyinFilter] = useState<
     T9CandidatePinyinFilter | null
   >(null);
-  const [schemas, setSchemas] = useState<Rime.Schema[]>([]);
   const lastShiftTapRef = useRef(0);
   const deletedTextRef = useRef("");
   const selectAllSnapshotRef = useRef<SelectAllSnapshot | null>(null);
@@ -496,7 +495,6 @@ function KeyboardContent(props: {
   >(
     null,
   );
-  const schemasRef = useRef<Rime.Schema[]>([]);
   const rimeOptionStateRef = useRef<Record<string, boolean>>({});
   const t9FilterStateRef = useRef<T9FilterState>({ digits: "", selected: [] });
   const pressedKeyIdsRef = useRef<Set<string>>(new Set());
@@ -516,11 +514,6 @@ function KeyboardContent(props: {
   );
   const hitTargetActionsRef = useRef<Record<string, any>>({});
   const spaceCursorDragXRef = useRef<number | null>(null);
-  const preeditScrollProxyRef = useRef<any>(null);
-  const candidateScrollProxyRef = useRef<any>(null);
-  const preeditScrollTimerRef = useRef<any>(null);
-  const candidateScrollTimerRef = useRef<any>(null);
-  const candidateScrollTargetRef = useRef<CandidateScrollTarget | null>(null);
   const lastPressFeedbackAtRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
@@ -589,12 +582,6 @@ function KeyboardContent(props: {
       if (rimeNotificationFlushTimerRef.current != null) {
         clearTimeout(rimeNotificationFlushTimerRef.current);
       }
-      if (preeditScrollTimerRef.current != null) {
-        clearTimeout(preeditScrollTimerRef.current);
-      }
-      if (candidateScrollTimerRef.current != null) {
-        clearTimeout(candidateScrollTimerRef.current);
-      }
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
       CustomKeyboard.removeListener(
         "selectionDidChange",
@@ -619,11 +606,12 @@ function KeyboardContent(props: {
       clearQueuedKeyboardActions();
       stopRepeatingBackspace();
       performanceDiagnosticsRef.current?.dispose();
+      rimeViewStateControllerRef.current?.dispose();
       setKeyboardActionDiagnosticsEnabled(false);
       disposeConfiguredHaptics();
       sessionRef.current?.close();
       sessionRef.current = null;
-      setRimeReady(false);
+      rimeReadyRef.current = false;
     };
   }, []);
 
@@ -644,17 +632,13 @@ function KeyboardContent(props: {
     return () => controller?.setCommitListener(null);
   }, [settings.performanceDiagnostics]);
 
-  useEffect(() => {
-    schemasRef.current = schemas;
-  }, [schemas]);
-
-  useEffect(() => {
+  const onCandidateRenderCommit = useCallback(() => {
     if (!settings.performanceDiagnostics) return;
     const pending = pendingRimeRenderSamplesRef.current.splice(0);
     for (const sample of pending) {
       performanceDiagnosticsRef.current?.recordRimeRenderCommit(sample);
     }
-  }, [settings.performanceDiagnostics ? rimeState : null]);
+  }, [settings.performanceDiagnostics]);
 
   function setT9FilterState(next: T9FilterState) {
     t9FilterStateRef.current = next;
@@ -675,6 +659,44 @@ function KeyboardContent(props: {
     };
   }
 
+  function publishRimeState(next: KeyboardRimeState, notifyView = true) {
+    rimeStateRef.current = next;
+    rimeViewStateControllerRef.current?.publish(next, notifyView);
+    const previous = rimeProjectionRef.current;
+    const nextProjection: KeyboardBodyRimeProjection = {
+      ascii: next.ascii,
+      currentSchemaId: next.currentSchemaId,
+      composing: next.preedit.length > 0,
+      hasSecondCandidate: next.candidates.length > 1,
+      hasThirdCandidate: next.candidates.length > 2,
+      t9Preedit: isT9KeyboardRef.current ? next.preedit : previous.t9Preedit,
+      t9PreeditCursor: isT9KeyboardRef.current
+        ? next.preeditCursor
+        : previous.t9PreeditCursor,
+      schemas: schemasRef.current,
+    };
+    if (
+      previous.ascii === nextProjection.ascii &&
+      previous.currentSchemaId === nextProjection.currentSchemaId &&
+      previous.composing === nextProjection.composing &&
+      previous.hasSecondCandidate === nextProjection.hasSecondCandidate &&
+      previous.hasThirdCandidate === nextProjection.hasThirdCandidate &&
+      previous.t9Preedit === nextProjection.t9Preedit &&
+      previous.t9PreeditCursor === nextProjection.t9PreeditCursor &&
+      previous.schemas === nextProjection.schemas
+    ) return;
+    rimeProjectionRef.current = nextProjection;
+    setRimeProjection(nextProjection);
+  }
+
+  function currentPreedit() {
+    return rimeStateRef.current.preedit;
+  }
+
+  function currentCandidates() {
+    return rimeStateRef.current.candidates;
+  }
+
   function applyRimeMetadata(patch: Partial<RimeMetadata>) {
     cacheRimeMetadata(patch);
     const previous = rimeStateRef.current;
@@ -691,8 +713,7 @@ function KeyboardContent(props: {
       ascii: nextAscii,
       currentSchemaId: nextSchemaId,
     };
-    rimeStateRef.current = next;
-    setRimeState(next);
+    publishRimeState(next, false);
   }
 
   function clearT9ProcessorSelection(session = sessionRef.current) {
@@ -712,7 +733,7 @@ function KeyboardContent(props: {
     rimeSetupStartedRef.current = true;
     try {
       const result = await Thread.runInBackground(async () => {
-        await Rime.setup();
+        if (!Rime.isSetUp) await Rime.setup();
         if (settings.keyboardType === "t9") {
           await ensureT9ProcessorLuaInstalled();
         }
@@ -724,7 +745,6 @@ function KeyboardContent(props: {
         return { list, session };
       });
       if (disposedRef.current) return;
-      setSchemas(result.list);
       schemasRef.current = result.list;
       const s = result.session;
       if (disposedRef.current) {
@@ -734,13 +754,14 @@ function KeyboardContent(props: {
       sessionRef.current = s;
       rimeMetadataRef.current = readRimeMetadata(s);
       refresh(s);
+      publishRimeState(rimeStateRef.current);
       if (settings.showNotifications) {
         refreshKnownRimeOptionStates(s);
       }
       installRimeNotificationHandler();
-      setRimeReady(true);
+      rimeReadyRef.current = true;
     } catch (e) {
-      setRimeReady(false);
+      rimeReadyRef.current = false;
       setError((e as Error).message ?? String(e));
     }
   }
@@ -812,25 +833,25 @@ function KeyboardContent(props: {
     };
     const previous = rimeStateRef.current;
     const comparisonStartedAt = performanceSample ? performanceNow() : 0;
-    const unchanged = previous.preedit === nextRimeState.preedit &&
+    const viewUnchanged = previous.preedit === nextRimeState.preedit &&
       previous.preeditCursor === nextRimeState.preeditCursor &&
       previous.highlightedIdx === nextRimeState.highlightedIdx &&
       previous.pageNo === nextRimeState.pageNo &&
       previous.rimePageSize === nextRimeState.rimePageSize &&
-      previous.currentSchemaId === nextRimeState.currentSchemaId &&
-      previous.ascii === nextRimeState.ascii &&
       sameCandidates(previous.candidates, nextRimeState.candidates);
+    const unchanged = viewUnchanged &&
+      previous.currentSchemaId === nextRimeState.currentSchemaId &&
+      previous.ascii === nextRimeState.ascii;
     const candidateCompareMs = performanceSample
       ? performanceNow() - comparisonStartedAt
       : 0;
     const stateChanged = !unchanged;
     if (stateChanged) {
-      rimeStateRef.current = nextRimeState;
-      if (performanceSample) {
+      if (performanceSample && !viewUnchanged) {
         performanceSample.renderScheduledAt = performanceNow();
         pendingRimeRenderSamplesRef.current.push(performanceSample);
       }
-      setRimeState(nextRimeState);
+      publishRimeState(nextRimeState, !viewUnchanged);
     }
     if (isT9Keyboard) {
       setT9DelimiterVisualPositions((previous) => {
@@ -1133,7 +1154,8 @@ function KeyboardContent(props: {
   }
 
   function letterLongPressEnabled() {
-    return rimeReady && Date.now() >= suppressLetterLongPressUntilRef.current;
+    return rimeReadyRef.current &&
+      Date.now() >= suppressLetterLongPressUntilRef.current;
   }
 
   function switchToLetterLayer() {
@@ -1441,8 +1463,8 @@ function KeyboardContent(props: {
     if (spaceCursorDragXRef.current == null) {
       spaceCursorDragXRef.current = Number(details?.startLocation?.x ?? x);
     }
-    const hasCandidateNavigation = preedit.length > 0 &&
-      candidates.length > 0;
+    const hasCandidateNavigation = currentPreedit().length > 0 &&
+      currentCandidates().length > 0;
     const stepSize = hasCandidateNavigation
       ? SPACE_CANDIDATE_DRAG_STEP
       : SPACE_CURSOR_DRAG_STEP;
@@ -1694,7 +1716,7 @@ function KeyboardContent(props: {
   }
 
   function pressSymbol(text: string) {
-    if (ascii || preedit.length === 0) {
+    if (ascii || currentPreedit().length === 0) {
       insertTextReplacingSelectAll(text);
       return;
     }
@@ -1702,7 +1724,7 @@ function KeyboardContent(props: {
   }
 
   function pressNumericDot() {
-    if (!ascii && preedit.length > 0) {
+    if (!ascii && currentPreedit().length > 0) {
       processText(".");
       return;
     }
@@ -1808,8 +1830,7 @@ function KeyboardContent(props: {
       highlightedIdx: 0,
       pageNo: 0,
     };
-    rimeStateRef.current = nextRimeState;
-    setRimeState(nextRimeState);
+    publishRimeState(nextRimeState);
     setCandidateExpanded(false);
     setExpandedCandidates([]);
     setExpandedBatchHasMore(false);
@@ -1871,7 +1892,7 @@ function KeyboardContent(props: {
 
   function backspaceSwipeUp() {
     stopRepeatingBackspace();
-    if (preedit.length > 0) {
+    if (currentPreedit().length > 0) {
       runConfiguredAction(
         settings.backspaceComposingSwipeUp,
         settings.backspaceComposingSwipeUpMode,
@@ -1895,7 +1916,7 @@ function KeyboardContent(props: {
   function toggleAscii() {
     const s = sessionRef.current;
     if (!s) return;
-    if (preedit) clearComposition();
+    if (currentPreedit()) clearComposition();
     const next = !ascii;
     s.setOption("ascii_mode", next);
     cacheRimeMetadata({ ascii: next });
@@ -1909,7 +1930,7 @@ function KeyboardContent(props: {
     setSymbolLayer(false);
     const s = sessionRef.current;
     if (!s) return;
-    if (preedit) clearComposition();
+    if (currentPreedit()) clearComposition();
     if (!ascii) {
       s.setOption("ascii_mode", true);
       cacheRimeMetadata({ ascii: true });
@@ -1924,7 +1945,7 @@ function KeyboardContent(props: {
     setSymbolLayer(false);
     const s = sessionRef.current;
     if (!s) return;
-    if (preedit) clearComposition();
+    if (currentPreedit()) clearComposition();
     if (ascii) {
       s.setOption("ascii_mode", false);
       cacheRimeMetadata({ ascii: false });
@@ -1992,7 +2013,10 @@ function KeyboardContent(props: {
     const s = sessionRef.current;
     let menu = s?.context?.menu;
     if (!s || !menu) return false;
-    const pageSize = Math.max(1, menu.pageSize || rimePageSize || 1);
+    const pageSize = Math.max(
+      1,
+      menu.pageSize || rimeStateRef.current.rimePageSize || 1,
+    );
     const targetPage = Math.floor(index / pageSize);
     const targetIndex = index % pageSize;
 
@@ -2030,7 +2054,7 @@ function KeyboardContent(props: {
   }
 
   function processSpaceSwipeCandidate(numberKey: "2" | "3") {
-    if (preedit) {
+    if (currentPreedit()) {
       if (selectCandidateByKey(numberKey)) return;
       processKey(numberKey.charCodeAt(0), numberKey);
       return;
@@ -2040,19 +2064,19 @@ function KeyboardContent(props: {
 
   function canSpaceSwipeCandidate(numberKey: "2" | "3") {
     const index = numberKey === "2" ? 1 : 2;
-    return preedit.length > 0 && candidates.length > index;
+    return currentPreedit().length > 0 && currentCandidates().length > index;
   }
 
   function hasLiveComposition() {
     return (sessionRef.current?.context?.preedit?.length ?? 0) > 0 ||
-      preedit.length > 0;
+      currentPreedit().length > 0;
   }
 
   function runT9SpaceSwipe(direction: "up" | "down") {
     const numberKey = direction === "up" ? "2" : "3";
     const candidateIndex = direction === "up" ? 1 : 2;
     const liveCandidates = sessionRef.current?.context?.menu?.candidates ??
-      candidates;
+      currentCandidates();
     if (hasLiveComposition()) {
       if (liveCandidates.length > candidateIndex) {
         processSpaceSwipeCandidate(numberKey);
@@ -2086,9 +2110,10 @@ function KeyboardContent(props: {
     let nextFilter: T9FilterState | null = null;
     if (/^[2-9]$/.test(value)) {
       const current = t9FilterStateRef.current.digits &&
-          (preedit.length === 0 || !t9HasCommittedPrefix(preedit))
+          (currentPreedit().length === 0 ||
+            !t9HasCommittedPrefix(currentPreedit()))
         ? t9FilterStateRef.current
-        : t9FilterFromPreedit(preedit);
+        : t9FilterFromPreedit(currentPreedit());
       nextFilter = {
         digits: `${current.digits}${value}`,
         selected: current.selected,
@@ -2114,6 +2139,7 @@ function KeyboardContent(props: {
   }
 
   function pressT9Delimiter() {
+    const preedit = currentPreedit();
     if (ascii || preedit.length === 0) {
       insertTextReplacingSelectAll("'");
       return;
@@ -2144,7 +2170,7 @@ function KeyboardContent(props: {
     });
     setT9CandidatePinyinFilter({
       selected: option.selected,
-      preeditCore: t9PreeditCore(preedit),
+      preeditCore: t9PreeditCore(currentPreedit()),
     });
     syncT9ProcessorSelection(option.selected);
   }
@@ -2532,11 +2558,11 @@ function KeyboardContent(props: {
   }
 
   const t9LocalComposing = isT9Keyboard &&
-    (preedit.length > 0 || t9FilterState.digits.length > 0);
-  const composing = preedit.length > 0 || t9LocalComposing;
+    (t9Preedit.length > 0 || t9FilterState.digits.length > 0);
+  const composing = rimeComposing || t9LocalComposing;
   const t9PinyinOptions = t9LocalComposing
     ? t9PinyinOptionsFromPreedit(
-      preedit,
+      t9Preedit,
       t9FilterState,
       t9CandidatePinyinFilter,
     )
@@ -2574,184 +2600,32 @@ function KeyboardContent(props: {
         ),
     [settings.candidateMenuCustomEnabled, settings.candidateMenuActions],
   );
-  function candidateContextMenu(absoluteIndex: number) {
-    return candidateMenuActions.length > 0
-      ? (
-        <Group>
-          {candidateMenuActions.map((item, index) => (
-            <Button
-              key={`${index}-${item.name}-${item.action}`}
-              title={item.name}
-              action={() => runCandidateMenuAction(absoluteIndex, item.action)}
-            />
-          ))}
-        </Group>
-      )
-      : null;
-  }
-
-  function candidateContextMenuProps(absoluteIndex: number) {
-    const menuItems = candidateContextMenu(absoluteIndex);
-    return menuItems != null ? { menuItems } : undefined;
-  }
   const localT9PreeditDisplay = isT9Keyboard
-    ? t9LocalPreeditDisplay(preedit, t9FilterState, t9CandidatePinyinFilter)
+    ? t9LocalPreeditDisplay(
+      t9Preedit,
+      t9FilterState,
+      t9CandidatePinyinFilter,
+    )
     : null;
   const keyboardPreedit = isT9Keyboard
     ? withT9VisualDelimiters(
-      localT9PreeditDisplay ?? preedit,
+      localT9PreeditDisplay ?? t9Preedit,
       localT9PreeditDisplay ? [] : t9DelimiterVisualPositions,
     )
-    : preedit;
-  const showsPreeditCaret = !error &&
-    !settings.inlinePreedit &&
-    settings.showPreeditCaret &&
-    keyboardPreedit.length > 0;
+    : "";
   const safePreeditCursor = Math.min(
     keyboardPreedit.length,
     Math.max(
       0,
-      localT9PreeditDisplay ? keyboardPreedit.length : preeditCursor +
+      localT9PreeditDisplay ? keyboardPreedit.length : t9PreeditCursor +
         (isT9Keyboard
-          ? t9VisualDelimiterOffset(preeditCursor, t9DelimiterVisualPositions)
+          ? t9VisualDelimiterOffset(
+            t9PreeditCursor,
+            t9DelimiterVisualPositions,
+          )
           : 0),
     ),
   );
-  const preeditBeforeCaret = showsPreeditCaret
-    ? keyboardPreedit.slice(0, safePreeditCursor)
-    : error
-    ? `Rime 错误：${error}`
-    : settings.inlinePreedit
-    ? ""
-    : keyboardPreedit;
-  const preeditAfterCaret = showsPreeditCaret
-    ? keyboardPreedit.slice(safePreeditCursor)
-    : "";
-  const showsPreeditRow = !settings.inlinePreedit;
-  const preeditCaretScrollKey = "preedit-caret-anchor";
-  const preeditTailScrollKey = "preedit-tail-anchor";
-  const preeditScrollTargetKey = showsPreeditCaret
-    ? preeditCaretScrollKey
-    : preeditTailScrollKey;
-  const preeditNeedsAutoScroll = showsPreeditRow &&
-    keyboardPreedit.length > 0 &&
-    keyboardPreedit.length * PREEDIT_SCROLL_ESTIMATED_CHARACTER_WIDTH >
-      metrics.width - 16;
-  const candidateHeaderHeight = settings.inlinePreedit
-    ? metrics.candidateBarHeight
-    : metrics.candidateBarHeight + metrics.preeditRowHeight + 2;
-  const effectiveCandidateRightButtonMode =
-    settings.candidateRightButtonMode === "expand" && candidates.length === 0
-      ? "dismiss"
-      : settings.candidateRightButtonMode;
-  const candidateHomeButtonVisible = !composing;
-  const toolbarLeftButtons = useMemo(
-    () =>
-      candidateHomeButtonVisible
-        ? settings.toolbarLeftButtons.filter((item) =>
-          item.symbol && item.action
-        ).slice(0, TOOLBAR_LEFT_BUTTON_MAX)
-        : [],
-    [candidateHomeButtonVisible, settings.toolbarLeftButtons],
-  );
-  const toolbarButtonWidth = 42;
-  const candidateToolbarLeftWidth = toolbarLeftButtons.length *
-    toolbarButtonWidth;
-  const candidateRightButtonVisible =
-    effectiveCandidateRightButtonMode !== "hidden";
-  const candidateRightButtonWidth = candidateRightButtonVisible ? 42 : 0;
-  const candidateFixedButtonWidth = candidateToolbarLeftWidth +
-    candidateRightButtonWidth;
-  const candidateFixedButtonCount = toolbarLeftButtons.length +
-    (candidateRightButtonVisible ? 1 : 0);
-  const candidateFixedButtonGaps = KEY_SPACING * candidateFixedButtonCount;
-  const candidateBarWidth = Math.max(
-    0,
-    metrics.width - candidateFixedButtonWidth - candidateFixedButtonGaps,
-  );
-  const highlightedCandidate = candidates[highlightedIdx];
-  const candidateItems = useMemo(
-    () =>
-      candidates.map((candidate, index) => ({
-        candidate,
-        comment: settings.showCandidateComment
-          ? candidate.comment?.trim() ?? ""
-          : "",
-        pageIndex: index,
-        absoluteIndex: pageNo * rimePageSize + index,
-      })),
-    [candidates, pageNo, rimePageSize, settings.showCandidateComment],
-  );
-  const highlightedCandidateComment = candidateItems[highlightedIdx]?.comment ??
-    "";
-  const highlightedCandidateWidth = useMemo(
-    () =>
-      highlightedCandidate && candidateBarWidth > 0
-        ? candidateButtonNaturalWidth({
-          text: highlightedCandidate.text,
-          comment: highlightedCandidateComment,
-          index: highlightedIdx,
-          showIndex: settings.showCandidateComment,
-          candidateFontSize: metrics.candidateFontSize,
-          commentFontSize: metrics.candidateCommentFontSize,
-        })
-        : 0,
-    [
-      candidateBarWidth,
-      highlightedCandidate,
-      highlightedCandidateComment,
-      highlightedIdx,
-      metrics.candidateCommentFontSize,
-      metrics.candidateFontSize,
-      settings.showCandidateComment,
-    ],
-  );
-  const normalCandidateContextMenus = useMemo(
-    () =>
-      Array.from({ length: rimePageSize }, (_, pageIndex) => {
-        if (candidateMenuActions.length === 0) return undefined;
-        const absoluteIndex = pageNo * rimePageSize + pageIndex;
-        return {
-          menuItems: (
-            <Group>
-              {candidateMenuActions.map((item, index) => (
-                <Button
-                  key={`${index}-${item.name}-${item.action}`}
-                  title={item.name}
-                  action={() =>
-                    hitTargetActionsRef.current.runCandidateMenuAction(
-                      absoluteIndex,
-                      item.action,
-                    )}
-                />
-              ))}
-            </Group>
-          ),
-        };
-      }),
-    [candidateMenuActions, pageNo, rimePageSize],
-  );
-  const visibleCandidateItems = candidateItems;
-  const candidateAutoScrollTargetKey = highlightedCandidate
-    ? `${pageNo}-${highlightedIdx}`
-    : null;
-  const candidateAutoScrollContentKey = highlightedCandidate
-    ? `${pageNo}-${highlightedIdx}-${highlightedCandidate.text}`
-    : null;
-  const candidateAutoScrollAnchor = highlightedCandidateWidth >
-      candidateBarWidth
-    ? "trailing"
-    : highlightedIdx === 0
-    ? "leading"
-    : "center";
-  const candidateRightButtonImage =
-    effectiveCandidateRightButtonMode === "expand"
-      ? candidateExpanded ? "chevron.up.circle" : settings.toolbarExpandSymbol
-      : settings.toolbarDismissSymbol;
-  const highlightedAbsoluteIndex = pageNo * rimePageSize + highlightedIdx;
-  const expandedPagerWidth = 42;
-  const expandedCandidateWidth = metrics.width - expandedPagerWidth -
-    KEY_SPACING;
   const showNextKeyboardButton = useMemo(() => Device.isiPad, []);
   const bodyRowSpacing = 6;
   const visibleBodyRowCount = (settings.showFunctionRow ? 1 : 0) + 4;
@@ -2828,73 +2702,6 @@ function KeyboardContent(props: {
     (bottomNumbersWidth - KEY_SPACING) / 2,
   );
 
-  useEffect(() => {
-    if (preeditScrollTimerRef.current != null) {
-      clearTimeout(preeditScrollTimerRef.current);
-      preeditScrollTimerRef.current = null;
-    }
-    if (!preeditNeedsAutoScroll) return;
-    preeditScrollTimerRef.current = setTimeout(() => {
-      preeditScrollTimerRef.current = null;
-      preeditScrollProxyRef.current?.scrollTo(
-        preeditScrollTargetKey,
-        "trailing",
-      );
-    }, 20);
-  }, [
-    metrics.width,
-    keyboardPreedit,
-    preeditNeedsAutoScroll,
-    preeditScrollTargetKey,
-  ]);
-
-  useEffect(() => {
-    if (!candidateAutoScrollTargetKey || !candidateAutoScrollContentKey) {
-      if (candidateScrollTimerRef.current != null) {
-        clearTimeout(candidateScrollTimerRef.current);
-        candidateScrollTimerRef.current = null;
-      }
-      candidateScrollTargetRef.current = null;
-      return;
-    }
-    const currentTarget: CandidateScrollTarget = {
-      key: candidateAutoScrollContentKey,
-      pageNo,
-      highlightedIdx,
-      anchor: candidateAutoScrollAnchor,
-    };
-    const previousTarget = candidateScrollTargetRef.current;
-    candidateScrollTargetRef.current = currentTarget;
-    const targetMoved = previousTarget == null ||
-      previousTarget.pageNo !== currentTarget.pageNo ||
-      previousTarget.highlightedIdx !== currentTarget.highlightedIdx;
-    const alignmentChanged = previousTarget?.anchor !== currentTarget.anchor;
-    const changedNonLeadingCandidate =
-      previousTarget?.key !== currentTarget.key &&
-      currentTarget.anchor !== "leading";
-    if (!targetMoved && !alignmentChanged && !changedNonLeadingCandidate) {
-      return;
-    }
-    if (candidateScrollTimerRef.current != null) {
-      clearTimeout(candidateScrollTimerRef.current);
-      candidateScrollTimerRef.current = null;
-    }
-    candidateScrollTimerRef.current = setTimeout(() => {
-      candidateScrollTimerRef.current = null;
-      candidateScrollProxyRef.current?.scrollTo(
-        candidateAutoScrollTargetKey,
-        candidateAutoScrollAnchor,
-      );
-    }, 20);
-  }, [
-    candidateAutoScrollAnchor,
-    candidateAutoScrollContentKey,
-    candidateAutoScrollTargetKey,
-    candidateBarWidth,
-    highlightedIdx,
-    highlightedCandidateWidth,
-    pageNo,
-  ]);
   const expandedPanelHeight = normalKeyboardBodyHeight;
 
   function shiftSwipeUp() {
@@ -3353,6 +3160,11 @@ function KeyboardContent(props: {
     stopRepeatingCursorMove();
     clearAllRowGestureState();
     releaseAllPressedKeys();
+    const effectiveCandidateRightButtonMode =
+      settings.candidateRightButtonMode === "expand" &&
+        currentCandidates().length === 0
+        ? "dismiss"
+        : settings.candidateRightButtonMode;
     if (effectiveCandidateRightButtonMode === "expand") {
       if (candidateExpanded) {
         setCandidateExpanded(false);
@@ -3449,10 +3261,11 @@ function KeyboardContent(props: {
   }
 
   function toolbarScriptContext(clipboard: string) {
+    const state = rimeStateRef.current;
     return {
       clipboard,
-      preedit,
-      candidates: candidates.map((candidate) => ({
+      preedit: state.preedit,
+      candidates: state.candidates.map((candidate) => ({
         text: candidate.text,
         comment: candidateComment(candidate),
       })),
@@ -3533,57 +3346,6 @@ function KeyboardContent(props: {
     }
   }
 
-  function toolbarContextMenuProps(item: ToolbarButtonConfig) {
-    if (item.action.trim() !== "{schemaMenu}" || schemaMenu == null) {
-      return undefined;
-    }
-    return { menuItems: schemaMenu };
-  }
-
-  function renderRimeNotificationToast() {
-    if (!rimeNotificationToast) return null;
-    const cornerRadius = 8;
-    return (
-      <HStack
-        key={rimeNotificationToast.id}
-        spacing={0}
-        allowsHitTesting={false}
-        padding={{ horizontal: 12 }}
-        frame={{
-          maxWidth: Math.min(180, metrics.width - 16),
-          height: metrics.candidateButtonHeight,
-        }}
-        background={(palette.nativeKeyStyle
-          ? palette.usesCustomColors
-            ? {
-              style: palette.keyBg as any,
-              shape: { type: "rect", cornerRadius },
-            }
-            : "clear"
-          : {
-            style: palette.keyBg as any,
-            shape: { type: "rect", cornerRadius },
-          }) as any}
-        glassEffect={(palette.nativeKeyStyle
-          ? { type: "rect", cornerRadius }
-          : undefined) as any}
-        clipShape={{ type: "rect", cornerRadius }}
-        shadow={palette.nativeKeyStyle
-          ? undefined
-          : { color: palette.shadow as any, radius: 1, y: 1 }}
-      >
-        <Text
-          font={Math.max(13, metrics.candidateFontSize - 2)}
-          lineLimit={1}
-          minScaleFactor={0.75}
-          foregroundStyle={palette.primary as any}
-        >
-          {rimeNotificationToast.text}
-        </Text>
-      </HStack>
-    );
-  }
-
   const numericTouchFrame = (index: number) =>
     verticalTouchFrame(index, 4, metrics.keyHeight, numericRowSpacing);
   const numericBottomTouch = numericTouchFrame(3);
@@ -3609,6 +3371,32 @@ function KeyboardContent(props: {
   hitTargetActionsRef.current = {
     runWithFeedback,
     runCandidateMenuAction,
+    selectCandidateFromHeader: (absoluteIndex: number) =>
+      runWithFeedback(() => selectCandidateAbsolute(absoluteIndex)),
+    runToolbarHeaderAction: (action: string) =>
+      runWithFeedbackBeforeAction(
+        () => runToolbarAction(action),
+        EXIT_ACTION_FEEDBACK_DELAY,
+      ),
+    pressCandidateRightFromHeader: () => {
+      const mode = settings.candidateRightButtonMode === "expand" &&
+          currentCandidates().length === 0
+        ? "dismiss"
+        : settings.candidateRightButtonMode;
+      runWithFeedbackBeforeAction(
+        pressCandidateRightButton,
+        mode === "dismiss" ? EXIT_ACTION_FEEDBACK_DELAY : 0,
+      );
+    },
+    selectExpandedCandidate: (absoluteIndex: number) =>
+      runWithFeedback(() => {
+        selectCandidateAbsolute(absoluteIndex);
+        setCandidateExpanded(false);
+        setExpandedCandidates([]);
+        setExpandedBatchHasMore(false);
+      }),
+    moveExpandedCandidatePage: (direction: "up" | "down") =>
+      runWithFeedback(() => moveExpandedCandidateBatch(direction)),
     beginKeyTouch,
     endKeyTouch,
     pressShift,
@@ -3693,6 +3481,36 @@ function KeyboardContent(props: {
     stopRepeatingCursorMove,
   };
 
+  const onToolbarHeaderAction = useCallback(
+    (action: string) =>
+      hitTargetActionsRef.current.runToolbarHeaderAction(action),
+    [],
+  );
+  const onCandidateMenuAction = useCallback(
+    (absoluteIndex: number, action: string) =>
+      hitTargetActionsRef.current.runCandidateMenuAction(absoluteIndex, action),
+    [],
+  );
+  const onSelectCandidateFromHeader = useCallback(
+    (absoluteIndex: number) =>
+      hitTargetActionsRef.current.selectCandidateFromHeader(absoluteIndex),
+    [],
+  );
+  const onCandidateRightButton = useCallback(
+    () => hitTargetActionsRef.current.pressCandidateRightFromHeader(),
+    [],
+  );
+  const onSelectExpandedCandidate = useCallback(
+    (absoluteIndex: number) =>
+      hitTargetActionsRef.current.selectExpandedCandidate(absoluteIndex),
+    [],
+  );
+  const onMoveExpandedCandidatePage = useCallback(
+    (direction: "up" | "down") =>
+      hitTargetActionsRef.current.moveExpandedCandidatePage(direction),
+    [],
+  );
+
   const cachedComposingFunctionHitTargets = useMemo(
     () =>
       usesT9MixedFunctionRow
@@ -3731,8 +3549,8 @@ function KeyboardContent(props: {
       isT9Keyboard ? settings.t9SpaceSwipeUpMode : null,
       isT9Keyboard ? settings.t9SpaceSwipeDown : null,
       isT9Keyboard ? settings.t9SpaceSwipeDownMode : null,
-      composing,
-      candidates.length,
+      hasSecondCandidate,
+      hasThirdCandidate,
     ],
   );
   const cachedNumericDigitHitTargets = useMemo(
@@ -3743,8 +3561,9 @@ function KeyboardContent(props: {
     [
       numericKeyWidth,
       symbolLayer,
-      symbolLayer ? preedit.length : 0,
-      symbolLayer ? candidates.length : 0,
+      symbolLayer ? Number(rimeComposing) : 0,
+      symbolLayer ? Number(hasSecondCandidate) : 0,
+      symbolLayer ? Number(hasThirdCandidate) : 0,
     ],
   );
   const cachedNumericBottomHitTargets = useMemo(
@@ -3752,8 +3571,9 @@ function KeyboardContent(props: {
     [
       numericKeyWidth,
       symbolLayer,
-      symbolLayer ? preedit.length : 0,
-      symbolLayer ? candidates.length : 0,
+      symbolLayer ? Number(rimeComposing) : 0,
+      symbolLayer ? Number(hasSecondCandidate) : 0,
+      symbolLayer ? Number(hasThirdCandidate) : 0,
     ],
   );
   const cachedNumericRightHitTargets = useMemo(
@@ -3844,210 +3664,224 @@ function KeyboardContent(props: {
       t9KeyWidth,
     ],
   );
-  const cachedQwertyLetterRows = useMemo(
-    () =>
-      isT9Keyboard ? null : LETTER_ROWS.map((row, rowIndex) => {
-        const sideInset = rowIndex === 1 ? metrics.secondRowInset : 0;
-        const rowTouch = bodyTouchFrame(
-          (settings.showFunctionRow ? 1 : 0) + rowIndex,
-          metrics.keyHeight,
-        );
-        const letterTouchWidth = (index: number) => {
-          if (rowIndex === 0) {
-            return metrics.letterWidth +
-              (index === 0 || index === row.length - 1
-                ? KEY_SPACING / 2
-                : KEY_SPACING);
-          }
-          if (rowIndex === 2) return metrics.letterWidth + KEY_SPACING;
-          if (index === 0) {
-            return sideInset + metrics.letterWidth + KEY_SPACING / 2;
-          }
-          if (index === row.length - 1) {
-            return metrics.letterWidth + sideInset + KEY_SPACING / 2;
-          }
-          return metrics.letterWidth + KEY_SPACING;
-        };
-        const letterVisualOffset = (index: number) =>
-          rowIndex === 0
-            ? index === 0 ? 0 : KEY_SPACING / 2
-            : rowIndex === 2
+  function renderQwertyLetterRow(row: string[], rowIndex: number) {
+    const sideInset = rowIndex === 1 ? metrics.secondRowInset : 0;
+    const rowTouch = bodyTouchFrame(
+      (settings.showFunctionRow ? 1 : 0) + rowIndex,
+      metrics.keyHeight,
+    );
+    const letterTouchWidth = (index: number) => {
+      if (rowIndex === 0) {
+        return metrics.letterWidth +
+          (index === 0 || index === row.length - 1
             ? KEY_SPACING / 2
-            : index === 0
-            ? sideInset
-            : KEY_SPACING / 2;
-        return (
-          <HStack
-            key={`row-${rowIndex}`}
-            spacing={0}
-            frame={{
-              width: metrics.width,
-              height: rowTouch.touchHeight,
-            }}
-            zIndex={10 + rowIndex}
-          >
-            {rowIndex === 2
-              ? (
-                <KeyFace
-                  id="shift"
-                  image={composing && settings.shiftComposingEnabled
-                    ? settings.shiftComposingIcon
-                    : capsLocked
-                    ? "capslock.fill"
-                    : shifted
-                    ? "shift.fill"
-                    : "shift"}
-                  palette={palette}
-                  width={metrics.shiftWidth}
-                  height={metrics.keyHeight}
-                  touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
-                  touchHeight={rowTouch.touchHeight}
-                  visualOffsetX={0}
-                  visualOffsetY={rowTouch.visualOffsetY}
-                  system
-                  selected={shifted || capsLocked}
-                  active={isPressed("shift")}
-                  onPress={() => hitTargetActionsRef.current.pressShift()}
-                  onTouchStart={() =>
-                    hitTargetActionsRef.current.beginKeyTouch("shift")}
-                  onTouchEnd={() =>
-                    hitTargetActionsRef.current.endKeyTouch("shift")}
-                  onSwipeUp={() => hitTargetActionsRef.current.shiftSwipeUp()}
-                  onSwipeStart={() =>
-                    hitTargetActionsRef.current.stopRepeatingBackspace()}
-                  swipeTriggerDistance={settings.swipeTriggerDistance}
-                />
-              )
-              : null}
-            {row.map((ch, index) => {
-              const letterLabel = backslashWrapMode
-                ? BACKSLASH_SYMBOLS[ch]
+            : KEY_SPACING);
+      }
+      if (rowIndex === 2) return metrics.letterWidth + KEY_SPACING;
+      if (index === 0) {
+        return sideInset + metrics.letterWidth + KEY_SPACING / 2;
+      }
+      if (index === row.length - 1) {
+        return metrics.letterWidth + sideInset + KEY_SPACING / 2;
+      }
+      return metrics.letterWidth + KEY_SPACING;
+    };
+    const letterVisualOffset = (index: number) =>
+      rowIndex === 0
+        ? index === 0 ? 0 : KEY_SPACING / 2
+        : rowIndex === 2
+        ? KEY_SPACING / 2
+        : index === 0
+        ? sideInset
+        : KEY_SPACING / 2;
+    return (
+      <HStack
+        key={`row-${rowIndex}`}
+        spacing={0}
+        frame={{
+          width: metrics.width,
+          height: rowTouch.touchHeight,
+        }}
+        zIndex={10 + rowIndex}
+      >
+        {rowIndex === 2
+          ? (
+            <KeyFace
+              id="shift"
+              image={composing && settings.shiftComposingEnabled
+                ? settings.shiftComposingIcon
+                : capsLocked
+                ? "capslock.fill"
+                : shifted
+                ? "shift.fill"
+                : "shift"}
+              palette={palette}
+              width={metrics.shiftWidth}
+              height={metrics.keyHeight}
+              touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
+              touchHeight={rowTouch.touchHeight}
+              visualOffsetX={0}
+              visualOffsetY={rowTouch.visualOffsetY}
+              system
+              selected={shifted || capsLocked}
+              active={isPressed("shift")}
+              onPress={() => hitTargetActionsRef.current.pressShift()}
+              onTouchStart={() =>
+                hitTargetActionsRef.current.beginKeyTouch("shift")}
+              onTouchEnd={() =>
+                hitTargetActionsRef.current.endKeyTouch("shift")}
+              onSwipeUp={() => hitTargetActionsRef.current.shiftSwipeUp()}
+              onSwipeStart={() =>
+                hitTargetActionsRef.current.stopRepeatingBackspace()}
+              swipeTriggerDistance={settings.swipeTriggerDistance}
+            />
+          )
+          : null}
+        {row.map((ch, index) => {
+          const letterLabel = backslashWrapMode
+            ? BACKSLASH_SYMBOLS[ch]
+            : shifted || capsLocked || settings.uppercaseLetterLabels
+            ? ch.toUpperCase()
+            : ch;
+          const swipeUpImage = !backslashWrapMode &&
+              settings.showHintSymbols
+            ? settings.letterSwipeUpSymbols[ch] || undefined
+            : undefined;
+          const swipeUpLabel = !backslashWrapMode &&
+              settings.showHintSymbols && !swipeUpImage
+            ? settings.letterSwipeUp[ch]
+            : undefined;
+          const swipeDownImage = !backslashWrapMode &&
+              settings.showHintSymbols
+            ? settings.letterSwipeDownSymbols[ch] || undefined
+            : undefined;
+          const swipeDownLabel = !backslashWrapMode &&
+              settings.showHintSymbols && !swipeDownImage
+            ? settings.letterSwipeDown[ch]
+            : undefined;
+          return (
+            <KeyFace
+              key={ch}
+              id={ch}
+              label={letterLabel}
+              labelFontSize={backslashWrapMode
+                ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
                 : shifted || capsLocked || settings.uppercaseLetterLabels
-                ? ch.toUpperCase()
-                : ch;
-              const swipeUpImage = !backslashWrapMode &&
-                  settings.showHintSymbols
-                ? settings.letterSwipeUpSymbols[ch] || undefined
-                : undefined;
-              const swipeUpLabel = !backslashWrapMode &&
-                  settings.showHintSymbols && !swipeUpImage
-                ? settings.letterSwipeUp[ch]
-                : undefined;
-              const swipeDownImage = !backslashWrapMode &&
-                  settings.showHintSymbols
-                ? settings.letterSwipeDownSymbols[ch] || undefined
-                : undefined;
-              const swipeDownLabel = !backslashWrapMode &&
-                  settings.showHintSymbols && !swipeDownImage
-                ? settings.letterSwipeDown[ch]
-                : undefined;
-              return (
-                <KeyFace
-                  key={ch}
-                  id={ch}
-                  label={letterLabel}
-                  labelFontSize={backslashWrapMode
-                    ? BACKSLASH_SYMBOLS[ch].length > 2 ? 16 : 22
-                    : shifted || capsLocked || settings.uppercaseLetterLabels
-                    ? 24
-                    : 27}
-                  topLeft={swipeUpLabel}
-                  topLeftImage={swipeUpImage}
-                  topRight={swipeDownLabel}
-                  topRightImage={swipeDownImage}
-                  palette={palette}
-                  width={metrics.letterWidth}
-                  height={metrics.keyHeight}
-                  touchWidth={letterTouchWidth(index)}
-                  touchHeight={rowTouch.touchHeight}
-                  visualOffsetX={letterVisualOffset(index)}
-                  visualOffsetY={rowTouch.visualOffsetY}
-                  active={isPressed(ch)}
-                  popupLabel={letterLongPressPopup?.key === ch
-                    ? undefined
-                    : letterLabel}
-                  popupSwipeUpLabel={swipeUpLabel}
-                  popupSwipeUpImage={swipeUpImage}
-                  popupSwipeDownLabel={swipeDownLabel}
-                  popupSwipeDownImage={swipeDownImage}
-                  popupOptions={letterLongPressPopup?.key === ch
-                    ? [
-                      {
-                        label: ch,
-                        selected: letterLongPressPopup.selected === "lower",
-                      },
-                      {
-                        label: ch.toUpperCase(),
-                        selected: letterLongPressPopup.selected === "upper",
-                      },
-                    ]
-                    : undefined}
-                  showPopup={settings.showKeyPopups}
-                  onPress={() => hitTargetActionsRef.current.pressLetter(ch)}
-                  onTouchStart={() =>
-                    hitTargetActionsRef.current.beginKeyTouch(ch)}
-                  onTouchEnd={() => hitTargetActionsRef.current.endKeyTouch(ch)}
-                  onLongPress={() =>
-                    hitTargetActionsRef.current.startLetterLongPress(ch)}
-                  onLongPressMove={(details) =>
-                    hitTargetActionsRef.current.updateLetterLongPressSelection(
-                      ch,
-                      details,
-                    )}
-                  onLongPressEnd={() =>
-                    hitTargetActionsRef.current.finishLetterLongPress(ch)}
-                  longPressEnabled={() =>
-                    hitTargetActionsRef.current.letterLongPressEnabled()}
-                  longPressDuration={settings.letterLongPressDuration}
-                  onSwipeUp={() =>
-                    hitTargetActionsRef.current.runLetterSwipe("up", ch)}
-                  onSwipeDown={() =>
-                    hitTargetActionsRef.current.runLetterSwipe("down", ch)}
-                  swipeTriggerDistance={settings.swipeTriggerDistance}
-                />
-              );
-            })}
-            {rowIndex === 2
-              ? (
-                <KeyFace
-                  id="backspace"
-                  image="delete.left"
-                  palette={palette}
-                  width={metrics.shiftWidth}
-                  height={metrics.keyHeight}
-                  touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
-                  touchHeight={rowTouch.touchHeight}
-                  visualOffsetX={KEY_SPACING / 2}
-                  visualOffsetY={rowTouch.visualOffsetY}
-                  system
-                  active={isPressed("backspace")}
-                  onPress={() => hitTargetActionsRef.current.pressBackspace()}
-                  onTouchStart={() =>
-                    hitTargetActionsRef.current.beginKeyTouch("backspace")}
-                  onTouchEnd={() =>
-                    hitTargetActionsRef.current.endKeyTouch("backspace")}
-                  onLongPress={() =>
-                    hitTargetActionsRef.current.startBackspaceLongPress()}
-                  onLongPressEnd={() =>
-                    hitTargetActionsRef.current.stopRepeatingBackspace()}
-                  onLongPressMove={(details) =>
-                    hitTargetActionsRef.current.backspaceLongPressMove(details)}
-                  longPressDuration={DELETE_LONG_PRESS_DURATION}
-                  onSwipeLeft={() =>
-                    hitTargetActionsRef.current.backspaceSwipeLeft()}
-                  onSwipeUp={() =>
-                    hitTargetActionsRef.current.backspaceSwipeUp()}
-                  onSwipeDown={() =>
-                    hitTargetActionsRef.current.backspaceSwipeDown()}
-                  onSwipeStart={() =>
-                    hitTargetActionsRef.current.stopRepeatingBackspace()}
-                  swipeTriggerDistance={settings.swipeTriggerDistance}
-                />
-              )
-              : null}
-          </HStack>
-        );
-      }),
+                ? 24
+                : 27}
+              topLeft={swipeUpLabel}
+              topLeftImage={swipeUpImage}
+              topRight={swipeDownLabel}
+              topRightImage={swipeDownImage}
+              palette={palette}
+              width={metrics.letterWidth}
+              height={metrics.keyHeight}
+              touchWidth={letterTouchWidth(index)}
+              touchHeight={rowTouch.touchHeight}
+              visualOffsetX={letterVisualOffset(index)}
+              visualOffsetY={rowTouch.visualOffsetY}
+              active={isPressed(ch)}
+              popupLabel={letterLongPressPopup?.key === ch
+                ? undefined
+                : letterLabel}
+              popupSwipeUpLabel={swipeUpLabel}
+              popupSwipeUpImage={swipeUpImage}
+              popupSwipeDownLabel={swipeDownLabel}
+              popupSwipeDownImage={swipeDownImage}
+              popupOptions={letterLongPressPopup?.key === ch
+                ? [
+                  {
+                    label: ch,
+                    selected: letterLongPressPopup.selected === "lower",
+                  },
+                  {
+                    label: ch.toUpperCase(),
+                    selected: letterLongPressPopup.selected === "upper",
+                  },
+                ]
+                : undefined}
+              showPopup={settings.showKeyPopups}
+              onPress={() => hitTargetActionsRef.current.pressLetter(ch)}
+              onTouchStart={() => hitTargetActionsRef.current.beginKeyTouch(ch)}
+              onTouchEnd={() => hitTargetActionsRef.current.endKeyTouch(ch)}
+              onLongPress={() =>
+                hitTargetActionsRef.current.startLetterLongPress(ch)}
+              onLongPressMove={(details) =>
+                hitTargetActionsRef.current.updateLetterLongPressSelection(
+                  ch,
+                  details,
+                )}
+              onLongPressEnd={() =>
+                hitTargetActionsRef.current.finishLetterLongPress(ch)}
+              longPressEnabled={() =>
+                hitTargetActionsRef.current.letterLongPressEnabled()}
+              longPressDuration={settings.letterLongPressDuration}
+              onSwipeUp={() =>
+                hitTargetActionsRef.current.runLetterSwipe("up", ch)}
+              onSwipeDown={() =>
+                hitTargetActionsRef.current.runLetterSwipe("down", ch)}
+              swipeTriggerDistance={settings.swipeTriggerDistance}
+            />
+          );
+        })}
+        {rowIndex === 2
+          ? (
+            <KeyFace
+              id="backspace"
+              image="delete.left"
+              palette={palette}
+              width={metrics.shiftWidth}
+              height={metrics.keyHeight}
+              touchWidth={metrics.shiftWidth + KEY_SPACING / 2}
+              touchHeight={rowTouch.touchHeight}
+              visualOffsetX={KEY_SPACING / 2}
+              visualOffsetY={rowTouch.visualOffsetY}
+              system
+              active={isPressed("backspace")}
+              onPress={() => hitTargetActionsRef.current.pressBackspace()}
+              onTouchStart={() =>
+                hitTargetActionsRef.current.beginKeyTouch("backspace")}
+              onTouchEnd={() =>
+                hitTargetActionsRef.current.endKeyTouch("backspace")}
+              onLongPress={() =>
+                hitTargetActionsRef.current.startBackspaceLongPress()}
+              onLongPressEnd={() =>
+                hitTargetActionsRef.current.stopRepeatingBackspace()}
+              onLongPressMove={(details) =>
+                hitTargetActionsRef.current.backspaceLongPressMove(details)}
+              longPressDuration={DELETE_LONG_PRESS_DURATION}
+              onSwipeLeft={() =>
+                hitTargetActionsRef.current.backspaceSwipeLeft()}
+              onSwipeUp={() => hitTargetActionsRef.current.backspaceSwipeUp()}
+              onSwipeDown={() =>
+                hitTargetActionsRef.current.backspaceSwipeDown()}
+              onSwipeStart={() =>
+                hitTargetActionsRef.current.stopRepeatingBackspace()}
+              swipeTriggerDistance={settings.swipeTriggerDistance}
+            />
+          )
+          : null}
+      </HStack>
+    );
+  }
+  const cachedQwertyUpperRows = useMemo(
+    () =>
+      isT9Keyboard ? null : LETTER_ROWS.slice(0, 2).map(renderQwertyLetterRow),
+    [
+      backslashWrapMode,
+      bodyRowSpacing,
+      capsLocked,
+      isT9Keyboard,
+      letterLongPressPopup,
+      metrics,
+      palette,
+      settings,
+      shifted,
+      visibleBodyRowCount,
+    ],
+  );
+  const cachedQwertyBottomLetterRow = useMemo(
+    () => isT9Keyboard ? null : renderQwertyLetterRow(LETTER_ROWS[2], 2),
     [
       backslashWrapMode,
       bodyRowSpacing,
@@ -4362,220 +4196,25 @@ function KeyboardContent(props: {
           maxHeight: "infinity" as any,
         }}
       >
-        <ZStack
-          frame={{
-            width: metrics.width,
-            height: candidateHeaderHeight,
-            alignment: "bottomTrailing" as any,
-          }}
-        >
-          <VStack
-            spacing={showsPreeditRow ? 2 : 0}
-            frame={{
-              width: metrics.width,
-              height: candidateHeaderHeight,
-              alignment: "leading" as any,
-            }}
-          >
-            {showsPreeditRow
-              ? (
-                <ScrollViewReader>
-                  {(proxy) => {
-                    preeditScrollProxyRef.current = proxy;
-                    return (
-                      <ScrollView
-                        axes="horizontal"
-                        scrollIndicator="hidden"
-                        frame={{
-                          width: metrics.width,
-                          height: metrics.preeditRowHeight,
-                        }}
-                      >
-                        <HStack
-                          spacing={1}
-                          padding={{ leading: 8, trailing: 8 }}
-                          frame={{
-                            height: metrics.preeditRowHeight,
-                            alignment: "bottomLeading" as any,
-                          }}
-                        >
-                          <Text
-                            font="caption"
-                            lineLimit={1}
-                            fixedSize={{ horizontal: true, vertical: true }}
-                            foregroundStyle={palette.primary as any}
-                          >
-                            {preeditBeforeCaret}
-                          </Text>
-                          {showsPreeditCaret
-                            ? (
-                              <Text
-                                font="caption2"
-                                baselineOffset={-7}
-                                foregroundStyle={palette.primary as any}
-                                padding={{ bottom: -2 }}
-                              >
-                                ^
-                              </Text>
-                            )
-                            : null}
-                          {showsPreeditCaret
-                            ? (
-                              <VStack
-                                key={preeditCaretScrollKey}
-                                frame={{
-                                  width: 1,
-                                  height: metrics.preeditRowHeight,
-                                }}
-                              />
-                            )
-                            : null}
-                          {preeditAfterCaret
-                            ? (
-                              <Text
-                                font="caption"
-                                lineLimit={1}
-                                fixedSize={{ horizontal: true, vertical: true }}
-                                foregroundStyle={palette.primary as any}
-                              >
-                                {preeditAfterCaret}
-                              </Text>
-                            )
-                            : null}
-                          <VStack
-                            key={preeditTailScrollKey}
-                            frame={{
-                              width: 1,
-                              height: metrics.preeditRowHeight,
-                            }}
-                          />
-                        </HStack>
-                      </ScrollView>
-                    );
-                  }}
-                </ScrollViewReader>
-              )
-              : null}
-            <HStack
-              spacing={KEY_SPACING}
-              frame={{
-                width: metrics.width,
-                height: metrics.candidateBarHeight,
-              }}
-            >
-              {toolbarLeftButtons.map((item) => (
-                <KeyFace
-                  key={`toolbar-left-${item.id}`}
-                  id={`toolbar-left-${item.id}`}
-                  image={item.symbol}
-                  palette={palette}
-                  width={toolbarButtonWidth}
-                  height={metrics.candidateButtonHeight}
-                  system
-                  plain
-                  foregroundStyle={palette.primaryOverrides?.[
-                    `toolbar-left-${item.id}`
-                  ] ?? palette.primary}
-                  onPress={() =>
-                    runWithFeedbackBeforeAction(
-                      () => runToolbarAction(item.action),
-                      EXIT_ACTION_FEEDBACK_DELAY,
-                    )}
-                  contextMenu={toolbarContextMenuProps(item)}
-                />
-              ))}
-              <ScrollViewReader>
-                {(proxy) => {
-                  candidateScrollProxyRef.current = proxy;
-                  return (
-                    <ScrollView
-                      axes="horizontal"
-                      scrollIndicator="hidden"
-                      frame={{
-                        width: candidateBarWidth,
-                        height: metrics.candidateBarHeight,
-                      }}
-                    >
-                      <HStack
-                        spacing={5}
-                        buttonStyle="plain"
-                        frame={{
-                          minWidth: candidateBarWidth,
-                          height: metrics.candidateBarHeight,
-                          alignment: "leading" as any,
-                        }}
-                        background={"rgba(0,0,0,0.001)" as any}
-                        contentShape="rect"
-                      >
-                        {visibleCandidateItems.map(({
-                          candidate,
-                          comment,
-                          pageIndex,
-                          absoluteIndex,
-                        }) => (
-                          <CandidateButton
-                            key={`${pageNo}-${pageIndex}`}
-                            index={pageIndex}
-                            candidate={candidate}
-                            comment={comment}
-                            showIndex={settings.showCandidateComment}
-                            selected={pageIndex === highlightedIdx}
-                            palette={palette}
-                            height={metrics.candidateButtonHeight}
-                            candidateFontSize={metrics.candidateFontSize}
-                            commentFontSize={metrics.candidateCommentFontSize}
-                            contextMenu={normalCandidateContextMenus[pageIndex]}
-                            onPress={() =>
-                              runWithFeedback(() =>
-                                selectCandidateAbsolute(absoluteIndex)
-                              )}
-                          />
-                        ))}
-                      </HStack>
-                    </ScrollView>
-                  );
-                }}
-              </ScrollViewReader>
-              {candidateRightButtonVisible
-                ? (
-                  <KeyFace
-                    id="candidate-right"
-                    image={candidateRightButtonImage}
-                    palette={palette}
-                    width={candidateRightButtonWidth}
-                    height={metrics.candidateButtonHeight}
-                    system
-                    plain
-                    foregroundStyle={palette.primaryOverrides
-                      ?.["candidate-right"] ??
-                      palette.primary}
-                    onPress={() =>
-                      runWithFeedbackBeforeAction(
-                        pressCandidateRightButton,
-                        effectiveCandidateRightButtonMode === "dismiss"
-                          ? EXIT_ACTION_FEEDBACK_DELAY
-                          : 0,
-                      )}
-                  />
-                )
-                : null}
-            </HStack>
-          </VStack>
-          {rimeNotificationToast
-            ? (
-              <HStack
-                allowsHitTesting={false}
-                frame={{
-                  width: metrics.width,
-                  height: candidateHeaderHeight,
-                  alignment: "bottomTrailing" as any,
-                }}
-              >
-                {renderRimeNotificationToast()}
-              </HStack>
-            )
-            : null}
-        </ZStack>
+        <CandidateHeader
+          controller={rimeViewStateControllerRef.current!}
+          settings={settings}
+          metrics={metrics}
+          palette={palette}
+          displayPreedit={isT9Keyboard ? keyboardPreedit : undefined}
+          displayPreeditCursor={isT9Keyboard ? safePreeditCursor : undefined}
+          error={error}
+          composing={composing}
+          candidateExpanded={candidateExpanded}
+          notificationToast={rimeNotificationToast}
+          candidateMenuActions={candidateMenuActions}
+          schemaMenu={schemaMenu}
+          onToolbarAction={onToolbarHeaderAction}
+          onCandidateAction={onCandidateMenuAction}
+          onSelectCandidate={onSelectCandidateFromHeader}
+          onRightButton={onCandidateRightButton}
+          onRenderCommit={onCandidateRenderCommit}
+        />
 
         <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
           <VStack
@@ -5151,7 +4790,12 @@ function KeyboardContent(props: {
                     </VStack>
                   </HStack>
                 )
-                : cachedQwertyLetterRows}
+                : (
+                  <Group>
+                    {cachedQwertyUpperRows}
+                    {cachedQwertyBottomLetterRow}
+                  </Group>
+                )}
             </Group>
 
             {cachedQwertyBottomRow}
@@ -5159,135 +4803,19 @@ function KeyboardContent(props: {
 
           {candidateExpanded
             ? (
-              <HStack
-                spacing={KEY_SPACING}
-                frame={{ width: metrics.width, height: expandedPanelHeight }}
-                background={"rgba(0,0,0,0.001)" as any}
-                contentShape="rect"
-              >
-                <ScrollView
-                  axes="vertical"
-                  scrollIndicator="hidden"
-                  frame={{
-                    width: expandedCandidateWidth,
-                    height: expandedPanelHeight,
-                  }}
-                  background={"rgba(0,0,0,0.001)" as any}
-                  contentShape="rect"
-                >
-                  <VStack
-                    spacing={KEY_SPACING}
-                    frame={{
-                      width: expandedCandidateWidth,
-                      minHeight: expandedPanelHeight,
-                      alignment: "top" as any,
-                    }}
-                    background={"rgba(0,0,0,0.001)" as any}
-                    contentShape="rect"
-                  >
-                    <FlowLayout
-                      spacing={KEY_SPACING}
-                      frame={{
-                        width: expandedCandidateWidth,
-                        alignment: "leading" as any,
-                      }}
-                    >
-                      {(expandedCandidates.length > 0
-                        ? expandedCandidates
-                        : visibleCandidateItems.map((
-                          { candidate, absoluteIndex },
-                        ) => ({
-                          candidate,
-                          absoluteIndex,
-                        }))).map(({ candidate, absoluteIndex }) => {
-                          const comment = candidateComment(candidate);
-                          const naturalWidth = candidateButtonNaturalWidth({
-                            text: candidate.text,
-                            comment,
-                            index: absoluteIndex,
-                            showIndex: settings.showCandidateComment,
-                            candidateFontSize: metrics.candidateFontSize,
-                            commentFontSize: metrics.candidateCommentFontSize,
-                            expanded: true,
-                          });
-                          const width = naturalWidth > expandedCandidateWidth
-                            ? expandedCandidateWidth
-                            : undefined;
-                          return (
-                            <CandidateButton
-                              key={`expanded-${absoluteIndex}`}
-                              index={absoluteIndex}
-                              candidate={candidate}
-                              comment={comment}
-                              showIndex={settings.showCandidateComment}
-                              selected={absoluteIndex ===
-                                highlightedAbsoluteIndex}
-                              palette={palette}
-                              width={width}
-                              height={Math.max(
-                                52,
-                                metrics.candidateButtonHeight + 12,
-                              )}
-                              candidateFontSize={metrics.candidateFontSize}
-                              commentFontSize={metrics.candidateCommentFontSize}
-                              expanded
-                              contextMenu={candidateContextMenuProps(
-                                absoluteIndex,
-                              )}
-                              onPress={() =>
-                                runWithFeedback(() => {
-                                  selectCandidateAbsolute(absoluteIndex);
-                                  setCandidateExpanded(false);
-                                  setExpandedCandidates([]);
-                                  setExpandedBatchHasMore(false);
-                                })}
-                            />
-                          );
-                        })}
-                    </FlowLayout>
-                  </VStack>
-                </ScrollView>
-                <VStack
-                  spacing={KEY_SPACING}
-                  frame={{
-                    width: expandedPagerWidth,
-                    height: expandedPanelHeight,
-                  }}
-                >
-                  <KeyFace
-                    id="expanded-page-up"
-                    image="chevron.up"
-                    palette={palette}
-                    width={expandedPagerWidth}
-                    height={(expandedPanelHeight - KEY_SPACING) / 2}
-                    system
-                    foregroundStyle={pageNo > 0
-                      ? palette.primary
-                      : palette.hint}
-                    onPress={pageNo > 0
-                      ? () =>
-                        runWithFeedback(() => moveExpandedCandidateBatch("up"))
-                      : () => {}}
-                  />
-                  <KeyFace
-                    id="expanded-page-down"
-                    image="chevron.down"
-                    palette={palette}
-                    width={expandedPagerWidth}
-                    height={(expandedPanelHeight - KEY_SPACING) / 2}
-                    system
-                    foregroundStyle={expandedBatchHasMore
-                      ? palette.primary
-                      : palette.hint}
-                    onPress={expandedBatchHasMore
-                      ? () =>
-                        runWithFeedback(() =>
-                          moveExpandedCandidateBatch("down")
-                        )
-                      : () => {}}
-                  />
-                </VStack>
-              </HStack>
+              <ExpandedCandidatePanel
+                controller={rimeViewStateControllerRef.current!}
+                settings={settings}
+                metrics={metrics}
+                palette={palette}
+                panelHeight={expandedPanelHeight}
+                expandedCandidates={expandedCandidates}
+                batchHasMore={expandedBatchHasMore}
+                candidateMenuActions={candidateMenuActions}
+                onCandidateAction={onCandidateMenuAction}
+                onSelectCandidate={onSelectExpandedCandidate}
+                onMovePage={onMoveExpandedCandidatePage}
+              />
             )
             : null}
         </ZStack>
