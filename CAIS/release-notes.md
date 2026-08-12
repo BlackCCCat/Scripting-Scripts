@@ -1,7 +1,8 @@
 ## 本次更新
-- 长按菜单使用contextmenu+controlgroup，更美观
+- 亮色模式下长按预览效果优化
 
 ## 近期更新
+- 长按菜单使用contextmenu+controlgroup，更美观
 - 设置增加玻璃效果开关，低版本系统默认关闭
 - 优化首页UI的启动响应
 
