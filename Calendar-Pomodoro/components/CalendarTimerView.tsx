@@ -548,10 +548,15 @@ function FocusStopButton(props: {
       disabled={props.disabled}
       action={props.action}
       tint="systemRed"
-      glassEffect={{ type: "rect", cornerRadius: 30 } as any}
       frame={{ maxWidth: "infinity", minHeight: 62 }}
     >
-      <HStack spacing={10} frame={{ maxWidth: "infinity", minHeight: 62, alignment: "center" as any }}>
+      <HStack
+        spacing={10}
+        frame={{ maxWidth: "infinity", minHeight: 62, alignment: "center" as any }}
+        background="rgba(0,0,0,0.001)"
+        contentShape="rect"
+        glassEffect={{ type: "rect", cornerRadius: 30 } as any}
+      >
         <Image systemName="stop.fill" foregroundStyle="systemRed" imageScale="large" />
         <Text font="headline" fontWeight="bold" foregroundStyle="systemRed">
           停止并保存
