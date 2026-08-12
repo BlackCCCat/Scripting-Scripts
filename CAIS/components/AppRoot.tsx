@@ -67,6 +67,13 @@ import {
   type MenuActionResult,
 } from "../utils/menu_actions"
 import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
+import {
+  getLanShareRuntimeStatus,
+  reconcileLanShareServer,
+  releaseLanShareServer,
+  type LanShareRuntimeStatus,
+} from "../services/lan_share_server"
+import { rotateLanShareAccessToken } from "../services/lan_share_credentials"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
@@ -297,6 +304,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
   const [loading, setLoading] = useState(false)
   const [toastMessage, setToastMessage] = useState("")
+  const [lanShareStatus, setLanShareStatus] = useState<LanShareRuntimeStatus>(() => getLanShareRuntimeStatus(settings))
+  const lanShareStatusRef = useRef(lanShareStatus)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
     active: false,
     lastMessage: "未启动",
@@ -368,6 +377,44 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }, 700)
     return () => {
       if (timer) (globalThis as any).clearInterval?.(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let stopped = false
+    let reconciling = false
+
+    async function reconcile() {
+      if (stopped || reconciling) return
+      reconciling = true
+      try {
+        const latest = loadSettings()
+        const current = settingsRef.current
+        if (
+          latest.lanSharingEnabled !== current.lanSharingEnabled ||
+          latest.lanSharingPort !== current.lanSharingPort
+        ) {
+          const merged = {
+            ...current,
+            lanSharingEnabled: latest.lanSharingEnabled,
+            lanSharingPort: latest.lanSharingPort,
+          }
+          settingsRef.current = merged
+          if (!stopped) setSettings(merged)
+        }
+        const status = await reconcileLanShareServer(latest)
+        if (!stopped) publishLanShareStatus(status)
+      } finally {
+        reconciling = false
+      }
+    }
+
+    void reconcile()
+    const timer = (globalThis as any).setInterval?.(() => void reconcile(), 1500)
+    return () => {
+      stopped = true
+      if (timer) (globalThis as any).clearInterval?.(timer)
+      releaseLanShareServer()
     }
   }, [])
 
@@ -495,6 +542,12 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       const next = saveSettings(nextSettings)
       settingsRef.current = next
       setSettings(next)
+      if (
+        previous.lanSharingEnabled !== next.lanSharingEnabled ||
+        previous.lanSharingPort !== next.lanSharingPort
+      ) {
+        publishLanShareStatus(await reconcileLanShareServer(next))
+      }
       void refresh(true, next)
     } catch (error: any) {
       await Dialog.alert({
@@ -522,6 +575,26 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       toastPresented.setValue(false)
       toastHideTimer.current = null
     }, TOAST_DURATION_MS)
+  }
+
+  function publishLanShareStatus(status: LanShareRuntimeStatus) {
+    const current = lanShareStatusRef.current
+    if (
+      current.state === status.state &&
+      current.port === status.port &&
+      current.address === status.address &&
+      current.accessUrl === status.accessUrl &&
+      current.accessCode === status.accessCode &&
+      current.message === status.message
+    ) return
+    lanShareStatusRef.current = status
+    setLanShareStatus(status)
+  }
+
+  async function rotateLanShareToken() {
+    rotateLanShareAccessToken()
+    publishLanShareStatus(await reconcileLanShareServer(settingsRef.current))
+    showToast("访问码已更新")
   }
 
   function toastOptions() {
@@ -1330,6 +1403,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             onChanged={updateSettings}
             onClearFavorites={() => void requestClear("favorites")}
             onClearClipboard={(range) => void requestClear(range)}
+            lanShareStatus={lanShareStatus}
+            onRotateLanShareToken={() => void rotateLanShareToken()}
           />
         </VStack>
       )
@@ -1426,6 +1501,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
               onChanged={updateSettings}
               onClearFavorites={() => void requestClear("favorites")}
               onClearClipboard={(range) => void requestClear(range)}
+              lanShareStatus={lanShareStatus}
+              onRotateLanShareToken={() => void rotateLanShareToken()}
               leadingToolbar={toolbarLeading()}
               trailingToolbar={settingsToolbarButtons()}
             />

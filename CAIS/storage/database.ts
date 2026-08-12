@@ -123,6 +123,15 @@ export async function findClipByHash(contentHash: string, kind?: string): Promis
   return rows[0] ? rowToClip(rows[0]) : null
 }
 
+export async function findClipById(id: string): Promise<ClipItem | null> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT * FROM clips WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+    [id]
+  )
+  return rows[0] ? rowToClip(rows[0]) : null
+}
+
 export async function findTextClipsByContent(content: string): Promise<ClipItem[]> {
   const db = await initializeDatabase()
   const rows = await db.fetchAll(

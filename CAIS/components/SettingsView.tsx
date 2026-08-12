@@ -6,6 +6,7 @@ import {
   Image,
   Menu,
   Navigation,
+  NavigationLink,
   NavigationStack,
   Picker,
   Section,
@@ -33,6 +34,8 @@ import {
   validateNetworkRequest,
   validateRuntimeTemplate,
 } from "../utils/custom_action";
+import type { LanShareRuntimeStatus } from "../services/lan_share_server";
+import { LanShareSettingsView } from "./LanShareSettingsView";
 
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
 const MAX_ITEM_OPTIONS = [200, 500, 800];
@@ -367,6 +370,8 @@ export function SettingsView(props: {
   onChanged: (settings: CaisSettings) => void;
   onClearFavorites?: () => void;
   onClearClipboard?: (range: ClipboardClearRange) => void;
+  lanShareStatus?: LanShareRuntimeStatus;
+  onRotateLanShareToken?: () => void;
   leadingToolbar?: any;
   trailingToolbar?: any;
 }) {
@@ -538,6 +543,25 @@ export function SettingsView(props: {
             </HStack>
           </Toggle>
         ) : null}
+        <NavigationLink
+          destination={
+            <LanShareSettingsView
+              value={settings}
+              status={props.lanShareStatus}
+              onChanged={props.onChanged}
+              onRotateToken={props.onRotateLanShareToken}
+            />
+          }
+        >
+          <HStack>
+            <Image systemName="network" foregroundStyle="systemIndigo" />
+            <Text>局域网共享</Text>
+            <Spacer />
+            <Text foregroundStyle="secondaryLabel">
+              {settings.lanSharingEnabled ? "已开启" : "已关闭"}
+            </Text>
+          </HStack>
+        </NavigationLink>
         <Button
           title="清空收藏数据"
           systemImage="star.slash"

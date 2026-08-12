@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>CAIS 局域网共享</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <section id="authScreen" class="auth-screen hidden" aria-labelledby="authTitle">
+    <form id="authForm" class="auth-card">
+      <div class="brand-icon">C</div>
+      <div><h1 id="authTitle">连接 CAIS</h1><p>输入 CAIS 局域网共享页面显示的 8 位访问码。</p></div>
+      <label><span>访问码</span><input id="accessCodeInput" type="text" inputmode="text" maxlength="8" autocomplete="one-time-code" placeholder="XXXXXXXX" autocapitalize="characters" spellcheck="false"></label>
+      <p id="authError" class="auth-error hidden"></p>
+      <button class="primary-button" type="submit">连接</button>
+    </form>
+  </section>
+
+  <div id="appShell" class="shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">C</div>
+        <div><strong>CAIS</strong><span>局域网共享</span></div>
+      </div>
+      <nav class="scope-nav" aria-label="内容分类">
+        <button class="nav-item active" data-scope="clipboard"><span>▣</span>剪贴板<b id="clipboardCount">0</b></button>
+        <button class="nav-item" data-scope="favorites"><span>☆</span>收藏<b id="favoriteCount">0</b></button>
+      </nav>
+      <div class="server-state"><i></i><span>已连接到 CAIS</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div class="mobile-brand"><strong>CAIS</strong><span id="connectionState">正在连接</span></div>
+        <div class="search-wrap">
+          <span aria-hidden="true">⌕</span>
+          <input id="searchInput" type="search" placeholder="搜索标题或内容" autocomplete="off">
+        </div>
+        <button id="newButton" class="primary-button"><span>＋</span>粘贴新内容</button>
+      </header>
+
+      <div class="mobile-tabs" role="tablist">
+        <button class="active" data-scope="clipboard">剪贴板</button>
+        <button data-scope="favorites">收藏</button>
+      </div>
+
+      <section class="content" aria-live="polite">
+        <div class="content-heading">
+          <div><h1 id="pageTitle">剪贴板</h1><p id="pageSubtitle">来自 CAIS 的最近内容</p></div>
+          <button id="refreshButton" class="icon-button" title="刷新" aria-label="刷新">↻</button>
+        </div>
+        <div id="notice" class="notice hidden"></div>
+        <div id="groups"></div>
+        <div id="emptyState" class="empty hidden"><span>▣</span><h2>暂无内容</h2><p>在 CAIS 中复制内容，或者从这里粘贴新内容。</p></div>
+        <button id="loadMoreButton" class="load-more hidden">加载更多</button>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="editorDialog">
+    <form method="dialog">
+      <div class="dialog-head"><div><h2 id="dialogTitle">修改内容</h2><p id="dialogHint"></p></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <label id="titleField"><span>标题</span><input id="titleInput" maxlength="160" placeholder="留空则自动生成"></label>
+        <label id="scopeField"><span>保存到</span><select id="scopeInput"><option value="clipboard">剪贴板</option><option value="favorites">收藏</option></select></label>
+        <label id="contentField"><span>内容</span><textarea id="contentInput" rows="10" maxlength="500000" placeholder="在这里粘贴文本"></textarea></label>
+      </div>
+      <div class="dialog-actions"><button value="cancel" class="secondary-button">取消</button><button id="saveButton" value="default" class="primary-button">保存并同步</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="imagePreviewDialog" class="image-preview-dialog">
+    <div class="dialog-head">
+      <div><h2 id="imagePreviewTitle">图片预览</h2><p>原始图片</p></div>
+      <button id="closeImagePreview" class="icon-button" aria-label="关闭">×</button>
+    </div>
+    <div class="image-preview-stage">
+      <div id="imagePreviewLoading">正在读取原图</div>
+      <img id="imagePreviewContent" class="hidden" alt="原图预览">
+    </div>
+    <div class="dialog-actions">
+      <button id="downloadPreviewImage" class="primary-button">下载原图</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

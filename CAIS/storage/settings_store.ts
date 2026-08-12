@@ -41,6 +41,7 @@ function defaultNativeGlassEffect(): boolean {
 function sanitizeSettings(raw: any): CaisSettings {
   const monitorIntervalMs = Number(raw?.monitorIntervalMs ?? DEFAULT_CAIS_SETTINGS.monitorIntervalMs)
   const maxItems = Number(raw?.maxItems ?? DEFAULT_CAIS_SETTINGS.maxItems)
+  const lanSharingPort = Number(raw?.lanSharingPort ?? DEFAULT_CAIS_SETTINGS.lanSharingPort)
   const appContentLineLimit = Number(raw?.appContentLineLimit ?? DEFAULT_CAIS_SETTINGS.appContentLineLimit)
   const keyboardMaxItems = Number(raw?.keyboardMaxItems ?? DEFAULT_CAIS_SETTINGS.keyboardMaxItems)
   const defaultBuiltins = DEFAULT_CAIS_SETTINGS.keyboardMenu.builtins
@@ -83,6 +84,10 @@ function sanitizeSettings(raw: any): CaisSettings {
     maxItems: Math.max(50, Math.min(800, maxItems || DEFAULT_CAIS_SETTINGS.maxItems)),
     iCloudSync: Boolean(raw?.iCloudSync ?? DEFAULT_CAIS_SETTINGS.iCloudSync),
     iCloudSyncImages: Boolean(raw?.iCloudSyncImages ?? DEFAULT_CAIS_SETTINGS.iCloudSyncImages),
+    lanSharingEnabled: Boolean(raw?.lanSharingEnabled ?? DEFAULT_CAIS_SETTINGS.lanSharingEnabled),
+    lanSharingPort: Number.isInteger(lanSharingPort) && lanSharingPort >= 1024 && lanSharingPort <= 65535
+      ? lanSharingPort
+      : DEFAULT_CAIS_SETTINGS.lanSharingPort,
     appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
     appClipRowGlassEffect: Boolean(raw?.appClipRowGlassEffect ?? defaultNativeGlassEffect()),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),

@@ -50,6 +50,8 @@ export type CaisSettings = {
   maxItems: number
   iCloudSync: boolean
   iCloudSyncImages: boolean
+  lanSharingEnabled: boolean
+  lanSharingPort: number
   appContentLineLimit: number
   appClipRowGlassEffect: boolean
   keyboardShowTitle: boolean
@@ -111,6 +113,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   maxItems: 800,
   iCloudSync: false,
   iCloudSyncImages: false,
+  lanSharingEnabled: false,
+  lanSharingPort: 8787,
   appContentLineLimit: 3,
   appClipRowGlassEffect: true,
   keyboardShowTitle: true,
