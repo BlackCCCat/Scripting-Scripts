@@ -1,4 +1,5 @@
 import {
+  Device,
   Markdown,
   NavigationStack,
   Path,
@@ -47,8 +48,10 @@ export function ReleaseNotesSheet(props: {
   theme?: MarkdownProps["theme"]
   detents?: PresentationDetent[]
 }) {
+  const useGlassPresentation = Number.parseInt(Device.systemVersion, 10) >= 26
+
   return (
-    <NavigationStack presentationBackground="clear">
+    <NavigationStack presentationBackground={useGlassPresentation ? "clear" : undefined}>
       <ScrollView
         background="clear"
         scrollContentBackground="hidden"
@@ -57,7 +60,7 @@ export function ReleaseNotesSheet(props: {
         toolbarBackgroundVisibility="hidden"
         presentationDragIndicator="visible"
         presentationDetents={props.detents ?? ["medium", "large"]}
-        presentationBackground="clear"
+        presentationBackground={useGlassPresentation ? "clear" : undefined}
         padding={{ top: 24, leading: 18, bottom: 18, trailing: 18 }}
       >
         <Markdown

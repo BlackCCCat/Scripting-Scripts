@@ -1,4 +1,5 @@
 import {
+  Device,
   Markdown,
   NavigationStack,
   Path,
@@ -52,15 +53,17 @@ function ZDictReleaseNotesSheet(props: {
   theme?: MarkdownProps["theme"]
   detents?: PresentationDetent[]
 }) {
+  const useGlassPresentation = Number.parseInt(Device.systemVersion, 10) >= 26
+
   return (
-    <NavigationStack presentationBackground="clear">
+    <NavigationStack presentationBackground={useGlassPresentation ? "clear" : undefined}>
       <ScrollView
         background="clear"
         scrollContentBackground="hidden"
         navigationTitle={props.title ?? "更新内容"}
         navigationBarTitleDisplayMode="inline"
         toolbarBackgroundVisibility="hidden"
-        presentationBackground="clear"
+        presentationBackground={useGlassPresentation ? "clear" : undefined}
         presentationDragIndicator="visible"
         presentationDetents={props.detents ?? ["medium", "large"]}
         padding={{ top: 24, leading: 18, bottom: 18, trailing: 18 }}
