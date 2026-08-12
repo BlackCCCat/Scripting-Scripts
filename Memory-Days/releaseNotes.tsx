@@ -67,6 +67,8 @@ function MarkdownReleaseNotesSheet({
           useDefaultHighlighterTheme
           scrollable={false}
           background="clear"
+          frame={{ maxWidth: 'infinity', alignment: 'leading' }}
+          multilineTextAlignment="leading"
         />
       </ScrollView>
     </NavigationStack>
