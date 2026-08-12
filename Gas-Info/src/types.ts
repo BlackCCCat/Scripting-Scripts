@@ -24,6 +24,21 @@ export function fuelMeta(code: FuelCode): FuelMeta {
   return FUELS.find(f => f.code === code) ?? FUELS[1]
 }
 
+/** 有效油价必须是大于 0 的数字；0 表示该油品暂无价格。 */
+export function isValidFuelPrice(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+}
+
+export function formatFuelPrice(
+  value: number | null | undefined,
+  options?: { currency?: boolean }
+): string {
+  if (!isValidFuelPrice(value)) {
+    return "--"
+  }
+  return `${options?.currency ? "¥" : ""}${value.toFixed(2)}`
+}
+
 /** 单个省份的油价 */
 export interface ProvincePrice {
   /** 省份名，如 "河南" */

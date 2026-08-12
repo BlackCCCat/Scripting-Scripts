@@ -3,6 +3,7 @@ import { FuelCode } from "./types"
 /** 应用设置存取（基于 Storage 持久化） */
 
 const KEY_PREFERRED_FUEL = "preferredFuel"
+const KEY_OIL_PRICE_SOURCE = "oilPriceSource"
 const KEY_SEARCH_RADIUS = "searchRadiusKm"
 const KEY_LOCATION_MODE = "locationMode"
 const KEY_MANUAL_PROVINCE = "manualProvince"
@@ -10,6 +11,15 @@ const KEY_LAST_AUTO_PROVINCE = "lastAutoProvince"
 const PRIVATE_STORAGE = { shared: false }
 
 export type LocationMode = "auto" | "manual"
+export type OilPriceSource = "autohome" | "qiyoujiage"
+
+export const OIL_PRICE_SOURCE_OPTIONS: Array<{
+  value: OilPriceSource
+  label: string
+}> = [
+  { value: "autohome", label: "汽车之家" },
+  { value: "qiyoujiage", label: "汽油价格网" },
+]
 
 /** 用户选择的高亮油品，默认 95 号 */
 export function getPreferredFuel(): FuelCode {
@@ -22,6 +32,16 @@ export function getPreferredFuel(): FuelCode {
 
 export function setPreferredFuel(code: FuelCode): void {
   Storage.set(KEY_PREFERRED_FUEL, code, PRIVATE_STORAGE)
+}
+
+/** 油价数据首选来源，默认汽车之家。 */
+export function getOilPriceSource(): OilPriceSource {
+  const v = Storage.get<OilPriceSource>(KEY_OIL_PRICE_SOURCE, PRIVATE_STORAGE)
+  return v === "qiyoujiage" ? "qiyoujiage" : "autohome"
+}
+
+export function setOilPriceSource(source: OilPriceSource): void {
+  Storage.set(KEY_OIL_PRICE_SOURCE, source, PRIVATE_STORAGE)
 }
 
 /** 附近油站搜索半径（公里），默认 5 公里 */

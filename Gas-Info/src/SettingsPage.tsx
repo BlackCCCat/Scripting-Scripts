@@ -10,7 +10,11 @@ import {
   VirtualNode,
 } from "scripting"
 import { FUELS, FuelCode } from "./types"
-import { RADIUS_OPTIONS } from "./settings"
+import {
+  OIL_PRICE_SOURCE_OPTIONS,
+  OilPriceSource,
+  RADIUS_OPTIONS,
+} from "./settings"
 import { Theme } from "./theme"
 
 /** 设置区块容器 */
@@ -77,13 +81,17 @@ function OptionRow({
 export function SettingsPage({
   preferred,
   radiusKm,
+  oilPriceSource,
   onPreferredChange,
   onRadiusChange,
+  onOilPriceSourceChange,
 }: {
   preferred: FuelCode
   radiusKm: number
+  oilPriceSource: OilPriceSource
   onPreferredChange: (code: FuelCode) => void
   onRadiusChange: (km: number) => void
+  onOilPriceSourceChange: (source: OilPriceSource) => void
 }) {
   return (
     <ScrollView>
@@ -115,9 +123,20 @@ export function SettingsPage({
           ))}
         </SettingSection>
 
+        <SettingSection title="油价数据源">
+          {OIL_PRICE_SOURCE_OPTIONS.map((source, i) => (
+            <OptionRow
+              label={source.label}
+              selected={source.value === oilPriceSource}
+              onTap={() => onOilPriceSourceChange(source.value)}
+              showDivider={i < OIL_PRICE_SOURCE_OPTIONS.length - 1}
+            />
+          ))}
+        </SettingSection>
+
         <VStack alignment="leading" spacing={6} padding={{ horizontal: 4 }}>
           <Text font={12} foregroundStyle={Theme.secondary}>
-            油价数据来自 qiyoujiage.com 公开页面，仅供参考。
+            油价数据来自公开页面，仅供参考。
           </Text>
           <Text font={12} foregroundStyle={Theme.secondary}>
             实际价格以加油站公示价格为准。

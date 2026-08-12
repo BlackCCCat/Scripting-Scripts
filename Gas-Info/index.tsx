@@ -12,10 +12,13 @@ import {
 } from "scripting"
 import { FuelCode } from "./src/types"
 import {
+  getOilPriceSource,
   getPreferredFuel,
   setPreferredFuel,
   getSearchRadiusKm,
   setSearchRadiusKm,
+  OilPriceSource,
+  setOilPriceSource,
 } from "./src/settings"
 import { HomePage } from "./src/HomePage"
 import { NearbyPage } from "./src/NearbyPage"
@@ -51,6 +54,8 @@ function App() {
   })
   const [preferred, setPreferred] = useState<FuelCode>(getPreferredFuel())
   const [radiusKm, setRadiusKm] = useState<number>(getSearchRadiusKm())
+  const [oilPriceSource, setOilPriceSourceState] =
+    useState<OilPriceSource>(getOilPriceSource())
 
   function changePreferred(code: FuelCode) {
     setPreferredFuel(code)
@@ -63,6 +68,12 @@ function App() {
     setRadiusKm(km)
   }
 
+  function changeOilPriceSource(source: OilPriceSource) {
+    setOilPriceSource(source)
+    setOilPriceSourceState(source)
+    Widget.reloadAll()
+  }
+
   return (
     <TabView selection={selection} tint={Theme.orange} sheet={releaseNotesSheet}>
       <NavigationStack
@@ -70,7 +81,7 @@ function App() {
         tag={0}
       >
         <Page title="今日油价">
-          <HomePage preferred={preferred} />
+          <HomePage preferred={preferred} oilPriceSource={oilPriceSource} />
         </Page>
       </NavigationStack>
 
@@ -91,8 +102,10 @@ function App() {
           <SettingsPage
             preferred={preferred}
             radiusKm={radiusKm}
+            oilPriceSource={oilPriceSource}
             onPreferredChange={changePreferred}
             onRadiusChange={changeRadius}
+            onOilPriceSourceChange={changeOilPriceSource}
           />
         </Page>
       </NavigationStack>

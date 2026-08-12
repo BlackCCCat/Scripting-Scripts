@@ -15,7 +15,15 @@ import {
   getPreferredFuel,
   setLastAutoProvinceName,
 } from "./src/settings"
-import { FUELS, FuelCode, OilPriceData, ProvincePrice, fuelMeta } from "./src/types"
+import {
+  FUELS,
+  FuelCode,
+  OilPriceData,
+  ProvincePrice,
+  formatFuelPrice,
+  fuelMeta,
+  isValidFuelPrice,
+} from "./src/types"
 
 type WidgetData = {
   data: OilPriceData
@@ -225,6 +233,7 @@ function PriceLine({
   scale: WidgetScale
 }) {
   const meta = fuelMeta(code)
+  const hasPrice = isValidFuelPrice(price)
   if (mode === "medium") {
     return (
       <HStack
@@ -239,20 +248,22 @@ function PriceLine({
         >
           {meta.fullName}
         </Text>
-        <Text
-          font={s(scale, 21)}
-          fontWeight="bold"
-          foregroundStyle={TEXT_PRIMARY}
-        >
-          ¥
-        </Text>
+        {hasPrice ? (
+          <Text
+            font={s(scale, 21)}
+            fontWeight="bold"
+            foregroundStyle={TEXT_PRIMARY}
+          >
+            ¥
+          </Text>
+        ) : null}
         <Text
           font={s(scale, 36)}
           fontWeight="bold"
           foregroundStyle={TEXT_PRIMARY}
           monospacedDigit
         >
-          {price.toFixed(2)}
+          {formatFuelPrice(price)}
         </Text>
         <Text
           font={s(scale, 13)}
@@ -278,20 +289,22 @@ function PriceLine({
           {meta.fullName}(元/升)
         </Text>
         <HStack alignment="firstTextBaseline" spacing={0}>
-          <Text
-            font={s(scale, 44)}
-            fontWeight="bold"
-            foregroundStyle={TEXT_PRIMARY}
-          >
-            ¥
-          </Text>
+          {hasPrice ? (
+            <Text
+              font={s(scale, 44)}
+              fontWeight="bold"
+              foregroundStyle={TEXT_PRIMARY}
+            >
+              ¥
+            </Text>
+          ) : null}
           <Text
             font={s(scale, 86)}
             fontWeight="bold"
             foregroundStyle={TEXT_PRIMARY}
             monospacedDigit
           >
-            {price.toFixed(2)}
+            {formatFuelPrice(price)}
           </Text>
         </HStack>
       </VStack>
@@ -308,20 +321,22 @@ function PriceLine({
         {mode === "small" ? meta.fullName : `${meta.fullName}(元/升)`}
       </Text>
       <HStack alignment="firstTextBaseline" spacing={0}>
-        <Text
-          font={s(scale, 22)}
-          fontWeight="bold"
-          foregroundStyle={TEXT_PRIMARY}
-        >
-          ¥
-        </Text>
+        {hasPrice ? (
+          <Text
+            font={s(scale, 22)}
+            fontWeight="bold"
+            foregroundStyle={TEXT_PRIMARY}
+          >
+            ¥
+          </Text>
+        ) : null}
         <Text
           font={s(scale, 38)}
           fontWeight="bold"
           foregroundStyle={TEXT_PRIMARY}
           monospacedDigit
         >
-          {price.toFixed(2)}
+          {formatFuelPrice(price)}
         </Text>
       </HStack>
     </VStack>
@@ -363,7 +378,7 @@ function FuelChip({
         lineLimit={1}
         monospacedDigit
       >
-        ¥{price.toFixed(2)}
+        {formatFuelPrice(price, { currency: true })}
       </Text>
     </HStack>
   ) : (
@@ -382,7 +397,7 @@ function FuelChip({
         lineLimit={1}
         monospacedDigit
       >
-        ¥{price.toFixed(2)}
+        {formatFuelPrice(price, { currency: true })}
       </Text>
     </VStack>
   )

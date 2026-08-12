@@ -16,7 +16,15 @@ import {
   Widget,
   gradient,
 } from "scripting"
-import { FUELS, FuelCode, OilPriceData, ProvincePrice, fuelMeta } from "./types"
+import {
+  FUELS,
+  FuelCode,
+  OilPriceData,
+  ProvincePrice,
+  formatFuelPrice,
+  fuelMeta,
+  isValidFuelPrice,
+} from "./types"
 import { fetchOilPrices, matchProvince, normalizeProvinceName } from "./service"
 import { Theme } from "./theme"
 import {
@@ -24,6 +32,7 @@ import {
   getLastAutoProvinceName,
   getManualProvinceName,
   LocationMode,
+  OilPriceSource,
   setLastAutoProvinceName,
   setLocationMode,
   setManualProvinceName,
@@ -84,11 +93,13 @@ function HeaderCard({
           {meta.fullName}
         </Text>
         <HStack alignment="firstTextBaseline" spacing={0}>
-          <Text font={26} fontWeight="bold" foregroundStyle="white">
-            ¥
-          </Text>
+          {isValidFuelPrice(bigPrice) ? (
+            <Text font={26} fontWeight="bold" foregroundStyle="white">
+              ¥
+            </Text>
+          ) : null}
           <Text font={56} fontWeight="bold" foregroundStyle="white">
-            {bigPrice.toFixed(2)}
+            {formatFuelPrice(bigPrice)}
           </Text>
           <Text
             font={16}
@@ -117,7 +128,7 @@ function HeaderCard({
               {f.label}
             </Text>
             <Text font={16} fontWeight="bold" foregroundStyle="white">
-              ¥{province.prices[f.code].toFixed(2)}
+              {formatFuelPrice(province.prices[f.code], { currency: true })}
             </Text>
           </VStack>
         ))}
@@ -181,7 +192,7 @@ function ProvinceRow({ item }: { item: ProvincePrice }) {
               {f.label}
             </Text>
             <Text font={16} fontWeight="semibold" foregroundStyle={Theme.priceOrange}>
-              {item.prices[f.code].toFixed(2)}
+              {formatFuelPrice(item.prices[f.code])}
             </Text>
           </VStack>
         ))}
@@ -220,7 +231,18 @@ function sortProvinces(
       return mode === "nameAsc" ? result : -result
     }
 
-    const result = a.prices[preferred] - b.prices[preferred]
+    const aPrice = a.prices[preferred]
+    const bPrice = b.prices[preferred]
+    const aValid = isValidFuelPrice(aPrice)
+    const bValid = isValidFuelPrice(bPrice)
+    if (aValid !== bValid) {
+      return aValid ? -1 : 1
+    }
+    if (!aValid || !bValid) {
+      return a.province.localeCompare(b.province, "zh-Hans-CN")
+    }
+
+    const result = aPrice - bPrice
     return mode === "priceAsc" ? result : -result
   })
 }
@@ -283,7 +305,7 @@ function DetailRow({ code, price }: { code: FuelCode; price: number }) {
         </Text>
         <Spacer />
         <Text font={22} fontWeight="bold" foregroundStyle={Theme.priceOrange}>
-          ¥{price.toFixed(2)}
+          {formatFuelPrice(price, { currency: true })}
         </Text>
         <Text font={14} foregroundStyle={Theme.secondary} padding={{ leading: 4 }}>
           元/升
@@ -502,7 +524,13 @@ function ProvinceSelectorPage({
   )
 }
 
-export function HomePage({ preferred }: { preferred: FuelCode }) {
+export function HomePage({
+  preferred,
+  oilPriceSource,
+}: {
+  preferred: FuelCode
+  oilPriceSource: OilPriceSource
+}) {
   const [data, setData] = useState<OilPriceData | null>(null)
   const [loading, setLoading] = useState(true)
   const [resolvingProvince, setResolvingProvince] = useState(true)
@@ -544,7 +572,10 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
     setError(null)
     try {
       const provinceNamePromise = requestCurrentProvinceName(forceRefresh)
-      const result = await fetchOilPrices({ forceRefresh })
+      const result = await fetchOilPrices({
+        forceRefresh,
+        preferredSource: oilPriceSource,
+      })
       setData(result)
       const cachedAutoProvince = matchProvince(
         result.provinces,
@@ -577,7 +608,7 @@ export function HomePage({ preferred }: { preferred: FuelCode }) {
 
   useEffect(() => {
     load()
-  }, [])
+  }, [oilPriceSource])
 
   const manualProvince = data
     ? matchProvince(data.provinces, manualProvinceName)

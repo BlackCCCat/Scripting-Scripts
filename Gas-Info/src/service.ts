@@ -1,50 +1,54 @@
 import { fetch } from "scripting"
-import { OilPriceData, ProvincePrice } from "./types"
+import {
+  FuelCode,
+  OilPriceData,
+  PriceForecast,
+  ProvincePrice,
+  isValidFuelPrice,
+} from "./types"
+import { getOilPriceSource, OilPriceSource } from "./settings"
 
 type FuelPageCode = "92" | "95" | "98" | "0"
 type OilPriceCache = {
   savedDate: string
+  preferredSource: OilPriceSource
   data: OilPriceData
 }
+type SourceFetchResult = OilPriceData & {
+  sourceId: OilPriceSource
+}
 
-const SOURCE_HOST = "http://www.qiyoujiage.com"
-const CACHE_KEY = "oilPriceDataCache.v1"
+const QIYOUJIAGE_HOST = "http://www.qiyoujiage.com"
+const AUTOHOME_URL = "https://www.autohome.com.cn/oil"
+const CACHE_KEY = "oilPriceDataCache.v3"
 const PRIVATE_STORAGE = { shared: false }
+const SOURCE_TIMEOUT_MS = 8000
+const SUPPLEMENT_TIMEOUT_MS = 3000
 const PRICE_PAGES: { code: FuelPageCode; url: string }[] = [
-  { code: "92", url: `${SOURCE_HOST}/92.shtml` },
-  { code: "95", url: `${SOURCE_HOST}/95.shtml` },
-  { code: "98", url: `${SOURCE_HOST}/98.shtml` },
-  { code: "0", url: `${SOURCE_HOST}/chaiyou.shtml` },
+  { code: "92", url: `${QIYOUJIAGE_HOST}/92.shtml` },
+  { code: "95", url: `${QIYOUJIAGE_HOST}/95.shtml` },
+  { code: "98", url: `${QIYOUJIAGE_HOST}/98.shtml` },
+  { code: "0", url: `${QIYOUJIAGE_HOST}/chaiyou.shtml` },
 ]
 
-/** 油价数据服务层：从 qiyoujiage.com 的公开页面抓取并归一化。 */
+/** 油价数据服务层：按首选源抓取，超时或缺数据时自动回退补全。 */
 export async function fetchOilPrices(options?: {
   forceRefresh?: boolean
+  preferredSource?: OilPriceSource
 }): Promise<OilPriceData> {
-  const cached = readOilPriceCache()
+  const preferredSource = options?.preferredSource ?? getOilPriceSource()
+  const cached = readOilPriceCache(preferredSource)
   if (!options?.forceRefresh && cached) {
     return cached.data
   }
 
   try {
-    const pages = await Promise.all(
-      PRICE_PAGES.map(async page => {
-        const response = await fetch(page.url)
-        if (!response.ok) {
-          throw new Error(`油价数据请求失败：${page.url}`)
-        }
-        return {
-          ...page,
-          html: await response.text(),
-        }
-      })
-    )
-
-    const data = normalizePages(pages)
+    const data = await fetchCombinedOilPrices(preferredSource)
     Storage.set<OilPriceCache>(
       CACHE_KEY,
       {
         savedDate: todayKey(),
+        preferredSource,
         data,
       },
       PRIVATE_STORAGE
@@ -52,7 +56,7 @@ export async function fetchOilPrices(options?: {
 
     return data
   } catch (e) {
-    const cached = readOilPriceCache()
+    const cached = readOilPriceCache(preferredSource)
     if (cached) {
       return cached.data
     }
@@ -60,12 +64,189 @@ export async function fetchOilPrices(options?: {
   }
 }
 
-function readOilPriceCache(): OilPriceCache | null {
+function readOilPriceCache(preferredSource: OilPriceSource): OilPriceCache | null {
   const cached = Storage.get<OilPriceCache>(CACHE_KEY, PRIVATE_STORAGE)
-  if (cached?.data?.provinces?.length && cached.savedDate === todayKey()) {
+  if (
+    isUsableOilData(cached?.data) &&
+    cached.savedDate === todayKey() &&
+    cached.preferredSource === preferredSource
+  ) {
     return cached
   }
   return null
+}
+
+function isUsableOilData(data: OilPriceData | undefined): data is OilPriceData {
+  return !!(
+    data?.provinces?.length &&
+    data.provinces.length >= 31 &&
+    matchProvince(data.provinces, "甘肃")
+  )
+}
+
+async function fetchCombinedOilPrices(
+  preferredSource: OilPriceSource
+): Promise<OilPriceData> {
+  const fallbackSource = otherSource(preferredSource)
+  let primary: SourceFetchResult | null = null
+  let fallback: SourceFetchResult | null = null
+
+  try {
+    primary = await fetchSourceWithTimeout(preferredSource)
+  } catch {
+    fallback = await fetchSourceWithTimeout(fallbackSource)
+  }
+
+  if (primary && shouldSupplement(primary)) {
+    const timeoutMs = hasIncompleteProvincePrices(primary)
+      ? SOURCE_TIMEOUT_MS
+      : SUPPLEMENT_TIMEOUT_MS
+    try {
+      fallback = await fetchSourceWithTimeout(
+        fallbackSource,
+        timeoutMs
+      )
+    } catch {
+      // 首选源已经可用，补充源失败时继续使用首选源数据。
+    }
+  }
+
+  const base = primary ?? fallback
+  if (!base) {
+    throw new Error("油价数据加载失败")
+  }
+
+  const supplemented = fallback ? mergeOilPriceData(base, fallback) : base
+  const forecast = await resolveForecast(supplemented, primary, fallback)
+
+  return {
+    provinces: supplemented.provinces,
+    forecast,
+    source: sourceLabel(supplemented, forecast),
+  }
+}
+
+function otherSource(source: OilPriceSource): OilPriceSource {
+  return source === "autohome" ? "qiyoujiage" : "autohome"
+}
+
+function shouldSupplement(data: OilPriceData): boolean {
+  return (
+    data.provinces.length < 31 ||
+    hasIncompleteProvincePrices(data) ||
+    !hasConcreteForecast(data.forecast)
+  )
+}
+
+function hasIncompleteProvincePrices(data: OilPriceData): boolean {
+  return data.provinces.some(
+    province =>
+      !isValidFuelPrice(province.prices["92"]) ||
+      !isValidFuelPrice(province.prices["95"]) ||
+      !isValidFuelPrice(province.prices["98"]) ||
+      !isValidFuelPrice(province.prices["0"])
+  )
+}
+
+function hasConcreteForecast(forecast: PriceForecast): boolean {
+  return forecast.perTon !== null && forecast.perLiterRange !== null
+}
+
+async function fetchSourceWithTimeout(
+  source: OilPriceSource,
+  timeoutMs = SOURCE_TIMEOUT_MS
+): Promise<SourceFetchResult> {
+  return withTimeout(
+    () =>
+      source === "autohome"
+        ? fetchAutohomeOilPrices()
+        : fetchQiyoujiageOilPrices(),
+    timeoutMs,
+    sourceLabelText(source)
+  )
+}
+
+function withTimeout<T>(
+  run: () => Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label}请求超时`))
+    }, ms)
+    run()
+      .then(resolve, reject)
+      .finally(() => {
+        if (timer) {
+          clearTimeout(timer)
+        }
+      })
+  })
+}
+
+async function fetchQiyoujiageOilPrices(): Promise<SourceFetchResult> {
+  const pages = await Promise.all(
+    PRICE_PAGES.map(async page => {
+      const response = await fetch(page.url)
+      if (!response.ok) {
+        throw new Error(`油价数据请求失败：${page.url}`)
+      }
+      return {
+        ...page,
+        html: await response.text(),
+      }
+    })
+  )
+
+  return {
+    ...normalizePages(pages),
+    sourceId: "qiyoujiage",
+  }
+}
+
+async function fetchAutohomeOilPrices(): Promise<SourceFetchResult> {
+  const response = await fetch(AUTOHOME_URL)
+  if (!response.ok) {
+    throw new Error(`油价数据请求失败：${AUTOHOME_URL}`)
+  }
+  return normalizeAutohomePage(await response.text())
+}
+
+async function resolveForecast(
+  data: OilPriceData,
+  primary: SourceFetchResult | null,
+  fallback: SourceFetchResult | null
+): Promise<PriceForecast> {
+  if (hasConcreteForecast(data.forecast)) {
+    return data.forecast
+  }
+
+  const qiyoujiage = [primary, fallback].find(
+    item => item?.sourceId === "qiyoujiage" && hasConcreteForecast(item.forecast)
+  )
+  if (qiyoujiage) {
+    return qiyoujiage.forecast
+  }
+
+  try {
+    return await withTimeout(
+      fetchQiyoujiageForecast,
+      SUPPLEMENT_TIMEOUT_MS,
+      "调价预测"
+    )
+  } catch {
+    return defaultForecast("下次调价信息以数据来源页面公布为准。")
+  }
+}
+
+async function fetchQiyoujiageForecast(): Promise<PriceForecast> {
+  const response = await fetch(`${QIYOUJIAGE_HOST}/92.shtml`)
+  if (!response.ok) {
+    throw new Error("调价预测请求失败")
+  }
+  return parseForecast(await response.text())
 }
 
 function todayKey(): string {
@@ -120,8 +301,135 @@ function normalizePages(
   return {
     provinces,
     forecast: parseForecast(pages[0].html),
-    source: SOURCE_HOST,
+    source: QIYOUJIAGE_HOST,
   }
+}
+
+function normalizeAutohomePage(html: string): SourceFetchResult {
+  const jsonText = extractNextDataJson(html)
+  const data = JSON.parse(jsonText)
+  const rows = data?.props?.pageProps?.baseData?.oilPriceInfo?.oilPrices
+  if (!Array.isArray(rows)) {
+    throw new Error("未能从汽车之家页面解析到油价数据")
+  }
+
+  const provinces = rows
+    .map(row => normalizeAutohomeRow(row))
+    .filter((item): item is ProvincePrice => !!item)
+
+  if (!provinces.length) {
+    throw new Error("未能从汽车之家页面解析到省份价格")
+  }
+
+  return {
+    provinces,
+    forecast: defaultForecast("汽车之家暂未提供结构化调价预测。"),
+    source: AUTOHOME_URL,
+    sourceId: "autohome",
+  }
+}
+
+function extractNextDataJson(html: string): string {
+  const match = html.match(
+    /<script\s+id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/
+  )
+  if (!match) {
+    throw new Error("未找到汽车之家油价页面数据")
+  }
+  return match[1]
+}
+
+function normalizeAutohomeRow(row: any): ProvincePrice | null {
+  const prices = {
+    "92": Number(row?.oilPrice92),
+    "95": Number(row?.oilPrice95),
+    "98": Number(row?.oilPrice98),
+    "0": Number(row?.oilPrice0),
+  }
+  if (!row?.provinceName || !isUsableProvincePrices(prices)) {
+    return null
+  }
+
+  return {
+    province: String(row.provinceName),
+    prices,
+    updatedAt: typeof row.dateTime === "string" ? row.dateTime : todayKey(),
+  }
+}
+
+function isUsableProvincePrices(
+  prices: Record<FuelCode, number>
+): prices is Record<FuelCode, number> {
+  return Object.values(prices).some(isValidFuelPrice)
+}
+
+function mergeOilPriceData(
+  primary: SourceFetchResult,
+  fallback: SourceFetchResult
+): SourceFetchResult {
+  const byProvince = new Map<string, ProvincePrice>()
+  for (const province of fallback.provinces) {
+    byProvince.set(normalizeProvinceName(province.province), province)
+  }
+
+  const merged: ProvincePrice[] = []
+  const seen = new Set<string>()
+  for (const province of primary.provinces) {
+    const key = normalizeProvinceName(province.province)
+    const fallbackProvince = byProvince.get(key)
+    merged.push(fallbackProvince ? mergeProvince(province, fallbackProvince) : province)
+    seen.add(key)
+  }
+
+  for (const province of fallback.provinces) {
+    const key = normalizeProvinceName(province.province)
+    if (!seen.has(key)) {
+      merged.push(province)
+    }
+  }
+
+  return {
+    provinces: merged,
+    forecast: hasConcreteForecast(primary.forecast)
+      ? primary.forecast
+      : fallback.forecast,
+    source: `${primary.source}；${fallback.source}`,
+    sourceId: primary.sourceId,
+  }
+}
+
+function mergeProvince(
+  primary: ProvincePrice,
+  fallback: ProvincePrice
+): ProvincePrice {
+  return {
+    province: primary.province,
+    prices: {
+      "92": isValidFuelPrice(primary.prices["92"]) ? primary.prices["92"] : fallback.prices["92"],
+      "95": isValidFuelPrice(primary.prices["95"]) ? primary.prices["95"] : fallback.prices["95"],
+      "98": isValidFuelPrice(primary.prices["98"]) ? primary.prices["98"] : fallback.prices["98"],
+      "0": isValidFuelPrice(primary.prices["0"]) ? primary.prices["0"] : fallback.prices["0"],
+    },
+    updatedAt: latestDate(primary.updatedAt, fallback.updatedAt),
+  }
+}
+
+function sourceLabel(
+  data: OilPriceData,
+  forecast: PriceForecast
+): string {
+  const sources = data.source.split("；").filter(Boolean)
+  if (
+    hasConcreteForecast(forecast) &&
+    !sources.includes(QIYOUJIAGE_HOST)
+  ) {
+    sources.push(QIYOUJIAGE_HOST)
+  }
+  return Array.from(new Set(sources)).join("；")
+}
+
+function sourceLabelText(source: OilPriceSource): string {
+  return source === "autohome" ? "汽车之家" : "汽油价格网"
 }
 
 /**
@@ -229,14 +537,7 @@ function parseForecast(html: string): OilPriceData["forecast"] {
   )
 
   if (!match) {
-    return {
-      nextAdjustText: "以网站公布为准",
-      remainingDays: 0,
-      direction: "调整",
-      perTon: null,
-      perLiterRange: null,
-      sourceText: "下次调价信息以数据来源页面公布为准。",
-    }
+    return defaultForecast("下次调价信息以数据来源页面公布为准。")
   }
 
   const month = Number(match[1])
@@ -255,6 +556,17 @@ function parseForecast(html: string): OilPriceData["forecast"] {
     perTon: Number.isFinite(perTon) ? perTon : null,
     perLiterRange,
     sourceText: `目前预计${direction}${perTon}元/吨（${perLiterRange}）`,
+  }
+}
+
+function defaultForecast(sourceText: string): PriceForecast {
+  return {
+    nextAdjustText: "以网站公布为准",
+    remainingDays: 0,
+    direction: "调整",
+    perTon: null,
+    perLiterRange: null,
+    sourceText,
   }
 }
 
