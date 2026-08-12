@@ -344,6 +344,8 @@ export function KeyFace(props: {
   onPress: () => void;
   onLongPress?: () => void;
   onLongPressEnd?: () => void;
+  longPressPopupOptions?: { lower: string; upper: string };
+  onLongPressOptionEnd?: (selection: "lower" | "upper") => void;
   longPressEnabled?: boolean | (() => boolean);
   onTouchStart?: () => void;
   onTouchEnd?: () => void;
@@ -362,7 +364,6 @@ export function KeyFace(props: {
   popupSwipeUpImage?: string;
   popupSwipeDownLabel?: string;
   popupSwipeDownImage?: string;
-  popupOptions?: Array<{ label: string; selected: boolean }>;
   showPopup?: boolean;
   contextMenu?: any;
 }) {
@@ -386,6 +387,10 @@ export function KeyFace(props: {
     { label?: string; image?: string; key: string } | null
   >(null);
   const swipePopupKeyRef = useRef("");
+  const [longPressPopupSelection, setLongPressPopupSelectionState] = useState<
+    "lower" | "upper" | null
+  >(null);
+  const longPressPopupSelectionRef = useRef<"lower" | "upper" | null>(null);
   const overrideFallbackId = props.id === "t9-enter" ? "enter" : props.id;
   const usesEnterColor = props.id === "enter" ||
     props.id === "numeric-enter" ||
@@ -445,7 +450,18 @@ export function KeyFace(props: {
   const popupImage = showPopup && active
     ? hasSwipePopup ? swipePopup?.image : props.popupImage
     : undefined;
-  const popupOptions = showPopup && active ? props.popupOptions : undefined;
+  const popupOptions = showPopup && active && longPressPopupSelection
+    ? [
+      {
+        label: props.longPressPopupOptions?.lower ?? "",
+        selected: longPressPopupSelection === "lower",
+      },
+      {
+        label: props.longPressPopupOptions?.upper ?? "",
+        selected: longPressPopupSelection === "upper",
+      },
+    ]
+    : undefined;
   const popupForeground = hasSwipePopup ? hintFg : fg;
   const popupVisible = showPopup &&
     !!(popupTitle || popupImage || popupOptions);
@@ -530,6 +546,14 @@ export function KeyFace(props: {
     setSwipePopupState(next ? { ...next, key } : null);
   }
 
+  function setLongPressPopupSelection(
+    next: "lower" | "upper" | null,
+  ) {
+    if (longPressPopupSelectionRef.current === next) return;
+    longPressPopupSelectionRef.current = next;
+    setLongPressPopupSelectionState(next);
+  }
+
   function updateSwipePopup(details: any) {
     if (propsRef.current.showPopup === false) return;
     if (!propsRef.current.popupLabel && !propsRef.current.popupImage) return;
@@ -569,10 +593,28 @@ export function KeyFace(props: {
         !!propsRef.current.onLongPress && dragIntent(details),
       onTouchStart: beginTouch,
       onTouchEnd: endTouchOnce,
-      onLongPress: () => propsRef.current.onLongPress?.(),
-      onLongPressEnd: () => propsRef.current.onLongPressEnd?.(),
-      onLongPressMove: (details: any) =>
-        propsRef.current.onLongPressMove?.(details),
+      onLongPress: () => {
+        if (propsRef.current.longPressPopupOptions) {
+          setLongPressPopupSelection("upper");
+        }
+        propsRef.current.onLongPress?.();
+      },
+      onLongPressEnd: () => {
+        const selection = longPressPopupSelectionRef.current;
+        setLongPressPopupSelection(null);
+        if (selection && propsRef.current.onLongPressOptionEnd) {
+          propsRef.current.onLongPressOptionEnd(selection);
+          return;
+        }
+        propsRef.current.onLongPressEnd?.();
+      },
+      onLongPressMove: (details: any) => {
+        if (longPressPopupSelectionRef.current) {
+          const dx = Number(details?.translation?.width ?? 0);
+          setLongPressPopupSelection(dx < 0 ? "lower" : "upper");
+        }
+        propsRef.current.onLongPressMove?.(details);
+      },
       onSwipeStart: () => propsRef.current.onSwipeStart?.(),
       onResolveSwipe: (
         direction: "up" | "down" | "left" | "right",

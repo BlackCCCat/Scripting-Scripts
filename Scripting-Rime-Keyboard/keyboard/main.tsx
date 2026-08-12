@@ -130,11 +130,6 @@ type SelectAllSnapshot = {
   cursorBefore: number;
 };
 
-type LetterLongPressPopup = {
-  key: string;
-  selected: "lower" | "upper";
-};
-
 type T9CandidatePinyinFilter = {
   selected: string[];
   preeditCore: string;
@@ -456,9 +451,6 @@ function KeyboardContent(props: {
   } = rimeProjection;
   const [shifted, setShifted] = useState(false);
   const [capsLocked, setCapsLocked] = useState(false);
-  const [letterLongPressPopup, setLetterLongPressPopupState] = useState<
-    LetterLongPressPopup | null
-  >(null);
   const [symbolLayer, setSymbolLayer] = useState(false);
   const [backslashWrapMode, setBackslashWrapMode] = useState(false);
   const rimeReadyRef = useRef(false);
@@ -504,7 +496,6 @@ function KeyboardContent(props: {
   if (pressVisualControllerRef.current == null) {
     pressVisualControllerRef.current = new KeyPressVisualController();
   }
-  const letterLongPressPopupRef = useRef<LetterLongPressPopup | null>(null);
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowGestureMachineRef = useRef(new Map<string, any>());
@@ -1061,9 +1052,6 @@ function KeyboardContent(props: {
       setTimeout(() => {
         pressedReleaseTimersRef.current.delete(id);
         cleanupContinuousActionForKey(id);
-        if (letterLongPressPopupRef.current?.key === id) {
-          setLetterLongPressPopup(null);
-        }
         setKeyPressed(id, false);
       }, delay),
     );
@@ -1090,7 +1078,6 @@ function KeyboardContent(props: {
       clearTimeout(timer);
     }
     pressedReleaseTimersRef.current.clear();
-    setLetterLongPressPopup(null);
     performanceDiagnosticsRef.current?.cancelOpenTouches();
     if (pressedKeyIdsRef.current.size === 0) return;
     pressedKeyIdsRef.current.clear();
@@ -1115,21 +1102,6 @@ function KeyboardContent(props: {
     return pressedKeyIdsRef.current.has(id);
   }
 
-  function setLetterLongPressPopup(next: LetterLongPressPopup | null) {
-    letterLongPressPopupRef.current = next;
-    setLetterLongPressPopupState(next);
-  }
-
-  function updateLetterLongPressSelection(ch: string, details: any) {
-    const current = letterLongPressPopupRef.current;
-    if (!current || current.key !== ch) return;
-    const locationX = Number(details?.location?.x ?? 0);
-    const startX = Number(details?.startLocation?.x ?? metrics.letterWidth / 2);
-    const selected = locationX < startX ? "lower" : "upper";
-    if (current.selected === selected) return;
-    setLetterLongPressPopup({ key: ch, selected });
-  }
-
   function pressLiteralLetter(ch: string) {
     if (ascii) {
       insertTextReplacingSelectAll(ch);
@@ -1139,10 +1111,10 @@ function KeyboardContent(props: {
     if (backslashWrapMode) setBackslashWrapMode(false);
   }
 
-  function finishLetterLongPress(ch: string) {
-    const current = letterLongPressPopupRef.current;
-    const selected = current?.key === ch ? current.selected : "upper";
-    setLetterLongPressPopup(null);
+  function finishLetterLongPress(
+    ch: string,
+    selected: "lower" | "upper",
+  ) {
     if (selected === "lower") pressLiteralLetter(ch);
     else pressUppercaseLetter(ch);
   }
@@ -1192,9 +1164,6 @@ function KeyboardContent(props: {
       id === "t9-backspace"
     ) {
       stopRepeatingBackspace();
-    }
-    if (letterLongPressPopupRef.current?.key === id) {
-      setLetterLongPressPopup(null);
     }
     playReleaseFeedback();
     setKeyPressed(id, false);
@@ -3403,10 +3372,8 @@ function KeyboardContent(props: {
     shiftSwipeUp,
     pressLetter,
     startLetterLongPress: (ch: string) => {
-      setLetterLongPressPopup({ key: ch, selected: "upper" });
       holdKeyPressedUntilRelease(ch);
     },
-    updateLetterLongPressSelection,
     finishLetterLongPress,
     letterLongPressEnabled,
     runLetterSwipe,
@@ -3781,38 +3748,23 @@ function KeyboardContent(props: {
               visualOffsetX={letterVisualOffset(index)}
               visualOffsetY={rowTouch.visualOffsetY}
               active={isPressed(ch)}
-              popupLabel={letterLongPressPopup?.key === ch
-                ? undefined
-                : letterLabel}
+              popupLabel={letterLabel}
               popupSwipeUpLabel={swipeUpLabel}
               popupSwipeUpImage={swipeUpImage}
               popupSwipeDownLabel={swipeDownLabel}
               popupSwipeDownImage={swipeDownImage}
-              popupOptions={letterLongPressPopup?.key === ch
-                ? [
-                  {
-                    label: ch,
-                    selected: letterLongPressPopup.selected === "lower",
-                  },
-                  {
-                    label: ch.toUpperCase(),
-                    selected: letterLongPressPopup.selected === "upper",
-                  },
-                ]
-                : undefined}
+              longPressPopupOptions={{ lower: ch, upper: ch.toUpperCase() }}
               showPopup={settings.showKeyPopups}
               onPress={() => hitTargetActionsRef.current.pressLetter(ch)}
               onTouchStart={() => hitTargetActionsRef.current.beginKeyTouch(ch)}
               onTouchEnd={() => hitTargetActionsRef.current.endKeyTouch(ch)}
               onLongPress={() =>
                 hitTargetActionsRef.current.startLetterLongPress(ch)}
-              onLongPressMove={(details) =>
-                hitTargetActionsRef.current.updateLetterLongPressSelection(
+              onLongPressOptionEnd={(selection) =>
+                hitTargetActionsRef.current.finishLetterLongPress(
                   ch,
-                  details,
+                  selection,
                 )}
-              onLongPressEnd={() =>
-                hitTargetActionsRef.current.finishLetterLongPress(ch)}
               longPressEnabled={() =>
                 hitTargetActionsRef.current.letterLongPressEnabled()}
               longPressDuration={settings.letterLongPressDuration}
@@ -3872,7 +3824,6 @@ function KeyboardContent(props: {
       bodyRowSpacing,
       capsLocked,
       isT9Keyboard,
-      letterLongPressPopup,
       metrics,
       palette,
       settings,
@@ -3888,7 +3839,6 @@ function KeyboardContent(props: {
       capsLocked,
       composing,
       isT9Keyboard,
-      letterLongPressPopup,
       metrics,
       palette,
       settings,
