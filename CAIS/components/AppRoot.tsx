@@ -43,8 +43,8 @@ import {
   updateClipTitle,
   addFavoriteFromInput,
 } from "../storage/clip_repository"
-import { initializeDatabase } from "../storage/database"
-import { readClipDataVersion } from "../storage/change_signal"
+import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
+import { readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
 import { loadSettings, saveSettings } from "../storage/settings_store"
 import { applyICloudSyncSettings } from "../storage/icloud_sync"
 import { formatDateTime, withHaptic } from "../utils/common"
@@ -370,14 +370,118 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }, [])
 
   useEffect(() => {
+    let stopped = false
     let lastSeenClipDataVersion = readClipDataVersion()
-    const timer = (globalThis as any).setInterval?.(() => {
-      const version = readClipDataVersion()
+    let lastSeenDatabaseDataVersion: number | null = null
+    let checkingDatabaseDataVersion = false
+    let refreshQueued = false
+    let refreshRequested = false
+    let socket: WebSocket | null = null
+    let socketKey = ""
+
+    function scheduleRefresh() {
+      if (stopped) return
+      if (refreshQueued) {
+        refreshRequested = true
+        return
+      }
+      refreshQueued = true
+      const run = () => {
+        if (stopped) {
+          refreshQueued = false
+          return
+        }
+        void refresh(true, settingsRef.current).catch(() => {}).finally(() => {
+          refreshQueued = false
+          if (refreshRequested) {
+            refreshRequested = false
+            scheduleRefresh()
+          }
+        })
+      }
+      if ((globalThis as any).setTimeout) {
+        ;(globalThis as any).setTimeout(run, 0)
+      } else {
+        run()
+      }
+    }
+
+    function refreshForVersion(version: number) {
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
-      void refresh(true, settingsRef.current)
+      scheduleRefresh()
+    }
+
+    function checkDatabaseVersion() {
+      if (checkingDatabaseDataVersion) return
+      checkingDatabaseDataVersion = true
+      void readDatabaseDataVersion().then((version) => {
+        if (stopped) return
+        if (lastSeenDatabaseDataVersion != null && version !== lastSeenDatabaseDataVersion) {
+          scheduleRefresh()
+        }
+        lastSeenDatabaseDataVersion = version
+      }).catch(() => {}).finally(() => {
+        checkingDatabaseDataVersion = false
+      })
+    }
+
+    function closeSocket() {
+      const current = socket
+      socket = null
+      socketKey = ""
+      try { current?.close() } catch {}
+    }
+
+    function connectSocket() {
+      if (stopped) return
+      const status = lanShareStatusRef.current
+      if (status.state !== "running" && status.state !== "delegated") {
+        closeSocket()
+        return
+      }
+      if (typeof WebSocket !== "function") return
+      const key = `${status.port}:${status.accessCode}`
+      if (socket && socketKey === key) return
+      closeSocket()
+      try {
+        const next = new WebSocket(`ws://127.0.0.1:${status.port}/ws?token=${encodeURIComponent(status.accessCode)}`)
+        socket = next
+        socketKey = key
+        next.onmessage = (message) => {
+          if (stopped) return
+          try {
+            const raw = typeof message === "string" ? message : message.toRawString("utf-8") ?? ""
+            const value = JSON.parse(raw)
+            if (value?.type === "connected" || value?.type === "dataChanged") {
+              refreshForVersion(Number(value.version) || 0)
+            }
+          } catch {
+          }
+        }
+        next.onerror = () => {
+          try { next.close() } catch {}
+        }
+        next.onclose = () => {
+          if (socket === next) {
+            socket = null
+            socketKey = ""
+          }
+        }
+      } catch {
+        closeSocket()
+      }
+    }
+
+    const unsubscribe = subscribeClipDataChanges(refreshForVersion)
+    const timer = (globalThis as any).setInterval?.(() => {
+      checkDatabaseVersion()
+      connectSocket()
     }, 700)
     return () => {
+      stopped = true
+      unsubscribe()
+      closeSocket()
       if (timer) (globalThis as any).clearInterval?.(timer)
     }
   }, [])

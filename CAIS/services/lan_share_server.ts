@@ -5,17 +5,19 @@ import {
   addFavoriteFromInput,
   editClipContent,
   getClipById,
+  getClipCounts,
   getClipGroups,
   getFullClipContent,
   updateClipTitle,
 } from "../storage/clip_repository"
-import { readClipDataVersion } from "../storage/change_signal"
-import { initializeDatabase } from "../storage/database"
+import { bumpClipDataVersion, readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
+import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
 import { imagePreviewPath } from "../storage/image_store"
 import { loadSettings } from "../storage/settings_store"
 import { getLanShareAccessToken } from "./lan_share_credentials"
+import { imageFromUploadRequest, MAX_LAN_IMAGE_UPLOAD_BYTES } from "./lan_share_image_upload"
 
-const MAX_REQUEST_BODY_SIZE = 1024 * 1024
+const MAX_REQUEST_BODY_SIZE = MAX_LAN_IMAGE_UPLOAD_BYTES + 256 * 1024
 const MAX_TEXT_LENGTH = 500_000
 const MAX_TITLE_LENGTH = 160
 const RATE_LIMIT_WINDOW_MS = 60_000
@@ -39,6 +41,9 @@ let server: HttpServer | null = null
 let serverPort: number | null = null
 let versionTimer: any = null
 let lastBroadcastVersion = 0
+let lastDatabaseDataVersion: number | null = null
+let checkingDatabaseDataVersion = false
+let unsubscribeDataChanges: (() => void) | null = null
 let activeAccessToken = ""
 let sessions: WebSocketSession[] = []
 let reconcileQueue: Promise<LanShareRuntimeStatus> = Promise.resolve({
@@ -209,8 +214,8 @@ function webGroups(groups: ClipGroup[]) {
   }))
 }
 
-function notifyDataChanged(): void {
-  const version = readClipDataVersion()
+function notifyDataChanged(version = readClipDataVersion()): void {
+  if (version <= lastBroadcastVersion) return
   lastBroadcastVersion = version
   const message = JSON.stringify({ type: "dataChanged", version })
   sessions = sessions.filter((session) => {
@@ -226,6 +231,10 @@ function notifyDataChanged(): void {
 function startVersionBroadcasting(): void {
   stopVersionBroadcasting()
   lastBroadcastVersion = readClipDataVersion()
+  unsubscribeDataChanges = subscribeClipDataChanges(notifyDataChanged)
+  void readDatabaseDataVersion().then((version) => {
+    lastDatabaseDataVersion = version
+  }).catch(() => {})
   activeAccessToken = getLanShareAccessToken()
   versionTimer = (globalThis as any).setInterval?.(() => {
     const accessToken = getLanShareAccessToken()
@@ -236,15 +245,30 @@ function startVersionBroadcasting(): void {
       })
       sessions = []
     }
-    const version = readClipDataVersion()
-    if (version > lastBroadcastVersion) notifyDataChanged()
+    if (!checkingDatabaseDataVersion) {
+      checkingDatabaseDataVersion = true
+      void readDatabaseDataVersion().then((databaseVersion) => {
+        if (lastDatabaseDataVersion != null && databaseVersion !== lastDatabaseDataVersion) {
+          lastDatabaseDataVersion = databaseVersion
+          bumpClipDataVersion()
+        } else {
+          lastDatabaseDataVersion = databaseVersion
+        }
+      }).catch(() => {}).finally(() => {
+        checkingDatabaseDataVersion = false
+      })
+    }
   }, VERSION_POLL_INTERVAL_MS)
 }
 
 function stopVersionBroadcasting(): void {
   if (versionTimer) (globalThis as any).clearInterval?.(versionTimer)
   versionTimer = null
+  unsubscribeDataChanges?.()
+  unsubscribeDataChanges = null
   activeAccessToken = ""
+  lastDatabaseDataVersion = null
+  checkingDatabaseDataVersion = false
 }
 
 function enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
@@ -336,10 +360,6 @@ function registerRoutes(nextServer: HttpServer): void {
     const invalid = requireMethod(request, "GET")
     return invalid ?? jsonResponse({ service: "CAIS", version: 1, port: serverPort })
   })
-  nextServer.registerAsyncHandler("/api/version", async (request) => {
-    const invalid = requireMethod(request, "GET")
-    return invalid ?? jsonResponse({ version: readClipDataVersion() })
-  })
   nextServer.registerAsyncHandler("/api/items", async (request) => {
     if (request.method.toUpperCase() === "GET") {
       const scope: ClipListScope = queryValue(request, "scope") === "favorites" ? "favorites" : "clipboard"
@@ -347,11 +367,14 @@ function registerRoutes(nextServer: HttpServer): void {
       const limit = Math.max(1, Math.min(100, Number(queryValue(request, "limit")) || 40))
       const offset = Math.max(0, Number(queryValue(request, "offset")) || 0)
       const groups = await getClipGroups(scope, search, limit, offset)
+      const counts = await getClipCounts()
       return jsonResponse({
         groups: webGroups(groups),
+        counts,
         limit,
         offset,
         hasMore: groups.some((group) => group.items.length >= limit),
+        capabilities: { imageUpload: loadSettings().captureImages },
         version: readClipDataVersion(),
       })
     }
@@ -373,7 +396,6 @@ function registerRoutes(nextServer: HttpServer): void {
         if (result.status === "skipped") throw new Error(result.reason)
         return title.trim() ? updateClipTitle(result.item, title) : result.item
       })
-      notifyDataChanged()
       return jsonResponse({ item: webItem(item) }, 201, "Created")
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "保存失败")
@@ -401,7 +423,6 @@ function registerRoutes(nextServer: HttpServer): void {
         if (current.kind === "image") throw new Error("图片条目只能修改标题")
         return editClipContent(current, content)
       })
-      notifyDataChanged()
       return jsonResponse({ item: webItem(item) })
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "修改失败")
@@ -423,7 +444,6 @@ function registerRoutes(nextServer: HttpServer): void {
         if (!current) throw new Error("条目不存在")
         return updateClipTitle(current, title)
       })
-      notifyDataChanged()
       return jsonResponse({ item: webItem(item) })
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "标题保存失败")
@@ -439,6 +459,22 @@ function registerRoutes(nextServer: HttpServer): void {
     const download = queryValue(request, "download") === "1"
     const original = download || queryValue(request, "original") === "1"
     return imageResponse(id, original, download)
+  })
+
+  nextServer.registerAsyncHandler("/api/images", async (request) => {
+    const invalid = requireMethod(request, "POST")
+    if (invalid) return invalid
+    try {
+      const settings = loadSettings()
+      if (!settings.captureImages) return errorResponse(403, "图片采集未开启")
+      const image = imageFromUploadRequest(request)
+      const result = await enqueueWrite(() => addClipFromPayload({ kind: "image", image }, settings))
+      if (result.status === "skipped") throw new Error(result.reason)
+      return jsonResponse({ item: webItem(result.item) }, 201, "Created")
+    } catch (error: any) {
+      const message = String(error?.message ?? error ?? "图片保存失败")
+      return errorResponse(message.includes("重复") ? 409 : 400, message)
+    }
   })
 
   nextServer.registerWebsocket("/ws", {

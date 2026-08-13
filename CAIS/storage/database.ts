@@ -63,6 +63,13 @@ export function resetDatabaseConnection() {
   initialized = false
 }
 
+export async function readDatabaseDataVersion(): Promise<number> {
+  const db = await openCaisDatabase()
+  const rows = await db.fetchAll("PRAGMA data_version")
+  const row = rows[0] ?? {}
+  return Number(row.data_version ?? Object.values(row)[0] ?? 0) || 0
+}
+
 async function ensureSchema(db: DB): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS clips (
@@ -271,6 +278,33 @@ export async function listClipGroups(options: {
     await ensureSchema(db)
     initialized = true
     return fetchClipGroups(db, options)
+  }
+}
+
+async function fetchClipCounts(db: DB): Promise<Record<ClipListScope, number>> {
+  const rows = await db.fetchAll(`
+    SELECT
+      COUNT(CASE WHEN manual_favorite = 0 THEN 1 END) AS clipboard_count,
+      COUNT(CASE WHEN favorite = 1 THEN 1 END) AS favorite_count
+    FROM clips
+    WHERE deleted_at IS NULL
+  `)
+  const row = rows[0] ?? {}
+  return {
+    clipboard: Number(row.clipboard_count ?? 0),
+    favorites: Number(row.favorite_count ?? 0),
+  }
+}
+
+export async function countClipsByScope(): Promise<Record<ClipListScope, number>> {
+  const db = await openCaisDatabase()
+  try {
+    return await fetchClipCounts(db)
+  } catch (error) {
+    if (initialized) throw error
+    await ensureSchema(db)
+    initialized = true
+    return fetchClipCounts(db)
   }
 }
 

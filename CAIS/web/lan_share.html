@@ -38,7 +38,11 @@
           <span aria-hidden="true">⌕</span>
           <input id="searchInput" type="search" placeholder="搜索标题或内容" autocomplete="off">
         </div>
-        <button id="newButton" class="primary-button"><span>＋</span>粘贴新内容</button>
+        <div class="topbar-actions">
+          <button id="newButton" class="primary-button"><span>＋</span>粘贴新内容</button>
+          <button id="imageButton" class="secondary-button hidden"><span>▧</span>粘贴图片</button>
+          <input id="imageInput" class="hidden" type="file" accept="image/*">
+        </div>
       </header>
 
       <div class="mobile-tabs" role="tablist">

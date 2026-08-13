@@ -10,11 +10,13 @@
     counts: { clipboard: 0, favorites: 0 },
     version: 0,
     loading: false,
+    reloadPending: false,
+    imageUploadEnabled: false,
+    imageUploading: false,
     dialogMode: "new",
     editingId: null,
     websocket: null,
     reconnectTimer: null,
-    pollTimer: null,
     searchTimer: null,
     toastTimer: null,
     imageUrls: new Set(),
@@ -38,6 +40,8 @@
     search: document.querySelector("#searchInput"),
     refresh: document.querySelector("#refreshButton"),
     newButton: document.querySelector("#newButton"),
+    imageButton: document.querySelector("#imageButton"),
+    imageInput: document.querySelector("#imageInput"),
     connection: document.querySelector("#connectionState"),
     dialog: document.querySelector("#editorDialog"),
     dialogTitle: document.querySelector("#dialogTitle"),
@@ -93,7 +97,9 @@
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
     headers.set("X-CAIS-Token", state.token);
-    if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    if (typeof options.body === "string" && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     const response = await fetch(path, { ...options, headers, cache: "no-store" });
     const contentType = response.headers.get("content-type") || "";
     const value = contentType.includes("application/json") ? await response.json() : await response.text();
@@ -217,16 +223,19 @@
     </section>`).join("");
     elements.empty.classList.toggle("hidden", groups.length > 0 || state.loading);
     elements.loadMore.classList.toggle("hidden", !state.hasMore || state.loading);
-    state.counts[state.scope] = groups.reduce((total, group) => total + group.items.length, 0);
     const clipboardCount = document.querySelector("#clipboardCount");
     const favoriteCount = document.querySelector("#favoriteCount");
     if (clipboardCount) clipboardCount.textContent = String(state.counts.clipboard);
     if (favoriteCount) favoriteCount.textContent = String(state.counts.favorites);
+    elements.imageButton.classList.toggle("hidden", !state.imageUploadEnabled);
     void loadImages();
   }
 
   async function loadItems({ append = false, quiet = false } = {}) {
-    if (state.loading) return;
+    if (state.loading) {
+      state.reloadPending = true;
+      return;
+    }
     state.loading = true;
     if (!append) state.offset = 0;
     if (!quiet) showNotice("");
@@ -237,7 +246,12 @@
       });
       const value = await api(`/api/items?${params}`);
       state.groups = append ? mergeGroups(value.groups) : value.groups;
+      state.counts = {
+        clipboard: Number(value.counts && value.counts.clipboard) || 0,
+        favorites: Number(value.counts && value.counts.favorites) || 0,
+      };
       state.hasMore = Boolean(value.hasMore);
+      state.imageUploadEnabled = Boolean(value.capabilities && value.capabilities.imageUpload);
       state.version = Number(value.version) || state.version;
       render();
       elements.connection.textContent = "已连接";
@@ -251,7 +265,19 @@
     } finally {
       state.loading = false;
       elements.refresh.disabled = false;
+      if (state.reloadPending && !elements.dialog.open) {
+        state.reloadPending = false;
+        void loadItems({ quiet: true });
+      }
     }
+  }
+
+  function requestReload() {
+    if (elements.dialog.open || state.loading) {
+      state.reloadPending = true;
+      return;
+    }
+    void loadItems({ quiet: true });
   }
 
   function setScope(scope) {
@@ -292,6 +318,63 @@
     const copied = document.execCommand("copy");
     area.remove();
     return copied;
+  }
+
+  async function uploadImage(file) {
+    if (!state.imageUploadEnabled) throw new Error("图片采集未开启");
+    if (!file || !String(file.type || "").startsWith("image/")) throw new Error("请选择图片文件");
+    if (file.size > 12 * 1024 * 1024) throw new Error("图片不能超过 12 MB");
+    if (state.imageUploading) return;
+    state.imageUploading = true;
+    elements.imageButton.disabled = true;
+    try {
+      await api("/api/images", {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      showToast("图片已保存并同步");
+      await loadItems({ quiet: true });
+    } catch (error) {
+      if ((error.message || "").includes("图片采集未开启")) {
+        state.imageUploadEnabled = false;
+        render();
+      }
+      throw error;
+    } finally {
+      state.imageUploading = false;
+      elements.imageButton.disabled = false;
+      elements.imageInput.value = "";
+    }
+  }
+
+  async function pasteOrChooseImage() {
+    if (navigator.clipboard && typeof navigator.clipboard.read === "function" && window.isSecureContext) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const type = item.types.find((value) => value.startsWith("image/"));
+          if (type) {
+            await uploadImage(await item.getType(type));
+            return;
+          }
+        }
+        throw new Error("剪贴板中没有图片");
+      } catch (error) {
+        if ((error.message || "") === "剪贴板中没有图片") throw error;
+      }
+    }
+    elements.imageInput.click();
+  }
+
+  async function pasteText(text) {
+    if (!String(text || "").trim()) return;
+    await api("/api/items", {
+      method: "POST",
+      body: JSON.stringify({ title: "", content: text, scope: state.scope }),
+    });
+    showToast("文本已保存并同步");
+    await loadItems({ quiet: true });
   }
 
   async function downloadImage(item) {
@@ -439,8 +522,9 @@
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === "dataChanged" && Number(message.version) > state.version && !elements.dialog.open) {
-          void loadItems({ quiet: true });
+        if (message.type === "connected") elements.connection.textContent = "已连接";
+        if ((message.type === "connected" || message.type === "dataChanged") && Number(message.version) !== state.version) {
+          requestReload();
         }
       } catch {}
     };
@@ -448,17 +532,6 @@
       if (state.websocket === socket) state.reconnectTimer = setTimeout(connectWebSocket, 1800);
     };
     socket.onerror = () => socket.close();
-  }
-
-  function startVersionFallback() {
-    clearInterval(state.pollTimer);
-    state.pollTimer = setInterval(async () => {
-      if (document.hidden || elements.dialog.open) return;
-      try {
-        const value = await api("/api/version");
-        if (Number(value.version) > state.version) await loadItems({ quiet: true });
-      } catch {}
-    }, 3000);
   }
 
   function bindEvents() {
@@ -471,7 +544,6 @@
         showApp();
         await loadItems();
         connectWebSocket();
-        startVersionFallback();
       } catch (error) {
         showAuth(error.message || "连接失败");
       } finally {
@@ -485,6 +557,30 @@
     document.querySelectorAll("[data-scope]").forEach((button) => button.addEventListener("click", () => setScope(button.dataset.scope)));
     elements.refresh.addEventListener("click", () => loadItems());
     elements.newButton.addEventListener("click", () => configureDialog("new"));
+    elements.imageButton.addEventListener("click", () => {
+      void pasteOrChooseImage().catch((error) => showToast(error.message || "图片粘贴失败"));
+    });
+    elements.imageInput.addEventListener("change", () => {
+      const file = elements.imageInput.files && elements.imageInput.files[0];
+      if (file) void uploadImage(file).catch((error) => showToast(error.message || "图片上传失败"));
+    });
+    document.addEventListener("paste", (event) => {
+      if (elements.dialog.open) return;
+      const target = event.target;
+      if (target && target.closest && target.closest("input, textarea, select, [contenteditable='true']")) return;
+      const clipboardItems = Array.from(event.clipboardData ? event.clipboardData.items : []);
+      const imageItem = clipboardItems.find((item) => String(item.type || "").startsWith("image/"));
+      const file = imageItem ? imageItem.getAsFile() : null;
+      if (file && state.imageUploadEnabled) {
+        event.preventDefault();
+        void uploadImage(file).catch((error) => showToast(error.message || "图片粘贴失败"));
+        return;
+      }
+      const text = event.clipboardData ? event.clipboardData.getData("text/plain") : "";
+      if (!text.trim()) return;
+      event.preventDefault();
+      void pasteText(text).catch((error) => showToast(error.message || "文本粘贴失败"));
+    });
     elements.loadMore.addEventListener("click", () => { state.offset += PAGE_SIZE; void loadItems({ append: true }); });
     elements.search.addEventListener("input", () => {
       clearTimeout(state.searchTimer);
@@ -498,6 +594,9 @@
       if (button) void performAction(button.dataset.action, button.dataset.id);
     });
     elements.saveButton.addEventListener("click", saveDialog);
+    elements.dialog.addEventListener("close", () => {
+      if (state.reloadPending) requestReload();
+    });
     elements.closeImagePreview.addEventListener("click", closeImagePreview);
     elements.imagePreviewDialog.addEventListener("close", closeImagePreview);
     elements.downloadPreviewImage.addEventListener("click", () => {
@@ -521,7 +620,6 @@
       showApp();
       await loadItems();
       connectWebSocket();
-      startVersionFallback();
     } catch {
       sessionStorage.removeItem("caisLanToken");
       showAuth("访问码已失效，请重新输入。");

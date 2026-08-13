@@ -42,6 +42,7 @@ import {
   togglePinned,
 } from "../storage/clip_repository"
 import { readClipDataVersion } from "../storage/change_signal"
+import { readDatabaseDataVersion } from "../storage/database"
 import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
 import { summarizeContent } from "../utils/common"
@@ -88,7 +89,6 @@ let currentKeyboardNativeGlassEffect = true
 export type KeyboardInitialState = {
   items: ClipItem[]
   settings: CaisSettings
-  version: number
   loaded: boolean
   scope: ClipListScope
 }
@@ -430,11 +430,10 @@ function rememberKeyboardItems(scope: ClipListScope, items: ClipItem[], version 
 
 export async function preloadKeyboardInitialState(): Promise<KeyboardInitialState> {
   const settings = loadSettings()
-  const version = readClipDataVersion()
   const scope: ClipListScope = "clipboard"
   const items = await getClips("", queryLimitForKeyboard(settings), scope)
-  rememberKeyboardItems(scope, items, version)
-  return { items, settings, version, loaded: true, scope }
+  rememberKeyboardItems(scope, items)
+  return { items, settings, loaded: true, scope }
 }
 
 function ClipTile(props: {
@@ -819,16 +818,45 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     prepareCaisFeedback(settings)
     const lifecycle = ++keyboardLifecycleGeneration
     void boot(lifecycle)
-    let lastSeenClipDataVersion = props.initialState?.version ?? readClipDataVersion()
+    let lastSeenDatabaseDataVersion: number | null = null
+    let checkingDatabaseDataVersion = false
+    let refreshQueued = false
+    let refreshRequested = false
+    let stopped = false
+
+    function scheduleRefresh() {
+      if (stopped) return
+      if (refreshQueued) {
+        refreshRequested = true
+        return
+      }
+      refreshQueued = true
+      void refresh(true, lifecycle, activeKeyboardScope).catch(() => {}).finally(() => {
+        refreshQueued = false
+        if (refreshRequested) {
+          refreshRequested = false
+          scheduleRefresh()
+        }
+      })
+    }
+
     const timer = (globalThis as any).setInterval?.(() => {
       const pipActive = readPipControlState().active
       setAppPipActive((current) => current === pipActive ? current : pipActive)
-      const version = readClipDataVersion()
-      if (version <= lastSeenClipDataVersion) return
-      lastSeenClipDataVersion = version
-      void refresh(true, lifecycle, activeKeyboardScope)
+      if (checkingDatabaseDataVersion) return
+      checkingDatabaseDataVersion = true
+      void readDatabaseDataVersion().then((databaseVersion) => {
+        if (stopped) return
+        if (lastSeenDatabaseDataVersion != null && databaseVersion !== lastSeenDatabaseDataVersion) {
+          scheduleRefresh()
+        }
+        lastSeenDatabaseDataVersion = databaseVersion
+      }).catch(() => {}).finally(() => {
+        checkingDatabaseDataVersion = false
+      })
     }, 900)
     return () => {
+      stopped = true
       if (keyboardLifecycleGeneration === lifecycle) keyboardLifecycleGeneration += 1
       if (timer) (globalThis as any).clearInterval?.(timer)
       if (keyboardMonitorStartTimer) {

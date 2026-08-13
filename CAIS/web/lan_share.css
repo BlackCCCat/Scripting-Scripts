@@ -52,6 +52,8 @@ main { min-width: 0; }
 .search-wrap { flex: 1; max-width: 660px; height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .search-wrap span { color: var(--muted); font-size: 21px; transform: rotate(-20deg); }
 .search-wrap input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text); }
+.topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.topbar-actions button { white-space: nowrap; }
 
 button { cursor: pointer; }
 .primary-button, .secondary-button, .icon-button, .load-more, .card-action { border: 1px solid var(--line); border-radius: 9px; min-height: 38px; padding: 8px 13px; background: var(--surface); }
@@ -120,7 +122,8 @@ dialog::backdrop { background: rgba(11, 13, 18, 0.46); backdrop-filter: blur(3px
   .mobile-brand strong { font-size: 18px; }
   .mobile-brand span { color: var(--muted); font-size: 11px; }
   .search-wrap { order: 2; max-width: none; }
-  .primary-button { order: 3; }
+  .topbar-actions { order: 3; width: 100%; margin-left: 0; }
+  .topbar-actions button { flex: 1; }
   .mobile-tabs { margin: 12px 14px 0; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; border-radius: 10px; background: var(--surface-2); }
   .mobile-tabs button { border: 0; border-radius: 8px; padding: 7px; background: transparent; }
   .mobile-tabs button.active { background: var(--surface); color: var(--accent); font-weight: 650; box-shadow: 0 1px 5px rgba(0,0,0,.08); }
