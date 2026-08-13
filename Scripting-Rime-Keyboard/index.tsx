@@ -1149,7 +1149,7 @@ function SettingsView() {
     loadRimeKeyboardSettings()
   );
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "scripting-rime-keyboard:release-notes:last-seen-hash",
     title: "更新内容",
   });

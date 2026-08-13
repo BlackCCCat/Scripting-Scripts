@@ -179,7 +179,7 @@ type FavoriteFeedCursorState = {
 export function HomeView() {
   const dismiss = Navigation.useDismiss()
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "bilifavor:release-notes:last-seen-hash",
   })
   const [initialStore] = useState<BiliAuthStore>(() => loadStoredAuthState())

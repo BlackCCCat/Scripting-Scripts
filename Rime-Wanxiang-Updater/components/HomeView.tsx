@@ -1369,7 +1369,7 @@ export function HomeView() {
   const logProxyRef = useRef<any>();
   const settingsSaveRef = useRef<(() => void) | null>(null);
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "wanxiang-helper:release-notes:last-seen-hash",
     title: "更新内容",
   });

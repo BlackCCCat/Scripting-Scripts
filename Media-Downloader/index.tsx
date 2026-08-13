@@ -542,7 +542,7 @@ function View() {
   const [toastPresented, setToastPresented] = useState(false)
   const t = getI18n(preferences.language)
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "media-downloader:release-notes:last-seen-hash",
     title: t.releaseNotes,
   })

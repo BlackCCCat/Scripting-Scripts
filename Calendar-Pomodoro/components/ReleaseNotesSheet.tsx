@@ -1,7 +1,7 @@
 // Scripting 组件与 API：
 // - Markdown 用于渲染更新说明
 // - sheet 内容使用透明 ScrollView，避免 Markdown 默认背景形成白色遮罩
-// - Path/Script 用于读取脚本目录下的 release-notes.md
+// - Path/Script 用于读取脚本目录下的 changelog.md
 import {
   Device,
   Markdown,
@@ -25,7 +25,7 @@ type ReleaseNotesSheetConfig = {
   detents?: PresentationDetent[]
 }
 
-const DEFAULT_RELEASE_NOTES_FILE = "release-notes.md"
+const DEFAULT_CHANGELOG_FILE = "changelog.md"
 
 function normalizeMarkdownContent(content: string): string {
   return content.replace(/\r\n/g, "\n").trim()
@@ -96,7 +96,7 @@ export function ReleaseNotesSheet(props: {
 }
 
 export function useReleaseNotesSheet(config: ReleaseNotesSheetConfig = {}) {
-  const markdownFile = config.markdownFile ?? DEFAULT_RELEASE_NOTES_FILE
+  const markdownFile = config.markdownFile ?? DEFAULT_CHANGELOG_FILE
   const [content, setContent] = useState("")
   const [contentHash, setContentHash] = useState("")
   const [isPresented, setIsPresented] = useState(false)

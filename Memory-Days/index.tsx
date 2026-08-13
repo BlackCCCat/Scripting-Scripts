@@ -26,7 +26,7 @@ function MainView() {
   const isLoading = useObservable(true)
   const selectedTab = useObservable(0)
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: 'release-notes.md',
+    markdownFile: 'changelog.md',
     storageKey: '时光纪念:release-notes:last-seen-hash',
     title: '更新说明'
   })

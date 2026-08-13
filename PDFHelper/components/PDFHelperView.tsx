@@ -175,7 +175,7 @@ function removeSourcesByPdfPaths(sources: SourceItem[], pdfPaths: Set<string>): 
 
 export function PDFHelperView() {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "pdfhelper:release-notes:last-seen-hash",
     title: "更新说明",
   })

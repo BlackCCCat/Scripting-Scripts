@@ -48,7 +48,7 @@ function Page({
 function App() {
   const selection = useObservable<number>(0)
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "today-oil-price:release-notes:last-seen-hash",
     title: "更新内容",
   })

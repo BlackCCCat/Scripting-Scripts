@@ -413,6 +413,8 @@ export function HomeView() {
   const colorScheme = useColorScheme()
   const releaseNotesSheet = useReleaseNotesSheet({
     title: "更新说明",
+    // Legacy identifier retained so renaming the Markdown file does not reset read state.
+    storageKey: "custom-alarm:release-notes:release-notes.md:last-seen-hash",
   })
   const [initialState] = useState(() => loadCustomAlarmState())
   const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)

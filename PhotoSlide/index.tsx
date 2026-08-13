@@ -85,7 +85,7 @@ function App() {
   const today = startOfDay(Date.now())
   const defaultStartDate = today - 30 * dayInMilliseconds
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "photoslide:release-notes:last-seen-hash",
   })
 

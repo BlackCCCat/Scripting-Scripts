@@ -93,7 +93,7 @@ function ZDictScriptView() {
   const requestIdRef = useRef(0)
   const releaseNotesSheet = useZDictReleaseNotesSheet({
     title: "更新内容",
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "zdict:release-notes:last-seen-hash",
   })
 

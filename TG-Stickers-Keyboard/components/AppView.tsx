@@ -68,7 +68,7 @@ export function AppView() {
   const [showFolder, setShowFolder] = useState(false)
   const [managePackName, setManagePackName] = useState<string | null>(null)
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "tg-stickers-keyboard:release-notes:last-seen-hash",
     title: "更新说明",
   })

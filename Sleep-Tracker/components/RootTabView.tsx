@@ -15,7 +15,7 @@ const SETTINGS_TAB = 2
 
 export function RootTabView() {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "sleep-tracker:release-notes:last-seen-hash",
   })
   const [settings, setSettings] = useState<SleepTrackerSettings>(() => loadSleepTrackerSettings())

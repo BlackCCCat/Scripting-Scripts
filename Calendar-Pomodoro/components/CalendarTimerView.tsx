@@ -673,7 +673,7 @@ function OverallReportSheet(props: { tasks: Task[] }) {
 
 export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
   const releaseNotesSheet = useReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     title: "更新说明",
   });
   // 任务列表与当前选中任务

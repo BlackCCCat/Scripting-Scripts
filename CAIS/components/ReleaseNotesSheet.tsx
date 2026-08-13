@@ -19,7 +19,7 @@ type ReleaseNotesSheetConfig = {
   detents?: PresentationDetent[]
 }
 
-const DEFAULT_RELEASE_NOTES_FILE = "release-notes.md"
+const DEFAULT_CHANGELOG_FILE = "changelog.md"
 
 function normalizeMarkdownContent(content: string): string {
   return content.replace(/\r\n/g, "\n").trim()
@@ -76,7 +76,7 @@ export function ReleaseNotesSheet(props: {
 }
 
 export function useReleaseNotesSheet(config: ReleaseNotesSheetConfig = {}) {
-  const markdownFile = config.markdownFile ?? DEFAULT_RELEASE_NOTES_FILE
+  const markdownFile = config.markdownFile ?? DEFAULT_CHANGELOG_FILE
   const storageKey = config.storageKey ?? `cais:release-notes:${markdownFile}:last-seen-hash`
   const [content, setContent] = useState("")
   const [contentHash, setContentHash] = useState("")

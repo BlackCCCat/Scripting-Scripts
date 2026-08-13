@@ -450,7 +450,7 @@ function SurgeRemoteConfigPage(props: {
 function App() {
   const dismiss = Navigation.useDismiss();
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "wloc-helper:release-notes:last-seen-hash",
     title: "更新内容",
   });

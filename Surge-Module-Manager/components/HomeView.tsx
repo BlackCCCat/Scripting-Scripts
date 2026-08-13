@@ -198,7 +198,7 @@ function BatchCompactButton(props: {
 
 export function HomeView() {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "surge-modules-manager:release-notes:last-seen-hash",
     title: "更新内容",
   })

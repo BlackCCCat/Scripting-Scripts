@@ -19,7 +19,7 @@ export function RootTabView(props: {
   const [version, setVersion] = useState(0)
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
     title: "更新说明",
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "sms-pickup:release-notes:last-seen-hash",
   })
 

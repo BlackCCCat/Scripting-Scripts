@@ -20,7 +20,7 @@ type MarkdownReleaseNotesSheetConfig = {
   markAsSeenOnDismiss?: boolean
 }
 
-const DEFAULT_RELEASE_NOTES_FILE = "release-notes.md"
+const DEFAULT_CHANGELOG_FILE = "changelog.md"
 const PRIVATE_STORAGE = { shared: false }
 
 function normalizeMarkdownContent(content: string): string {
@@ -72,7 +72,7 @@ function MarkdownReleaseNotesSheet(props: {
 export function useMarkdownReleaseNotesSheet(
   config: MarkdownReleaseNotesSheetConfig = {}
 ) {
-  const markdownFile = config.markdownFile ?? DEFAULT_RELEASE_NOTES_FILE
+  const markdownFile = config.markdownFile ?? DEFAULT_CHANGELOG_FILE
   const storageKey =
     config.storageKey ?? `release-notes:${markdownFile}:last-seen-hash`
   const markAsSeenOnDismiss = config.markAsSeenOnDismiss ?? true

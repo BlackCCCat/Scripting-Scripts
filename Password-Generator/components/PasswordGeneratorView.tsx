@@ -192,7 +192,7 @@ function ToggleRow(props: {
 
 export function PasswordGeneratorView(props: { mode: ViewMode }) {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "password-generator:release-notes:last-seen-hash",
     title: "更新说明",
   })

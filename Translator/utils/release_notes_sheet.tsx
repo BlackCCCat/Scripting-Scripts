@@ -19,7 +19,7 @@ type MarkdownReleaseNotesSheetConfig = {
   detents?: PresentationDetent[]
 }
 
-const DEFAULT_RELEASE_NOTES_FILE = "release-notes.md"
+const DEFAULT_CHANGELOG_FILE = "changelog.md"
 const DEFAULT_STORAGE_KEY = "translator:release-notes:last-seen-hash"
 
 function normalizeMarkdownContent(content: string) {
@@ -83,7 +83,7 @@ export function TranslatorReleaseNotesSheet(props: {
 export function useTranslatorReleaseNotesSheet(
   config: MarkdownReleaseNotesSheetConfig = {}
 ) {
-  const markdownFile = config.markdownFile ?? DEFAULT_RELEASE_NOTES_FILE
+  const markdownFile = config.markdownFile ?? DEFAULT_CHANGELOG_FILE
   const storageKey = config.storageKey ?? DEFAULT_STORAGE_KEY
 
   const [content, setContent] = useState("")

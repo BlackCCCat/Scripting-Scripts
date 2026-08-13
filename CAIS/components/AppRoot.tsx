@@ -284,6 +284,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const releaseNotesSheet = useReleaseNotesSheet({
     title: "CAIS 更新说明",
     detents: ["medium", "large"],
+    // Legacy identifier retained so renaming the Markdown file does not reset read state.
+    storageKey: "cais:release-notes:release-notes.md:last-seen-hash",
   })
   const colorScheme = useColorScheme()
   const activeTab = useObservable(TAB_CLIPS)

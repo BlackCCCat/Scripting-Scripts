@@ -44,7 +44,7 @@ export function HomeView() {
   const [reloadToken, setReloadToken] = useState(0)
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
     title: "更新说明",
-    markdownFile: "release-notes.md",
+    markdownFile: "changelog.md",
     storageKey: "regex-tester:release-notes:last-seen-hash",
   })
 

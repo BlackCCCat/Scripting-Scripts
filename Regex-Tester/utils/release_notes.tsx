@@ -19,7 +19,7 @@ type MarkdownReleaseNotesSheetConfig = {
   markAsSeenOnDismiss?: boolean
 }
 
-const DEFAULT_RELEASE_NOTES_FILE = "release-notes.md"
+const DEFAULT_CHANGELOG_FILE = "changelog.md"
 
 function normalizeMarkdownContent(content: string): string {
   return content.replace(/\r\n/g, "\n").trim()
@@ -66,7 +66,7 @@ function MarkdownReleaseNotesSheet(props: {
 }
 
 export function useMarkdownReleaseNotesSheet(config: MarkdownReleaseNotesSheetConfig = {}) {
-  const markdownFile = config.markdownFile ?? DEFAULT_RELEASE_NOTES_FILE
+  const markdownFile = config.markdownFile ?? DEFAULT_CHANGELOG_FILE
   const storageKey = config.storageKey ?? `regex-tester:release-notes:${markdownFile}:last-seen-hash`
   const markAsSeenOnDismiss = config.markAsSeenOnDismiss ?? true
 
