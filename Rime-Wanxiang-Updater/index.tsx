@@ -14,7 +14,7 @@ async function presentHome() {
   try {
     await Navigation.present({
       element: <HomeView />,
-      modalPresentationStyle: "fullScreen",
+      modalPresentationStyle: "overFullScreen",
     })
   } finally {
     isPresentingHome = false

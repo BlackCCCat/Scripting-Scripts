@@ -1194,7 +1194,7 @@ function App() {
 }
 
 const run = async () => {
-  await Navigation.present({ element: <App />, modalPresentationStyle: "fullScreen" });
+  await Navigation.present({ element: <App />, modalPresentationStyle: "overFullScreen" });
   Script.exit();
 };
 

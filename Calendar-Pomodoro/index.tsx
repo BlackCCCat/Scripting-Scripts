@@ -7,7 +7,7 @@ async function run() {
   // 脚本入口：以全屏模态方式呈现主界面
   await Navigation.present({
     element: <CalendarTimerView />,
-    modalPresentationStyle: "fullScreen",
+    modalPresentationStyle: "overFullScreen",
   })
 }
 

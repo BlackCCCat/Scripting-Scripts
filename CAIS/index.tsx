@@ -15,7 +15,7 @@ async function run() {
   try {
     await Navigation.present({
       element: <AppRoot />,
-      ...(fullscreen ? { modalPresentationStyle: "fullScreen" as const } : {}),
+      ...(fullscreen ? { modalPresentationStyle: "overFullScreen" as const } : {}),
     })
   } finally {
     removeResume?.()

@@ -4,7 +4,7 @@ import { TranslatorRootView } from "./components/TranslatorRootView"
 async function run() {
   await Navigation.present({
     element: <TranslatorRootView />,
-    modalPresentationStyle: "fullScreen",
+    modalPresentationStyle: "overFullScreen",
   })
 
   Script.exit()

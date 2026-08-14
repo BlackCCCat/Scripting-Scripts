@@ -1,7 +1,9 @@
-## 本次更新
+## v2.13.3
+- 全屏由`fullScreen`调整为`overFullScreen`，保持scripting脚本页面滚动状态
+## v2.13.2
 - 增加局域网共享功能，便于在非Apple设备上访问剪贴板记录
 
-## 近期更新
+## 更早
 - 更新说明页面适配低版本系统
 - 亮色模式下长按预览效果优化
 - 长按菜单使用contextmenu+controlgroup，更美观
