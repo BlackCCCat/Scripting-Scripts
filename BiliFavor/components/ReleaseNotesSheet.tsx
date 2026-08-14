@@ -7,6 +7,7 @@ import {
   Script,
   useEffect,
   useState,
+  VStack,
   type MarkdownProps,
   type PresentationDetent,
 } from "scripting"
@@ -55,13 +56,19 @@ function MarkdownReleaseNotesSheet(props: {
         presentationBackground={useGlassPresentation ? "clear" : undefined}
         padding={{ top: 24, leading: 18, bottom: 18, trailing: 18 }}
       >
-        <Markdown
-          content={props.content}
-          theme={props.theme ?? "basic"}
-          useDefaultHighlighterTheme
-          scrollable={false}
-          background="clear"
-        />
+        <VStack
+          frame={{ maxWidth: "infinity", alignment: "topLeading" }}
+        >
+          <Markdown
+            content={props.content}
+            theme={props.theme ?? "basic"}
+            useDefaultHighlighterTheme
+            scrollable={false}
+            background="clear"
+            frame={{ maxWidth: "infinity", alignment: "topLeading" }}
+            multilineTextAlignment="leading"
+          />
+        </VStack>
       </ScrollView>
     </NavigationStack>
   )
