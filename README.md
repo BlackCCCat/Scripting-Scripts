@@ -22,7 +22,7 @@
 - [WLOC-Helper](./WLOC-Helper)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/WLOC-Helper.zip)
 - [Memory-Days](./Memory-Days)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Memory-Days.zip)
 - [TG-Stickers-Keyboard](./TG-Stickers-Keyboard)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/TG-Stickers-Keyboard.zip)
-
+- [Fonts-Installer](./Fonts-Installer)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Fonts-Installer.zip)
 
 **Codex完成几乎所有代码**
 

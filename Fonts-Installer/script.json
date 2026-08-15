@@ -1,0 +1,49 @@
+{
+  "iconImage" : null,
+  "description" : "导入、验证、预览并通过 iOS 配置描述文件安装 TrueType 与 OpenType 字体。支持从快捷指令或分享表单直接传入单个字体文件。",
+  "permissions" : null,
+  "author" : {
+    "homepage" : "https://github.com/BlackCCCat",
+    "name" : "BlackCCCat",
+    "email" : null
+  },
+  "icon" : "textformat",
+  "localizedDescriptions" : {
+    "fr" : "",
+    "zh" : "",
+    "es" : "",
+    "ru" : "",
+    "en" : "",
+    "it" : "",
+    "ja" : "",
+    "de" : "",
+    "pt" : ""
+  },
+  "runInApp" : false,
+  "color" : "rgba(79, 70, 229, 1.00)",
+  "contributors" : [
+
+  ],
+  "remoteResource": {
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Fonts-Installer.zip",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "version" : "",
+  "name" : "Fonts Installer",
+  "entry" : "index.tsx",
+  "intentInputTypes" : [
+    "FileURLs"
+  ],
+  "localizedNames" : {
+    "fr" : "",
+    "zh" : "",
+    "es" : "",
+    "ru" : "",
+    "en" : "",
+    "it" : "",
+    "ja" : "",
+    "de" : "",
+    "pt" : ""
+  }
+}
