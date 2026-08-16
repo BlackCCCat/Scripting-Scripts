@@ -14,6 +14,7 @@ import {
   useState,
 } from "scripting"
 import { formatFileSize, type InspectedFont } from "./font"
+import { recordInstalledFont } from "./font-history"
 import { openFontInstaller } from "./profile"
 import { createFontPreviewHTML } from "./preview"
 import { colors, CustomGradientBackground } from "./theme"
@@ -60,6 +61,14 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
     try {
       await openFontInstaller(selectedFont.info, selectedFont.data)
       HapticFeedback.notificationSuccess()
+      try {
+        recordInstalledFont(selectedFont.info)
+      } catch (historyError) {
+        await Dialog.alert({
+          title: "安装请求已发出",
+          message: `系统已接收描述文件，但无法保存字体历史：${errorMessage(historyError)}`,
+        })
+      }
       dismiss()
     } catch (error) {
       await Dialog.alert({ title: "无法开始安装", message: errorMessage(error) })

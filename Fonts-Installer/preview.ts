@@ -23,6 +23,10 @@ export function createFontPreviewHTML(
   const title = escapeHTML(info.fullName)
   const family = escapeHTML(info.familyName)
   const postScriptName = escapeHTML(info.postScriptName)
+  const displaySample = info.supportsChinese ? "字体预览 Aa" : "Font Preview Aa"
+  const chineseSample = info.supportsChinese
+    ? '<div class="sample">天地玄黄，宇宙洪荒。<br>春风又绿江南岸。</div>'
+    : ""
   const bodyPadding = options.embedded
     ? "18px 16px calc(env(safe-area-inset-bottom, 0px) + 18px)"
     : "calc(env(safe-area-inset-top, 0px) + 72px) 20px calc(env(safe-area-inset-bottom, 0px) + 44px)"
@@ -71,8 +75,8 @@ export function createFontPreviewHTML(
     <div class="meta">${family} · ${postScriptName}</div>
   </header>
   <main class="specimen">
-    <div class="display">字体预览 Aa</div>
-    <div class="sample">天地玄黄，宇宙洪荒。<br>春风又绿江南岸。</div>
+    <div class="display">${displaySample}</div>
+    ${chineseSample}
     <div class="sample">The quick brown fox jumps over the lazy dog.</div>
     <div class="glyphs">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789<br>.,:;!? @ # ¥ $ % &amp; ( ) [ ] { }</div>
   </main>
