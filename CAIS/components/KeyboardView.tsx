@@ -121,11 +121,15 @@ function readKeyboardLayout(): KeyboardLayoutMode {
   const st = storage()
   try {
     const raw = st?.get?.(KEYBOARD_LAYOUT_KEY) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY)
-    if (raw != null) return normalizeKeyboardLayout(raw)
+    if (raw != null) {
+      removeLegacySharedKeyboardLayout()
+      return normalizeKeyboardLayout(raw)
+    }
   } catch {
   }
   try {
     const raw = st?.get?.(KEYBOARD_LAYOUT_KEY, LEGACY_SHARED_STORAGE_OPTIONS) ?? st?.getString?.(KEYBOARD_LAYOUT_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+    if (raw == null) return "twoByTwo"
     const value = normalizeKeyboardLayout(raw)
     writeKeyboardLayout(value)
     return value
@@ -140,13 +144,21 @@ function normalizeKeyboardLayout(value: any): KeyboardLayoutMode {
   return "twoByTwo"
 }
 
+function removeLegacySharedKeyboardLayout() {
+  try {
+    storage()?.remove?.(KEYBOARD_LAYOUT_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+  } catch {
+  }
+}
+
 function writeKeyboardLayout(value: KeyboardLayoutMode) {
   const st = storage()
   try {
     if (typeof st?.set === "function") {
-      st.set(KEYBOARD_LAYOUT_KEY, value)
+      if (st.set(KEYBOARD_LAYOUT_KEY, value) !== false) removeLegacySharedKeyboardLayout()
     } else if (typeof st?.setString === "function") {
       st.setString(KEYBOARD_LAYOUT_KEY, value)
+      removeLegacySharedKeyboardLayout()
     }
   } catch {
   }

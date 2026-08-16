@@ -33,18 +33,18 @@ export const DEFAULT_PREFERENCES: Preferences = {
 export function getPreferences(): Preferences {
   const saved = Storage.get<Partial<Preferences>>(PREFS_KEY, { shared: false })
   const sharedSaved = Storage.get<Partial<Preferences>>(PREFS_KEY, { shared: true })
-  if (!saved && sharedSaved) {
-    Storage.set(PREFS_KEY, sharedSaved, { shared: false })
-  }
-  if (sharedSaved) {
+  const migrated = saved ?? sharedSaved
+  if (saved != null && sharedSaved != null) {
+    Storage.remove(PREFS_KEY, { shared: true })
+  } else if (sharedSaved != null && Storage.set(PREFS_KEY, sharedSaved, { shared: false })) {
     Storage.remove(PREFS_KEY, { shared: true })
   }
 
   const next = {
     ...DEFAULT_PREFERENCES,
-    ...(saved || sharedSaved || {}),
+    ...(migrated || {}),
   }
-  if ((saved || sharedSaved)?.ytDlpReady === false && (saved || sharedSaved)?.ytDlpDetectionVersion !== YTDLP_DETECTION_VERSION) {
+  if (migrated?.ytDlpReady === false && migrated?.ytDlpDetectionVersion !== YTDLP_DETECTION_VERSION) {
     next.ytDlpReady = null
     next.ytDlpVersion = null
     next.ytDlpCheckedAt = null
@@ -54,6 +54,7 @@ export function getPreferences(): Preferences {
 }
 
 export function persistPreferences(next: Preferences) {
-  Storage.set(PREFS_KEY, next, { shared: false })
-  Storage.remove(PREFS_KEY, { shared: true })
+  if (Storage.set(PREFS_KEY, next, { shared: false })) {
+    Storage.remove(PREFS_KEY, { shared: true })
+  }
 }

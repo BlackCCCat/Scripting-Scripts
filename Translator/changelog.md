@@ -1,3 +1,6 @@
+## v2.14.1
+- 迁移shared storage到脚本私有storage
+
 ## v2.13.3
 - 全屏由`fullScreen`调整为`overFullScreen`，保持scripting脚本页面滚动状态
 ## 更早

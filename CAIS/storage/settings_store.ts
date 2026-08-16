@@ -8,16 +8,25 @@ function getStorage(): any {
   return (globalThis as any).Storage
 }
 
-function writeSettingsRaw(raw: string): void {
+function removeLegacySharedSettings(): void {
+  try {
+    getStorage()?.remove?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS)
+  } catch {
+  }
+}
+
+function writeSettingsRaw(raw: string): boolean {
   const st = getStorage()
   try {
     if (typeof st?.set === "function") {
-      st.set(SETTINGS_KEY, raw)
+      return st.set(SETTINGS_KEY, raw) !== false
     } else if (typeof st?.setString === "function") {
       st.setString(SETTINGS_KEY, raw)
+      return true
     }
   } catch {
   }
+  return false
 }
 
 function sanitizeCustomActionMode(value: any): KeyboardCustomAction["mode"] {
@@ -110,14 +119,18 @@ export function loadSettings(): CaisSettings {
   const st = getStorage()
   try {
     const raw = st?.get?.(SETTINGS_KEY) ?? st?.getString?.(SETTINGS_KEY)
-    if (raw != null) return sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
+    if (raw != null) {
+      const fixed = sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
+      removeLegacySharedSettings()
+      return fixed
+    }
   } catch {
   }
   try {
     const raw = st?.get?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS) ?? st?.getString?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS)
     if (raw != null) {
       const fixed = sanitizeSettings(typeof raw === "string" ? JSON.parse(raw) : raw)
-      writeSettingsRaw(JSON.stringify(fixed))
+      if (writeSettingsRaw(JSON.stringify(fixed))) removeLegacySharedSettings()
       return fixed
     }
   } catch {
@@ -127,6 +140,6 @@ export function loadSettings(): CaisSettings {
 
 export function saveSettings(settings: CaisSettings): CaisSettings {
   const fixed = sanitizeSettings(settings)
-  writeSettingsRaw(JSON.stringify(fixed))
+  if (writeSettingsRaw(JSON.stringify(fixed))) removeLegacySharedSettings()
   return fixed
 }

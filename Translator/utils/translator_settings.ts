@@ -68,7 +68,11 @@ function readSharedSettings(st: any): TranslatorSettings | null | undefined {
 }
 
 function writePrivateSettings(st: any, settings: TranslatorSettings) {
-  st?.set?.(STORAGE_KEY, settings)
+  try {
+    return typeof st?.set === "function" && st.set(STORAGE_KEY, settings) !== false
+  } catch {
+    return false
+  }
 }
 
 function removeSharedSettings(st: any) {
@@ -260,8 +264,7 @@ export function loadTranslatorSettings(): TranslatorSettings {
   if (sharedRaw != null) {
     // 旧版本把配置写进 shared 域，这里迁回脚本私有域，并顺手清掉旧数据。
     const migrated = normalizeTranslatorSettings(sharedRaw)
-    writePrivateSettings(st, migrated)
-    removeSharedSettings(st)
+    if (writePrivateSettings(st, migrated)) removeSharedSettings(st)
     return migrated
   }
 
@@ -272,8 +275,9 @@ export function loadTranslatorSettings(): TranslatorSettings {
 export function saveTranslatorSettings(settings: TranslatorSettings) {
   const st = storage()
   if (!st?.set) return
-  writePrivateSettings(st, normalizeTranslatorSettings(settings))
-  removeSharedSettings(st)
+  if (writePrivateSettings(st, normalizeTranslatorSettings(settings))) {
+    removeSharedSettings(st)
+  }
 }
 
 export function updateEngineEnabled(

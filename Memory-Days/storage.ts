@@ -9,6 +9,8 @@ const APP_FOLDER = SCRIPT_STORAGE_NAME
 const LEGACY_APP_FOLDERS = ['时光纪念数据', '纪念' + '日数据']
 const DATA_FILE = 'data.json'
 const ICLOUD_SYNC_KEY = `${SCRIPT_STORAGE_NAME}.iCloudSyncEnabled`
+const PRIVATE_STORAGE_OPTIONS = { shared: false }
+const LEGACY_SHARED_STORAGE_OPTIONS = { shared: true }
 
 interface BackupAsset {
   path: string
@@ -80,11 +82,23 @@ function isICloudAvailable(): boolean {
 }
 
 function isICloudSyncEnabled(): boolean {
-  return !!Storage.get<boolean>(ICLOUD_SYNC_KEY, { shared: true })
+  const privateValue = Storage.get<boolean>(ICLOUD_SYNC_KEY, PRIVATE_STORAGE_OPTIONS)
+  const sharedValue = Storage.get<boolean>(ICLOUD_SYNC_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+  if (privateValue != null) {
+    if (sharedValue != null) Storage.remove(ICLOUD_SYNC_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+    return privateValue
+  }
+  if (sharedValue == null) return false
+  if (Storage.set(ICLOUD_SYNC_KEY, sharedValue, PRIVATE_STORAGE_OPTIONS)) {
+    Storage.remove(ICLOUD_SYNC_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+  }
+  return sharedValue
 }
 
 function setICloudSyncPreference(enabled: boolean): void {
-  Storage.set(ICLOUD_SYNC_KEY, enabled, { shared: true })
+  if (Storage.set(ICLOUD_SYNC_KEY, enabled, PRIVATE_STORAGE_OPTIONS)) {
+    Storage.remove(ICLOUD_SYNC_KEY, LEGACY_SHARED_STORAGE_OPTIONS)
+  }
 }
 
 function shouldUseICloudStorage(): boolean {
