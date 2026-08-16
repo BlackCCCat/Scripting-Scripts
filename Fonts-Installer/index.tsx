@@ -323,10 +323,17 @@ function FontsInstallerView() {
 
 async function run() {
   const sharedFontPath = sharedFontPathFromQuery()
+  let pendingSharedFontPath = sharedFontPath
   try {
     await removeExpiredStagedFonts()
     if (sharedFontPath) {
       const font = await inspectFontFile(sharedFontPath)
+      try {
+        await removeStagedFont(sharedFontPath)
+        pendingSharedFontPath = null
+      } catch (error) {
+        console.warn("字体已识别，但暂时无法清理分享的字体副本", error)
+      }
       await Navigation.present({ element: <SharedFontInstallView selectedFont={font} /> })
     } else {
       await Navigation.present({ element: <FontsInstallerView /> })
@@ -334,9 +341,9 @@ async function run() {
   } catch (error) {
     await Dialog.alert({ title: "无法打开字体", message: errorMessage(error) })
   } finally {
-    if (sharedFontPath) {
+    if (pendingSharedFontPath) {
       try {
-        await removeStagedFont(sharedFontPath)
+        await removeStagedFont(pendingSharedFontPath)
       } catch (error) {
         console.warn("无法清理分享的字体副本", error)
       }

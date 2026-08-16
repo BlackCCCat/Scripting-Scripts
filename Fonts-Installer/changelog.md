@@ -1,3 +1,7 @@
+## v2.14.2
+- Share Sheet 字体识别后立即清理临时副本，并移除与本次输入路径匹配的文件书签
+
+
 ## v2.14.1
 - 迁移shared storage到脚本私有storage
 - 导入字体卡片中及Share Sheet 跳转后的预览安装页下，字体家族与 PostScript 信息均可复制

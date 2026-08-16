@@ -45,6 +45,20 @@ export async function stageSharedFont(sourcePath: string): Promise<string> {
   return token
 }
 
+export function removeBookmarksForSharedFont(sourcePath: string): number {
+  if (!supportedExtensions.has(Path.extname(sourcePath).toLowerCase())) return 0
+
+  const normalizedSourcePath = Path.normalize(sourcePath)
+  let removedCount = 0
+
+  for (const bookmark of FileManager.getAllFileBookmarks()) {
+    if (Path.normalize(bookmark.path) !== normalizedSourcePath) continue
+    if (FileManager.removeFileBookmark(bookmark.name)) removedCount += 1
+  }
+
+  return removedCount
+}
+
 export function sharedFontPathFromQuery(): string | null {
   const token = Script.queryParameters?.[SHARED_FONT_PARAMETER]
   return typeof token === "string" ? sharedFontPathFromToken(token) : null
