@@ -1,11 +1,7 @@
+import { Path } from "scripting"
 import type { CachedSticker, StickerPack } from "./types"
+import { readPrivateStorage, STORAGE_KEYS, writePrivateStorage } from "./privateStorage"
 
-const PACKS_KEY = "tg-stickers-keyboard:packs:v1"
-const TOKEN_KEY = "tg-stickers-keyboard:bot-token:v1"
-const TARGET_SCRIPT_KEY = "tg-stickers-keyboard:target-keyboard-script:v1"
-const RECENT_STICKERS_KEY = "tg-stickers-keyboard:recent-stickers:v1"
-const SOUND_ENABLED_KEY = "tg-stickers-keyboard:sound-enabled:v1"
-const DYNAMIC_STICKERS_ENABLED_KEY = "tg-stickers-keyboard:dynamic-stickers-enabled:v1"
 const SCRIPT_NAME = "TG Stickers Keyboard"
 const ROOT_DIR = `${FileManager.appGroupDocumentsDirectory}/${SCRIPT_NAME}`
 const STICKERS_DIR = `${ROOT_DIR}/stickers`
@@ -13,57 +9,66 @@ const PREVIEWS_DIR = `${ROOT_DIR}/previews`
 const THUMBNAILS_DIR = `${ROOT_DIR}/thumbnails`
 const LEGACY_GIFS_DIR = `${ROOT_DIR}/gifs`
 const RECENT_LIMIT = 10
+const STATIC_STICKER_EXTENSIONS = new Set([".webp", ".png", ".jpg", ".jpeg"])
 
 export function loadBotToken(): string {
-  return Storage.get<string>(TOKEN_KEY, { shared: true }) ?? ""
+  return readPrivateStorage<string>(STORAGE_KEYS.botToken) ?? ""
 }
 
 export function saveBotToken(token: string) {
-  Storage.set(TOKEN_KEY, token.trim(), { shared: true })
+  writePrivateStorage(STORAGE_KEYS.botToken, token.trim())
 }
 
 export function loadTargetKeyboardScript(): string {
-  return Storage.get<string>(TARGET_SCRIPT_KEY, { shared: true }) ?? ""
+  return readPrivateStorage<string>(STORAGE_KEYS.targetScript) ?? ""
 }
 
 export function saveTargetKeyboardScript(scriptName: string) {
-  Storage.set(TARGET_SCRIPT_KEY, scriptName.trim(), { shared: true })
+  writePrivateStorage(STORAGE_KEYS.targetScript, scriptName.trim())
 }
 
 export function loadSoundEnabled(): boolean {
-  return Storage.get<boolean>(SOUND_ENABLED_KEY, { shared: true }) ?? true
+  return readPrivateStorage<boolean>(STORAGE_KEYS.soundEnabled) ?? true
 }
 
 export function saveSoundEnabled(enabled: boolean) {
-  Storage.set(SOUND_ENABLED_KEY, enabled, { shared: true })
+  writePrivateStorage(STORAGE_KEYS.soundEnabled, enabled)
 }
 
 export function loadDynamicStickersEnabled(): boolean {
-  return Storage.get<boolean>(DYNAMIC_STICKERS_ENABLED_KEY, { shared: true }) ?? false
+  return readPrivateStorage<boolean>(STORAGE_KEYS.dynamicStickersEnabled) ?? false
 }
 
 export function saveDynamicStickersEnabled(enabled: boolean) {
-  Storage.set(DYNAMIC_STICKERS_ENABLED_KEY, enabled, { shared: true })
+  writePrivateStorage(STORAGE_KEYS.dynamicStickersEnabled, enabled)
 }
 
 export function loadPacks(): StickerPack[] {
-  return Storage.get<StickerPack[]>(PACKS_KEY, { shared: true }) ?? []
+  const storedPacks = readPrivateStorage<StickerPack[]>(STORAGE_KEYS.packs) ?? []
+  const recoveredPacks = recoverPacksFromDisk(storedPacks)
+  if (recoveredPacks.length !== storedPacks.length
+    || recoveredPacks.some((pack, index) => pack.stickers.length !== storedPacks[index]?.stickers.length)) {
+    savePacks(recoveredPacks)
+  }
+  return recoveredPacks
 }
 
 export function savePacks(packs: StickerPack[]) {
-  Storage.set(PACKS_KEY, packs, { shared: true })
+  writePrivateStorage(STORAGE_KEYS.packs, packs)
 }
 
 export function loadRecentStickers(): CachedSticker[] {
-  const stickers = Storage.get<CachedSticker[]>(RECENT_STICKERS_KEY, { shared: true }) ?? []
+  const stickers = readPrivateStorage<CachedSticker[]>(STORAGE_KEYS.recentStickers) ?? []
   const existing = stickers.filter((sticker) => FileManager.existsSync(sticker.localPath))
   if (existing.length !== stickers.length) saveRecentStickers(existing)
   return existing.slice(0, RECENT_LIMIT)
 }
 
 export function saveRecentStickers(stickers: CachedSticker[]) {
-  Storage.set(RECENT_STICKERS_KEY, stickers.slice(0, RECENT_LIMIT), { shared: true })
+  writePrivateStorage(STORAGE_KEYS.recentStickers, stickers.slice(0, RECENT_LIMIT))
 }
+
+export { migrateLegacySharedStorage } from "./privateStorage"
 
 export function rememberRecentSticker(sticker: CachedSticker): CachedSticker[] {
   const next = [
@@ -72,6 +77,79 @@ export function rememberRecentSticker(sticker: CachedSticker): CachedSticker[] {
   ].slice(0, RECENT_LIMIT)
   saveRecentStickers(next)
   return next
+}
+
+function recoverPacksFromDisk(storedPacks: StickerPack[]): StickerPack[] {
+  try {
+    return scanPacksFromDisk(storedPacks)
+  } catch {
+    return storedPacks
+  }
+}
+
+function scanPacksFromDisk(storedPacks: StickerPack[]): StickerPack[] {
+  if (!FileManager.existsSync(STICKERS_DIR)) return storedPacks
+
+  const packs = [...storedPacks]
+  const packIndexByDirectory = new Map(
+    packs.map((pack, index) => [packDirectory(pack.name), index]),
+  )
+
+  for (const directory of FileManager.readDirectorySync(STICKERS_DIR)) {
+    if (!FileManager.isDirectorySync(directory)) continue
+
+    const packIndex = packIndexByDirectory.get(directory)
+    const existingPack = packIndex == null ? undefined : packs[packIndex]
+    const knownStickerIds = new Set(existingPack?.stickers.map((sticker) => sticker.id) ?? [])
+    const recoveredStickers = FileManager.readDirectorySync(directory)
+      .filter((path) => FileManager.isFileSync(path))
+      .map((path) => recoverStickerFromFile(existingPack?.name ?? Path.basename(directory), path))
+      .filter((sticker): sticker is CachedSticker => !!sticker && !knownStickerIds.has(sticker.id))
+
+    if (recoveredStickers.length === 0) continue
+    if (existingPack && packIndex != null) {
+      packs[packIndex] = {
+        ...existingPack,
+        stickers: [...existingPack.stickers, ...recoveredStickers],
+      }
+      continue
+    }
+
+    const name = Path.basename(directory)
+    packIndexByDirectory.set(directory, packs.length)
+    packs.push({
+      name,
+      title: name,
+      importedAt: Date.now(),
+      sourceLink: "",
+      stickers: recoveredStickers,
+    })
+  }
+  return packs
+}
+
+function recoverStickerFromFile(packName: string, localPath: string): CachedSticker | null {
+  const parsed = Path.parse(localPath)
+  const extension = parsed.ext.toLowerCase()
+  const kind = extension === ".gif"
+    ? "video"
+    : STATIC_STICKER_EXTENSIONS.has(extension)
+      ? "static"
+      : null
+  if (!kind) return null
+
+  const thumbnailPath = thumbnailLocalPath(packName, parsed.name)
+  return {
+    id: parsed.name,
+    fileId: "",
+    fileUniqueId: parsed.name,
+    emoji: "",
+    kind,
+    fileName: parsed.base,
+    localPath,
+    thumbnailPath: FileManager.existsSync(thumbnailPath) ? thumbnailPath : undefined,
+    gifPath: kind === "video" ? localPath : undefined,
+  }
 }
 
 export function stickersDirectory(): string {

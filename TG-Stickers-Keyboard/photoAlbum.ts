@@ -1,8 +1,12 @@
 import type { CachedSticker } from "./types"
+import {
+  readPrivateStorage,
+  removePrivateStorage,
+  STORAGE_KEYS,
+  writePrivateStorage,
+} from "./privateStorage"
 
 const ALBUM_TITLE = "TG-Stickers"
-const ALBUM_ID_KEY = "tg-stickers-keyboard:photo-album-id:v1"
-const SAVED_ASSETS_KEY = "tg-stickers-keyboard:photo-assets:v1"
 
 type SavedAssets = Record<string, string>
 
@@ -22,11 +26,11 @@ function stickerKey(packName: string, stickerId: string): string {
 }
 
 function loadSavedAssets(): SavedAssets {
-  return Storage.get<SavedAssets>(SAVED_ASSETS_KEY, { shared: true }) ?? {}
+  return readPrivateStorage<SavedAssets>(STORAGE_KEYS.photoAssets) ?? {}
 }
 
 function saveSavedAssets(assets: SavedAssets) {
-  Storage.set(SAVED_ASSETS_KEY, assets, { shared: true })
+  writePrivateStorage(STORAGE_KEYS.photoAssets, assets)
 }
 
 async function assertPhotoLibraryAccess() {
@@ -44,7 +48,7 @@ async function assertPhotoLibraryAccess() {
 }
 
 async function findAlbum(): Promise<PHAssetCollection | null> {
-  const savedId = Storage.get<string>(ALBUM_ID_KEY, { shared: true })
+  const savedId = readPrivateStorage<string>(STORAGE_KEYS.photoAlbumId)
   if (savedId) {
     const savedAlbum = await Photos.fetchAlbum(savedId)
     if (savedAlbum?.title === ALBUM_TITLE) return savedAlbum
@@ -52,7 +56,7 @@ async function findAlbum(): Promise<PHAssetCollection | null> {
 
   const albums = await Photos.fetchAlbums({ type: "album" })
   const album = albums.find((item) => item.title === ALBUM_TITLE) ?? null
-  if (album) Storage.set(ALBUM_ID_KEY, album.localIdentifier, { shared: true })
+  if (album) writePrivateStorage(STORAGE_KEYS.photoAlbumId, album.localIdentifier)
   return album
 }
 
@@ -62,7 +66,7 @@ async function ensureAlbum(): Promise<PHAssetCollection> {
 
   const created = await Photos.createAlbum(ALBUM_TITLE)
   if (!created) throw new Error(`无法创建 ${ALBUM_TITLE} 相簿`)
-  Storage.set(ALBUM_ID_KEY, created.localIdentifier, { shared: true })
+  writePrivateStorage(STORAGE_KEYS.photoAlbumId, created.localIdentifier)
   return created
 }
 
@@ -182,7 +186,7 @@ export async function clearStickersFromAlbum(): Promise<ClearAlbumResult> {
   let albumDeleted = false
   if (album && (await album.fetchAssets()).length === 0) {
     albumDeleted = await Photos.deleteAlbums([album])
-    if (albumDeleted) Storage.remove(ALBUM_ID_KEY, { shared: true })
+    if (albumDeleted) removePrivateStorage(STORAGE_KEYS.photoAlbumId)
   }
 
   return { deleted: assets.length, albumDeleted }

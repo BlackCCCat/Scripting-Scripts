@@ -32,6 +32,7 @@ import {
   loadPacks,
   loadSoundEnabled,
   loadTargetKeyboardScript,
+  migrateLegacySharedStorage,
   removePackDirectories,
   saveBotToken,
   saveDynamicStickersEnabled,
@@ -74,6 +75,7 @@ export function AppView() {
   })
 
   useEffect(() => {
+    migrateLegacySharedStorage()
     const token = loadBotToken()
     setBotToken(token)
     setTargetScript(loadTargetKeyboardScript())

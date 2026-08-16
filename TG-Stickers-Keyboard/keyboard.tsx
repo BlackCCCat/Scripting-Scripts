@@ -18,6 +18,7 @@ import {
   loadRecentStickers,
   loadSoundEnabled,
   loadTargetKeyboardScript,
+  migrateLegacySharedStorage,
   rememberRecentSticker,
 } from "./storage"
 import { prepareKeyboardFeedback, playKeyboardFeedback } from "./keyboardFeedback"
@@ -55,6 +56,7 @@ function KeyboardView() {
   const [status, setStatus] = useState("")
 
   useEffect(() => {
+    migrateLegacySharedStorage()
     const loaded = loadPacks()
       .map((pack) => ({
         ...pack,
