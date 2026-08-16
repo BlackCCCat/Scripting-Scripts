@@ -1,6 +1,6 @@
 ## v2.14.1
 - 迁移shared storage到脚本私有storage
-- 导入字体卡片中字体家族与 PostScript 信息均可复制
+- 导入字体卡片中及Share Sheet 跳转后的预览安装页下，字体家族与 PostScript 信息均可复制
 - 支持一次导入多个字体文件，并逐个预览或安装。
 - 右上角入口改为字体历史；历史页面可通过 FontPicker 添加系统字体
 

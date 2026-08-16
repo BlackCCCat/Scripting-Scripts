@@ -14,6 +14,7 @@ import {
   useState,
 } from "scripting"
 import { formatFileSize, type InspectedFont } from "./font"
+import { CopyFontValueButton, FontDetailRow } from "./font-detail-row"
 import { recordInstalledFont } from "./font-history"
 import { openFontInstaller } from "./profile"
 import { createFontPreviewHTML } from "./preview"
@@ -32,6 +33,7 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
   const controller = useMemo(() => new WebViewController({ ephemeral: true }), [])
   const [previewState, setPreviewState] = useState<PreviewState>("loading")
   const [installing, setInstalling] = useState(false)
+  const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const previewReady = previewState === "ready"
 
   useEffect(() => {
@@ -54,6 +56,16 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
       controller.dispose()
     }
   }, [controller, selectedFont])
+
+  const copyFontValue = async (value: string, label: string) => {
+    try {
+      await Pasteboard.setString(value)
+      setCopyMessage(`已复制${label}`)
+      HapticFeedback.notificationSuccess()
+    } catch (error) {
+      await Dialog.alert({ title: `无法复制${label}`, message: errorMessage(error) })
+    }
+  }
 
   const installFont = async () => {
     if (!previewReady || installing) return
@@ -89,7 +101,7 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
           padding={{ top: 14, bottom: 18, leading: 16, trailing: 16 }}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         >
-          <HStack
+          <VStack
             spacing={12}
             padding={14}
             frame={{ maxWidth: "infinity", alignment: "leading" }}
@@ -102,18 +114,49 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
                   },
                 })}
           >
-            <Image systemName="textformat" font={28} foregroundStyle={colors.accent} />
-            <VStack
-              alignment="leading"
-              spacing={3}
-              frame={{ maxWidth: "infinity", alignment: "leading" }}
-            >
-              <Text font="headline" foregroundStyle={colors.primary}>{selectedFont.info.fullName}</Text>
-              <Text font="caption" foregroundStyle={colors.secondary}>
-                {selectedFont.info.format} · {formatFileSize(selectedFont.info.fileSize)}
-              </Text>
+            <HStack spacing={12} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+              <Image systemName="textformat" font={28} foregroundStyle={colors.accent} />
+              <VStack
+                alignment="leading"
+                spacing={3}
+                frame={{ maxWidth: "infinity", alignment: "leading" }}
+              >
+                <Text font="headline" foregroundStyle={colors.primary}>{selectedFont.info.fullName}</Text>
+                <Text font="caption" foregroundStyle={colors.secondary}>
+                  {selectedFont.info.format} · {formatFileSize(selectedFont.info.fileSize)}
+                </Text>
+              </VStack>
+            </HStack>
+
+            <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+              <FontDetailRow
+                label="字体家族"
+                value={selectedFont.info.familyName}
+                trailing={(
+                  <CopyFontValueButton
+                    accessibilityLabel="复制字体家族名称"
+                    disabled={installing}
+                    action={() => void copyFontValue(selectedFont.info.familyName, "字体家族名称")}
+                  />
+                )}
+              />
+              <FontDetailRow
+                label="PostScript"
+                value={selectedFont.info.postScriptName}
+                trailing={(
+                  <CopyFontValueButton
+                    accessibilityLabel="复制 PostScript 名称"
+                    disabled={installing}
+                    action={() => void copyFontValue(selectedFont.info.postScriptName, "PostScript 名称")}
+                  />
+                )}
+              />
             </VStack>
-          </HStack>
+
+            {copyMessage ? (
+              <Text font="footnote" foregroundStyle={colors.success}>{copyMessage}</Text>
+            ) : null}
+          </VStack>
 
           <ZStack
             frame={{ maxWidth: "infinity", maxHeight: "infinity" }}

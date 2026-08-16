@@ -15,6 +15,7 @@ import {
   useState,
 } from "scripting"
 import { formatFileSize, inspectFontFile, type InspectedFont } from "./font"
+import { CopyFontValueButton, FontDetailRow } from "./font-detail-row"
 import { useMarkdownChangelogSheet } from "./changelog"
 import { recordInstalledFont } from "./font-history"
 import { FontHistoryView } from "./font-history-view"
@@ -51,42 +52,6 @@ function Card(props: { children: JSX.Element | JSX.Element[]; spacing?: number }
     >
       {props.children}
     </VStack>
-  )
-}
-
-function DetailRow(props: { label: string; value: string; trailing?: JSX.Element }) {
-  return (
-    <HStack spacing={12} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-      <Text font="subheadline" foregroundStyle={colors.secondary} frame={{ width: 92, alignment: "leading" }}>
-        {props.label}
-      </Text>
-      <Text
-        font="subheadline"
-        foregroundStyle={colors.primary}
-        frame={{ maxWidth: "infinity", alignment: "leading" }}
-        lineLimit={1}
-        truncationMode="tail"
-        layoutPriority={0}
-      >
-        {props.value}
-      </Text>
-      {props.trailing ?? null}
-    </HStack>
-  )
-}
-
-function CopyFontValueButton(props: { accessibilityLabel: string; action: () => void }) {
-  return (
-    <Button
-      title=""
-      systemImage="doc.on.doc"
-      accessibilityLabel={props.accessibilityLabel}
-      buttonStyle="plain"
-      foregroundStyle={colors.accent}
-      fixedSize={{ horizontal: true, vertical: true }}
-      layoutPriority={1}
-      action={props.action}
-    />
   )
 }
 
@@ -285,7 +250,7 @@ function FontsInstallerView() {
                 </HStack>
 
                 <VStack spacing={10} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-                  <DetailRow
+                  <FontDetailRow
                     label="字体家族"
                     value={selected.info.familyName}
                     trailing={(
@@ -295,8 +260,8 @@ function FontsInstallerView() {
                       />
                     )}
                   />
-                  <DetailRow label="样式" value={selected.info.styleName} />
-                  <DetailRow
+                  <FontDetailRow label="样式" value={selected.info.styleName} />
+                  <FontDetailRow
                     label="PostScript"
                     value={selected.info.postScriptName}
                     trailing={(
@@ -306,7 +271,7 @@ function FontsInstallerView() {
                       />
                     )}
                   />
-                  <DetailRow label="格式" value={`${selected.info.format} · ${formatFileSize(selected.info.fileSize)}`} />
+                  <FontDetailRow label="格式" value={`${selected.info.format} · ${formatFileSize(selected.info.fileSize)}`} />
                 </VStack>
 
                 <HStack spacing={12} frame={{ maxWidth: "infinity" }}>
