@@ -1354,7 +1354,11 @@ function FileEditorSheet(props: {
           ),
         }}
       >
-        <Editor controller={controller} />
+        <Editor
+          controller={controller}
+          searchEnabled
+          ignoresSafeArea={{ regions: "container", edges: "bottom" }}
+        />
       </VStack>
     </NavigationStack>
   );

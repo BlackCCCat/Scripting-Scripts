@@ -31,6 +31,8 @@ import {
   HOME_SECTION_LABELS,
   BUILTIN_SCRIPTING_BOOKMARK,
   BUILTIN_SCRIPTING_LABEL,
+  syncUpdateToScriptingRimeForConfig,
+  withSyncUpdateToScriptingRime,
 } from "../utils/config"
 import { callMaybeAsync, normalizePath, storage } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates, getScriptingRimePaths } from "../utils/hamster"
@@ -469,6 +471,12 @@ export function SettingsView(props: {
   }
 
   async function syncSchemeFromLocal(base: AppConfig): Promise<AppConfig> {
+    const scopedSyncUpdate = syncUpdateToScriptingRimeForConfig(base)
+    const withScopedSync = () => (
+      base.syncUpdateToScriptingRime === scopedSyncUpdate
+        ? base
+        : { ...base, syncUpdateToScriptingRime: scopedSyncUpdate }
+    )
     let detected = ""
     let detectedEngine = ""
     try {
@@ -481,7 +489,7 @@ export function SettingsView(props: {
       detectedEngine = ""
     }
     const candidates = await collectMetaCandidatesAsync(base, detected)
-    if (!candidates.length && !base.hamsterBookmarkName) return base
+    if (!candidates.length && !base.hamsterBookmarkName) return withScopedSync()
 
     let meta: any = undefined
     for (const root of candidates) {
@@ -501,7 +509,7 @@ export function SettingsView(props: {
         }
       } catch { }
     }
-    if (!meta) return base
+    if (!meta) return withScopedSync()
     const normalized = normalizeSchemeFromMeta(meta, base)
     const releaseSource = normalizeReleaseSourceFromMeta(meta)
     const inputMethod = normalizeInputMethodFromMeta(meta, detectedEngine)
@@ -519,13 +527,15 @@ export function SettingsView(props: {
           : base.proSchemeKey,
     }
     next.downloadModel = modelDownloadForInputMethod(next, next.inputMethod)
+    next.syncUpdateToScriptingRime = scopedSyncUpdate
 
     const changed =
       base.schemeEdition !== next.schemeEdition ||
       base.proSchemeKey !== next.proSchemeKey ||
       base.releaseSource !== next.releaseSource ||
       base.usePrereleaseScheme !== next.usePrereleaseScheme ||
-      base.inputMethod !== next.inputMethod
+      base.inputMethod !== next.inputMethod ||
+      base.syncUpdateToScriptingRime !== next.syncUpdateToScriptingRime
     if (!changed) return base
 
     const schemeIndex = SCHEME_OPTIONS.indexOf(next.schemeEdition)
@@ -583,13 +593,17 @@ export function SettingsView(props: {
             }
             setCfg((live) => {
               const nextInputMethod = isBuiltinScripting ? "scripting" : live.inputMethod
-              return {
+              const next = {
                 ...live,
                 hamsterRootPath: selectedPath,
                 hamsterBookmarkName: nextBookmarkName,
                 useBuiltinScriptingPath: isBuiltinScripting,
                 inputMethod: nextInputMethod,
                 downloadModel: modelDownloadForInputMethod(live, nextInputMethod),
+              }
+              return {
+                ...next,
+                syncUpdateToScriptingRime: syncUpdateToScriptingRimeForConfig(next),
               }
             })
           } catch { }
@@ -727,7 +741,13 @@ export function SettingsView(props: {
           value={cfg.hamsterRootPath}
           onChanged={(v: string) => {
             if (useBuiltinScriptingPath) return
-            setCfg((c) => ({ ...c, hamsterRootPath: v, hamsterBookmarkName: "" }))
+            setCfg((c) => {
+              const next = { ...c, hamsterRootPath: v, hamsterBookmarkName: "" }
+              return {
+                ...next,
+                syncUpdateToScriptingRime: syncUpdateToScriptingRimeForConfig(next),
+              }
+            })
           }}
           prompt="粘贴或选择 Rime 根目录"
           textFieldStyle="roundedBorder"
@@ -951,7 +971,7 @@ export function SettingsView(props: {
             value={cfg.syncUpdateToScriptingRime}
             onChanged={(v: boolean) => {
               try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
-              setCfg((c) => ({ ...c, syncUpdateToScriptingRime: v }))
+              setCfg((c) => withSyncUpdateToScriptingRime(c, v))
             }}
             toggleStyle="switch"
           />

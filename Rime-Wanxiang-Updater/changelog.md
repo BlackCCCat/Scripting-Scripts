@@ -1,6 +1,7 @@
 ## v2.14.3
 - new:当使用其他输入法时，增加默认同步更新到scripting rime的选项
 - new:书签文件夹选单增加管理配置
+- improve: Editor去掉底部安全区域，增加搜索/替换功能
 ## v2.13.3
 - 全屏由`fullScreen`调整为`overFullScreen`，保持scripting脚本页面滚动状态
 ## 更早

@@ -39,6 +39,7 @@ export type AppConfig = {
   useBuiltinScriptingPath: boolean
   visibleBookmarkNames: string[]
   syncUpdateToScriptingRime: boolean
+  syncUpdateToScriptingRimeByBookmark: Record<string, boolean>
   autoCheckOnLaunch: boolean
   showVerboseLog: boolean
   homeSectionOrder: HomeSectionKey[]
@@ -70,6 +71,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   useBuiltinScriptingPath: false,
   visibleBookmarkNames: [],
   syncUpdateToScriptingRime: false,
+  syncUpdateToScriptingRimeByBookmark: {},
   autoCheckOnLaunch: false,
   showVerboseLog: true,
   homeSectionOrder: ["local", "status", "remote", "notes"],
@@ -85,6 +87,29 @@ export function normalizeHomeSectionOrder(input: unknown): HomeSectionKey[] {
   }
   for (const key of HOME_SECTION_KEYS) uniq.add(key)
   return Array.from(uniq)
+}
+
+export function bookmarkConfigScopeKey(cfg: Pick<AppConfig, "hamsterBookmarkName" | "hamsterRootPath">): string {
+  const bookmarkName = String(cfg.hamsterBookmarkName ?? "").trim()
+  if (bookmarkName) return `bookmark:${bookmarkName}`
+  const rootPath = String(cfg.hamsterRootPath ?? "").trim().replace(/\/+$/, "")
+  return rootPath ? `path:${rootPath}` : ""
+}
+
+export function syncUpdateToScriptingRimeForConfig(cfg: AppConfig): boolean {
+  const key = bookmarkConfigScopeKey(cfg)
+  return key ? cfg.syncUpdateToScriptingRimeByBookmark[key] === true : false
+}
+
+export function withSyncUpdateToScriptingRime(cfg: AppConfig, enabled: boolean): AppConfig {
+  const key = bookmarkConfigScopeKey(cfg)
+  const byBookmark = { ...cfg.syncUpdateToScriptingRimeByBookmark }
+  if (key) byBookmark[key] = enabled
+  return {
+    ...cfg,
+    syncUpdateToScriptingRime: enabled,
+    syncUpdateToScriptingRimeByBookmark: byBookmark,
+  }
 }
 
 export function loadConfig(): AppConfig {
@@ -117,6 +142,14 @@ export function loadConfig(): AppConfig {
         ? [currentBookmark]
         : []
     }
+    if (!obj.syncUpdateToScriptingRimeByBookmark || typeof obj.syncUpdateToScriptingRimeByBookmark !== "object") {
+      obj.syncUpdateToScriptingRimeByBookmark = {}
+      const key = bookmarkConfigScopeKey(obj as AppConfig)
+      if (key && obj.syncUpdateToScriptingRime === true) {
+        obj.syncUpdateToScriptingRimeByBookmark[key] = true
+      }
+    }
+    obj.syncUpdateToScriptingRime = syncUpdateToScriptingRimeForConfig({ ...DEFAULT_CONFIG, ...obj })
     obj.homeSectionOrder = normalizeHomeSectionOrder(obj?.homeSectionOrder)
     const cfg = { ...DEFAULT_CONFIG, ...obj }
     const currentRaw = readStorageValue(st, STORAGE_KEY)
@@ -129,8 +162,12 @@ export function loadConfig(): AppConfig {
 
 export function saveConfig(cfg: AppConfig) {
   const st: any = (globalThis as any).Storage ?? Runtime as any
+  const scopeKey = bookmarkConfigScopeKey(cfg)
+  const syncByBookmark = { ...cfg.syncUpdateToScriptingRimeByBookmark }
+  if (scopeKey) syncByBookmark[scopeKey] = cfg.syncUpdateToScriptingRime === true
   const raw = JSON.stringify({
     ...cfg,
+    syncUpdateToScriptingRimeByBookmark: syncByBookmark,
     homeSectionOrder: normalizeHomeSectionOrder(cfg.homeSectionOrder),
   })
   if (st?.set) st.set(STORAGE_KEY, raw)
