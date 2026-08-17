@@ -160,7 +160,7 @@ function NoteCodeEditorPage(props: { title: string; content: string }) {
           scriptName="Calendar Pomodoro Note"
           showAccessoryView
           searchEnabled
-          ignoresSafeArea={{ edges: "bottom" }}
+          ignoresSafeArea={{ regions: "container", edges: "bottom" }}
         />
       </VStack>
     </NavigationStack>

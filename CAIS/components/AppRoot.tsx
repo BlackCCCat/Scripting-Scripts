@@ -204,7 +204,7 @@ function ClipContentEditorView(props: {
           scriptName="CAIS"
           showAccessoryView
           searchEnabled
-          ignoresSafeArea={{ edges: "bottom" }}
+          ignoresSafeArea={{ regions: "container", edges: "bottom" }}
         />
       </VStack>
     </NavigationStack>

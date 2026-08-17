@@ -1,3 +1,6 @@
+## v2.14.3
+- Editor移除底部安全区域，修正安全区参数，防止搜索框不随键盘抬高。
+
 ## v2.13.3
 - 全屏由`fullScreen`调整为`overFullScreen`，保持scripting脚本页面滚动状态
 ## 更早

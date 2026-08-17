@@ -134,6 +134,7 @@ export type RimeKeyboardSettings = {
 };
 
 const SETTINGS_KEY = "rime_pinyin_keyboard_settings_v1";
+const SHARED_MIGRATION_KEY = `${SETTINGS_KEY}_shared_migration_v1`;
 const LEGACY_SHARED_OPTIONS = { shared: true };
 
 export const LETTER_KEYS = "qwertyuiopasdfghjklzxcvbnm".split("");
@@ -1334,25 +1335,76 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
   return normalized;
 }
 
+function removeLegacySharedSettings(st: any) {
+  try {
+    if (typeof st?.remove !== "function") return false;
+    st.remove(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
+    return true;
+  } catch {}
+  return false;
+}
+
+function writePrivateSettings(st: any, value: unknown) {
+  try {
+    if (typeof st?.set === "function") {
+      return st.set(SETTINGS_KEY, value) !== false;
+    }
+    if (typeof st?.setString === "function") {
+      const raw = typeof value === "string" ? value : JSON.stringify(value);
+      st.setString(SETTINGS_KEY, raw);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+function sharedMigrationCompleted(st: any) {
+  try {
+    const value = st?.get?.(SHARED_MIGRATION_KEY) ??
+      st?.getString?.(SHARED_MIGRATION_KEY);
+    return value === true || value === "true";
+  } catch {
+    return false;
+  }
+}
+
+function markSharedMigrationCompleted(st: any) {
+  try {
+    if (typeof st?.set === "function") {
+      return st.set(SHARED_MIGRATION_KEY, true) !== false;
+    }
+    if (typeof st?.setString === "function") {
+      st.setString(SHARED_MIGRATION_KEY, "true");
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 function getRawSettings(): unknown {
   const st = (globalThis as any).Storage;
+  const migrationCompleted = sharedMigrationCompleted(st);
   try {
     const local = st?.get?.(SETTINGS_KEY) ??
       st?.getString?.(SETTINGS_KEY);
-    if (local != null) return local;
+    if (local != null) {
+      if (!migrationCompleted) {
+        if (removeLegacySharedSettings(st)) markSharedMigrationCompleted(st);
+      }
+      return local;
+    }
   } catch {}
+  if (migrationCompleted) return null;
   try {
     const legacyShared = st?.get?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS) ??
       st?.getString?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
-    if (legacyShared == null) return null;
-    try {
-      if (
-        typeof legacyShared === "string" && typeof st?.setString === "function"
-      ) {
-        st.setString(SETTINGS_KEY, legacyShared);
-      } else st?.set?.(SETTINGS_KEY, legacyShared);
-      st?.remove?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
-    } catch {}
+    if (legacyShared == null) {
+      markSharedMigrationCompleted(st);
+      return null;
+    }
+    if (writePrivateSettings(st, legacyShared)) {
+      if (removeLegacySharedSettings(st)) markSharedMigrationCompleted(st);
+    }
     return legacyShared;
   } catch {
     return null;
@@ -1378,14 +1430,10 @@ export function saveRimeKeyboardSettings(
   const normalized = normalizeRimeKeyboardSettings(settings);
   const st = (globalThis as any).Storage;
   if (!st) return normalized;
-  try {
-    if (typeof st.set === "function") {
-      st.set(SETTINGS_KEY, normalized);
-    } else if (typeof st.setString === "function") {
-      const raw = JSON.stringify(normalized);
-      st.setString(SETTINGS_KEY, raw);
-    }
-    st.remove?.(SETTINGS_KEY, LEGACY_SHARED_OPTIONS);
-  } catch {}
+  if (
+    writePrivateSettings(st, normalized) && !sharedMigrationCompleted(st)
+  ) {
+    if (removeLegacySharedSettings(st)) markSharedMigrationCompleted(st);
+  }
   return normalized;
 }

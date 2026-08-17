@@ -680,6 +680,8 @@ function RimeConfigEditorPage(props: { file: RimeConfigFile }) {
         controller={controller}
         scriptName={Script.name}
         showAccessoryView
+        searchEnabled
+        ignoresSafeArea={{ regions: "container", edges: "bottom" }}
       />
     </VStack>
   );
