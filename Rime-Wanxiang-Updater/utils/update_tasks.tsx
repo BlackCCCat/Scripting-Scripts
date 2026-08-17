@@ -1,13 +1,13 @@
 // File: utils/update_tasks.ts
 import { Path } from "scripting"
 import type { AppConfig } from "./config"
-import { getExcludePatterns } from "./config"
+import { BUILTIN_SCRIPTING_BOOKMARK, getExcludePatterns } from "./config"
 import { Runtime } from "./runtime"
 import { sleep, FM, removePathLoose, tempDownloadPath, pickGithubSha256FromDigest, globToRegExp, pickExpectedSize, getFileSize } from "./common"
 import { downloadWithProgress } from "./downloader"
 import { ensureDir, removeDirSafe, unzipToDirWithOverwrite, mergeSubdirsByName } from "./fs"
 import { deployHamster } from "./deploy"
-import { assertInstallPathAccess, detectRimeDir } from "./hamster"
+import { assertInstallPathAccess, detectRimeDir, getScriptingRimePaths } from "./hamster"
 
 import { loadMetaAsync, setDictMeta, setModelMeta, setSchemeMeta } from "./meta"
 import { removeExtractedFiles, setExtractedFiles } from "./extracted_cache"
@@ -506,6 +506,74 @@ async function resolveRimeDir(cfg: AppConfig): Promise<string> {
   return await assertInstallPathAccess(cfg)
 }
 
+type UpdateInstallTarget = {
+  cfg: AppConfig
+  installRoot: string
+  label?: string
+}
+
+function samePath(left: string, right: string): boolean {
+  return String(left ?? "").replace(/\/+$/, "") === String(right ?? "").replace(/\/+$/, "")
+}
+
+async function resolveUpdateTargets(cfg: AppConfig): Promise<UpdateInstallTarget[]> {
+  const primaryRoot = await resolveRimeDir(cfg)
+  const targets: UpdateInstallTarget[] = [{ cfg, installRoot: primaryRoot }]
+  const shouldSync = cfg.syncUpdateToScriptingRime === true &&
+    cfg.inputMethod !== "scripting" &&
+    cfg.hamsterBookmarkName !== BUILTIN_SCRIPTING_BOOKMARK
+  if (!shouldSync) return targets
+
+  const scriptingPaths = await getScriptingRimePaths()
+  if (!scriptingPaths?.rootDir) throw new Error("无法获取 Scripting Rime 路径，无法完成同步更新")
+  const scriptingCfg: AppConfig = {
+    ...cfg,
+    hamsterRootPath: scriptingPaths.rootDir,
+    hamsterBookmarkName: BUILTIN_SCRIPTING_BOOKMARK,
+    inputMethod: "scripting",
+    useBuiltinScriptingPath: true,
+    syncUpdateToScriptingRime: false,
+  }
+  const scriptingRoot = await resolveRimeDir(scriptingCfg)
+  if (!samePath(primaryRoot, scriptingRoot)) {
+    targets.push({ cfg: scriptingCfg, installRoot: scriptingRoot, label: "Scripting Rime" })
+  }
+  return targets
+}
+
+function targetLogPrefix(target: UpdateInstallTarget): string {
+  return target.label ? `同步到 ${target.label}：` : ""
+}
+
+async function replaceFileFromSource(fm: any, sourcePath: string, destinationPath: string) {
+  try {
+    if (typeof fm?.removeSync === "function") fm.removeSync(destinationPath)
+    else if (typeof fm?.remove === "function") await fm.remove(destinationPath)
+  } catch { }
+
+  if (typeof fm?.copyFileSync === "function") {
+    fm.copyFileSync(sourcePath, destinationPath)
+    return
+  }
+  if (typeof fm?.copyFile === "function") {
+    await fm.copyFile(sourcePath, destinationPath)
+    return
+  }
+  if (typeof fm?.copySync === "function") {
+    fm.copySync(sourcePath, destinationPath)
+    return
+  }
+  if (typeof fm?.copy === "function") {
+    await fm.copy(sourcePath, destinationPath)
+    return
+  }
+  if (typeof fm?.copyItem === "function") {
+    await fm.copyItem(sourcePath, destinationPath)
+    return
+  }
+  throw new Error("FileManager 不支持复制文件，无法同步写入多个目录")
+}
+
 // ===== 统一检查：方案/词库/模型 =====
 export async function checkAllUpdates(
   cfg: AppConfig,
@@ -601,15 +669,18 @@ export async function updateScheme(
 ) {
   params.onStage?.("解析目录...")
   const { engine } = await detectRimeDir(cfg)
-  const installDir = await assertInstallPathAccess(cfg)
+  const targets = await resolveUpdateTargets(cfg)
+  const installDir = targets[0].installRoot
 
   const latest = await fetchLatestSchemeAsset(cfg)
   if (!latest?.url) throw new Error("\u672A\u627E\u5230\u53EF\u7528\u7684\u8FDC\u7AEF\u65B9\u6848\u8D44\u4EA7")
   params.onLog?.(`远程方案资产：${latest.name}`)
   params.onLog?.(`下载地址：${latest.url}`)
 
-  await ensureDir(installDir)
-  await removeDirSafe(Path.join(installDir, "UpdateCache"))
+  for (const target of targets) {
+    await ensureDir(target.installRoot)
+    await removeDirSafe(Path.join(target.installRoot, "UpdateCache"))
+  }
   const zipPath = tempDownloadPath(latest.name)
   await removePathLoose(zipPath)
 
@@ -640,62 +711,63 @@ export async function updateScheme(
       }
     }
 
-    const exclude = getExcludePatterns(cfg)
-    params.onStage?.("清理旧文件中…")
-    emitProgress(params.onProgress, 0)
-    const removed = await removeExtractedFiles({
-      installRoot: installDir,
-      kind: "scheme",
-      compareRoot: installDir,
-      excludePatterns: exclude,
-      onRemovedFile: (path) => params.onLog?.(`删除旧文件：${path}`),
-      onSkippedFile: (path, reason) => {
-        if (reason === "excluded") params.onLog?.(`跳过排除文件：${path}`)
-      },
-      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
-    })
-    if (removed > 0) {
-      params.onStage?.(`\u5DF2\u6E05\u7406\u65E7\u6587\u4EF6\uFF1A${removed} \u4E2A`)
+    for (const target of targets) {
+      const prefix = targetLogPrefix(target)
+      const exclude = getExcludePatterns(target.cfg)
+      if (target.label) params.onStage?.(`${target.label}：清理旧文件中…`)
+      else params.onStage?.("清理旧文件中…")
+      emitProgress(params.onProgress, 0)
+      const removed = await removeExtractedFiles({
+        installRoot: target.installRoot,
+        kind: "scheme",
+        compareRoot: target.installRoot,
+        excludePatterns: exclude,
+        onRemovedFile: (path) => params.onLog?.(`${prefix}删除旧文件：${path}`),
+        onSkippedFile: (path, reason) => {
+          if (reason === "excluded") params.onLog?.(`${prefix}跳过排除文件：${path}`)
+        },
+        onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
+      })
+      if (removed > 0) {
+        params.onStage?.(`${target.label ? `${target.label}：` : ""}已清理旧文件：${removed} 个`)
+      }
+      params.onStage?.(target.label ? `${target.label}：解压中...` : "解压中...")
+      emitProgress(params.onProgress, 0)
+      const copied = new Set<string>()
+      await unzipToDirWithOverwrite(zipPath, target.installRoot, {
+        excludePatterns: exclude,
+        onCopiedFile: (dstPath) => {
+          copied.add(String(dstPath))
+          params.onLog?.(`${prefix}写入文件：${String(dstPath)}`)
+        },
+        onSkippedFile: (srcPath) => {
+          params.onLog?.(`${prefix}跳过排除文件：${String(srcPath)}`)
+        },
+        onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
+      })
+      setExtractedFiles(target.installRoot, "scheme", Array.from(copied))
+      params.onLog?.(`${prefix}方案写入完成：${copied.size} 个文件`)
+      await setSchemeMeta({
+        installRoot: target.installRoot,
+        bookmarkName: target.cfg.hamsterBookmarkName,
+        fileName: latest.name,
+        usePrereleaseScheme: target.cfg.usePrereleaseScheme,
+        schemeEdition: target.cfg.schemeEdition,
+        proSchemeKey: target.cfg.schemeEdition === "pro" ? target.cfg.proSchemeKey : undefined,
+        inputMethod: target.cfg.inputMethod,
+        tag: latest.tag,
+        updatedAt: latest.updatedAt ?? new Date().toISOString(),
+        remoteIdOrSha: latest.remoteIdOrSha ?? latest.tag ?? latest.name,
+        source: target.cfg.releaseSource,
+      })
+      emitProgress(params.onProgress, 1)
     }
-    params.onStage?.("解压中...")
-    emitProgress(params.onProgress, 0)
-    const copied = new Set<string>()
-    await unzipToDirWithOverwrite(zipPath, installDir, {
-      excludePatterns: exclude,
-      onCopiedFile: (dstPath) => {
-        copied.add(String(dstPath))
-        params.onLog?.(`写入文件：${String(dstPath)}`)
-      },
-      onSkippedFile: (srcPath) => {
-        params.onLog?.(`跳过排除文件：${String(srcPath)}`)
-      },
-      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
-    })
-    setExtractedFiles(installDir, "scheme", Array.from(copied))
-    params.onLog?.(`方案写入完成：${copied.size} 个文件`)
-    emitProgress(params.onProgress, 1)
   } finally {
     await removePathLoose(zipPath)
   }
 
-  // \u8BB0\u5F55\u65B9\u6848\u7248\u672C
-  const remoteIdOrSha = latest.remoteIdOrSha ?? latest.tag ?? latest.name
-  await setSchemeMeta({
-    installRoot: installDir,
-    bookmarkName: cfg.hamsterBookmarkName,
-    fileName: latest.name,
-    usePrereleaseScheme: cfg.usePrereleaseScheme,
-    schemeEdition: cfg.schemeEdition,
-    proSchemeKey: cfg.schemeEdition === "pro" ? cfg.proSchemeKey : undefined,
-    inputMethod: cfg.inputMethod,
-    tag: latest.tag,
-    updatedAt: latest.updatedAt ?? new Date().toISOString(),
-    remoteIdOrSha,
-    source: cfg.releaseSource,
-  })
-
   if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
-  return { engine, installRoot: installDir, assetName: latest.name, tag: latest.tag, updatedAt: latest.updatedAt, remoteIdOrSha }
+  return { engine, installRoot: installDir, assetName: latest.name, tag: latest.tag, updatedAt: latest.updatedAt, remoteIdOrSha: latest.remoteIdOrSha ?? latest.tag ?? latest.name }
 }
 
 export async function updateDict(
@@ -707,9 +779,11 @@ export async function updateDict(
     autoDeploy?: boolean
   }
 ) {
-  const installRoot = await resolveRimeDir(cfg)
-  await ensureDir(installRoot)
-  await removeDirSafe(Path.join(installRoot, "UpdateCache"))
+  const targets = await resolveUpdateTargets(cfg)
+  for (const target of targets) {
+    await ensureDir(target.installRoot)
+    await removeDirSafe(Path.join(target.installRoot, "UpdateCache"))
+  }
 
   const dict = await fetchLatestDictAsset(cfg)
 
@@ -747,72 +821,72 @@ export async function updateDict(
       }
     }
 
-    const exclude = getExcludePatterns(cfg)
-    const dictDir = Path.join(installRoot, "dicts")
-    await ensureDir(dictDir)
-    params.onStage?.("清理旧文件中…")
-    emitProgress(params.onProgress, 0)
-    const removed = await removeExtractedFiles({
-      installRoot,
-      kind: "dict",
-      compareRoot: dictDir,
-      excludePatterns: exclude,
-      onRemovedFile: (path) => params.onLog?.(`删除旧文件：${path}`),
-      onSkippedFile: (path, reason) => {
-        if (reason === "excluded") params.onLog?.(`跳过排除文件：${path}`)
-      },
-      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
-    })
-    if (removed > 0) {
-      params.onStage?.(`已清理旧文件：${removed} 个`)
+    for (const target of targets) {
+      const prefix = targetLogPrefix(target)
+      const exclude = getExcludePatterns(target.cfg)
+      const dictDir = Path.join(target.installRoot, "dicts")
+      await ensureDir(dictDir)
+      params.onStage?.(target.label ? `${target.label}：清理旧文件中…` : "清理旧文件中…")
+      emitProgress(params.onProgress, 0)
+      const removed = await removeExtractedFiles({
+        installRoot: target.installRoot,
+        kind: "dict",
+        compareRoot: dictDir,
+        excludePatterns: exclude,
+        onRemovedFile: (path) => params.onLog?.(`${prefix}删除旧文件：${path}`),
+        onSkippedFile: (path, reason) => {
+          if (reason === "excluded") params.onLog?.(`${prefix}跳过排除文件：${path}`)
+        },
+        onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
+      })
+      if (removed > 0) params.onStage?.(`${target.label ? `${target.label}：` : ""}已清理旧文件：${removed} 个`)
+      params.onStage?.(target.label ? `${target.label}：解压到 dicts 目录中…` : "解压到 dicts 目录中…")
+      emitProgress(params.onProgress, 0)
+      const copied = new Set<string>()
+      await unzipToDirWithOverwrite(zipPath, dictDir, {
+        excludePatterns: exclude,
+        flattenSingleDir: true,
+        onCopiedFile: (dstPath) => {
+          copied.add(String(dstPath))
+          params.onLog?.(`${prefix}写入文件：${String(dstPath)}`)
+        },
+        onSkippedFile: (srcPath) => {
+          params.onLog?.(`${prefix}跳过排除文件：${String(srcPath)}`)
+        },
+        onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
+      })
+      params.onStage?.(target.label ? `${target.label}：整理词库文件中…` : "整理词库文件中…")
+      emitProgress(params.onProgress, 0)
+      const merged = await mergeSubdirsByName(dictDir, {
+        excludePatterns: exclude,
+        namePattern: /dict/i,
+        onCopiedFile: (dstPath) => {
+          copied.add(String(dstPath))
+          params.onLog?.(`${prefix}整理词库文件：${String(dstPath)}`)
+        },
+        onSkippedFile: (srcPath) => {
+          params.onLog?.(`${prefix}跳过排除文件：${String(srcPath)}`)
+        },
+        onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
+      })
+      setExtractedFiles(target.installRoot, "dict", Array.from(copied))
+      if (merged > 0) params.onLog?.(`${prefix}已整理嵌套词库目录：${merged} 个`)
+      params.onLog?.(`${prefix}词库写入完成：${copied.size} 个文件`)
+      await setDictMeta({
+        installRoot: target.installRoot,
+        bookmarkName: target.cfg.hamsterBookmarkName,
+        fileName: dict.name,
+        inputMethod: target.cfg.inputMethod,
+        tag: dict.tag,
+        updatedAt: dict.updatedAt ?? new Date().toISOString(),
+        remoteIdOrSha: ensureRemoteMark(dict, "dict"),
+        source: target.cfg.releaseSource,
+      })
+      emitProgress(params.onProgress, 1)
     }
-    params.onStage?.("解压到 dicts 目录中…")
-    emitProgress(params.onProgress, 0)
-    const copied = new Set<string>()
-    await unzipToDirWithOverwrite(zipPath, dictDir, {
-      excludePatterns: exclude,
-      flattenSingleDir: true,
-      onCopiedFile: (dstPath) => {
-        copied.add(String(dstPath))
-        params.onLog?.(`写入文件：${String(dstPath)}`)
-      },
-      onSkippedFile: (srcPath) => {
-        params.onLog?.(`跳过排除文件：${String(srcPath)}`)
-      },
-      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
-    })
-    params.onStage?.("整理词库文件中…")
-    emitProgress(params.onProgress, 0)
-    const merged = await mergeSubdirsByName(dictDir, {
-      excludePatterns: exclude,
-      namePattern: /dict/i,
-      onCopiedFile: (dstPath) => {
-        copied.add(String(dstPath))
-        params.onLog?.(`整理词库文件：${String(dstPath)}`)
-      },
-      onSkippedFile: (srcPath) => {
-        params.onLog?.(`跳过排除文件：${String(srcPath)}`)
-      },
-      onProgress: (done, total) => emitProgress(params.onProgress, total > 0 ? done / total : 1),
-    })
-    setExtractedFiles(installRoot, "dict", Array.from(copied))
-    if (merged > 0) params.onLog?.(`已整理嵌套词库目录：${merged} 个`)
-    params.onLog?.(`词库写入完成：${copied.size} 个文件`)
-    emitProgress(params.onProgress, 1)
   } finally {
     await removePathLoose(zipPath)
   }
-
-  await setDictMeta({
-    installRoot,
-    bookmarkName: cfg.hamsterBookmarkName,
-    fileName: dict.name,
-    inputMethod: cfg.inputMethod,
-    tag: dict.tag,
-    updatedAt: dict.updatedAt ?? new Date().toISOString(),
-    remoteIdOrSha: ensureRemoteMark(dict, "dict"),
-    source: cfg.releaseSource,
-  })
 
   if (params.autoDeploy) await deployIfEnabled(cfg, params.onStage, params.onLog)
   return dict
@@ -826,11 +900,14 @@ async function updateBinaryAsset(args: {
   onStage?: (s: string) => void
   onLog?: (s: string) => void
   onProgress?: (p: { percent?: number; received: number; total?: number; speedBps?: number }) => void
-  writeMeta: (installRoot: string, asset: RemoteAsset) => Promise<void>
+  targets?: UpdateInstallTarget[]
+  writeMeta: (target: UpdateInstallTarget, asset: RemoteAsset) => Promise<void>
 }) {
-  const installRoot = await resolveRimeDir(args.cfg)
-  await ensureDir(installRoot)
-  await removeDirSafe(Path.join(installRoot, "UpdateCache"))
+  const targets = args.targets ?? (await resolveUpdateTargets(args.cfg))
+  for (const target of targets) {
+    await ensureDir(target.installRoot)
+    await removeDirSafe(Path.join(target.installRoot, "UpdateCache"))
+  }
 
   const asset = args.asset ?? (await fetchModelReleaseAsset(args.cfg, args.fileName))
   if (!asset?.url) throw new Error(`未找到可用的${args.label}资产`)
@@ -838,7 +915,6 @@ async function updateBinaryAsset(args: {
   args.onLog?.(`下载地址：${asset.url}`)
 
   const expectedSize = pickExpectedSize(asset)
-  const dstPath = Path.join(installRoot, args.fileName)
   const tempPath = tempDownloadPath(args.fileName)
 
   args.onStage?.("下载中…")
@@ -876,32 +952,14 @@ async function updateBinaryAsset(args: {
     args.onStage?.("写入中…")
     emitProgress(args.onProgress, 0)
     try {
-      try {
-        if (typeof fm?.removeSync === "function") fm.removeSync(dstPath)
-        else if (typeof fm?.remove === "function") await fm.remove(dstPath)
-        args.onLog?.(`删除旧${args.label}：${dstPath}`)
-      } catch { }
-
-      if (typeof fm?.moveSync === "function") {
-        fm.moveSync(tempPath, dstPath)
-      } else if (typeof fm?.move === "function") {
-        await fm.move(tempPath, dstPath)
-      } else if (typeof fm?.renameSync === "function") {
-        fm.renameSync(tempPath, dstPath)
-      } else if (typeof fm?.rename === "function") {
-        await fm.rename(tempPath, dstPath)
-      } else if (typeof fm?.copySync === "function") {
-        fm.copySync(tempPath, dstPath)
-        if (typeof fm?.removeSync === "function") fm.removeSync(tempPath)
-        else if (typeof fm?.remove === "function") await fm.remove(tempPath)
-      } else if (typeof fm?.copy === "function") {
-        await fm.copy(tempPath, dstPath)
-        if (typeof fm?.removeSync === "function") fm.removeSync(tempPath)
-        else if (typeof fm?.remove === "function") await fm.remove(tempPath)
-      } else {
-        throw new Error("FileManager 不支持 move/rename/copy 操作")
+      for (const target of targets) {
+        const destinationPath = Path.join(target.installRoot, args.fileName)
+        const prefix = targetLogPrefix(target)
+        args.onLog?.(`${prefix}删除旧${args.label}：${destinationPath}`)
+        await replaceFileFromSource(fm, tempPath, destinationPath)
+        args.onLog?.(`${prefix}写入${args.label}文件：${destinationPath}`)
+        await args.writeMeta(target, asset)
       }
-      args.onLog?.(`写入${args.label}文件：${dstPath}`)
       emitProgress(args.onProgress, 1)
     } catch (err) {
       args.onStage?.("写入失败")
@@ -911,7 +969,6 @@ async function updateBinaryAsset(args: {
     await removePathLoose(tempPath)
   }
 
-  await args.writeMeta(installRoot, asset)
   return asset
 }
 
@@ -942,24 +999,26 @@ export async function updateModel(
     return modelAsset
   }
 
+  const targets = shouldUpdateModel ? await resolveUpdateTargets(cfg) : []
   const model = shouldUpdateModel ? await updateBinaryAsset({
     cfg,
+    targets,
     fileName: MODEL_FILE,
     asset: modelAsset,
     label: "模型",
     onStage: (s) => params.onStage?.(`模型：${s}`),
     onLog: params.onLog,
     onProgress: params.onProgress,
-    writeMeta: async (installRoot, asset) => {
+    writeMeta: async (target, asset) => {
       await setModelMeta({
-        installRoot,
-        bookmarkName: cfg.hamsterBookmarkName,
+        installRoot: target.installRoot,
+        bookmarkName: target.cfg.hamsterBookmarkName,
         fileName: MODEL_FILE,
-        inputMethod: cfg.inputMethod,
+        inputMethod: target.cfg.inputMethod,
         tag: asset.tag,
         updatedAt: asset.updatedAt ?? new Date().toISOString(),
         remoteIdOrSha: ensureRemoteMark(asset, "model"),
-        source: cfg.releaseSource,
+        source: target.cfg.releaseSource,
       })
     },
   }) : modelAsset

@@ -3,6 +3,7 @@ import {
   Button,
   Form,
   Navigation,
+  NavigationStack,
   Section,
   Spacer,
   Text,
@@ -28,6 +29,8 @@ import {
   type InputMethod,
   PRO_KEYS,
   HOME_SECTION_LABELS,
+  BUILTIN_SCRIPTING_BOOKMARK,
+  BUILTIN_SCRIPTING_LABEL,
 } from "../utils/config"
 import { callMaybeAsync, normalizePath, storage } from "../utils/common"
 import { detectRimeDir, collectRimeCandidates, getScriptingRimePaths } from "../utils/hamster"
@@ -35,9 +38,6 @@ import { clearMetaForRoot, loadMetaAsync } from "../utils/meta"
 import { clearExtractedFilesForRoot } from "../utils/extracted_cache"
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup"
 import { HomeSectionOrderView } from "./HomeSectionOrderView"
-
-const BUILTIN_SCRIPTING_BOOKMARK = "__builtin_scripting_rime__"
-const BUILTIN_SCRIPTING_LABEL = "Scripting Rime"
 
 type AlertNode = any
 type AlertState = {
@@ -173,6 +173,68 @@ function modelDownloadForInputMethod(cfg: AppConfig, inputMethod: InputMethod): 
   return typeof stored === "boolean" ? stored : DEFAULT_CONFIG.downloadModel
 }
 
+type Bookmark = { name: string; path: string }
+
+function BookmarkManagerView(props: {
+  bookmarks: Bookmark[]
+  visibleBookmarkNames: string[]
+  onDone: (names: string[]) => void
+}) {
+  const dismiss = Navigation.useDismiss()
+  const [visibleNames, setVisibleNames] = useState<string[]>(() =>
+    props.visibleBookmarkNames.filter((name) => props.bookmarks.some((bookmark) => bookmark.name === name))
+  )
+
+  function toggleBookmark(name: string, enabled: boolean) {
+    setVisibleNames((names) => {
+      const next = new Set(names)
+      if (enabled) next.add(name)
+      else next.delete(name)
+      return props.bookmarks.map((bookmark) => bookmark.name).filter((bookmarkName) => next.has(bookmarkName))
+    })
+  }
+
+  function saveAndClose() {
+    props.onDone(visibleNames)
+    dismiss()
+  }
+
+  return (
+    <NavigationStack>
+      <VStack navigationTitle="书签管理" navigationBarTitleDisplayMode="inline">
+        <Form
+          formStyle="grouped"
+          toolbar={{
+            topBarLeading: <Button title="取消" role="cancel" action={() => dismiss()} />,
+            topBarTrailing: <Button title="保存" action={saveAndClose} />,
+          }}
+        >
+          <Section
+            header={<Text>显示在书签文件夹中</Text>}
+            footer={<Text font="caption" foregroundStyle="secondaryLabel">Scripting Rime 为内置路径，会始终显示在书签文件夹中。</Text>}
+          >
+            {props.bookmarks.length ? props.bookmarks.map((bookmark) => (
+              <Toggle
+                key={bookmark.name}
+                value={visibleNames.includes(bookmark.name)}
+                onChanged={(enabled: boolean) => toggleBookmark(bookmark.name, enabled)}
+                toggleStyle="switch"
+              >
+                <VStack alignment="leading" spacing={2}>
+                  <Text>{bookmark.name}</Text>
+                  <Text font="caption" foregroundStyle="secondaryLabel">{bookmark.path}</Text>
+                </VStack>
+              </Toggle>
+            )) : (
+              <Text foregroundStyle="secondaryLabel">暂无已保存的书签文件夹</Text>
+            )}
+          </Section>
+        </Form>
+      </VStack>
+    </NavigationStack>
+  )
+}
+
 async function collectMetaCandidatesAsync(base: AppConfig, detected?: string): Promise<string[]> {
   const out: string[] = []
   const push = (p?: string) => {
@@ -246,7 +308,7 @@ export function SettingsView(props: {
   })
   const [showSavedToast, setShowSavedToast] = useState(false)
   const [toastMessage, setToastMessage] = useState("已保存")
-  const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>([])
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [bookmarkIdx, setBookmarkIdx] = useState<number>(0)
 
   useEffect(() => {
@@ -330,6 +392,37 @@ export function SettingsView(props: {
     })
   }
 
+  async function openBookmarkManager() {
+    const managedBookmarks = await readSavedBookmarks()
+    await Navigation.present({
+      element: (
+        <BookmarkManagerView
+          bookmarks={managedBookmarks}
+          visibleBookmarkNames={cfg.visibleBookmarkNames}
+          onDone={(visibleBookmarkNames) => {
+            const next = { ...cfg, visibleBookmarkNames }
+            setCfg(next)
+            void refreshBookmarks(next)
+          }}
+        />
+      ),
+    })
+  }
+
+  async function readSavedBookmarks(): Promise<Bookmark[]> {
+    const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
+    if (!fm?.getAllFileBookmarks) return []
+    try {
+      const result = fm.getAllFileBookmarks()
+      const list = result && typeof result.then === "function" ? await result : result
+      return (Array.isArray(list) ? list : [])
+        .map((item: any) => ({ name: String(item?.name ?? ""), path: String(item?.path ?? "") }))
+        .filter((item: Bookmark) => item.name && item.path)
+    } catch {
+      return []
+    }
+  }
+
   async function pickAndAddBookmark() {
     try {
       try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
@@ -358,6 +451,10 @@ export function SettingsView(props: {
         hamsterRootPath: pickedPath,
         hamsterBookmarkName: bookmarkName,
         useBuiltinScriptingPath: false,
+        visibleBookmarkNames: Array.from(new Set([
+          ...cfg.visibleBookmarkNames,
+          bookmarkName,
+        ])),
       }
       next = await syncSchemeFromLocal(next)
       setCfg(next)
@@ -442,35 +539,21 @@ export function SettingsView(props: {
     return next
   }
 
-  async function refreshBookmarks(current?: AppConfig): Promise<{ name: string; path: string }[]> {
+  async function refreshBookmarks(current?: AppConfig): Promise<Bookmark[]> {
     const fm: any = (globalThis as any).FileManager ?? Runtime.FileManager
-    let list: any = []
-    if (fm?.getAllFileBookmarks) {
-      try {
-        const r = fm.getAllFileBookmarks()
-        list = r && typeof r.then === "function" ? await r : r
-      } catch {
-        list = []
-      }
-    }
-    const arr = Array.isArray(list) ? list : []
-    const cleaned = arr
-      .map((x: any) => ({ name: String(x?.name ?? ""), path: String(x?.path ?? "") }))
-      .filter((x: any) => x.name && x.path)
-    let combined = cleaned
+    const cleaned = await readSavedBookmarks()
+    const selectedConfig = current ?? cfg
+    const visibleBookmarks = cleaned.filter((bookmark) => selectedConfig.visibleBookmarkNames.includes(bookmark.name))
+    let scriptingRoot = ""
     try {
       const scriptingPaths = await getScriptingRimePaths()
-      if (scriptingPaths?.rootDir) {
-        combined = [
-          { name: BUILTIN_SCRIPTING_LABEL, path: scriptingPaths.rootDir },
-          ...cleaned,
-        ]
-      }
+      scriptingRoot = scriptingPaths?.rootDir ?? ""
     } catch { }
+    const combined: Bookmark[] = [{ name: BUILTIN_SCRIPTING_LABEL, path: scriptingRoot }, ...visibleBookmarks]
     setBookmarks(combined)
 
-    const targetName = current?.hamsterBookmarkName ?? cfg.hamsterBookmarkName
-    const targetPath = current?.hamsterRootPath ?? cfg.hamsterRootPath
+    const targetName = selectedConfig.hamsterBookmarkName
+    const targetPath = selectedConfig.hamsterRootPath
     if (combined.length) {
       let idx = -1
       if (targetName === BUILTIN_SCRIPTING_BOOKMARK) {
@@ -479,8 +562,9 @@ export function SettingsView(props: {
         idx = combined.findIndex((b) => b.name === targetName)
       }
       if (idx < 0 && targetPath) idx = combined.findIndex((b) => normalizePath(b.path) === normalizePath(targetPath))
-      setBookmarkIdx(idx >= 0 ? idx : 0)
-      if (idx >= 0) {
+      if (idx < 0) idx = 0
+      setBookmarkIdx(idx)
+      if (combined[idx]?.path) {
         const matched = combined[idx]
         const isBuiltinScripting = matched.name === BUILTIN_SCRIPTING_LABEL
         const canUseByName = !isBuiltinScripting && fm?.bookmarkExists
@@ -509,26 +593,6 @@ export function SettingsView(props: {
               }
             })
           } catch { }
-        }
-      } else if (!targetPath) {
-        const first = combined[0]
-        const isBuiltinScripting = first.name === BUILTIN_SCRIPTING_LABEL
-        const canUseByName = !isBuiltinScripting && fm?.bookmarkExists
-          ? !!(await callMaybeAsync(fm.bookmarkExists, fm, [first.name]))
-          : true
-        const resolved = !isBuiltinScripting && fm?.bookmarkedPath && canUseByName
-          ? String((await callMaybeAsync(fm.bookmarkedPath, fm, [first.name])) ?? first.path)
-          : first.path
-            setCfg((c) => ({
-              ...c,
-              hamsterRootPath: resolved,
-              hamsterBookmarkName: isBuiltinScripting ? BUILTIN_SCRIPTING_BOOKMARK : first.name,
-              useBuiltinScriptingPath: isBuiltinScripting,
-              inputMethod: isBuiltinScripting ? "scripting" : c.inputMethod,
-              downloadModel: modelDownloadForInputMethod(c, isBuiltinScripting ? "scripting" : c.inputMethod),
-            }))
-        if (isBuiltinScripting) {
-          setInputIdx(INPUT_METHODS.findIndex((m) => m.value === "scripting"))
         }
       }
     } else {
@@ -631,6 +695,7 @@ export function SettingsView(props: {
   const schemeLabels = useMemo<string[]>(() => SCHEME_OPTIONS.slice(), [])
   const proLabels = useMemo<string[]>(() => PRO_KEYS.map((key) => PRO_KEY_LABELS[key] ?? key), [])
   const useBuiltinScriptingPath = cfg.hamsterBookmarkName === BUILTIN_SCRIPTING_BOOKMARK || (cfg.inputMethod === "scripting" && cfg.useBuiltinScriptingPath)
+  const canSyncToScriptingRime = cfg.inputMethod !== "scripting" && cfg.hamsterBookmarkName !== BUILTIN_SCRIPTING_BOOKMARK
   const bookmarkContextMenu = {
     menuItems: (
       <Group>
@@ -733,6 +798,18 @@ export function SettingsView(props: {
             暂无可用书签，长按此处选择新的文件夹
           </Text>
         )}
+        <Button
+          action={() => {
+            try { (globalThis as any).HapticFeedback?.mediumImpact?.() } catch { }
+            void openBookmarkManager()
+          }}
+        >
+          <HStack padding={{ top: 6, bottom: 6 }}>
+            <Text foregroundStyle="label">书签管理</Text>
+            <Spacer />
+            <Text foregroundStyle="systemBlue">管理显示项</Text>
+          </HStack>
+        </Button>
       </Section>
 
       <Section header={<Text>发布源</Text>}>
@@ -868,6 +945,17 @@ export function SettingsView(props: {
           }}
           toggleStyle="switch"
         />
+        {canSyncToScriptingRime ? (
+          <Toggle
+            title={"同步更新到 Scripting Rime"}
+            value={cfg.syncUpdateToScriptingRime}
+            onChanged={(v: boolean) => {
+              try { (globalThis as any).HapticFeedback?.heavyImpact?.() } catch { }
+              setCfg((c) => ({ ...c, syncUpdateToScriptingRime: v }))
+            }}
+            toggleStyle="switch"
+          />
+        ) : null}
         <Toggle
           title={"不清理部署目录(build)"}
           value={cfg.skipBuildCleanup}

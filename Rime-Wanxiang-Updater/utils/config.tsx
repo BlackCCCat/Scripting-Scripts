@@ -7,6 +7,9 @@ export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin
 export type InputMethod = "hamster" | "hamster3" | "scripting"
 export type HomeSectionKey = "local" | "remote" | "notes" | "status"
 
+export const BUILTIN_SCRIPTING_BOOKMARK = "__builtin_scripting_rime__"
+export const BUILTIN_SCRIPTING_LABEL = "Scripting Rime"
+
 export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou", "shyplus", "wx"]
 export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "notes", "status"]
 export const HOME_SECTION_LABELS: Record<HomeSectionKey, string> = {
@@ -34,6 +37,8 @@ export type AppConfig = {
   downloadModelByInputMethod: Partial<Record<InputMethod, boolean>>
   inputMethod: InputMethod
   useBuiltinScriptingPath: boolean
+  visibleBookmarkNames: string[]
+  syncUpdateToScriptingRime: boolean
   autoCheckOnLaunch: boolean
   showVerboseLog: boolean
   homeSectionOrder: HomeSectionKey[]
@@ -63,6 +68,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   downloadModelByInputMethod: {},
   inputMethod: "hamster",
   useBuiltinScriptingPath: false,
+  visibleBookmarkNames: [],
+  syncUpdateToScriptingRime: false,
   autoCheckOnLaunch: false,
   showVerboseLog: true,
   homeSectionOrder: ["local", "status", "remote", "notes"],
@@ -103,6 +110,12 @@ export function loadConfig(): AppConfig {
     if (typeof obj.downloadModel !== "boolean") obj.downloadModel = DEFAULT_CONFIG.downloadModel
     if (!obj.downloadModelByInputMethod || typeof obj.downloadModelByInputMethod !== "object") {
       obj.downloadModelByInputMethod = {}
+    }
+    if (!Array.isArray(obj.visibleBookmarkNames)) {
+      const currentBookmark = String(obj.hamsterBookmarkName ?? "").trim()
+      obj.visibleBookmarkNames = currentBookmark && currentBookmark !== BUILTIN_SCRIPTING_BOOKMARK
+        ? [currentBookmark]
+        : []
     }
     obj.homeSectionOrder = normalizeHomeSectionOrder(obj?.homeSectionOrder)
     const cfg = { ...DEFAULT_CONFIG, ...obj }
