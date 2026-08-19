@@ -53,6 +53,7 @@ import { TokenSelectionPanel } from "./TokenSelectionPanel"
 import { readPipControlState, requestPipStart, requestPipStop } from "../services/pip_control"
 import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
 import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
+import { recognizeTextFromImagePath } from "../services/image_text_recognition"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -698,6 +699,19 @@ function ClipTileMenu(props: {
     }
   }
 
+  async function extractText() {
+    try {
+      const text = await recognizeTextFromImagePath(item.imagePath)
+      if (!text) {
+        props.onStatus("未识别到文字")
+        return
+      }
+      await handleMenuResult({ kind: "text", text }, "")
+    } catch (error: any) {
+      props.onStatus(String(error?.message ?? error ?? "文字提取失败"))
+    }
+  }
+
   async function toggleItemPinned() {
     await togglePinned(item)
     await props.onRefresh()
@@ -778,6 +792,9 @@ function ClipTileMenu(props: {
           systemImage={item.favorite ? "star.slash" : "star"}
           action={() => void toggleItemFavorite()}
         />
+      ) : null}
+      {isImage ? (
+        <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractText()} />
       ) : null}
       {getOrderedMenuBuiltins(props.settings).map((action) => renderBuiltinAction(action))}
       {!isImage ? (

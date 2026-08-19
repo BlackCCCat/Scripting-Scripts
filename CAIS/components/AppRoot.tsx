@@ -2,12 +2,15 @@ import {
   Button,
   ControlGroup,
   Divider,
+  DragGesture,
   EmptyView,
   Editor,
   Group,
+  GeometryReader,
   HStack,
   Image,
   Menu,
+  MagnifyGesture,
   NavigationStack,
   Picker,
   Section,
@@ -17,6 +20,7 @@ import {
   Text,
   TextField,
   VStack,
+  ZStack,
   useEffect,
   useObservable,
   useRef,
@@ -74,6 +78,7 @@ import {
   type LanShareRuntimeStatus,
 } from "../services/lan_share_server"
 import { rotateLanShareAccessToken } from "../services/lan_share_credentials"
+import { recognizeTextFromImagePath } from "../services/image_text_recognition"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
@@ -252,6 +257,56 @@ function ImageViewerView(props: {
   item: ClipItem
 }) {
   const dismiss = Navigation.useDismiss()
+  const imagePath = props.item.imagePath
+  const [scale, setScale] = useState(1)
+  const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const gestureBaseScale = useRef(1)
+  const gestureBaseOffset = useRef({ x: 0, y: 0 })
+  const [imageSize] = useState(() => {
+    const image = imagePath ? UIImage.fromFile(imagePath) : null
+    return image ? { width: image.width, height: image.height } : null
+  })
+
+  function zoomScale(magnification: number): number {
+    return Math.max(1, Math.min(5, gestureBaseScale.current * magnification))
+  }
+
+  function constrainedOffset(
+    value: { x: number; y: number },
+    zoom: number,
+    viewport: { width: number; height: number },
+  ) {
+    const viewportWidth = Math.max(1, viewport.width)
+    const viewportHeight = Math.max(1, viewport.height)
+    let fittedWidth = viewportWidth
+    let fittedHeight = viewportHeight
+    if (imageSize?.width && imageSize.height) {
+      const fit = Math.min(viewportWidth / imageSize.width, viewportHeight / imageSize.height)
+      fittedWidth = imageSize.width * fit
+      fittedHeight = imageSize.height * fit
+    }
+    const maxX = Math.max(0, (fittedWidth * zoom - viewportWidth) / 2)
+    const maxY = Math.max(0, (fittedHeight * zoom - viewportHeight) / 2)
+    return {
+      x: Math.max(-maxX, Math.min(maxX, value.x)),
+      y: Math.max(-maxY, Math.min(maxY, value.y)),
+    }
+  }
+
+  function magnifiedOffset(
+    magnification: number,
+    location: { x: number; y: number },
+    viewport: { width: number; height: number },
+  ) {
+    const nextScale = zoomScale(magnification)
+    const ratio = nextScale / gestureBaseScale.current
+    const base = gestureBaseOffset.current
+    return constrainedOffset({
+      x: base.x * ratio + (location.x - viewport.width / 2) * (1 - ratio),
+      y: base.y * ratio + (location.y - viewport.height / 2) * (1 - ratio),
+    }, nextScale, viewport)
+  }
+
   return (
     <NavigationStack>
       <VStack
@@ -263,13 +318,67 @@ function ImageViewerView(props: {
           topBarTrailing: <Button title="完成" action={() => dismiss(null)} />,
         }}
       >
-        {props.item.imagePath ? (
-          <Image
-            filePath={props.item.imagePath}
-            resizable
-            scaleToFit
-            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-          />
+        {imagePath ? (
+          <GeometryReader>
+            {(proxy) => (
+              <ZStack
+                frame={{ width: proxy.size.width, height: proxy.size.height, alignment: "center" as any }}
+                clipped
+                gesture={
+                  MagnifyGesture(0.01)
+                    .onChanged((value) => {
+                      const nextScale = zoomScale(value.magnification)
+                      setScale(nextScale)
+                      setOffset(magnifiedOffset(value.magnification, value.startLocation, proxy.size))
+                    })
+                    .onEnded((value) => {
+                      const nextScale = zoomScale(value.magnification)
+                      const nextOffset = magnifiedOffset(value.magnification, value.startLocation, proxy.size)
+                      gestureBaseScale.current = nextScale
+                      gestureBaseOffset.current = nextOffset
+                      setScale(nextScale)
+                      setOffset(nextOffset)
+                    })
+                }
+                simultaneousGesture={
+                  DragGesture({ minDistance: 2, coordinateSpace: "local" })
+                    .onChanged((value) => {
+                      if (scale <= 1) return
+                      setOffset(constrainedOffset({
+                        x: gestureBaseOffset.current.x + value.translation.width,
+                        y: gestureBaseOffset.current.y + value.translation.height,
+                      }, scale, proxy.size))
+                    })
+                    .onEnded((value) => {
+                      if (scale <= 1) {
+                        gestureBaseOffset.current = { x: 0, y: 0 }
+                        setOffset({ x: 0, y: 0 })
+                        return
+                      }
+                      const nextOffset = constrainedOffset({
+                        x: gestureBaseOffset.current.x + value.translation.width,
+                        y: gestureBaseOffset.current.y + value.translation.height,
+                      }, scale, proxy.size)
+                      gestureBaseOffset.current = nextOffset
+                      setOffset(nextOffset)
+                    })
+                }
+              >
+                <ZStack
+                  scaleEffect={scale}
+                  offset={offset}
+                  frame={{ width: proxy.size.width, height: proxy.size.height, alignment: "center" as any }}
+                >
+                  <Image
+                    filePath={imagePath}
+                    resizable
+                    scaleToFit
+                    frame={{ width: proxy.size.width, height: proxy.size.height, alignment: "center" as any }}
+                  />
+                </ZStack>
+              </ZStack>
+            )}
+          </GeometryReader>
         ) : (
           <Text foregroundStyle="secondaryLabel">图片文件不可读取</Text>
         )}
@@ -845,6 +954,26 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     })
   }
 
+  async function extractTextFromImage(item: ClipItem) {
+    try {
+      showToast("正在提取文字...")
+      const text = await recognizeTextFromImagePath(item.imagePath)
+      if (!text) {
+        showToast("未识别到文字")
+        return
+      }
+      await writeTextToPasteboard(text)
+      await addClipFromPayload(
+        { kind: "text", text },
+        { ...settingsRef.current, captureText: true },
+      )
+      showToast("已提取文字并复制")
+      await refresh()
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "文字提取失败") })
+    }
+  }
+
   async function shareItem(item: ClipItem) {
     try {
       const value = item.kind === "image" ? item.imagePath : await itemSource(item)
@@ -1131,6 +1260,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
                 <Button title="分享" systemImage="square.and.arrow.up" action={() => void shareItem(item)} />
               </ControlGroup>
               <Divider />
+              {item.kind === "image" ? (
+                <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractTextFromImage(item)} />
+              ) : null}
               {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
                 <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
               ) : null}
