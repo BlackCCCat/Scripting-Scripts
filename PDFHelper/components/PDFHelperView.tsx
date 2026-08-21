@@ -173,6 +173,37 @@ function removeSourcesByPdfPaths(sources: SourceItem[], pdfPaths: Set<string>): 
   )
 }
 
+function BottomActionButton(props: {
+  title: string
+  systemImage: string
+  disabled: boolean
+  action: () => void
+}) {
+  const background = props.disabled ? "#5B6472" : "#0A66D8"
+
+  return (
+    <Button
+      buttonStyle="plain"
+      disabled={props.disabled}
+      action={props.action}
+      frame={{ maxWidth: "infinity", minHeight: 46 }}
+    >
+      <HStack
+        spacing={7}
+        frame={{ maxWidth: "infinity", minHeight: 46, alignment: "center" as any }}
+        background={background}
+        clipShape={{ type: "rect", cornerRadius: 12, style: "continuous" } as any}
+        contentShape="rect"
+      >
+        <Image systemName={props.systemImage} foregroundStyle="white" imageScale="medium" />
+        <Text font="headline" fontWeight="semibold" foregroundStyle="white">
+          {props.title}
+        </Text>
+      </HStack>
+    </Button>
+  )
+}
+
 export function PDFHelperView() {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
     markdownFile: "changelog.md",
@@ -553,17 +584,15 @@ export function PDFHelperView() {
               ) : null}
             </HStack>
             <HStack spacing={10}>
-              <Button
+              <BottomActionButton
                 title={processing ? "处理中..." : "转换"}
                 systemImage="doc.badge.gearshape"
-                buttonStyle="borderedProminent"
                 disabled={!canConvert}
                 action={() => void runConvert()}
               />
-              <Button
+              <BottomActionButton
                 title={processing ? "处理中..." : "合并"}
                 systemImage="square.stack.3d.up.fill"
-                buttonStyle="borderedProminent"
                 disabled={!canMerge}
                 action={() => void runMerge()}
               />

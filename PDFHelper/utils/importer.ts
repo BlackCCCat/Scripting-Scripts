@@ -175,7 +175,7 @@ async function createPdfSourcePerPage(
       let previewFilePath: string | null = null;
 
       if (!skipPreview) {
-        const preview = await buildPdfPagePreview(page, sourceId, idx);
+        const preview = await buildPdfPagePreview(page);
         previewImage = preview.previewImage;
         previewFilePath = preview.previewFilePath;
       }
@@ -238,7 +238,7 @@ async function createPdfSourceWhole(
     let previewFilePath: string | null = null;
     const firstPage = document.pageAt(0);
     if (firstPage) {
-      const preview = await buildPdfPagePreview(firstPage, sourceId, 0);
+      const preview = await buildPdfPagePreview(firstPage);
       previewImage = preview.previewImage;
       previewFilePath = preview.previewFilePath;
     }
