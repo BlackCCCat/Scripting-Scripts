@@ -227,12 +227,41 @@ function FloatingActionGroup(props: {
   );
 }
 
-function RowKV(props: { k: string; v: string; valueColor?: string }) {
+function compactRemoteMarker(value: string) {
+  const text = String(value ?? "").trim();
+  const isDate = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(text);
+  if (isDate || text.length <= 18) return text;
+  return `${text.slice(0, 8)}...${text.slice(-6)}`;
+}
+
+function wrapFullMarker(value: string) {
+  const text = String(value ?? "").trim();
+  if (text.length <= 32) return text;
+  return text.match(/.{1,32}/g)?.join("\n") ?? text;
+}
+
+function RowKV(props: {
+  k: string;
+  v: string;
+  valueColor?: string;
+  compactMarker?: boolean;
+  onTap?: () => void;
+}) {
+  const value = props.compactMarker ? compactRemoteMarker(props.v) : props.v;
   return (
-    <HStack>
+    <HStack
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+      onTapGesture={props.onTap}
+    >
       <Text>{props.k}</Text>
       <Spacer />
-      <Text foregroundStyle={(props.valueColor ?? "label") as any}>{props.v}</Text>
+      <Text
+        foregroundStyle={(props.valueColor ?? "label") as any}
+        lineLimit={props.compactMarker ? 1 : undefined}
+      >
+        {value}
+      </Text>
     </HStack>
   );
 }
@@ -1457,6 +1486,28 @@ export function HomeView() {
     setAlert((a) => ({ ...a, isPresented: false }));
   }
 
+  function showInformationPair(
+    title: string,
+    localLabel: string,
+    localValue: string,
+    remoteLabel: string,
+    remoteValue: string,
+  ) {
+    const message = [
+      `${localLabel}：`,
+      wrapFullMarker(localValue) || "暂无法获取",
+      "",
+      `${remoteLabel}：`,
+      wrapFullMarker(remoteValue) || "暂无法获取",
+    ].join("\n");
+    setAlert({
+      title,
+      isPresented: true,
+      message: <Text multilineTextAlignment="leading">{message}</Text>,
+      actions: <Button title="知道了" action={closeAlert} />,
+    });
+  }
+
   function pushLog(
     level: LogLevel,
     scope: LogScope,
@@ -2485,18 +2536,53 @@ export function HomeView() {
       return (
         <Section key={key} header={<Text>本地信息</Text>}>
           <RowKV k="当前选择的方案" v={localSelectedScheme} />
-          <RowKV k="本地方案" v={localSchemeVersion} valueColor={schemeValueColor} />
-          <RowKV k="本地词库" v={localDictMark} valueColor={dictValueColor} />
-          {cfg.downloadModel ? <RowKV k="本地模型" v={localModelMark} valueColor={modelValueColor} /> : null}
+          <RowKV
+            k="本地方案"
+            v={localSchemeVersion}
+            valueColor={schemeValueColor}
+            onTap={() => showInformationPair("方案信息", "本地方案", localSchemeVersion, "远程方案", remoteSchemeVer)}
+          />
+          <RowKV
+            k="本地词库"
+            v={localDictMark}
+            valueColor={dictValueColor}
+            compactMarker
+            onTap={() => showInformationPair("词库信息", "本地词库", localDictMark, "远程词库", remoteDictMark)}
+          />
+          {cfg.downloadModel ? (
+            <RowKV
+              k="本地模型"
+              v={localModelMark}
+              valueColor={modelValueColor}
+              compactMarker
+              onTap={() => showInformationPair("模型信息", "本地模型", localModelMark, "远程模型", remoteModelMark)}
+            />
+          ) : null}
         </Section>
       );
     }
     if (key === "remote") {
       return (
         <Section key={key} header={<Text>远程信息</Text>}>
-          <RowKV k="远程方案" v={remoteSchemeVer} />
-          <RowKV k="远程词库" v={remoteDictMark} />
-          {cfg.downloadModel ? <RowKV k="远程模型" v={remoteModelMark} /> : null}
+          <RowKV
+            k="远程方案"
+            v={remoteSchemeVer}
+            onTap={() => showInformationPair("方案信息", "本地方案", localSchemeVersion, "远程方案", remoteSchemeVer)}
+          />
+          <RowKV
+            k="远程词库"
+            v={remoteDictMark}
+            compactMarker
+            onTap={() => showInformationPair("词库信息", "本地词库", localDictMark, "远程词库", remoteDictMark)}
+          />
+          {cfg.downloadModel ? (
+            <RowKV
+              k="远程模型"
+              v={remoteModelMark}
+              compactMarker
+              onTap={() => showInformationPair("模型信息", "本地模型", localModelMark, "远程模型", remoteModelMark)}
+            />
+          ) : null}
         </Section>
       );
     }
