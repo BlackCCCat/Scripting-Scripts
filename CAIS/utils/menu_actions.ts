@@ -32,7 +32,7 @@ export function getOrderedMenuBuiltins(settings: CaisSettings): KeyboardMenuBuil
     (key) => CONFIGURABLE_MENU_BUILTIN_ACTIONS.includes(key),
   )
   if (!order?.length) return CONFIGURABLE_MENU_BUILTIN_ACTIONS
-  const result = order.filter((key) => key !== "tokenize")
+  const result: KeyboardMenuBuiltinAction[] = order.filter((key) => key !== "tokenize")
   result.unshift("tokenize")
   const insertAfter = (anchor: KeyboardMenuBuiltinAction, action: KeyboardMenuBuiltinAction) => {
     if (result.includes(action)) return
