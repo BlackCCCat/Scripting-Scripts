@@ -74,6 +74,7 @@ type YtDlpProbeResult = {
   url: string
   httpHeaders?: Record<string, string>
   cookieFilePath?: string
+  extractorArgs?: YtDlpExtractorArgs
 }
 
 type HLSDownloadPlan = {
@@ -93,6 +94,8 @@ type HLSMasterSelection = {
 }
 
 export type MediaDownloadKind = "douyin" | "youtube" | "m3u8" | "generic"
+
+type YtDlpExtractorArgs = Record<string, Record<string, string[]>>
 
 type MediaMetadata = {
   id?: string | null
@@ -155,6 +158,19 @@ function isTransientWebViewCleanupFailure(output: string | undefined): boolean {
 
 function isCookieAuthProbeFailure(output: string | undefined): boolean {
   return /cookies?|login|logged in|sign in|authentication|unauthori[sz]ed|forbidden|HTTP Error 40[13]|private video|members-only|not available/i.test(output || "")
+}
+
+function isTikTokWebpageUnexpectedFailure(output: string | undefined): boolean {
+  return /ERROR:\s*\[TikTok\].*Unexpected response from webpage request/i.test(output || "")
+}
+
+function tiktokExtractorArgs(): YtDlpExtractorArgs {
+  return {
+    tiktok: {
+      app_info: [""],
+      api_hostname: ["api16-normal-c-useast1a.tiktokv.com"],
+    },
+  }
 }
 
 function normalizeInstagramURL(url: string): string {
@@ -727,14 +743,41 @@ export async function getYtDlpVersion(): Promise<string | null> {
 
 export async function installOrUpdateYtDlp(): Promise<string> {
   await ensureDownloadDirectories()
-  const result = await Shell.run(
+  const fullResult = await Shell.run(
+    commandLine(["python3", "-m", "pip", "install", "--upgrade", "yt-dlp[default,curl-cffi]"]),
+    { timeout: 900 }
+  )
+  if (fullResult.exitCode === 0) {
+    return compactLog(fullResult.output || "yt-dlp updated")
+  }
+
+  const fallbackResult = await Shell.run(
     commandLine(["python3", "-m", "pip", "install", "--upgrade", "yt-dlp"]),
     { timeout: 900 }
   )
-  if (result.exitCode !== 0) {
-    throw new Error(compactLog(result.output || `pip exited with code ${result.exitCode}`))
+  const combinedOutput = [
+    "yt-dlp extras install failed; fell back to plain yt-dlp.",
+    fullResult.output || `extras pip exited with code ${fullResult.exitCode}`,
+    fallbackResult.output || `plain pip exited with code ${fallbackResult.exitCode}`,
+  ].join("\n")
+  if (fallbackResult.exitCode !== 0) {
+    throw new Error(compactLog(combinedOutput))
   }
-  return compactLog(result.output || "yt-dlp updated")
+  return compactLog(combinedOutput)
+}
+
+async function getYtDlpDependencyReport(): Promise<string> {
+  const script = [
+    "import importlib.metadata as m, importlib.util as u",
+    "mods=['yt_dlp','curl_cffi','requests','websockets','brotli','certifi','Cryptodome']",
+    "def version(name):",
+    "    try: return m.version(name.replace('_','-'))",
+    "    except Exception: return 'missing'",
+    "print('; '.join(f'{name}={version(name) if u.find_spec(name) else \"missing\"}' for name in mods))",
+  ].join("\n")
+  const result = await runShellWithTimeout(commandLine(["python3", "-c", script]), { timeout: 20 })
+  if (result.exitCode !== 0) return compactLog(result.output || `dependency check exited with code ${result.exitCode}`, 700)
+  return result.output.trim()
 }
 
 async function ensureTempDirectory() {
@@ -763,7 +806,7 @@ function throwIfCancelled() {
   }
 }
 
-function writeYtDlpConfig(url: string, format: string, outputTemplate: string, paths: string, noCheckCertificate = false, httpHeaders?: Record<string, string>, cookieFilePath?: string): string {
+function writeYtDlpConfig(url: string, format: string, outputTemplate: string, paths: string, noCheckCertificate = false, httpHeaders?: Record<string, string>, cookieFilePath?: string, extractorArgs?: YtDlpExtractorArgs): string {
   ytdlpConfigCounter += 1
   const configPath = Path.join(TEMP_DIR, `ytdlp-${Date.now()}-${ytdlpConfigCounter}.json`)
   FileManager.writeAsStringSync(configPath, JSON.stringify({
@@ -777,16 +820,17 @@ function writeYtDlpConfig(url: string, format: string, outputTemplate: string, p
     no_check_certificate: noCheckCertificate,
     http_headers: httpHeaders,
     cookiefile: cookieFilePath,
+    extractor_args: extractorArgs,
   }))
   return configPath
 }
 
-function buildYtDlpRunnerArgs(url: string, format: string, outputTemplate: string, paths: string, noCheckCertificate = false, httpHeaders?: Record<string, string>, cookieFilePath?: string): string[] {
-  const configPath = writeYtDlpConfig(url, format, outputTemplate, paths, noCheckCertificate, httpHeaders, cookieFilePath)
+function buildYtDlpRunnerArgs(url: string, format: string, outputTemplate: string, paths: string, noCheckCertificate = false, httpHeaders?: Record<string, string>, cookieFilePath?: string, extractorArgs?: YtDlpExtractorArgs): string[] {
+  const configPath = writeYtDlpConfig(url, format, outputTemplate, paths, noCheckCertificate, httpHeaders, cookieFilePath, extractorArgs)
   return ["python3", YTDLP_RUNNER_PATH, configPath]
 }
 
-function buildYtDlpProbeArgs(url: string, noCheckCertificate = false, httpHeaders?: Record<string, string>, cookieFilePath?: string): string[] {
+function buildYtDlpProbeArgs(url: string, noCheckCertificate = false, httpHeaders?: Record<string, string>, cookieFilePath?: string, extractorArgs?: YtDlpExtractorArgs): string[] {
   ytdlpConfigCounter += 1
   const configPath = Path.join(TEMP_DIR, `ytdlp-probe-${Date.now()}-${ytdlpConfigCounter}.json`)
   FileManager.writeAsStringSync(configPath, JSON.stringify({
@@ -797,6 +841,7 @@ function buildYtDlpProbeArgs(url: string, noCheckCertificate = false, httpHeader
     no_check_certificate: noCheckCertificate,
     http_headers: httpHeaders,
     cookiefile: cookieFilePath,
+    extractor_args: extractorArgs,
   }))
   return ["python3", YTDLP_RUNNER_PATH, configPath]
 }
@@ -957,6 +1002,7 @@ async function probeYtDlpMedia(url: string, options: {
   onProgress?: DownloadProgressFn
   onLog?: DownloadLogFn
   platform: string
+  onYtDlpStatus?: (ready: boolean, version: string | null) => void
 }): Promise<YtDlpProbeResult> {
   options.onProgress?.({ fraction: 0.12, stage: `正在读取 ${options.platform} 媒体信息` })
   options.onLog?.(`正在读取 ${options.platform} 媒体信息。`)
@@ -964,14 +1010,15 @@ async function probeYtDlpMedia(url: string, options: {
   let effectiveURL = url
   let httpHeaders: Record<string, string> | undefined
   let cookieFilePath: string | undefined
+  let extractorArgs: YtDlpExtractorArgs | undefined = options.platform === "TikTok" ? tiktokExtractorArgs() : undefined
   const runProbe = async (label: string): Promise<ShellExecutionResult> => {
-    let attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath)), { timeout: 180 })
+    let attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath, extractorArgs)), { timeout: 180 })
     logShellResult(options.onLog, label, attempt)
     if (attempt.exitCode !== 0 && isTransientWebViewCleanupFailure(attempt.output) && !FileManager.existsSync(CANCEL_FLAG_PATH)) {
       options.onLog?.("检测到 WebView 清理中的临时异常，等待后自动重试媒体信息读取。")
       options.onProgress?.({ fraction: 0.13, stage: `正在重试 ${options.platform} 媒体信息` })
       await sleep(900)
-      attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath)), { timeout: 180 })
+      attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath, extractorArgs)), { timeout: 180 })
       logShellResult(options.onLog, `${label} transient retry`, attempt)
     }
     return attempt
@@ -992,7 +1039,19 @@ async function probeYtDlpMedia(url: string, options: {
     options.onProgress?.({ fraction: 0.16, stage: "正在重试 Instagram 媒体信息" })
     result = await runProbe("yt-dlp Instagram probe browser headers")
   }
-  if (result.exitCode !== 0 && !cookieFilePath && isCookieAuthProbeFailure(result.output)) {
+  if (result.exitCode !== 0 && options.platform === "TikTok" && isTikTokWebpageUnexpectedFailure(result.output)) {
+    options.onLog?.(`yt-dlp 依赖状态：${await getYtDlpDependencyReport()}`)
+    options.onLog?.("检测到 TikTok 网页响应兼容问题，正在更新 yt-dlp 后自动重试。")
+    options.onProgress?.({ fraction: 0.16, stage: "正在更新 yt-dlp 并重试 TikTok" })
+    const updateOutput = await installOrUpdateYtDlp()
+    const updatedVersion = await getYtDlpVersion()
+    options.onLog?.(`yt-dlp 更新完成：${updatedVersion || "unknown"}`)
+    options.onLog?.(`yt-dlp 更新输出：${compactLog(updateOutput, 700)}`)
+    options.onLog?.(`yt-dlp 更新后依赖状态：${await getYtDlpDependencyReport()}`)
+    options.onYtDlpStatus?.(true, updatedVersion)
+    result = await runProbe("yt-dlp TikTok probe after update")
+  }
+  if (result.exitCode !== 0 && !isTikTokWebpageUnexpectedFailure(result.output) && !cookieFilePath && isCookieAuthProbeFailure(result.output)) {
     options.onLog?.("媒体信息读取提示可能需要登录 Cookie，正在导出 WebView Cookie 后自动重试。")
     options.onProgress?.({ fraction: 0.17, stage: `正在重试 ${options.platform} 媒体信息` })
     cookieFilePath = await writeYtDlpCookieFileForURL(effectiveURL, options.onLog)
@@ -1000,7 +1059,7 @@ async function probeYtDlpMedia(url: string, options: {
       result = await runProbe(`yt-dlp ${options.platform} probe cookies`)
     }
   }
-  if (result.exitCode === 130 || FileManager.existsSync(CANCEL_FLAG_PATH)) {
+  if (result.exitCode === 130) {
     throw new Error("下载已取消")
   }
   if (result.exitCode !== 0) {
@@ -1014,7 +1073,7 @@ async function probeYtDlpMedia(url: string, options: {
     throw new Error("yt-dlp 未返回媒体信息")
   }
   options.onLog?.(`yt-dlp 媒体信息：extractor=${probe.extractor_key || "unknown"}，title=${probe.title || "unknown"}，formats=${probe.formats.length}`)
-  return { probe, noCheckCertificate, url: effectiveURL, httpHeaders, cookieFilePath }
+  return { probe, noCheckCertificate, url: effectiveURL, httpHeaders, cookieFilePath, extractorArgs }
 }
 
 async function verifyOutputFile(path: string, log?: DownloadLogFn) {
@@ -1208,11 +1267,13 @@ async function downloadGenericMedia(
     platform,
     onProgress: options?.onProgress,
     onLog: options?.onLog,
+    onYtDlpStatus: options?.onYtDlpStatus,
   })
   const { probe, noCheckCertificate } = probeResult
   const downloadURL = probeResult.url
   const httpHeaders = probeResult.httpHeaders
   const cookieFilePath = probeResult.cookieFilePath
+  const extractorArgs = probeResult.extractorArgs
   if (noCheckCertificate) {
     log("本次 yt-dlp 下载将继续使用 nocheckcertificate。")
   }
@@ -1239,7 +1300,8 @@ async function downloadGenericMedia(
         DOWNLOAD_DIR,
         noCheckCertificate,
         httpHeaders,
-        cookieFilePath
+        cookieFilePath,
+        extractorArgs
       ),
       start: 0.2,
       end: 0.94,
@@ -1264,7 +1326,8 @@ async function downloadGenericMedia(
         TEMP_DIR,
         noCheckCertificate,
         httpHeaders,
-        cookieFilePath
+        cookieFilePath,
+        extractorArgs
       ),
       start: 0.2,
       end: 0.54,
@@ -1289,7 +1352,8 @@ async function downloadGenericMedia(
         TEMP_DIR,
         noCheckCertificate,
         httpHeaders,
-        cookieFilePath
+        cookieFilePath,
+        extractorArgs
       ),
       start: 0.56,
       end: 0.78,
@@ -1658,7 +1722,19 @@ export async function downloadMedia(
   if (kind === "youtube") return downloadYouTube(sourceURL, options)
   if (kind === "m3u8") return downloadM3U8(sourceURL, options)
   if (kind === "generic") return downloadGenericMedia(sourceURL, options)
-  return downloadDouyinVideo(sourceURL, options)
+  try {
+    return await downloadDouyinVideo(sourceURL, options)
+  } catch (error) {
+    if (options?.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) {
+      throw error
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    options?.onLog?.(`抖音原生解析失败，切换到 yt-dlp 兜底：${message}`)
+    return downloadGenericMedia(sourceURL, {
+      ...options,
+      platform: "Douyin",
+    })
+  }
 }
 
 export { ROOT_DIR }

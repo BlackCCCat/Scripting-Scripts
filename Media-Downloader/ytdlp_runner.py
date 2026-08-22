@@ -11,6 +11,17 @@ class DownloadCancelled(Exception):
     pass
 
 
+class MediaDownloaderLogger:
+    def debug(self, message):
+        pass
+
+    def warning(self, message):
+        print("MEDIA_DOWNLOADER_YTDLP_WARNING " + str(message))
+
+    def error(self, message):
+        print("MEDIA_DOWNLOADER_YTDLP_ERROR " + str(message))
+
+
 def media_files_under(directory, since):
     extensions = {".mp4", ".m4v", ".mov", ".mkv", ".webm", ".m4a", ".aac", ".opus"}
     if not os.path.isdir(directory):
@@ -150,6 +161,7 @@ def main():
     options = {
         "format_sort": config.get("format_sort") or [],
         "noplaylist": True,
+        "logger": MediaDownloaderLogger(),
         "quiet": False,
         "no_warnings": False,
     }
@@ -163,6 +175,8 @@ def main():
         }
     if config.get("cookiefile"):
         options["cookiefile"] = config.get("cookiefile")
+    if isinstance(config.get("extractor_args"), dict):
+        options["extractor_args"] = config.get("extractor_args")
 
     mode = config.get("mode") or "download"
     if mode != "probe":

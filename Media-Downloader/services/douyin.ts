@@ -86,24 +86,47 @@ function isGalleryURL(url: string | null): boolean {
 }
 
 function firstURLFromAddress(address: unknown): string | null {
+  if (typeof address === "string") return address
+  if (Array.isArray(address)) {
+    for (const item of address) {
+      const url = firstURLFromAddress(item)
+      if (url) return url
+    }
+    return null
+  }
   if (!isRecord(address)) return null
 
-  const urls = getArray(address.url_list)
+  const urlList = getArray(address.url_list).length
+    ? getArray(address.url_list)
+    : getArray(address.urlList)
+  const urls = urlList
     .map((item: unknown) => getString(item))
     .filter((item: string | null): item is string => Boolean(item))
   if (urls.length) return urls[0]
 
-  return getString(address.url) || getString(address.uri)
+  for (const key of ["url", "uri", "src", "mainUrl", "playApi"]) {
+    const url = getString(address[key])
+    if (url) return url
+  }
+
+  return null
 }
 
 function urlsFromAddress(address: unknown): string[] {
+  if (typeof address === "string") return [address]
+  if (Array.isArray(address)) return address.flatMap((item) => urlsFromAddress(item))
   if (!isRecord(address)) return []
 
-  const urls = getArray(address.url_list)
-    .map((item: unknown) => getString(item))
-    .filter((item: string | null): item is string => Boolean(item))
-  const singleURL = getString(address.url) || getString(address.uri)
-  if (singleURL) urls.push(singleURL)
+  const urls: string[] = []
+  for (const key of ["url_list", "urlList", "downloadUrlList", "coverUrlList"]) {
+    urls.push(...getArray(address[key])
+      .map((item: unknown) => getString(item))
+      .filter((item: string | null): item is string => Boolean(item)))
+  }
+  for (const key of ["url", "uri", "src", "mainUrl", "playApi"]) {
+    const singleURL = getString(address[key])
+    if (singleURL) urls.push(singleURL)
+  }
 
   return urls
 }
@@ -147,14 +170,14 @@ function collectMediaURLs(source: unknown): string[] {
   if (!isRecord(source)) return []
 
   const urls: string[] = []
-  for (const key of ["url_list", "urlList"]) {
+  for (const key of ["url_list", "urlList", "downloadUrlList", "coverUrlList"]) {
     const list = getArray(source[key])
     for (const item of list) {
       const url = getString(item)
       if (url) urls.push(url)
     }
   }
-  for (const key of ["url", "uri"]) {
+  for (const key of ["url", "uri", "src", "mainUrl", "playApi"]) {
     const url = getString(source[key])
     if (url) urls.push(url)
   }
@@ -179,29 +202,36 @@ export function extractImageURLs(extracted: ExtractedInfo): string[] {
   const urls: string[] = []
 
   if (inlineRoot) {
-    const imagePostInfo = getNestedRecord(inlineRoot, "image_post_info")
+    const imagePostInfo = getNestedRecord(inlineRoot, "image_post_info") || getNestedRecord(inlineRoot, "imagePostInfo")
     const postImages = imagePostInfo
-      ? (getArray(imagePostInfo.images).length ? getArray(imagePostInfo.images) : getArray(imagePostInfo.image_list))
+      ? (getArray(imagePostInfo.images).length ? getArray(imagePostInfo.images) : getArray(imagePostInfo.image_list).length ? getArray(imagePostInfo.image_list) : getArray(imagePostInfo.imageList))
       : []
     const images = postImages.length
       ? postImages
-      : (getArray(inlineRoot.images).length ? getArray(inlineRoot.images) : getArray(inlineRoot.image_list))
+      : (getArray(inlineRoot.images).length ? getArray(inlineRoot.images) : getArray(inlineRoot.image_list).length ? getArray(inlineRoot.image_list) : getArray(inlineRoot.imageList))
     for (const image of images) {
       if (!isRecord(image)) continue
       const imageCandidates: string[] = []
       for (const key of [
         "watermark_free_download_url_list",
+        "watermarkFreeDownloadUrlList",
         "origin_image",
+        "originImage",
         "display_image",
+        "displayImage",
         "download_url",
+        "downloadUrl",
         "download_addr",
+        "downloadAddr",
         "download_url_list",
+        "downloadUrlList",
         "owner_watermark_image",
+        "ownerWatermarkImage",
       ]) {
         imageCandidates.push(...collectMediaURLs(image[key]))
       }
       imageCandidates.push(...urlsFromAddress(image))
-      for (const key of ["download_url", "origin_cover", "cover", "large", "medium", "url"]) {
+      for (const key of ["download_url", "downloadUrl", "origin_cover", "originCover", "cover", "large", "medium", "url"]) {
         imageCandidates.push(...urlsFromAddress(image[key]))
         const directURL = getString(image[key])
         if (directURL) imageCandidates.push(directURL)
@@ -272,13 +302,24 @@ export function extractThumbnailURL(extracted: ExtractedInfo): string | null {
 
   const video = getNestedRecord(inlineRoot, "video")
   if (video) {
-    for (const key of ["cover", "origin_cover", "dynamic_cover", "animated_cover"]) {
+    for (const key of ["cover", "origin_cover", "originCover", "dynamic_cover", "dynamicCover", "animated_cover", "animatedCover"]) {
       const url = firstURLFromAddress(video[key])
       if (url) return url
     }
   }
 
-  const images = getArray(inlineRoot.images)
+  const imagePostInfo = getNestedRecord(inlineRoot, "image_post_info") || getNestedRecord(inlineRoot, "imagePostInfo")
+  const images = getArray(imagePostInfo?.images).length
+    ? getArray(imagePostInfo?.images)
+    : getArray(imagePostInfo?.image_list).length
+      ? getArray(imagePostInfo?.image_list)
+      : getArray(imagePostInfo?.imageList).length
+        ? getArray(imagePostInfo?.imageList)
+        : getArray(inlineRoot.images).length
+          ? getArray(inlineRoot.images)
+          : getArray(inlineRoot.image_list).length
+            ? getArray(inlineRoot.image_list)
+            : getArray(inlineRoot.imageList)
   for (const image of images) {
     const url = firstURLFromAddress(image)
     if (url) return url
@@ -288,22 +329,75 @@ export function extractThumbnailURL(extracted: ExtractedInfo): string | null {
 }
 
 export function extractAwemeDetailRoot(data: unknown): Record<string, unknown> | null {
-  if (!isRecord(data)) return null
+  const seen = new Set<unknown>()
 
-  const record = data
-
-  if (isRecord(record.aweme_detail)) return record.aweme_detail
-  if (isRecord(record.video) || typeof record.aweme_id === "string") return record
-
-  const itemList = getArray(record.item_list)
-  if (itemList.length > 0 && isRecord(itemList[0])) return itemList[0]
-
-  const nestedData = record.data
-  if (isRecord(nestedData) && isRecord(nestedData.aweme_detail)) {
-    return nestedData.aweme_detail
+  const looksLikeAwemeRoot = (record: Record<string, unknown>) => {
+    if (!isRecord(record.video)) return false
+    return [
+      record.aweme_id,
+      record.awemeId,
+      record.item_id,
+      record.itemId,
+      record.group_id,
+      record.groupId,
+      record.desc,
+      record.caption,
+    ].some((value) => typeof value === "string" || typeof value === "number")
   }
 
-  return null
+  const findRoot = (value: unknown, depth: number): Record<string, unknown> | null => {
+    if (depth > 10 || !value) return null
+    if (seen.has(value)) return null
+    seen.add(value)
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const nested = findRoot(item, depth + 1)
+        if (nested) return nested
+      }
+      return null
+    }
+
+    if (!isRecord(value)) return null
+
+    const directKeys = [
+      "aweme_detail",
+      "awemeDetail",
+      "videoDetail",
+      "videoInfoRes",
+      "itemInfo",
+      "aweme",
+    ]
+    for (const key of directKeys) {
+      const nested = value[key]
+      if (isRecord(nested) && looksLikeAwemeRoot(nested)) return nested
+      const found = findRoot(nested, depth + 1)
+      if (found) return found
+    }
+
+    if (looksLikeAwemeRoot(value)) return value
+
+    const itemList = getArray(value.item_list).length ? getArray(value.item_list) : getArray(value.itemList)
+    for (const item of itemList) {
+      const nested = findRoot(item, depth + 1)
+      if (nested) return nested
+    }
+
+    const priorityKeys = ["data", "loaderData", "default", "props", "pageProps", "initialState"]
+    for (const key of priorityKeys) {
+      const nested = findRoot(value[key], depth + 1)
+      if (nested) return nested
+    }
+
+    for (const nested of Object.values(value)) {
+      const found = findRoot(nested, depth + 1)
+      if (found) return found
+    }
+
+    return null
+  }
+
+  return findRoot(data, 0)
 }
 
 export function extractInlineDetailRoot(extracted: ExtractedInfo): Record<string, unknown> | null {
@@ -364,12 +458,9 @@ export function buildDownloadCandidates(
     const video = getNestedRecord(inlineRoot, "video")
     if (video) {
       const pushAddress = (label: string, address: unknown) => {
-        if (!isRecord(address)) return
-        const addressRecord = address
-        const urls = getArray(addressRecord.url_list)
-          .map((item: unknown) => getString(item))
-          .filter((item: string | null): item is string => Boolean(item))
+        const urls = urlsFromAddress(address)
         for (const url of urls) {
+          if (!/^https?:\/\//i.test(url)) continue
           if (preferNoWatermark && url.includes("/playwm/")) {
             candidates.push({
               label: `${label}_replace_playwm_to_play`,
@@ -392,15 +483,21 @@ export function buildDownloadCandidates(
       }
 
       pushAddress("inline_play_addr_h264", video.play_addr_h264)
+      pushAddress("inline_playAddrH264", video.playAddrH264)
       pushAddress("inline_play_addr", video.play_addr)
+      pushAddress("inline_playAddr", video.playAddr)
       pushAddress("inline_play_addr_265", video.play_addr_265)
+      pushAddress("inline_playAddrH265", video.playAddrH265)
       pushAddress("inline_download_addr", video.download_addr)
+      pushAddress("inline_downloadAddr", video.downloadAddr)
+      pushAddress("inline_playApi", video.playApi)
 
-      const bitRates = getArray(video.bit_rate)
+      const bitRates = getArray(video.bit_rate).length ? getArray(video.bit_rate) : getArray(video.bitRateList)
       for (const item of bitRates) {
         if (!isRecord(item)) continue
-        const gearName = getString(item.gear_name) || getString(item.quality_type) || "bit_rate"
+        const gearName = getString(item.gear_name) || getString(item.gearName) || getString(item.quality_type) || getString(item.qualityType) || "bit_rate"
         pushAddress(`inline_bit_rate_${gearName}`, item.play_addr)
+        pushAddress(`inline_bitRate_${gearName}`, item.playAddr)
       }
     }
   }
@@ -695,29 +792,154 @@ export async function extractFromWebView(
 
     report?.({ fraction: 0.18, stage: "正在读取页面内嵌数据" })
     const data = await webView.evaluateJavaScript<ExtractedInfo>(`
+      const stringifySafe = (value) => {
+        try {
+          return JSON.stringify(value)
+        } catch (e) {
+          return null
+        }
+      }
+      const decodeVariants = (text) => {
+        const raw = String(text || '')
+        const variants = [raw, raw.replace(/\\\\u002F/g, '/')]
+        try {
+          variants.push(decodeURIComponent(raw))
+        } catch (e) {}
+        try {
+          variants.push(decodeURIComponent(raw.replace(/\\\\u002F/g, '/')))
+        } catch (e) {}
+        return Array.from(new Set(variants.filter(Boolean)))
+      }
+      const parseObjectAt = (text, start) => {
+        let depth = 0
+        let inString = false
+        let quote = ''
+        let escaped = false
+        for (let index = start; index < text.length; index++) {
+          const char = text[index]
+          if (inString) {
+            if (escaped) {
+              escaped = false
+            } else if (char === '\\\\') {
+              escaped = true
+            } else if (char === quote) {
+              inString = false
+            }
+            continue
+          }
+          if (char === '"' || char === "'") {
+            inString = true
+            quote = char
+            continue
+          }
+          if (char === '{') depth += 1
+          if (char === '}') {
+            depth -= 1
+            if (depth === 0) {
+              const chunk = text.slice(start, index + 1)
+              for (const candidate of [
+                chunk,
+                chunk.replace(/\\\\u002F/g, '/'),
+                chunk.replace(/\\\\"/g, '"').replace(/\\\\u002F/g, '/'),
+              ]) {
+                try {
+                  return JSON.parse(candidate)
+                } catch (e) {}
+              }
+              return null
+            }
+          }
+        }
+        return null
+      }
+      const findInText = (text) => {
+        const keys = ['"videoDetail"', 'videoDetail', '"aweme_detail"', 'aweme_detail', '"awemeDetail"', 'awemeDetail', '"videoInfoRes"', 'videoInfoRes']
+        for (const variant of decodeVariants(text)) {
+          try {
+            const parsed = JSON.parse(variant)
+            if (typeof parsed !== 'string') {
+              const hit = findAwemeDetail(parsed)
+              if (hit) return hit
+            }
+          } catch (e) {}
+          for (const key of keys) {
+            let index = variant.indexOf(key)
+            while (index >= 0) {
+              const brace = variant.indexOf('{', index)
+              if (brace < 0 || brace - index > 300) break
+              const parsed = parseObjectAt(variant, brace)
+              const hit = findAwemeDetail(parsed)
+              if (hit) return hit
+              index = variant.indexOf(key, index + key.length)
+            }
+          }
+        }
+        return null
+      }
+      const findAwemeDetail = (value, depth = 0, seen = new WeakSet()) => {
+        if (depth > 12 || value == null) return null
+        if (typeof value === 'string') return findInText(value)
+        if (typeof value !== 'object') return null
+        if (seen.has(value)) return null
+        seen.add(value)
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const hit = findAwemeDetail(item, depth + 1, seen)
+            if (hit) return hit
+          }
+          return null
+        }
+        const looksLikeAweme = value.video && [value.aweme_id, value.awemeId, value.item_id, value.itemId, value.group_id, value.groupId, value.desc, value.caption].some((item) => typeof item === 'string' || typeof item === 'number')
+        if (looksLikeAweme) return value
+        for (const key of ['aweme_detail','awemeDetail','videoDetail','videoInfoRes','itemInfo','aweme']) {
+          const hit = findAwemeDetail(value[key], depth + 1, seen)
+          if (hit) return hit
+        }
+        for (const key of ['item_list','itemList','images','image_list','imageList','data','loaderData','default','props','pageProps','initialState']) {
+          const hit = findAwemeDetail(value[key], depth + 1, seen)
+          if (hit) return hit
+        }
+        for (const nested of Object.values(value)) {
+          const hit = findAwemeDetail(nested, depth + 1, seen)
+          if (hit) return hit
+        }
+        return null
+      }
       const mediaEntries = performance.getEntriesByType('resource')
         .map((item) => item.name)
         .filter((name) => ['video','playwm','/play/','mp4','m3u8','aweme','douyinvod','tos-cn','iteminfo','image','douyinpic'].some((token) => name.includes(token)))
-      const scripts = Array.from(document.scripts)
+      const scriptTexts = Array.from(document.scripts)
         .map((s) => s.textContent || '')
-        .filter((text) => ['aweme_detail','play_addr','bit_rate','playwm','video_id','iteminfo','_ROUTER_DATA','videoInfoRes','image_post_info','images'].some((token) => text.includes(token)))
-        .slice(0, 8)
-        .map((text) => text.slice(0, 12000))
+      const scripts = scriptTexts
+        .filter((text) => ['aweme_detail','awemeDetail','videoDetail','play_addr','playAddr','bit_rate','bitRateList','playwm','video_id','awemeId','iteminfo','_ROUTER_DATA','videoInfoRes','image_post_info','imagePostInfo','images','__pace_f'].some((token) => text.includes(token)))
+        .slice(0, 12)
+        .map((text) => text.slice(0, 60000))
       let routerDataJSON = null
       let videoInfoResJSON = null
+      let matchedDetail = null
       try {
         if (typeof window._ROUTER_DATA !== 'undefined') {
           routerDataJSON = JSON.stringify(window._ROUTER_DATA)
-          const loaderValues = Object.values(window._ROUTER_DATA?.loaderData || {})
-          const matched = loaderValues.find((item) => item?.videoInfoRes)?.videoInfoRes
-          if (matched) {
-            videoInfoResJSON = JSON.stringify(matched)
-          }
+          matchedDetail = findAwemeDetail(window._ROUTER_DATA)
+          if (matchedDetail) videoInfoResJSON = stringifySafe(matchedDetail)
         }
       } catch (e) {}
       try {
         if (!videoInfoResJSON && typeof window.videoInfoRes !== 'undefined') {
-          videoInfoResJSON = JSON.stringify(window.videoInfoRes)
+          matchedDetail = findAwemeDetail(window.videoInfoRes)
+          videoInfoResJSON = stringifySafe(matchedDetail || window.videoInfoRes)
+        }
+      } catch (e) {}
+      try {
+        if (!videoInfoResJSON) {
+          matchedDetail = findAwemeDetail(window.__pace_f || self.__pace_f)
+          if (matchedDetail) videoInfoResJSON = stringifySafe(matchedDetail)
+        }
+      } catch (e) {}
+      try {
+        if (!videoInfoResJSON) {
+          matchedDetail = findAwemeDetail(scripts)
+          if (matchedDetail) videoInfoResJSON = stringifySafe(matchedDetail)
         }
       } catch (e) {}
       return {
