@@ -1,0 +1,39 @@
+{
+  "iconImage": null,
+  "author": {
+    "email": null,
+    "homepage": "https://github.com/BlackCCCat",
+    "name": "BlackCCCat"
+  },
+  "icon": "doc.on.doc",
+  "localizedDescriptions": {
+    "zh": "纯 Python PDF 工具，支持图片转 PDF、PDF 合并选页、插入、删除、替换、旋转、拆分和信息查看。",
+    "fr": "",
+    "de": "",
+    "en": "Pure Python PDF toolkit for image conversion, page selection, merge, insert, delete, replace, rotation, split, and PDF info.",
+    "es": "",
+    "ja": "",
+    "pt": "",
+    "ru": "",
+    "it": ""
+  },
+  "intentInputTypes": [],
+  "description": "纯 Python PDF 工具，支持图片转 PDF、PDF 合并选页、插入、删除、替换、旋转、拆分和信息查看。",
+  "name": "PDFToolSkill",
+  "contributors": [],
+  "localizedNames": {
+    "zh": "PDFToolSkill",
+    "fr": "",
+    "de": "",
+    "en": "PDFToolSkill",
+    "es": "",
+    "ja": "",
+    "pt": "",
+    "ru": "",
+    "it": ""
+  },
+  "remoteResource": null,
+  "runInApp": true,
+  "color": "rgba(0, 198, 165, 1)",
+  "version": "1.0.0"
+}
