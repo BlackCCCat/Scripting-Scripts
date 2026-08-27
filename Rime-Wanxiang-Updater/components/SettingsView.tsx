@@ -55,7 +55,7 @@ const INPUT_METHODS: { label: string; value: InputMethod }[] = [
   { label: "Scripting", value: "scripting" },
 ]
 
-const SCHEME_OPTIONS: AppConfig["schemeEdition"][] = ["base", "pro", "pure"]
+const SCHEME_OPTIONS: AppConfig["schemeEdition"][] = ["base", "pro", "pure", "lite"]
 
 const PRO_KEY_LABELS: Record<ProSchemeKey, string> = {
   moqi: "moqi-墨奇",

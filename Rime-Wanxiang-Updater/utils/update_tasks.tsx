@@ -416,12 +416,14 @@ async function fetchLatestAssetFromCnbPreferOpenApi(args: Parameters<typeof fetc
 function dictPattern(cfg: AppConfig): string {
   if (cfg.schemeEdition === "base") return "*base*dicts*.zip"
   if (cfg.schemeEdition === "pure") return "pure-dicts.zip"
+  if (cfg.schemeEdition === "lite") return "lite-dicts.zip"
   return `*${cfg.proSchemeKey}*dicts.zip`
 }
 
 function schemePattern(cfg: AppConfig): string {
   if (cfg.schemeEdition === "base") return "*base.zip"
   if (cfg.schemeEdition === "pure") return "rime-wanxiang-pure.zip"
+  if (cfg.schemeEdition === "lite") return "rime-wanxiang-lite.zip"
   return `*${cfg.proSchemeKey}*fuzhu.zip`
 }
 

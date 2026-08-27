@@ -270,7 +270,7 @@ function normalizeInputMethod(v?: string): InputMethod | undefined {
 
 function normalizeSchemeEdition(v?: string): SchemeEdition | undefined {
   const x = String(v ?? "").trim().toLowerCase()
-  if (x === "base" || x === "pro" || x === "pure") return x
+  if (x === "base" || x === "pro" || x === "pure" || x === "lite") return x
   return undefined
 }
 
@@ -284,6 +284,7 @@ function inferSchemeFromFile(fileName?: string): { schemeEdition?: SchemeEdition
   if (!x) return {}
   if (x.includes("base")) return { schemeEdition: "base" }
   if (x.includes("pure")) return { schemeEdition: "pure" }
+  if (x.includes("lite")) return { schemeEdition: "lite" }
   for (const key of PRO_KEYS) {
     if (x.includes(key)) return { schemeEdition: "pro", proSchemeKey: key }
   }
@@ -295,6 +296,7 @@ function formatSelectedScheme(schemeEdition?: SchemeEdition, proSchemeKey?: ProS
   if (schemeEdition === "base") return "base"
   if (schemeEdition === "pro") return proSchemeKey ? `pro (${proSchemeKey})` : "pro"
   if (schemeEdition === "pure") return "pure"
+  if (schemeEdition === "lite") return "lite"
   return undefined
 }
 

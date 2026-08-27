@@ -66,11 +66,13 @@ function formatSchemeLabel(metaScheme: MetaBundle["scheme"], fallback: AppConfig
   if (!metaScheme) {
     if (fallback.schemeEdition === "base") return "base"
     if (fallback.schemeEdition === "pure") return "pure"
+    if (fallback.schemeEdition === "lite") return "lite"
     return `pro(${fallback.proSchemeKey})`
   }
   if (metaScheme.selectedScheme) return metaScheme.selectedScheme.replace(" ", "")
   if (metaScheme.schemeEdition === "base") return "base"
   if (metaScheme.schemeEdition === "pure") return "pure"
+  if (metaScheme.schemeEdition === "lite") return "lite"
   return metaScheme.proSchemeKey ? `pro(${metaScheme.proSchemeKey})` : "pro"
 }
 
