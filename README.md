@@ -23,6 +23,7 @@
 - [Memory-Days](./Memory-Days)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Memory-Days.zip)
 - [TG-Stickers-Keyboard](./TG-Stickers-Keyboard)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/TG-Stickers-Keyboard.zip)
 - [Fonts-Installer](./Fonts-Installer)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Fonts-Installer.zip)
+- [FileStore](./FileStore)：[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scipting/FileStore)
 
 **Codex完成几乎所有代码**
 
@@ -41,3 +42,4 @@
 - [PhotoSlide](./PhotoSlide) 修改自`scripting`群组中开发者分享的`图片管理器`脚本
 - [WLOC-Helper](./WLOC-Helper) 修改自`scripting`群组中`@Waa404`的脚本，修改定位功能基于 [wloc项目](https://github.com/Yu9191/wloc) 实现
 - [Memory-Days](./Memory-Days) 人物及纪念日添加的操作逻辑复用`scripting`群组中`@Waa404`的脚本，重新设计的UI和小组件
+- [FileStore](./FileStore) 原版为 [Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore) 脚本，在此脚本基础上进行了二次修改
