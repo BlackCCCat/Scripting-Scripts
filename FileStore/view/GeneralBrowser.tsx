@@ -68,7 +68,7 @@ import { getDefaultOpener, setDefaultOpener, OPENER_OPTIONS } from "../manager/D
 import { AppSettings, saveSettings, readSettings } from "../manager/Settings";
 import { SettingsPage } from "./SettingsPage";
 import { MountDirectoriesPage } from "./MountDirectoriesPage";
-import { Bookmark, getAllBookmarks, addDirectoryBookmark, removeBookmark, renameBookmark, resolveBookmarkPath } from "../manager/BookmarkManager";
+import { Bookmark, getAllBookmarks, addDirectoryBookmark, removeBookmark, renameBookmark, getBookmarkPath } from "../manager/BookmarkManager";
 import { ensureDir, makeTimestamp, importSinglePhotoResult } from "../manager/importHelpers";
 import { DROP_ACCEPTED_TYPES, handleDropToDirectory } from "../manager/dropHandler";
 import { makeDragConfig } from "./FileListItem";
@@ -2614,25 +2614,18 @@ function GeneralBrowser({
   };
 
   const handleNavigateToBookmark = async (bookmark: Bookmark) => {
-    // 优先通过持久书签解析当前可访问路径（软件更新/容器 UUID 变化后 bookmarkId 仍可能可解析）
-    let path = bookmark.path;
-    if (bookmark.bookmarkId) {
-      const resolved = resolveBookmarkPath(bookmark.bookmarkId);
-      if (resolved) path = resolved;
-    }
+    const path = getBookmarkPath(bookmark);
     // 仅 exists 不够：路径存在但失去访问权限（如软件更新后书签失效）时 exists 仍可能返回 true，
     // 必须真正读一次目录才能确认可访问。
     let accessible = false;
     try {
-      accessible = (await FileManager.exists(path)) && (await FileManager.readDirectory(path)) !== null;
+      accessible = path != null && (await FileManager.exists(path)) && (await FileManager.readDirectory(path)) !== null;
     } catch {
       accessible = false;
     }
     if (!accessible) {
-      // 书签失效（软件更新导致）→ 用 ToastOverlay 弹窗提醒重新挂载
-      showRemountWarning(bookmark.name);
-      removeBookmark(bookmark.name);
-      setBookmarkRefreshKey((k) => k + 1);
+      // 文件提供者可能暂时不可用；保留挂载与系统书签，允许稍后重试。
+      showToast(`暂时无法访问「${bookmark.name}」，请检查目录或书签授权`);
       return;
     }
     if (isHomePage && settings && onSettingsChange) {
@@ -2657,8 +2650,11 @@ function GeneralBrowser({
       confirmLabel: "确定",
     });
     if (newName && newName.trim() && newName.trim() !== bookmark.name) {
-      renameBookmark(bookmark.name, newName.trim());
-      setBookmarkRefreshKey((k) => k + 1);
+      if (renameBookmark(bookmark.name, newName.trim())) {
+        setBookmarkRefreshKey((k) => k + 1);
+      } else {
+        showToast("名称更新失败，请检查是否重名");
+      }
     }
   };
 

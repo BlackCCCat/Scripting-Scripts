@@ -1,7 +1,6 @@
 // 书签管理器 - 使用 Storage API 持久化
 import { Path } from "scripting";
 import { pathToDisplayName } from "./utils";
-import { readSettings, saveSettings } from "./Settings";
 
 export interface Bookmark {
   name: string;
@@ -11,7 +10,28 @@ export interface Bookmark {
 }
 
 const BOOKMARKS_KEY = "FileStore_Bookmarks";
+const BOOKMARK_ALIASES_KEY = "FileStore_BookmarkAliases";
 const SHARED_OPTIONS = { shared: true };
+
+/** FileStore 显示别名；不修改系统书签，取消挂载后仍保留。 */
+export function getBookmarkAliases(): Record<string, string> {
+  return Storage.get<Record<string, string>>(BOOKMARK_ALIASES_KEY, SHARED_OPTIONS) ?? {};
+}
+
+export function setBookmarkAlias(bookmarkId: string, newName: string): boolean {
+  const name = newName.trim();
+  if (!bookmarkId || !name) return false;
+  return Storage.set(BOOKMARK_ALIASES_KEY, { ...getBookmarkAliases(), [bookmarkId]: name }, SHARED_OPTIONS);
+}
+
+/** 显式删除系统书签时一并清理本地别名；访问失败不可调用。 */
+export function removeSystemBookmark(bookmarkId: string): boolean {
+  if (!FileManager.removeFileBookmark(bookmarkId)) return false;
+  const aliases = getBookmarkAliases();
+  delete aliases[bookmarkId];
+  Storage.set(BOOKMARK_ALIASES_KEY, aliases, SHARED_OPTIONS);
+  return true;
+}
 
 function getStorage(): any {
   return (globalThis as any).Storage;
@@ -53,7 +73,13 @@ function readBookmarks(): Bookmark[] {
     }
 
     const parsed = parseStoredBookmarks(raw);
-    if (parsed) return parsed;
+    if (parsed) {
+      const aliases = getBookmarkAliases();
+      return parsed.map((bookmark) => {
+        const alias = aliases[bookmark.bookmarkId];
+        return typeof alias === "string" ? { ...bookmark, name: alias } : bookmark;
+      });
+    }
   } catch (e) {
     console.log("读取书签失败:", e);
   }
@@ -121,15 +147,24 @@ export function addBookmarkManually(path: string, displayName: string): Bookmark
 /** 将已有的系统目录书签加入 FileStore 挂载列表 */
 export function mountExistingBookmark(path: string, bookmarkId: string, displayName?: string): Bookmark | null {
   try {
-    const trimmedPath = path.trim();
     const trimmedBookmarkId = bookmarkId.trim();
-    if (!trimmedPath || !trimmedBookmarkId) return null;
+    if (!trimmedBookmarkId) return null;
+    const resolvedPath = resolveBookmarkPath(trimmedBookmarkId);
+    if (!resolvedPath) return null;
 
     const bookmarks = readBookmarks();
-    const existing = bookmarks.find((bookmark) => bookmark.path === trimmedPath);
-    if (existing) return existing;
+    const existingIndex = bookmarks.findIndex((bookmark) =>
+      bookmark.bookmarkId === trimmedBookmarkId || bookmark.path === resolvedPath || bookmark.path === path.trim(),
+    );
+    if (existingIndex >= 0) {
+      const bookmark = { ...bookmarks[existingIndex], path: resolvedPath, bookmarkId: trimmedBookmarkId };
+      bookmarks[existingIndex] = bookmark;
+      saveBookmarks(bookmarks);
+      return bookmark;
+    }
 
-    const baseName = displayName?.trim() || pathToDisplayName(trimmedPath) || Path.basename(trimmedPath) || trimmedBookmarkId;
+    const alias = getBookmarkAliases()[trimmedBookmarkId];
+    const baseName = (typeof alias === "string" ? alias : displayName?.trim()) || pathToDisplayName(resolvedPath) || Path.basename(resolvedPath) || trimmedBookmarkId;
     let finalName = baseName;
     let counter = 2;
     while (bookmarks.some((bookmark) => bookmark.name === finalName)) {
@@ -137,7 +172,7 @@ export function mountExistingBookmark(path: string, bookmarkId: string, displayN
       counter++;
     }
 
-    const bookmark: Bookmark = { name: finalName, path: trimmedPath, bookmarkId: trimmedBookmarkId };
+    const bookmark: Bookmark = { name: finalName, path: resolvedPath, bookmarkId: trimmedBookmarkId };
     bookmarks.push(bookmark);
     saveBookmarks(bookmarks);
     return bookmark;
@@ -209,7 +244,7 @@ export function removeBookmark(name: string): boolean {
       saveBookmarks(filtered);
       if (removed?.bookmarkId) {
         try {
-          FileManager.removeFileBookmark(removed.bookmarkId);
+          removeSystemBookmark(removed.bookmarkId);
         } catch {}
       }
       return true;
@@ -242,7 +277,7 @@ export function removeBookmarkById(bookmarkId: string, path?: string): boolean {
       saveBookmarks(filtered);
       if (removed?.bookmarkId) {
         try {
-          FileManager.removeFileBookmark(removed.bookmarkId);
+          removeSystemBookmark(removed.bookmarkId);
         } catch {}
       }
       return true;
@@ -260,36 +295,7 @@ export function bookmarkExists(name: string): boolean {
   return bookmarks.some((b) => b.name === name);
 }
 
-/** 重命名系统书签：先创建新书签，成功后再移除旧书签 */
-export function renameFileBookmark(bookmarkId: string, path: string, newName: string): string | null {
-  try {
-    const trimmedName = newName.trim();
-    if (!bookmarkId || !path || !trimmedName) return null;
-    if (bookmarkId === trimmedName) return bookmarkId;
-    if (FileManager.bookmarkExists(trimmedName)) return null;
-
-    const newBookmarkId = FileManager.addFileBookmark(path, trimmedName);
-    if (!newBookmarkId) return null;
-    FileManager.removeFileBookmark(bookmarkId);
-
-    const settings = readSettings();
-    const bookmarkSettingKeys = ["homeDirectoryBookmarkName", "dualLeftBookmarkName", "dualRightBookmarkName"] as const;
-    let settingsChanged = false;
-    for (const key of bookmarkSettingKeys) {
-      if (settings[key] !== bookmarkId) continue;
-      settings[key] = newBookmarkId;
-      settingsChanged = true;
-    }
-    if (settingsChanged) saveSettings(settings);
-
-    return newBookmarkId;
-  } catch (e) {
-    console.log("重命名系统书签失败:", e);
-    return null;
-  }
-}
-
-/** 重命名书签 */
+/** 仅修改 FileStore 显示名称，不改目录、系统书签名或导航设置。 */
 export function renameBookmark(oldName: string, newName: string): boolean {
   try {
     const bookmarks = readBookmarks();
@@ -298,11 +304,9 @@ export function renameBookmark(oldName: string, newName: string): boolean {
       const bookmark = bookmarks[idx];
       const trimmedName = newName.trim();
       if (!trimmedName) return false;
-      const bookmarkId = bookmark.bookmarkId
-        ? renameFileBookmark(bookmark.bookmarkId, bookmark.path, trimmedName)
-        : bookmark.bookmarkId;
-      if (bookmark.bookmarkId && !bookmarkId) return false;
-      bookmarks[idx] = { ...bookmark, name: trimmedName, bookmarkId: bookmarkId || "" };
+      if (bookmarks.some((item, index) => index !== idx && item.name === trimmedName)) return false;
+      if (bookmark.bookmarkId) return setBookmarkAlias(bookmark.bookmarkId, trimmedName);
+      bookmarks[idx] = { ...bookmark, name: trimmedName };
       saveBookmarks(bookmarks);
       return true;
     }
@@ -313,18 +317,9 @@ export function renameBookmark(oldName: string, newName: string): boolean {
   }
 }
 
-/** 获取书签路径（优先用持久书签解析） */
-export function getBookmarkPath(name: string): string | null {
-  const bookmarks = readBookmarks();
-  const bookmark = bookmarks.find((b) => b.name === name);
-  if (!bookmark) return null;
-  // 如果有持久书签 ID，用它重新解析路径
-  if (bookmark.bookmarkId) {
-    const resolved = resolveBookmarkPath(bookmark.bookmarkId);
-    if (resolved) return resolved;
-  }
-  // 回退到保存的路径
-  return bookmark.path;
+/** 系统书签必须重新解析；只有手动挂载的目录才直接使用保存路径。 */
+export function getBookmarkPath(bookmark: Bookmark): string | null {
+  return bookmark.bookmarkId ? resolveBookmarkPath(bookmark.bookmarkId) : bookmark.path || null;
 }
 
 /** 获取内置目录列表（对齐 Scripting FileManager 官方路径 API） */

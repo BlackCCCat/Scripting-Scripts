@@ -3,7 +3,7 @@
 
 import { NavigationStack, List, Section, Text, Button, Toggle, HStack, VStack, Spacer, Image, EmptyView, Rectangle, ScrollView, Group, useState, useEffect } from "scripting";
 import { AppSettings } from "../manager/Settings";
-import { Bookmark, getAllBookmarks, mountExistingBookmark, removeBookmarkById, renameBookmark, renameFileBookmark, unmountBookmark } from "../manager/BookmarkManager";
+import { Bookmark, getAllBookmarks, getBookmarkAliases, mountExistingBookmark, removeBookmarkById, removeSystemBookmark, renameBookmark, setBookmarkAlias, unmountBookmark, resolveBookmarkPath } from "../manager/BookmarkManager";
 import { getMaxIndexFileSizeKB, setMaxIndexFileSizeKB } from "../manager/SearchState";
 import { getServerCount, subscribe as subscribeHttpServers } from "../manager/LocalHttpServer";
 import { resetAllDefaultOpeners } from "../manager/DefaultOpener";
@@ -66,35 +66,40 @@ interface DirectoryBookmarkOption extends Bookmark {
 
 function getDirectoryBookmarkOptions(): DirectoryBookmarkOption[] {
   const mountedBookmarks = getAllBookmarks();
-  const mountedByPath = new Map(mountedBookmarks.map((bookmark) => [bookmark.path, bookmark]));
+  const aliases = getBookmarkAliases();
+  const mountedById = new Map(mountedBookmarks.filter((bookmark) => bookmark.bookmarkId).map((bookmark) => [bookmark.bookmarkId, bookmark]));
+  const mountedByPath = new Map(mountedBookmarks.filter((bookmark) => !bookmark.bookmarkId).map((bookmark) => [bookmark.path, bookmark]));
   const listedPaths = new Set<string>();
+  const listedIds = new Set<string>();
   const options: DirectoryBookmarkOption[] = [];
 
   try {
     for (const bookmark of FileManager.getAllFileBookmarks()) {
-      if (listedPaths.has(bookmark.path)) continue;
+      const path = resolveBookmarkPath(bookmark.name) || bookmark.path;
+      if (listedPaths.has(path)) continue;
       try {
-        if (!FileManager.isDirectorySync(bookmark.path)) continue;
+        if (!FileManager.isDirectorySync(path)) continue;
       } catch {
         continue;
       }
-      const mounted = mountedByPath.get(bookmark.path);
+      const mounted = mountedById.get(bookmark.name) || mountedByPath.get(path);
       options.push(mounted
-        ? { ...mounted, mounted: true }
+        ? { ...mounted, path, mounted: true }
         : {
-            name: bookmark.name,
-            path: bookmark.path,
+            name: typeof aliases[bookmark.name] === "string" ? aliases[bookmark.name] : bookmark.name,
+            path,
             bookmarkId: bookmark.name,
             mounted: false,
           });
-      listedPaths.add(bookmark.path);
+      listedPaths.add(path);
+      listedIds.add(bookmark.name);
     }
   } catch (e) {
     console.log("读取系统目录书签失败:", e);
   }
 
   for (const bookmark of mountedBookmarks) {
-    if (listedPaths.has(bookmark.path)) continue;
+    if (listedIds.has(bookmark.bookmarkId) || listedPaths.has(bookmark.path)) continue;
     options.push({ ...bookmark, mounted: true });
   }
 
@@ -118,10 +123,10 @@ function MountedDirectoriesSettingsPage({ onBookmarksChange }: { onBookmarksChan
     }
     const renamed = bookmark.mounted
       ? renameBookmark(bookmark.name, newName)
-      : renameFileBookmark(bookmark.bookmarkId, bookmark.path, newName) != null;
+      : setBookmarkAlias(bookmark.bookmarkId, newName);
     if (renamed) {
       refresh();
-      showToast("已更新书签名称");
+      showToast("已更新显示名称");
     } else {
       showToast("名称更新失败");
     }
@@ -139,6 +144,8 @@ function MountedDirectoriesSettingsPage({ onBookmarksChange }: { onBookmarksChan
     if (mountExistingBookmark(bookmark.path, bookmark.bookmarkId, bookmark.name)) {
       refresh();
       showToast("已挂载目录");
+    } else {
+      showToast("暂时无法解析书签，请稍后重试");
     }
   };
 
@@ -153,7 +160,7 @@ function MountedDirectoriesSettingsPage({ onBookmarksChange }: { onBookmarksChan
 
     const deleted = bookmark.mounted
       ? removeBookmarkById(bookmark.bookmarkId, bookmark.path)
-      : FileManager.removeFileBookmark(bookmark.bookmarkId);
+      : removeSystemBookmark(bookmark.bookmarkId);
     if (deleted) {
       refresh();
       showToast("已删除书签");
@@ -161,7 +168,12 @@ function MountedDirectoriesSettingsPage({ onBookmarksChange }: { onBookmarksChan
   };
 
   return (
-    <List navigationTitle="挂载目录" navigationBarTitleDisplayMode="inline" listStyle="plain">
+    <List
+      navigationTitle="挂载目录"
+      navigationBarTitleDisplayMode="inline"
+      listStyle="plain"
+      onAppear={() => setDirectoryBookmarks(getDirectoryBookmarkOptions())}
+    >
       {directoryBookmarks.length > 0 ? (
         <Section
           listSectionSeparator={{ visibility: "hidden", edges: "bottom" }}

@@ -26,7 +26,7 @@ import {
   addDirectoryBookmark,
   addBookmarkManually,
   removeBookmarkById,
-  resolveBookmarkPath,
+  getBookmarkPath,
   renameBookmark,
   Bookmark,
   reorderBookmarks,
@@ -50,15 +50,6 @@ interface MountDirectoriesPageProps {
   onSettingsChange?: (settings: AppSettings) => void;
 }
 
-function getAccessiblePath(bookmark: Bookmark): string | null {
-  if (bookmark.bookmarkId) {
-    const resolved = resolveBookmarkPath(bookmark.bookmarkId);
-    if (resolved) return resolved;
-    // 书签已失效（重启/重装后路径变更），回退到原始路径
-  }
-  return bookmark.path;
-}
-
 function sameStringSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
   for (const value of a) {
@@ -78,8 +69,11 @@ function sameNumberMap(a: Map<string, number>, b: Map<string, number>): boolean 
 async function handleRename(bookmark: Bookmark, onRefresh: () => void) {
   const trimmed = await renameWithPrompt(bookmark.name);
   if (trimmed) {
-    renameBookmark(bookmark.name, trimmed);
-    onRefresh();
+    if (renameBookmark(bookmark.name, trimmed)) {
+      onRefresh();
+    } else {
+      showToast("名称更新失败，请检查是否重名");
+    }
   }
 }
 
@@ -150,23 +144,24 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
 
   // 异步检查每个书签的目录是否存在 + 统计文件个数
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       const results = await Promise.all(
         bookmarks.map(async (bm) => {
           try {
-            const exists = await FileManager.exists(bm.path);
-            if (!exists) {
+            const path = getBookmarkPath(bm);
+            if (!path || !(await FileManager.exists(path))) {
               return { path: bm.path, inaccessible: true, count: 0 };
-            } else if (showFolderItemCounts !== false) {
-              const items = await FileManager.readDirectory(bm.path);
-              return { path: bm.path, inaccessible: false, count: items.length };
             }
-            return { path: bm.path, inaccessible: false, count: 0 };
+            // 不显示数量时也检查读取权限，不能只凭 exists 判断可访问。
+            const items = await FileManager.readDirectory(path);
+            return { path: bm.path, inaccessible: false, count: showFolderItemCounts !== false ? items.length : 0 };
           } catch {
             return { path: bm.path, inaccessible: true, count: 0 };
           }
         }),
       );
+      if (cancelled) return;
       const badPaths = new Set<string>();
       const counts = new Map<string, number>();
       for (const r of results) {
@@ -176,7 +171,8 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
       setInaccessiblePaths((prev) => (sameStringSet(prev, badPaths) ? prev : badPaths));
       setFolderCounts((prev) => (sameNumberMap(prev, counts) ? prev : counts));
     })();
-  }, [bookmarks]);
+    return () => { cancelled = true; };
+  }, [bookmarks, showFolderItemCounts]);
 
   // 导航路径（用于文件夹侧滑进入）
   const navPath = useObservable<string[]>([]);
@@ -588,7 +584,7 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
               <ForEach
                 data={forEachData}
                 builder={(bookmark, index) => {
-                  const dirPath = getAccessiblePath(bookmark);
+                  const dirPath = getBookmarkPath(bookmark);
                   const bookmarkAsFile = {
                     name: bookmark.name,
                     path: bookmark.path,
@@ -625,12 +621,12 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
                           ? showFolderItemCounts !== false && folderCounts.has(bookmark.path)
                             ? `${folderCounts.get(bookmark.path)} 项`
                             : "文件夹"
-                          : "⚠ 软件更新导致路径变化，无法访问，请重新挂载"
+                          : "⚠ 暂时无法访问，请检查目录或书签授权"
                       }
                       subtitleForegroundStyle={isAccessible ? undefined : "red"}
                       hideTopSeparator={index === 0}
                       navPath={isAccessible ? navPath : undefined}
-                      navPageId={isAccessible ? "browser:" + bookmark.path : undefined}
+                      navPageId={isAccessible ? "browser:" + dirPath : undefined}
                       trailingActions={[
                         { title: "取消挂载", systemImage: "trash", role: "destructive", action: () => handleRemoveBookmark(bookmark) },
                         {
