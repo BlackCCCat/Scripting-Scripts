@@ -69,6 +69,10 @@ export type TranslationResult = {
   translatedText: string
 }
 
+export type TranslationProgressCallbacks = {
+  onPartialText?: (text: string) => void | Promise<void>
+}
+
 export type EngineTranslationState = {
   engineId: string
   engineName: string

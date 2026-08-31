@@ -2,10 +2,12 @@ import { fetch, type Response } from "scripting"
 import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
   AiApiCompatibilityMode,
+  TranslationProgressCallbacks,
   TranslationRequest,
   TranslationResult,
   TranslatorEngineEntry,
 } from "../types"
+import { translateChunkedText } from "./translation_chunking"
 
 const GOOGLE_WEB_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 const DEEPLX_DEFAULT_ENDPOINT = "http://localhost:1188/translate"
@@ -14,6 +16,7 @@ const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
 const SILICONFLOW_DEFAULT_BASE_URL = "https://api.siliconflow.cn"
 const QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode"
 const SUCCESSFUL_AI_ENDPOINT_CACHE = new Map<string, string>()
+const AI_TRANSLATION_TIMEOUT_SECONDS = 60
 
 const AI_TRANSLATION_SYSTEM_PROMPT = [
   "You are a translation engine for an iOS translation panel.",
@@ -387,7 +390,7 @@ function buildChatCompletionBody(
   if (mode === "qwen") {
     return JSON.stringify({
       model,
-      stream: false,
+      stream: true,
       messages: [
         { role: "user", content: request.sourceText },
       ],
@@ -402,7 +405,7 @@ function buildChatCompletionBody(
     return JSON.stringify({
       model,
       temperature: 0.1,
-      stream: false,
+      stream: true,
       enable_thinking: false,
       response_format: {
         type: "text",
@@ -417,7 +420,7 @@ function buildChatCompletionBody(
   return JSON.stringify({
     model,
     temperature: 0.1,
-    stream: false,
+    stream: true,
     messages: [
       { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
       { role: "user", content: buildAiUserPrompt(request) },
@@ -429,7 +432,7 @@ function buildResponsesBody(model: string, request: TranslationRequest) {
   return JSON.stringify({
     model,
     temperature: 0.1,
-    stream: false,
+    stream: true,
     instructions: AI_TRANSLATION_SYSTEM_PROMPT,
     input: buildAiUserPrompt(request),
   })
@@ -439,7 +442,7 @@ function buildMessagesBody(model: string, request: TranslationRequest) {
   return JSON.stringify({
     model,
     temperature: 0.1,
-    stream: false,
+    stream: true,
     messages: [
       { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
       { role: "user", content: buildAiUserPrompt(request) },
@@ -508,6 +511,152 @@ function parseAiSseResponse(raw: string) {
   }
 
   return normalizeAiTranslatedText(text)
+}
+
+type StreamTextUpdate =
+  | { mode: "append"; text: string }
+  | { mode: "replace"; text: string }
+  | { mode: "done" }
+  | { mode: "ignore" }
+  | { mode: "error"; message: string }
+
+function parseAiStreamPayload(payload: any): StreamTextUpdate {
+  const eventType = String(payload?.type ?? "")
+  if (eventType === "error") {
+    const detail = truncateErrorDetail(String(
+      payload?.message
+      ?? payload?.error?.message
+      ?? ""
+    ))
+    return {
+      mode: "error",
+      message: detail || "AI 接口流式响应出错。",
+    }
+  }
+
+  if (eventType === "response.output_text.delta") {
+    const delta = String(payload?.delta ?? "")
+    return delta ? { mode: "append", text: delta } : { mode: "ignore" }
+  }
+
+  if (eventType === "response.output_text.done") {
+    const text = normalizeAiTranslatedText(String(payload?.text ?? ""))
+    return text ? { mode: "replace", text } : { mode: "done" }
+  }
+
+  const delta = String(
+    payload?.choices?.[0]?.delta?.content
+    ?? ""
+  )
+  if (delta) {
+    return { mode: "append", text: delta }
+  }
+
+  const snapshot = parseAiTranslatedText(payload)
+  if (snapshot) {
+    return { mode: "replace", text: snapshot }
+  }
+
+  return { mode: "ignore" }
+}
+
+function parseAiSseBlock(block: string): StreamTextUpdate {
+  const dataLines = block
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+
+  if (!dataLines.length) return { mode: "ignore" }
+
+  const data = dataLines.join("\n").trim()
+  if (!data || data === "[DONE]") {
+    return { mode: "done" }
+  }
+
+  try {
+    return parseAiStreamPayload(JSON.parse(data))
+  } catch {
+    const text = data
+    return text ? { mode: "append", text } : { mode: "ignore" }
+  }
+}
+
+function nextSseSeparatorIndex(buffer: string) {
+  const match = buffer.match(/\r?\n\r?\n/)
+  return match?.index ?? -1
+}
+
+function nextSseSeparatorLength(buffer: string) {
+  const match = buffer.match(/\r?\n\r?\n/)
+  return match?.[0]?.length ?? 0
+}
+
+async function readAiStreamResponse(
+  response: Response,
+  callbacks?: TranslationProgressCallbacks
+) {
+  let buffer = ""
+  let rawText = ""
+  let translatedText = ""
+  let lastPartialText = ""
+  let sawSse = false
+
+  for await (const chunk of response.dataStream as any) {
+    const piece = readStringFromData(chunk, ["utf-8", "utf8", "gb18030", "gbk"])
+    if (!piece) continue
+
+    rawText += piece
+    buffer += piece
+
+    while (true) {
+      const separatorIndex = nextSseSeparatorIndex(buffer)
+      if (separatorIndex < 0) break
+
+      const separatorLength = nextSseSeparatorLength(buffer)
+      const block = buffer.slice(0, separatorIndex)
+      buffer = buffer.slice(separatorIndex + separatorLength)
+
+      const update = parseAiSseBlock(block)
+      if (update.mode === "ignore" || update.mode === "done") {
+        continue
+      }
+      if (update.mode === "error") {
+        throw new Error(update.message)
+      }
+
+      sawSse = true
+      translatedText = update.mode === "replace"
+        ? update.text
+        : `${translatedText}${update.text}`
+
+      const partialText = normalizeAiTranslatedText(translatedText)
+      if (partialText && partialText !== lastPartialText) {
+        lastPartialText = partialText
+        await callbacks?.onPartialText?.(partialText)
+      }
+    }
+  }
+
+  if (buffer.trim().startsWith("data:")) {
+    const update = parseAiSseBlock(buffer)
+    if (update.mode === "error") {
+      throw new Error(update.message)
+    }
+    if (update.mode === "append") {
+      translatedText += update.text
+      sawSse = true
+    } else if (update.mode === "replace") {
+      translatedText = update.text
+      sawSse = true
+    }
+  }
+
+  if (!sawSse) {
+    return parseAiResponseText(rawText)
+  }
+
+  return normalizeAiTranslatedText(translatedText)
 }
 
 function looksLikeHtmlDocument(raw: string) {
@@ -631,9 +780,10 @@ async function translateWithDeepLX(
   }
 }
 
-async function translateWithAiApi(
+async function translateWithAiApiSingle(
   engine: TranslatorEngineEntry,
-  request: TranslationRequest
+  request: TranslationRequest,
+  callbacks?: TranslationProgressCallbacks
 ): Promise<TranslationResult> {
   const mode = normalizeAiMode(engine.config?.compatibilityMode)
   const baseUrl = ensureConfigured(resolveAiBaseUrl(mode, engine.config?.baseUrl), "请先配置 AI 接口地址。")
@@ -661,7 +811,7 @@ async function translateWithAiApi(
         method: "POST",
         headers,
         body,
-        timeout: 25,
+        timeout: AI_TRANSLATION_TIMEOUT_SECONDS,
       })
 
       if (!response.ok) {
@@ -676,12 +826,7 @@ async function translateWithAiApi(
         sawHtmlResponse = true
         continue
       }
-      const raw = await readResponseString(response)
-      if (looksLikeHtmlDocument(raw)) {
-        sawHtmlResponse = true
-        continue
-      }
-      translatedText = parseAiResponseText(raw)
+      translatedText = await readAiStreamResponse(response, callbacks)
       if (translatedText && isLikelyUntranslated(request, translatedText)) {
         translatedText = ""
         sawUntranslatedResponse = true
@@ -743,7 +888,8 @@ export function isExternalEngineConfigured(engine: TranslatorEngineEntry) {
 
 export async function translateWithExternalEngine(
   engine: TranslatorEngineEntry,
-  request: TranslationRequest
+  request: TranslationRequest,
+  callbacks?: TranslationProgressCallbacks
 ): Promise<TranslationResult> {
   switch (engine.kind) {
     case "google_translate":
@@ -751,7 +897,17 @@ export async function translateWithExternalEngine(
     case "deeplx":
       return await translateWithDeepLX(engine, request)
     case "ai_api":
-      return await translateWithAiApi(engine, request)
+      return await translateChunkedText(
+        request,
+        {
+          maxChunkLength: 1400,
+          concurrency: 2,
+          translateChunk: async (chunkRequest, chunkCallbacks) => (
+            await translateWithAiApiSingle(engine, chunkRequest, chunkCallbacks)
+          ),
+        },
+        callbacks
+      )
     default:
       throw new Error("当前引擎不是受支持的外部翻译引擎。")
   }

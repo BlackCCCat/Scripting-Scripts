@@ -1,3 +1,6 @@
+## v2.14.2
+- 优化翻译速度
+
 ## v2.14.1
 - 迁移shared storage到脚本私有storage
 

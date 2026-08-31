@@ -284,7 +284,25 @@ export function TranslationPanel(props: TranslationPanelProps) {
     }))
   }
 
-  async function translateEngine(engine: typeof visibleEngines[number]) {
+  function updatePartialEngineResult(engineId: string, translatedText: string) {
+    setEngineResults((current) => current.map((item) => (
+      item.engineId === engineId
+        ? {
+            ...item,
+            translatedText,
+            errorText: "",
+            isTranslating: true,
+          }
+        : item
+    )))
+  }
+
+  async function translateEngine(
+    engine: typeof visibleEngines[number],
+    options?: {
+      onPartialText?: (text: string) => void | Promise<void>
+    }
+  ) {
     const request = {
       sourceText,
       sourceLanguageCode,
@@ -292,12 +310,12 @@ export function TranslationPanel(props: TranslationPanelProps) {
     }
 
     const result = engine.kind === "apple_intelligence"
-      ? await appleEngine.translate(request)
+      ? await appleEngine.translate(request, options)
       : engine.kind === "assistant"
-        ? await createAssistantTranslationEngine(assistantConfig).translate(request)
+        ? await createAssistantTranslationEngine(assistantConfig).translate(request, options)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
-          : await translateWithExternalEngine(engine, request)
+          : await translateWithExternalEngine(engine, request, options)
 
     return {
       engineId: engine.id,
@@ -395,7 +413,12 @@ export function TranslationPanel(props: TranslationPanelProps) {
             ...assistantLogOptions(engine),
           })
           try {
-            const result = await translateEngine(engine)
+            const result = await translateEngine(engine, {
+              onPartialText: async (text: string) => {
+                if (requestId !== requestIdRef.current) return
+                updatePartialEngineResult(engine.id, text)
+              },
+            })
             if (requestId !== requestIdRef.current) return null
             logTranslationEvent("引擎翻译成功", {
               requestId,
@@ -558,7 +581,12 @@ export function TranslationPanel(props: TranslationPanelProps) {
     })
 
     try {
-      const result = await translateEngine(engine)
+      const result = await translateEngine(engine, {
+        onPartialText: async (text: string) => {
+          if (requestId !== requestIdRef.current) return
+          updatePartialEngineResult(engine.id, text)
+        },
+      })
       if (requestId !== requestIdRef.current) return
       logTranslationEvent("单引擎重试成功", {
         requestId,
@@ -721,7 +749,14 @@ export function TranslationPanel(props: TranslationPanelProps) {
               </HStack>
             }
           >
-            {result.isTranslating ? (
+            {result.isTranslating && result.translatedText ? (
+              <VStack spacing={10} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+                <CopyableTextRow
+                  text={result.translatedText}
+                />
+                <ProgressView />
+              </VStack>
+            ) : result.isTranslating ? (
               <VStack spacing={10} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
                 <ProgressView />
               </VStack>

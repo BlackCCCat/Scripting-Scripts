@@ -1,6 +1,14 @@
 import type { ReadableStream } from "scripting"
 import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
-import type { TranslationRequest, TranslationResult } from "../types"
+import type {
+  TranslationProgressCallbacks,
+  TranslationRequest,
+  TranslationResult,
+} from "../types"
+import {
+  splitTranslationText,
+  translateChunkedText,
+} from "./translation_chunking"
 
 const SESSION_INSTRUCTIONS = [
   "You are a translation engine for an iOS translation panel.",
@@ -67,61 +75,6 @@ function responseTokenBudget(sourceText: string) {
   return Math.min(8000, Math.max(1400, Math.ceil(sourceText.length * 3.2)))
 }
 
-function findChunkBoundary(text: string, maxLength: number) {
-  const candidates = [
-    text.lastIndexOf("\n\n", maxLength),
-    text.lastIndexOf("\n", maxLength),
-    text.lastIndexOf("。", maxLength),
-    text.lastIndexOf("！", maxLength),
-    text.lastIndexOf("？", maxLength),
-    text.lastIndexOf(". ", maxLength),
-    text.lastIndexOf("! ", maxLength),
-    text.lastIndexOf("? ", maxLength),
-    text.lastIndexOf("；", maxLength),
-    text.lastIndexOf(";", maxLength),
-    text.lastIndexOf("，", maxLength),
-    text.lastIndexOf(", ", maxLength),
-    text.lastIndexOf(" ", maxLength),
-  ]
-
-  const boundary = candidates.find((index) => index >= Math.floor(maxLength * 0.55))
-  if (boundary == null || boundary < 1) {
-    return maxLength
-  }
-
-  if (text.startsWith("\n\n", boundary)) {
-    return boundary + 2
-  }
-
-  if (
-    text.startsWith(". ", boundary) ||
-    text.startsWith("! ", boundary) ||
-    text.startsWith("? ", boundary) ||
-    text.startsWith(", ", boundary)
-  ) {
-    return boundary + 1
-  }
-
-  return boundary + 1
-}
-
-function splitIntoChunks(text: string, maxLength = 700) {
-  const chunks: string[] = []
-  let remaining = text
-
-  while (remaining.length > maxLength) {
-    const boundary = findChunkBoundary(remaining, maxLength)
-    chunks.push(remaining.slice(0, boundary))
-    remaining = remaining.slice(boundary)
-  }
-
-  if (remaining.length > 0) {
-    chunks.push(remaining)
-  }
-
-  return chunks.filter((chunk) => chunk.length > 0)
-}
-
 function normalizeStreamContent(content: string) {
   const normalized = content
     .replace(/^```[\w-]*\n?/, "")
@@ -149,10 +102,13 @@ function isSuspiciouslyShort(sourceText: string, translatedText: string) {
   return translatedText.trim().length < Math.max(24, Math.floor(sourceText.trim().length * 0.16))
 }
 
-async function readStreamText(stream: ReadableStream<any>) {
+async function readStreamText(
+  stream: ReadableStream<any>,
+  callbacks?: TranslationProgressCallbacks
+) {
   let fullText = ""
+  let lastPartialText = ""
 
-  // 这里兼容增量片段和“整段覆写”两种流式返回，避免把内容重复拼进去。
   for await (const chunk of stream as any) {
     const piece = String(chunk ?? "")
     if (!piece) continue
@@ -163,6 +119,12 @@ async function readStreamText(stream: ReadableStream<any>) {
     }
 
     fullText += piece
+
+    const partialText = normalizeStreamContent(fullText)
+    if (partialText && partialText !== lastPartialText) {
+      lastPartialText = partialText
+      await callbacks?.onPartialText?.(partialText)
+    }
   }
 
   return normalizeStreamContent(fullText)
@@ -263,6 +225,7 @@ export function createTranslationEngine() {
 
   async function translateSingle(
     request: TranslationRequest,
+    callbacks?: TranslationProgressCallbacks,
     allowRecursiveSplit = true
   ): Promise<TranslationResult> {
     const prompt = buildPrompt(request)
@@ -275,7 +238,7 @@ export function createTranslationEngine() {
         temperature: 0.1,
         maxResponseTokens: responseTokenBudget(request.sourceText),
       })
-      const translatedText = await readStreamText(stream)
+      const translatedText = await readStreamText(stream, callbacks)
 
       if (!translatedText) {
         throw new Error("模型没有返回可用译文。")
@@ -286,22 +249,19 @@ export function createTranslationEngine() {
         request.sourceText.length > 360 &&
         isSuspiciouslyShort(request.sourceText, translatedText)
       ) {
-        // 这里遇到疑似截断时再细分一次，优先保住完整性，不去动面板层逻辑。
-        const subChunks = splitIntoChunks(request.sourceText, Math.max(260, Math.floor(request.sourceText.length / 2)))
-
-        if (subChunks.length > 1) {
-          const translatedChunks: string[] = []
-          for (const chunk of subChunks) {
-            const result = await translateSingle(
-              { ...request, sourceText: chunk },
-              false
-            )
-            translatedChunks.push(result.translatedText)
-          }
-
-          return {
-            translatedText: translatedChunks.join(""),
-          }
+        const maxChunkLength = Math.max(260, Math.floor(request.sourceText.length / 2))
+        if (splitTranslationText(request.sourceText, maxChunkLength).length > 1) {
+          return await translateChunkedText(
+            request,
+            {
+              maxChunkLength,
+              concurrency: 1,
+              translateChunk: async (chunkRequest, chunkCallbacks) => (
+                await translateSingle(chunkRequest, chunkCallbacks, false)
+              ),
+            },
+            callbacks
+          )
         }
       }
 
@@ -324,31 +284,21 @@ export function createTranslationEngine() {
       prewarmSession.prewarm("Translate input text into the selected target language.")
     },
 
-    async translate(request: TranslationRequest): Promise<TranslationResult> {
-      const chunks = splitIntoChunks(request.sourceText)
-
-      if (chunks.length === 1) {
-        return await translateSingle(request)
-      }
-
-      const translatedChunks: string[] = []
-
-      for (const chunk of chunks) {
-        const result = await translateSingle({
-          ...request,
-          sourceText: chunk,
-        })
-        translatedChunks.push(result.translatedText)
-      }
-
-      const translatedText = translatedChunks.join("")
-      if (!translatedText.trim()) {
-        throw new Error("模型没有返回可用译文。")
-      }
-
-      return {
-        translatedText,
-      }
+    async translate(
+      request: TranslationRequest,
+      callbacks?: TranslationProgressCallbacks
+    ): Promise<TranslationResult> {
+      return await translateChunkedText(
+        request,
+        {
+          maxChunkLength: 700,
+          concurrency: 1,
+          translateChunk: async (chunkRequest, chunkCallbacks) => (
+            await translateSingle(chunkRequest, chunkCallbacks)
+          ),
+        },
+        callbacks
+      )
     },
 
     dispose() {

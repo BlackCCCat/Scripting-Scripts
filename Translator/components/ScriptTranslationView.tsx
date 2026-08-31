@@ -332,7 +332,25 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     }))
   }
 
-  async function translateEngine(engine: typeof visibleEngines[number]) {
+  function updatePartialEngineResult(engineId: string, translatedText: string) {
+    setEngineResults((current) => current.map((item) => (
+      item.engineId === engineId
+        ? {
+            ...item,
+            translatedText,
+            errorText: "",
+            isTranslating: true,
+          }
+        : item
+    )))
+  }
+
+  async function translateEngine(
+    engine: typeof visibleEngines[number],
+    options?: {
+      onPartialText?: (text: string) => void | Promise<void>
+    }
+  ) {
     const request = {
       sourceText,
       sourceLanguageCode,
@@ -340,12 +358,12 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     }
 
     const result = engine.kind === "apple_intelligence"
-      ? await appleEngine.translate(request)
+      ? await appleEngine.translate(request, options)
       : engine.kind === "assistant"
-        ? await createAssistantTranslationEngine(assistantConfig).translate(request)
+        ? await createAssistantTranslationEngine(assistantConfig).translate(request, options)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
-          : await translateWithExternalEngine(engine, request)
+          : await translateWithExternalEngine(engine, request, options)
 
     return {
       engineId: engine.id,
@@ -461,7 +479,12 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         visibleEngines.map(async (engine) => {
           const engineStartedAt = Date.now()
           try {
-            const result = await translateEngine(engine)
+            const result = await translateEngine(engine, {
+              onPartialText: async (text: string) => {
+                if (requestId !== requestIdRef.current) return
+                updatePartialEngineResult(engine.id, text)
+              },
+            })
             if (requestId !== requestIdRef.current) return null
 
             logTranslationEvent("脚本内引擎翻译成功", {
@@ -551,7 +574,12 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     )))
 
     try {
-      const result = await translateEngine(engine)
+      const result = await translateEngine(engine, {
+        onPartialText: async (text: string) => {
+          if (requestId !== requestIdRef.current) return
+          updatePartialEngineResult(engine.id, text)
+        },
+      })
       if (requestId !== requestIdRef.current) return
 
       logTranslationEvent("脚本内单引擎重试成功", {
@@ -830,7 +858,14 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
               listRowSeparator="hidden"
               listSectionSeparator="hidden"
             >
-              {result.isTranslating ? (
+              {result.isTranslating && result.translatedText ? (
+                <VStack spacing={10}>
+                  <CopyableTextRow
+                    text={result.translatedText}
+                  />
+                  <ProgressView />
+                </VStack>
+              ) : result.isTranslating ? (
                 <WanxiangCard>
                   <VStack spacing={10} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
                     <ProgressView />

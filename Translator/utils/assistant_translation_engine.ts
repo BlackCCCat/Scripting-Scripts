@@ -1,4 +1,10 @@
-import type { TranslationEngineConfig, TranslationRequest, TranslationResult } from "../types"
+import type {
+  TranslationEngineConfig,
+  TranslationProgressCallbacks,
+  TranslationRequest,
+  TranslationResult,
+} from "../types"
+import { translateChunkedText } from "./translation_chunking"
 
 const ASSISTANT_TRANSLATION_SYSTEM_PROMPT = [
   "You are a translation engine for an iOS translation panel.",
@@ -55,41 +61,70 @@ export function createAssistantTranslationEngine(config?: TranslationEngineConfi
     ? (customProvider ? { custom: customProvider } : undefined)
     : providerId
 
+  async function translateSingle(
+    request: TranslationRequest,
+    callbacks?: TranslationProgressCallbacks
+  ): Promise<TranslationResult> {
+    const stream = await Assistant.requestStreaming({
+      systemPrompt: ASSISTANT_TRANSLATION_SYSTEM_PROMPT,
+      provider,
+      modelId: modelId || undefined,
+      messages: {
+        role: "user",
+        content: [
+          `Source language: ${request.sourceLanguageCode}`,
+          `Target language: ${request.targetLanguageCode}`,
+          "Translate the following text:",
+          "",
+          "<text>",
+          request.sourceText,
+          "</text>",
+        ].join("\n"),
+      },
+    })
+
+    let translatedText = ""
+    let lastPartialText = ""
+
+    for await (const chunk of stream as any) {
+      if (chunk?.type !== "text") continue
+      translatedText += String(chunk.content ?? "")
+
+      const partialText = normalizeAssistantTranslation(translatedText)
+      if (partialText && partialText !== lastPartialText) {
+        lastPartialText = partialText
+        await callbacks?.onPartialText?.(partialText)
+      }
+    }
+
+    const normalized = normalizeAssistantTranslation(translatedText)
+    if (!normalized) {
+      throw new Error("Assistant 没有返回可用译文。")
+    }
+
+    return {
+      translatedText: normalized,
+    }
+  }
+
   return {
-    async translate(request: TranslationRequest): Promise<TranslationResult> {
-      const stream = await Assistant.requestStreaming({
-        systemPrompt: ASSISTANT_TRANSLATION_SYSTEM_PROMPT,
-        provider,
-        modelId: modelId || undefined,
-        messages: {
-          role: "user",
-          content: [
-            `Source language: ${request.sourceLanguageCode}`,
-            `Target language: ${request.targetLanguageCode}`,
-            "Translate the following text:",
-            "",
-            "<text>",
-            request.sourceText,
-            "</text>",
-          ].join("\n"),
+    translateSingle,
+
+    async translate(
+      request: TranslationRequest,
+      callbacks?: TranslationProgressCallbacks
+    ): Promise<TranslationResult> {
+      return await translateChunkedText(
+        request,
+        {
+          maxChunkLength: 1400,
+          concurrency: 2,
+          translateChunk: async (chunkRequest, chunkCallbacks) => (
+            await translateSingle(chunkRequest, chunkCallbacks)
+          ),
         },
-      })
-
-      let translatedText = ""
-
-      for await (const chunk of stream as any) {
-        if (chunk?.type !== "text") continue
-        translatedText += String(chunk.content ?? "")
-      }
-
-      const normalized = normalizeAssistantTranslation(translatedText)
-      if (!normalized) {
-        throw new Error("Assistant 没有返回可用译文。")
-      }
-
-      return {
-        translatedText: normalized,
-      }
+        callbacks
+      )
     },
   }
 }
