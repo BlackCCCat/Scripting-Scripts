@@ -1,5 +1,8 @@
 {
-  "intentInputTypes": [],
+  "intentInputTypes": [
+    "Text",
+    "URLs"
+  ],
   "runInApp": false,
   "contributors": [],
   "name": "Translator",
