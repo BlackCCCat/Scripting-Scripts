@@ -1,10 +1,7 @@
 import {
-  Button,
   Intent,
   Navigation,
-  NavigationStack,
   Script,
-  VStack,
   fetch,
 } from "scripting"
 
@@ -49,33 +46,6 @@ async function loadAppStoreText(reference: AppStoreReference) {
   return text
 }
 
-function IntentTranslationView(props: { sourceText: string }) {
-  const dismiss = Navigation.useDismiss()
-
-  return (
-    <NavigationStack>
-      <VStack
-        toolbar={{
-          cancellationAction: (
-            <Button
-              title="关闭"
-              systemImage="xmark"
-              action={dismiss}
-            />
-          ),
-        }}
-      >
-        <TranslationPanel
-          inputText={props.sourceText}
-          allowsReplacement={false}
-          embedded
-          navigationTitle="翻译"
-        />
-      </VStack>
-    </NavigationStack>
-  )
-}
-
 async function run() {
   try {
     const input = resolveIntentInput({
@@ -97,7 +67,13 @@ async function run() {
     })
 
     await Navigation.present({
-      element: <IntentTranslationView sourceText={sourceText} />,
+      element: (
+        <TranslationPanel
+          inputText={sourceText}
+          allowsReplacement={false}
+          showsScrollContentBackground
+        />
+      ),
     })
     Script.exit()
   } catch (error) {

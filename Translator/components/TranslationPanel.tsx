@@ -54,6 +54,7 @@ type TranslationPanelProps = {
   embedded?: boolean
   navigationTitle?: string
   showDismissButton?: boolean
+  showsScrollContentBackground?: boolean
   settingsRefreshKey?: number
 }
 
@@ -635,12 +636,16 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const sourceShouldCollapse = shouldCollapseSourceText(sourceText)
   const listProps = {
     listStyle: "insetGroup" as const,
-    scrollContentBackground: "hidden" as const,
-    contentMargins: {
-      edges: "top" as const,
-      insets: 0,
-      placement: "scrollContent" as const,
-    },
+    scrollContentBackground: props.showsScrollContentBackground
+      ? "visible" as const
+      : "hidden" as const,
+    ...(props.showsScrollContentBackground ? {} : {
+      contentMargins: {
+        edges: "top" as const,
+        insets: 0,
+        placement: "scrollContent" as const,
+      },
+    }),
     translationHost: systemTranslationHost,
     ...(props.embedded ? {} : {
       presentationDetents: ["medium", "large"] as PresentationDetent[],
