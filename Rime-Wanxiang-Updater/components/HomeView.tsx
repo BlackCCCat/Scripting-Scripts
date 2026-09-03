@@ -2543,6 +2543,7 @@ export function HomeView() {
             k="本地方案"
             v={localSchemeVersion}
             valueColor={schemeValueColor}
+            compactMarker
             onTap={() => showInformationPair("方案信息", "本地方案", localSchemeVersion, "远程方案", remoteSchemeVer)}
           />
           <RowKV
@@ -2570,6 +2571,7 @@ export function HomeView() {
           <RowKV
             k="远程方案"
             v={remoteSchemeVer}
+            compactMarker
             onTap={() => showInformationPair("方案信息", "本地方案", localSchemeVersion, "远程方案", remoteSchemeVer)}
           />
           <RowKV
