@@ -1,4 +1,4 @@
-import type { ClipboardClearRange, ClipGroup, ClipItem, ClipListScope } from "../types"
+import type { ClipboardClearRange, ClipGroup, ClipItem, ClipKindCountsByScope, ClipListScope } from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
 
 type DB = {
@@ -281,30 +281,54 @@ export async function listClipGroups(options: {
   }
 }
 
-async function fetchClipCounts(db: DB): Promise<Record<ClipListScope, number>> {
+async function fetchClipKindCounts(db: DB): Promise<ClipKindCountsByScope> {
   const rows = await db.fetchAll(`
     SELECT
       COUNT(CASE WHEN manual_favorite = 0 THEN 1 END) AS clipboard_count,
-      COUNT(CASE WHEN favorite = 1 THEN 1 END) AS favorite_count
+      COUNT(CASE WHEN manual_favorite = 0 AND kind = 'text' THEN 1 END) AS clipboard_text_count,
+      COUNT(CASE WHEN manual_favorite = 0 AND kind = 'url' THEN 1 END) AS clipboard_url_count,
+      COUNT(CASE WHEN manual_favorite = 0 AND kind = 'image' THEN 1 END) AS clipboard_image_count,
+      COUNT(CASE WHEN favorite = 1 THEN 1 END) AS favorite_count,
+      COUNT(CASE WHEN favorite = 1 AND kind = 'text' THEN 1 END) AS favorite_text_count,
+      COUNT(CASE WHEN favorite = 1 AND kind = 'url' THEN 1 END) AS favorite_url_count,
+      COUNT(CASE WHEN favorite = 1 AND kind = 'image' THEN 1 END) AS favorite_image_count
     FROM clips
     WHERE deleted_at IS NULL
   `)
   const row = rows[0] ?? {}
   return {
-    clipboard: Number(row.clipboard_count ?? 0),
-    favorites: Number(row.favorite_count ?? 0),
+    clipboard: {
+      total: Number(row.clipboard_count ?? 0),
+      text: Number(row.clipboard_text_count ?? 0),
+      url: Number(row.clipboard_url_count ?? 0),
+      image: Number(row.clipboard_image_count ?? 0),
+    },
+    favorites: {
+      total: Number(row.favorite_count ?? 0),
+      text: Number(row.favorite_text_count ?? 0),
+      url: Number(row.favorite_url_count ?? 0),
+      image: Number(row.favorite_image_count ?? 0),
+    },
   }
 }
 
-export async function countClipsByScope(): Promise<Record<ClipListScope, number>> {
+export async function countClipKindsByScope(): Promise<ClipKindCountsByScope> {
   const db = await openCaisDatabase()
   try {
-    return await fetchClipCounts(db)
+    return await fetchClipKindCounts(db)
   } catch (error) {
     if (initialized) throw error
     await ensureSchema(db)
     initialized = true
-    return fetchClipCounts(db)
+    return fetchClipKindCounts(db)
+  }
+}
+
+export async function countClipsByScope(): Promise<Record<ClipListScope, number>> {
+  const counts = await countClipKindsByScope()
+  return {
+    clipboard: counts.clipboard.total,
+    favorites: counts.favorites.total,
   }
 }
 

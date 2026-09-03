@@ -30,7 +30,7 @@ import {
   useColorScheme,
 } from "scripting"
 
-import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
+import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKindCountsByScope, ClipListScope, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
@@ -39,6 +39,7 @@ import {
   clearFavoriteClips,
   editClipContent,
   getClipGroups,
+  getClipKindCounts,
   getFullClipContent,
   markCopied,
   softDeleteClip,
@@ -95,6 +96,10 @@ let intentionalMinimize = false
 let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
 type AppRootMode = "app" | "home"
+const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
+  favorites: { total: 0, text: 0, url: 0, image: 0 },
+  clipboard: { total: 0, text: 0, url: 0, image: 0 },
+}
 
 function renderClipOutput(item: ClipItem, content: string): string {
   return item.manualFavorite ? renderRuntimeTemplate(content) : content
@@ -404,6 +409,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
+  const [clipKindCounts, setClipKindCounts] = useState<ClipKindCountsByScope>(EMPTY_CLIP_KIND_COUNTS)
   const [homeInitialDataReady, setHomeInitialDataReady] = useState(!homeScreenMode)
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
@@ -737,13 +743,15 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     const generation = ++appRefreshGeneration
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
     const search = queryRef.current.trim()
-    const [nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
+    const [nextFavoriteGroups, nextClipboardGroups, nextClipKindCounts] = await Promise.all([
       getClipGroups("favorites", search, groupLimit),
       getClipGroups("clipboard", search, groupLimit),
+      getClipKindCounts(),
     ])
     if (generation !== appRefreshGeneration) return
     setFavoriteGroups(nextFavoriteGroups)
     setClipboardGroups(nextClipboardGroups)
+    setClipKindCounts(nextClipKindCounts)
     if (homeScreenMode) setHomeInitialDataReady(true)
   }
 
@@ -1477,10 +1485,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     )
   }
 
-  function searchPanel() {
+  function searchPanel(scope: ClipListScope) {
     const outerPadding = homeScreenMode
       ? { top: 2, bottom: 4, leading: 16, trailing: 16 }
       : { top: 10, bottom: 6, leading: 16, trailing: 16 }
+    const counts = clipKindCounts[scope]
+    const metrics = [
+      { systemName: "list.number", value: counts.total },
+      { systemName: "doc.text", value: counts.text },
+      { systemName: "link", value: counts.url },
+      { systemName: "photo", value: counts.image },
+    ]
 
     return (
       <VStack
@@ -1498,7 +1513,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         >
           <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
             <Image systemName="magnifyingglass" foregroundStyle="secondaryLabel" frame={{ width: 18 }} />
-            <TextField title="" value={query} prompt="输入关键词" onChanged={setQuery} />
+            <TextField title="" value={query} prompt="输入关键词" onChanged={setQuery} frame={{ maxWidth: "infinity" }} />
+            {query.length === 0 ? (
+              <HStack spacing={6} foregroundStyle="secondaryLabel" fixedSize={{ horizontal: true, vertical: false }}>
+                {metrics.map((metric) => (
+                  <HStack key={metric.systemName} spacing={2}>
+                    <Image systemName={metric.systemName} font="caption2" />
+                    <Text font="caption2" monospacedDigit>{metric.value}</Text>
+                  </HStack>
+                ))}
+              </HStack>
+            ) : null}
           </HStack>
         </VStack>
       </VStack>
@@ -1622,7 +1647,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
           toast={toastOptions()}
         >
-          {searchPanel()}
+          {searchPanel("favorites")}
           {homeInitialDataReady
             ? renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")
             : null}
@@ -1657,7 +1682,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         toast={toastOptions()}
       >
         {pipControlPanel()}
-        {searchPanel()}
+        {searchPanel("clipboard")}
         {homeInitialDataReady
           ? renderGroupedClipList(
             clipboardGroups,
@@ -1701,7 +1726,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
-            {searchPanel()}
+            {searchPanel("favorites")}
             {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
           </Form>
         </NavigationStack>
@@ -1718,7 +1743,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             toast={toastOptions()}
           >
             {pipControlPanel()}
-            {searchPanel()}
+            {searchPanel("clipboard")}
             {renderGroupedClipList(
               clipboardGroups,
               query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",

@@ -28,6 +28,15 @@ export type ClipItem = {
 
 export type ClipListScope = "favorites" | "clipboard"
 
+export type ClipKindCounts = {
+  total: number
+  text: number
+  url: number
+  image: number
+}
+
+export type ClipKindCountsByScope = Record<ClipListScope, ClipKindCounts>
+
 export type ClipboardClearRange = "recent" | "threeDays" | "sevenDays" | "older"
 
 export type ClipGroup = {
