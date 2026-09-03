@@ -1,4 +1,4 @@
-import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipKindCountsByScope, ClipListScope, ClipPayload, CaisSettings } from "../types"
+import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, ClipPayload, CaisSettings } from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeClipContent, normalizeText } from "../utils/common"
 import { countClipKindsByScope, countClipsByScope, deleteClipboardClipsByRange, deleteClip, deleteFavoriteClips, findClipByHash, findClipById, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
@@ -86,8 +86,8 @@ export async function getClips(search = "", limit = 120, scope?: ClipListScope):
   return listClips({ search, limit, scope })
 }
 
-export async function getClipGroups(scope: ClipListScope, search = "", limit = 120, offset = 0): Promise<ClipGroup[]> {
-  return listClipGroups({ scope, search, limit, offset })
+export async function getClipGroups(scope: ClipListScope, search = "", limit = 120, offset = 0, kind?: ClipKind): Promise<ClipGroup[]> {
+  return listClipGroups({ scope, search, limit, offset, kind })
 }
 
 export async function getClipCounts(): Promise<Record<ClipListScope, number>> {

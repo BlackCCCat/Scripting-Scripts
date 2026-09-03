@@ -1,4 +1,4 @@
-import type { ClipboardClearRange, ClipGroup, ClipItem, ClipKindCountsByScope, ClipListScope } from "../types"
+import type { ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope } from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
 
 type DB = {
@@ -229,6 +229,7 @@ function scopeClause(scope: ClipListScope): string {
 async function fetchClipGroupRows(db: DB, options: {
   scope: ClipListScope
   search?: string
+  kind?: ClipKind
   limit?: number
   offset?: number
   group: TimeGroup
@@ -236,6 +237,10 @@ async function fetchClipGroupRows(db: DB, options: {
   const params: any[] = []
   const clauses = ["deleted_at IS NULL", scopeClause(options.scope), options.group.clause]
   params.push(...options.group.params)
+  if (options.kind) {
+    clauses.push("kind = ?")
+    params.push(options.kind)
+  }
   const search = String(options.search ?? "").trim()
   if (search) {
     clauses.push("(title LIKE ? OR content LIKE ?)")
@@ -253,6 +258,7 @@ async function fetchClipGroupRows(db: DB, options: {
 async function fetchClipGroups(db: DB, options: {
   scope: ClipListScope
   search?: string
+  kind?: ClipKind
   limit?: number
   offset?: number
 }): Promise<ClipGroup[]> {
@@ -267,6 +273,7 @@ async function fetchClipGroups(db: DB, options: {
 export async function listClipGroups(options: {
   scope: ClipListScope
   search?: string
+  kind?: ClipKind
   limit?: number
   offset?: number
 }): Promise<ClipGroup[]> {
