@@ -15,6 +15,27 @@ function shouldCapture(payload: ClipPayload, settings: CaisSettings): boolean {
   return settings.captureText
 }
 
+async function resolveDuplicate(
+  existing: ClipItem,
+  textMatches: ClipItem[],
+  settings: CaisSettings,
+): Promise<CaptureResult> {
+  let changed = false
+  for (const duplicate of textMatches.filter((match) => match.id !== existing.id)) {
+    await deleteClip(duplicate.id)
+    changed = true
+  }
+  if (settings.duplicatePolicy === "skip") {
+    if (changed) bumpClipDataVersion()
+    return { status: "skipped", reason: "重复内容已存在" }
+  }
+  const updatedAt = Date.now()
+  await updateClipState(existing.id, { updatedAt })
+  await trimActiveClips(settings.maxItems)
+  bumpClipDataVersion()
+  return { status: "updated", item: { ...existing, updatedAt } }
+}
+
 export async function addClipFromPayload(payload: ClipPayload, settings: CaisSettings): Promise<CaptureResult> {
   const content = payloadContent(payload)
   if (!content.trim()) return { status: "skipped", reason: "剪贴板为空" }
@@ -36,24 +57,12 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   const textMatches = kind === "image" ? [] : await findTextClipsByContent(content)
   const existing = kind === "image"
     ? await findClipByHash(contentHash, kind)
-    : textMatches[0] ?? await findClipByHash(contentHash)
-  const now = Date.now()
+    : textMatches[0] ?? null
   if (existing) {
-    let changed = false
-    for (const duplicate of textMatches.filter((match) => match.id !== existing.id)) {
-      await deleteClip(duplicate.id)
-      changed = true
-    }
-    if (settings.duplicatePolicy === "skip") {
-      if (changed) bumpClipDataVersion()
-      return { status: "skipped", reason: "重复内容已存在" }
-    }
-    await updateClipState(existing.id, { updatedAt: now })
-    await trimActiveClips(settings.maxItems)
-    bumpClipDataVersion()
-    return { status: "updated", item: { ...existing, updatedAt: now } }
+    return resolveDuplicate(existing, textMatches, settings)
   }
 
+  const now = Date.now()
   const id = makeId()
   let imagePath: string | undefined
   if (kind === "image") {
@@ -76,7 +85,17 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
     manualFavorite: false,
     deletedAt: null,
   }
-  await insertClip(item)
+  try {
+    await insertClip(item)
+  } catch (error) {
+    const concurrentMatches = kind === "image" ? [] : await findTextClipsByContent(content)
+    const concurrent = kind === "image"
+      ? await findClipByHash(contentHash, kind)
+      : concurrentMatches[0] ?? null
+    if (!concurrent) throw error
+    await removeImage(imagePath)
+    return resolveDuplicate(concurrent, concurrentMatches, settings)
+  }
   await trimActiveClips(settings.maxItems)
   bumpClipDataVersion()
   return { status: "created", item }
@@ -141,6 +160,10 @@ export async function clearClipboardClipsByRange(range: ClipboardClearRange): Pr
 export async function editClipContent(item: ClipItem, value: string): Promise<ClipItem> {
   const content = normalizeClipContent(value)
   if (!content.trim()) throw new Error("内容不能为空")
+  if (!item.manualFavorite) {
+    const duplicate = (await findTextClipsByContent(content)).find((match) => match.id !== item.id)
+    if (duplicate) throw new Error("相同内容已存在")
+  }
   const kind = item.kind === "image" ? "text" : isLikelyURL(content) ? "url" : "text"
   const next: ClipItem = {
     ...item,
@@ -151,7 +174,15 @@ export async function editClipContent(item: ClipItem, value: string): Promise<Cl
     updatedAt: Date.now(),
     imagePath: undefined,
   }
-  await updateClipContent(next)
+  try {
+    await updateClipContent(next)
+  } catch (error) {
+    if (!item.manualFavorite) {
+      const duplicate = (await findTextClipsByContent(content)).find((match) => match.id !== item.id)
+      if (duplicate) throw new Error("相同内容已存在")
+    }
+    throw error
+  }
   bumpClipDataVersion()
   return next
 }

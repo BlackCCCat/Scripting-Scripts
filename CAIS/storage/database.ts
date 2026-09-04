@@ -10,6 +10,7 @@ let cachedDb: DB | null = null
 let initialized = false
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at"
+const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
 
 function rowToClip(row: any): ClipItem {
   return {
@@ -47,6 +48,48 @@ function clipParams(item: ClipItem): any[] {
     item.manualFavorite ? 1 : 0,
     item.deletedAt ?? null,
   ]
+}
+
+async function ensureUniqueActiveTextIndex(db: DB): Promise<void> {
+  const indexes = await db.fetchAll("PRAGMA index_list('clips')")
+  if (indexes.some((row) => String(row.name ?? "") === UNIQUE_ACTIVE_TEXT_INDEX)) return
+
+  const rows = await db.fetchAll(`
+    SELECT id, content_hash, content, pinned, favorite, updated_at, last_copied_at
+    FROM clips
+    WHERE deleted_at IS NULL AND manual_favorite = 0 AND kind IN ('text', 'url')
+    ORDER BY pinned DESC, favorite DESC, updated_at DESC, rowid DESC
+  `)
+  const seen = new Map<string, Map<string, any>>()
+  for (const row of rows) {
+    const hash = String(row.content_hash ?? "")
+    const content = String(row.content ?? "")
+    let contents = seen.get(hash)
+    if (!contents) {
+      contents = new Map<string, any>()
+      seen.set(hash, contents)
+    }
+    const keeper = contents.get(content)
+    if (!keeper) {
+      contents.set(content, row)
+      continue
+    }
+    keeper.pinned = Math.max(Number(keeper.pinned ?? 0), Number(row.pinned ?? 0))
+    keeper.favorite = Math.max(Number(keeper.favorite ?? 0), Number(row.favorite ?? 0))
+    keeper.updated_at = Math.max(Number(keeper.updated_at ?? 0), Number(row.updated_at ?? 0))
+    keeper.last_copied_at = Math.max(Number(keeper.last_copied_at ?? 0), Number(row.last_copied_at ?? 0)) || null
+    await db.execute(
+      "UPDATE clips SET pinned = ?, favorite = ?, updated_at = ?, last_copied_at = ? WHERE id = ?",
+      [keeper.pinned, keeper.favorite, keeper.updated_at, keeper.last_copied_at, keeper.id]
+    )
+    await db.execute("DELETE FROM clips WHERE id = ?", [row.id])
+  }
+
+  await db.execute(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ${UNIQUE_ACTIVE_TEXT_INDEX}
+    ON clips(content_hash, content)
+    WHERE deleted_at IS NULL AND manual_favorite = 0 AND kind IN ('text', 'url')
+  `)
 }
 
 export async function openCaisDatabase(): Promise<DB> {
@@ -99,6 +142,7 @@ async function ensureSchema(db: DB): Promise<void> {
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_clipboard_order ON clips(deleted_at, manual_favorite, pinned DESC, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_trim_order ON clips(deleted_at, pinned, favorite, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash)")
+  await ensureUniqueActiveTextIndex(db)
 }
 
 export async function initializeDatabase(): Promise<DB> {
@@ -112,7 +156,7 @@ export async function initializeDatabase(): Promise<DB> {
 export async function insertClip(item: ClipItem): Promise<void> {
   const db = await initializeDatabase()
   await db.execute(`
-    INSERT OR REPLACE INTO clips (
+    INSERT INTO clips (
       id, kind, title, content, content_hash, image_path, source_change_count,
       created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
