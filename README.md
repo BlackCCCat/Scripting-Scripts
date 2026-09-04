@@ -40,12 +40,12 @@ OpenAPI的API管理工具，主要识别API是否可用，检测可用模型，�
 睡眠数据的读取及展示，支持多尺寸、多种数据类型小组件 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Sleep-Tracker.zip)
 
 ## [CAIS](./CAIS/)
-`Clipboard All in Scripting`，一个完整的剪贴板管理脚本，支持系统剪贴板的自动读取、iCloud同步、剪贴内容收藏、𧽯剪贴内容转换、自定义脚本转换、正则提取、图片OCR提取文字、局域网共享等功能，且可作为主页UI脚本运行 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
+`Clipboard All in Scripting`，一个完整的剪贴板管理脚本，支持系统剪贴板的自动读取、iCloud同步、剪贴内容收藏、剪贴内容转换、自定义脚本转换、正则提取、图片OCR提取文字、局域网共享等功能，且可作为主页UI脚本运行 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
 
 ## [Scripting Rime Keyboard](./Scripting-Rime-Keyboard)
 专门适配万象方案的Scripting Rime键盘，UI上移植了[万象皮肤](https://github.com/BlackCCCat/ResourceforHamster/tree/main/Skin_Keyboard/万象-元书)，基本可作为日常键盘使用，同时添加了九键的支持 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Scripting-Rime-Keyboard.zip)
 
-## [Media Downloader](./ Media-Downloader)
+## [Media Downloader](./Media-Downloader)
 已变更为 Media Downloader，支持抖音、推特、TikTok、小红书、instagram等网站视频解析下载 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Media-Downloader.zip)
 
 ## [ZDict](./ZDict)
