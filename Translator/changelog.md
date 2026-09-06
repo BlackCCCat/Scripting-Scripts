@@ -1,3 +1,6 @@
+## v2.14.12
+- 修复Apple Intelligence无法正常翻译App Store长内容
+
 ## v2.14.10
 - 支持sharesheet翻译
 - 支持App Store翻译

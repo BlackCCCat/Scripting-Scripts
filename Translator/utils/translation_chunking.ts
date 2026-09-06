@@ -7,6 +7,7 @@ import type {
 type TranslateChunkOptions = {
   maxChunkLength?: number
   concurrency?: number
+  maxRetries?: number
   translateChunk: (
     request: TranslationRequest,
     callbacks?: TranslationProgressCallbacks
@@ -92,8 +93,27 @@ export async function translateChunkedText(
   callbacks?: TranslationProgressCallbacks
 ): Promise<TranslationResult> {
   const chunks = splitTranslationText(request.sourceText, options.maxChunkLength ?? 700)
+  const maxRetries = Math.max(0, Math.floor(options.maxRetries ?? 0))
+
+  async function translateChunk(
+    chunkRequest: TranslationRequest,
+    chunkCallbacks?: TranslationProgressCallbacks
+  ) {
+    let lastError: unknown
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        return await options.translateChunk(chunkRequest, chunkCallbacks)
+      } catch (error) {
+        lastError = error
+      }
+    }
+
+    throw lastError
+  }
+
   if (chunks.length === 1) {
-    return await options.translateChunk(request, callbacks)
+    return await translateChunk(request, callbacks)
   }
 
   const completedChunks = new Array<string>(chunks.length).fill("")
@@ -117,7 +137,7 @@ export async function translateChunkedText(
       nextChunkIndex += 1
       if (index >= chunks.length) return
 
-      const result = await options.translateChunk(
+      const result = await translateChunk(
         {
           ...request,
           sourceText: chunks[index],

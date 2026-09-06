@@ -76,22 +76,11 @@ function responseTokenBudget(sourceText: string) {
 }
 
 function normalizeStreamContent(content: string) {
-  const normalized = content
+  return content
     .replace(/^```[\w-]*\n?/, "")
     .replace(/\n?```$/, "")
-    .replace(/^(?:\s*<text>\s*)+/i, "")
-    .replace(/(?:\s*<\/text>\s*)+$/i, "")
+    .replace(/<\/?text>/gi, "")
     .trim()
-
-  const lines = normalized.split("\n")
-  while (lines.length && lines[0].trim().toLowerCase() === "<text>") {
-    lines.shift()
-  }
-  while (lines.length && lines[lines.length - 1].trim().toLowerCase() === "</text>") {
-    lines.pop()
-  }
-
-  return lines.join("\n").trim()
 }
 
 function isSuspiciouslyShort(sourceText: string, translatedText: string) {
@@ -115,10 +104,9 @@ async function readStreamText(
 
     if (piece.startsWith(fullText)) {
       fullText = piece
-      continue
+    } else {
+      fullText += piece
     }
-
-    fullText += piece
 
     const partialText = normalizeStreamContent(fullText)
     if (partialText && partialText !== lastPartialText) {
@@ -290,12 +278,13 @@ export function createTranslationEngine() {
     ): Promise<TranslationResult> {
       return await translateChunkedText(
         request,
-        {
-          maxChunkLength: 700,
-          concurrency: 1,
-          translateChunk: async (chunkRequest, chunkCallbacks) => (
-            await translateSingle(chunkRequest, chunkCallbacks)
-          ),
+          {
+            maxChunkLength: 700,
+            concurrency: 1,
+            maxRetries: 1,
+            translateChunk: async (chunkRequest, chunkCallbacks) => (
+              await translateSingle(chunkRequest, chunkCallbacks)
+            ),
         },
         callbacks
       )

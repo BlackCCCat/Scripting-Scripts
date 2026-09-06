@@ -1,4 +1,4 @@
-import { fetch } from "scripting"
+import { fetch, type RequestInit } from "scripting"
 import {
   FuelCode,
   OilPriceData,
@@ -6,7 +6,7 @@ import {
   ProvincePrice,
   isValidFuelPrice,
 } from "./types"
-import { getOilPriceSource, OilPriceSource } from "./settings"
+import { getOilPriceSource, type OilPriceSource } from "./settings"
 
 type FuelPageCode = "92" | "95" | "98" | "0"
 type OilPriceCache = {
@@ -17,19 +17,68 @@ type OilPriceCache = {
 type SourceFetchResult = OilPriceData & {
   sourceId: OilPriceSource
 }
+type SinopecProvinceSpec = {
+  id: string
+  name: string
+}
 
 const QIYOUJIAGE_HOST = "http://www.qiyoujiage.com"
 const AUTOHOME_URL = "https://www.autohome.com.cn/oil"
-const CACHE_KEY = "oilPriceDataCache.v3"
+const SINOPEC_INIT_URL = "https://cx.sinopecsales.com/yjkqiantai/core/initCpb"
+const SINOPEC_PROVINCE_URL =
+  "https://cx.sinopecsales.com/yjkqiantai/data/switchProvince"
+const CACHE_KEY = "oilPriceDataCache.v4"
 const PRIVATE_STORAGE = { shared: false }
 const SOURCE_TIMEOUT_MS = 8000
 const SUPPLEMENT_TIMEOUT_MS = 3000
+const SINOPEC_CONCURRENCY = 6
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
 const PRICE_PAGES: { code: FuelPageCode; url: string }[] = [
   { code: "92", url: `${QIYOUJIAGE_HOST}/92.shtml` },
   { code: "95", url: `${QIYOUJIAGE_HOST}/95.shtml` },
   { code: "98", url: `${QIYOUJIAGE_HOST}/98.shtml` },
   { code: "0", url: `${QIYOUJIAGE_HOST}/chaiyou.shtml` },
 ]
+const SINOPEC_PROVINCES: SinopecProvinceSpec[] = [
+  { id: "11", name: "北京" },
+  { id: "31", name: "上海" },
+  { id: "32", name: "江苏" },
+  { id: "12", name: "天津" },
+  { id: "50", name: "重庆" },
+  { id: "36", name: "江西" },
+  { id: "21", name: "辽宁" },
+  { id: "34", name: "安徽" },
+  { id: "15", name: "内蒙古" },
+  { id: "35", name: "福建" },
+  { id: "64", name: "宁夏" },
+  { id: "62", name: "甘肃" },
+  { id: "63", name: "青海" },
+  { id: "44", name: "广东" },
+  { id: "37", name: "山东" },
+  { id: "45", name: "广西" },
+  { id: "14", name: "山西" },
+  { id: "52", name: "贵州" },
+  { id: "61", name: "陕西" },
+  { id: "46", name: "海南" },
+  { id: "51", name: "四川" },
+  { id: "13", name: "河北" },
+  { id: "54", name: "西藏" },
+  { id: "41", name: "河南" },
+  { id: "65", name: "新疆" },
+  { id: "23", name: "黑龙江" },
+  { id: "22", name: "吉林" },
+  { id: "53", name: "云南" },
+  { id: "42", name: "湖北" },
+  { id: "33", name: "浙江" },
+  { id: "43", name: "湖南" },
+]
+const SINOPEC_FUEL_FIELDS: Record<FuelCode, string[]> = {
+  "92": ["GAS_92", "E92", "AIPAO_GAS_92", "AIPAO_GAS_E92"],
+  "95": ["GAS_95", "E95", "AIPAO_GAS_95", "AIPAO_GAS_E95"],
+  "98": ["GAS_98", "E98", "AIPAO_GAS_98", "AIPAO_GAS_E98"],
+  "0": ["CHECHAI_0", "CHAI_0"],
+}
 
 /** 油价数据服务层：按首选源抓取，超时或缺数据时自动回退补全。 */
 export async function fetchOilPrices(options?: {
@@ -87,55 +136,46 @@ function isUsableOilData(data: OilPriceData | undefined): data is OilPriceData {
 async function fetchCombinedOilPrices(
   preferredSource: OilPriceSource
 ): Promise<OilPriceData> {
-  const fallbackSource = otherSource(preferredSource)
-  let primary: SourceFetchResult | null = null
-  let fallback: SourceFetchResult | null = null
+  const sources = sourceOrder(preferredSource)
+  const fetched: SourceFetchResult[] = []
+  let combined: SourceFetchResult | null = null
 
-  try {
-    primary = await fetchSourceWithTimeout(preferredSource)
-  } catch {
-    fallback = await fetchSourceWithTimeout(fallbackSource)
-  }
-
-  if (primary && shouldSupplement(primary)) {
-    const timeoutMs = hasIncompleteProvincePrices(primary)
-      ? SOURCE_TIMEOUT_MS
-      : SUPPLEMENT_TIMEOUT_MS
+  for (const source of sources) {
+    if (combined && !shouldSupplementPrices(combined)) {
+      break
+    }
     try {
-      fallback = await fetchSourceWithTimeout(
-        fallbackSource,
-        timeoutMs
-      )
+      const result = await fetchSourceWithTimeout(source)
+      fetched.push(result)
+      combined = combined ? mergeOilPriceData(combined, result) : result
     } catch {
-      // 首选源已经可用，补充源失败时继续使用首选源数据。
+      // 当前源不可用时继续尝试后续源。
     }
   }
 
-  const base = primary ?? fallback
-  if (!base) {
+  if (!combined) {
     throw new Error("油价数据加载失败")
   }
 
-  const supplemented = fallback ? mergeOilPriceData(base, fallback) : base
-  const forecast = await resolveForecast(supplemented, primary, fallback)
+  const forecast = await resolveForecast(fetched)
 
   return {
-    provinces: supplemented.provinces,
+    provinces: combined.provinces,
     forecast,
-    source: sourceLabel(supplemented, forecast),
+    source: sourceLabel(combined, forecast),
   }
 }
 
-function otherSource(source: OilPriceSource): OilPriceSource {
-  return source === "autohome" ? "qiyoujiage" : "autohome"
+function sourceOrder(preferredSource: OilPriceSource): OilPriceSource[] {
+  const fallback: OilPriceSource[] = ["sinopec", "autohome", "qiyoujiage"]
+  return [
+    preferredSource,
+    ...fallback.filter(source => source !== preferredSource),
+  ]
 }
 
-function shouldSupplement(data: OilPriceData): boolean {
-  return (
-    data.provinces.length < 31 ||
-    hasIncompleteProvincePrices(data) ||
-    !hasConcreteForecast(data.forecast)
-  )
+function shouldSupplementPrices(data: OilPriceData): boolean {
+  return data.provinces.length < 31 || hasIncompleteProvincePrices(data)
 }
 
 function hasIncompleteProvincePrices(data: OilPriceData): boolean {
@@ -160,7 +200,9 @@ async function fetchSourceWithTimeout(
     () =>
       source === "autohome"
         ? fetchAutohomeOilPrices()
-        : fetchQiyoujiageOilPrices(),
+        : source === "sinopec"
+          ? fetchSinopecOilPrices()
+          : fetchQiyoujiageOilPrices(),
     timeoutMs,
     sourceLabelText(source)
   )
@@ -189,7 +231,10 @@ function withTimeout<T>(
 async function fetchQiyoujiageOilPrices(): Promise<SourceFetchResult> {
   const pages = await Promise.all(
     PRICE_PAGES.map(async page => {
-      const response = await fetch(page.url)
+      const response = await fetch(
+        page.url,
+        qiyoujiageRequestInit(SOURCE_TIMEOUT_MS, `汽油价格网油价-${page.code}`)
+      )
       if (!response.ok) {
         throw new Error(`油价数据请求失败：${page.url}`)
       }
@@ -207,25 +252,72 @@ async function fetchQiyoujiageOilPrices(): Promise<SourceFetchResult> {
 }
 
 async function fetchAutohomeOilPrices(): Promise<SourceFetchResult> {
-  const response = await fetch(AUTOHOME_URL)
+  const response = await fetch(AUTOHOME_URL, {
+    timeout: SOURCE_TIMEOUT_MS / 1000,
+    debugLabel: "汽车之家油价",
+  })
   if (!response.ok) {
     throw new Error(`油价数据请求失败：${AUTOHOME_URL}`)
   }
   return normalizeAutohomePage(await response.text())
 }
 
-async function resolveForecast(
-  data: OilPriceData,
-  primary: SourceFetchResult | null,
-  fallback: SourceFetchResult | null
-): Promise<PriceForecast> {
-  if (hasConcreteForecast(data.forecast)) {
-    return data.forecast
+async function fetchSinopecOilPrices(): Promise<SourceFetchResult> {
+  await fetch(SINOPEC_INIT_URL, {
+    headers: {
+      "User-Agent": BROWSER_USER_AGENT,
+    },
+    timeout: SUPPLEMENT_TIMEOUT_MS / 1000,
+    debugLabel: "中国石化油价初始化",
+  }).catch(() => null)
+
+  const provinces = (
+    await mapLimited(SINOPEC_PROVINCES, SINOPEC_CONCURRENCY, spec =>
+      fetchSinopecProvince(spec).catch(() => null)
+    )
+  ).filter((item): item is ProvincePrice => !!item)
+
+  if (!provinces.length) {
+    throw new Error("未能从中国石化接口解析到省份价格")
   }
 
-  const qiyoujiage = [primary, fallback].find(
-    item => item?.sourceId === "qiyoujiage" && hasConcreteForecast(item.forecast)
-  )
+  return {
+    provinces,
+    forecast: defaultForecast("中国石化暂未提供结构化调价预测。"),
+    source: SINOPEC_INIT_URL,
+    sourceId: "sinopec",
+  }
+}
+
+async function fetchSinopecProvince(
+  spec: SinopecProvinceSpec
+): Promise<ProvincePrice | null> {
+  const response = await fetch(SINOPEC_PROVINCE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json;charset=UTF-8",
+      "User-Agent": BROWSER_USER_AGENT,
+      Origin: "https://cx.sinopecsales.com",
+      Referer: SINOPEC_INIT_URL,
+    },
+    body: JSON.stringify({ provinceId: spec.id }),
+    timeout: SOURCE_TIMEOUT_MS / 1000,
+    debugLabel: `中国石化油价-${spec.name}`,
+  })
+
+  if (!response.ok) {
+    return null
+  }
+
+  return normalizeSinopecProvince(spec, await response.json())
+}
+
+async function resolveForecast(
+  fetched: SourceFetchResult[]
+): Promise<PriceForecast> {
+  const qiyoujiage = fetched.find(item => {
+    return item.sourceId === "qiyoujiage" && hasConcreteForecast(item.forecast)
+  })
   if (qiyoujiage) {
     return qiyoujiage.forecast
   }
@@ -242,11 +334,28 @@ async function resolveForecast(
 }
 
 async function fetchQiyoujiageForecast(): Promise<PriceForecast> {
-  const response = await fetch(`${QIYOUJIAGE_HOST}/92.shtml`)
+  const response = await fetch(
+    `${QIYOUJIAGE_HOST}/92.shtml`,
+    qiyoujiageRequestInit(SUPPLEMENT_TIMEOUT_MS, "汽油价格网调价预测")
+  )
   if (!response.ok) {
     throw new Error("调价预测请求失败")
   }
   return parseForecast(await response.text())
+}
+
+function qiyoujiageRequestInit(
+  timeoutMs: number,
+  debugLabel: string
+): RequestInit {
+  return {
+    allowInsecureRequest: true,
+    headers: {
+      "User-Agent": BROWSER_USER_AGENT,
+    },
+    timeout: timeoutMs / 1000,
+    debugLabel,
+  }
 }
 
 function todayKey(): string {
@@ -357,10 +466,104 @@ function normalizeAutohomeRow(row: any): ProvincePrice | null {
   }
 }
 
+function normalizeSinopecProvince(
+  spec: SinopecProvinceSpec,
+  json: any
+): ProvincePrice | null {
+  const records = extractSinopecPriceRecords(json)
+  if (!records.length) {
+    return null
+  }
+
+  const prices = {
+    "92": pickSinopecPrice(records, "92"),
+    "95": pickSinopecPrice(records, "95"),
+    "98": pickSinopecPrice(records, "98"),
+    "0": pickSinopecPrice(records, "0"),
+  }
+
+  if (!isUsableProvincePrices(prices)) {
+    return null
+  }
+
+  return {
+    province: spec.name,
+    prices,
+    updatedAt: pickSinopecUpdatedAt(records) ?? todayKey(),
+  }
+}
+
+function extractSinopecPriceRecords(json: any): Record<string, any>[] {
+  const data = json?.data
+  const records: Record<string, any>[] = []
+  if (data?.provinceData && typeof data.provinceData === "object") {
+    records.push(data.provinceData)
+  }
+  if (Array.isArray(data?.area)) {
+    for (const area of data.area) {
+      if (area?.areaData && typeof area.areaData === "object") {
+        records.push(area.areaData)
+      }
+    }
+  }
+  return records
+}
+
+function pickSinopecPrice(
+  records: Record<string, any>[],
+  code: FuelCode
+): number {
+  for (const field of SINOPEC_FUEL_FIELDS[code]) {
+    for (const record of records) {
+      const price = Number(record[field])
+      if (isValidFuelPrice(price)) {
+        return price
+      }
+    }
+  }
+  return 0
+}
+
+function pickSinopecUpdatedAt(records: Record<string, any>[]): string | null {
+  const dates = records
+    .map(record => {
+      const value = record.START_DATE
+      return typeof value === "string" ? value.slice(0, 10) : null
+    })
+    .filter((date): date is string => !!date)
+
+  return dates.reduce<string | null>(
+    (latest, date) => (!latest || date > latest ? date : latest),
+    null
+  )
+}
+
 function isUsableProvincePrices(
   prices: Record<FuelCode, number>
 ): prices is Record<FuelCode, number> {
   return Object.values(prices).some(isValidFuelPrice)
+}
+
+async function mapLimited<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = []
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < items.length) {
+      const current = cursor
+      cursor += 1
+      results[current] = await run(items[current])
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  )
+  return results
 }
 
 function mergeOilPriceData(
@@ -377,7 +580,9 @@ function mergeOilPriceData(
   for (const province of primary.provinces) {
     const key = normalizeProvinceName(province.province)
     const fallbackProvince = byProvince.get(key)
-    merged.push(fallbackProvince ? mergeProvince(province, fallbackProvince) : province)
+    merged.push(
+      fallbackProvince ? mergeProvince(province, fallbackProvince) : province
+    )
     seen.add(key)
   }
 
@@ -405,10 +610,18 @@ function mergeProvince(
   return {
     province: primary.province,
     prices: {
-      "92": isValidFuelPrice(primary.prices["92"]) ? primary.prices["92"] : fallback.prices["92"],
-      "95": isValidFuelPrice(primary.prices["95"]) ? primary.prices["95"] : fallback.prices["95"],
-      "98": isValidFuelPrice(primary.prices["98"]) ? primary.prices["98"] : fallback.prices["98"],
-      "0": isValidFuelPrice(primary.prices["0"]) ? primary.prices["0"] : fallback.prices["0"],
+      "92": isValidFuelPrice(primary.prices["92"])
+        ? primary.prices["92"]
+        : fallback.prices["92"],
+      "95": isValidFuelPrice(primary.prices["95"])
+        ? primary.prices["95"]
+        : fallback.prices["95"],
+      "98": isValidFuelPrice(primary.prices["98"])
+        ? primary.prices["98"]
+        : fallback.prices["98"],
+      "0": isValidFuelPrice(primary.prices["0"])
+        ? primary.prices["0"]
+        : fallback.prices["0"],
     },
     updatedAt: latestDate(primary.updatedAt, fallback.updatedAt),
   }
@@ -429,7 +642,10 @@ function sourceLabel(
 }
 
 function sourceLabelText(source: OilPriceSource): string {
-  return source === "autohome" ? "汽车之家" : "汽油价格网"
+  if (source === "autohome") {
+    return "汽车之家"
+  }
+  return source === "sinopec" ? "中国石化" : "汽油价格网"
 }
 
 /**

@@ -11,12 +11,13 @@ const KEY_LAST_AUTO_PROVINCE = "lastAutoProvince"
 const PRIVATE_STORAGE = { shared: false }
 
 export type LocationMode = "auto" | "manual"
-export type OilPriceSource = "autohome" | "qiyoujiage"
+export type OilPriceSource = "autohome" | "qiyoujiage" | "sinopec"
 
 export const OIL_PRICE_SOURCE_OPTIONS: Array<{
   value: OilPriceSource
   label: string
 }> = [
+  { value: "sinopec", label: "中国石化" },
   { value: "autohome", label: "汽车之家" },
   { value: "qiyoujiage", label: "汽油价格网" },
 ]
@@ -34,10 +35,13 @@ export function setPreferredFuel(code: FuelCode): void {
   Storage.set(KEY_PREFERRED_FUEL, code, PRIVATE_STORAGE)
 }
 
-/** 油价数据首选来源，默认汽车之家。 */
+/** 油价数据首选来源，默认中国石化。 */
 export function getOilPriceSource(): OilPriceSource {
   const v = Storage.get<OilPriceSource>(KEY_OIL_PRICE_SOURCE, PRIVATE_STORAGE)
-  return v === "qiyoujiage" ? "qiyoujiage" : "autohome"
+  if (v === "sinopec" || v === "autohome" || v === "qiyoujiage") {
+    return v
+  }
+  return "sinopec"
 }
 
 export function setOilPriceSource(source: OilPriceSource): void {
