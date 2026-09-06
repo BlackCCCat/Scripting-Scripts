@@ -199,6 +199,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
   const [symbolSettings, setSymbolSettings] = useState<SymbolSettings>(() => loadSymbolSettings())
   const [options, setOptions] = useState<PasswordOptions>(() => createDefaultOptions(loadSymbolSettings()))
   const [password, setPassword] = useState(() => generatePassword(createDefaultOptions(loadSymbolSettings())))
+  const [showCopyToast, setShowCopyToast] = useState(false)
   const [lastFilledLength, setLastFilledLength] = useState(0)
   const [showKeyboardHistory, setShowKeyboardHistory] = useState(false)
   const [keyboardHistoryItems, setKeyboardHistoryItems] = useState<PasswordHistoryItem[]>([])
@@ -246,6 +247,7 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
 
   async function copyPassword(target: string) {
     await Pasteboard.setString(target)
+    setShowCopyToast(true)
     addPasswordHistory({
       id: `${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
       copiedAt: Date.now(),
@@ -431,12 +433,19 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
         buttonStyle="plain"
         action={withHaptic(() => copyPassword(password))}
         frame={{ maxWidth: "infinity" }}
+        toast={{
+          isPresented: showCopyToast,
+          onChanged: setShowCopyToast,
+          message: "已复制",
+          duration: 1.5,
+        }}
       >
         <VStack
           spacing={8}
           frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
           padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
           glassEffect={GLASS_PANEL}
+          contentShape={{ kind: "interaction", shape: { type: "rect", cornerRadius: 14 } }}
         >
           <HStack frame={{ width: "100%" as any }}>
             <Text font="caption" foregroundStyle="secondaryLabel">

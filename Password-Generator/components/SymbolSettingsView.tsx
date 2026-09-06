@@ -180,7 +180,6 @@ export function SymbolSettingsView(props: { initial: SymbolSettings }) {
           />
           <Button
             title="添加到列表"
-            glassEffect={GLASS_SYMBOL_BUTTON}
             action={withHaptic(addCustomSymbols)}
           />
         </Section>
