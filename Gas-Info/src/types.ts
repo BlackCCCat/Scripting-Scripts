@@ -49,6 +49,19 @@ export interface ProvincePrice {
   updatedAt: string
 }
 
+/** 单日历史油价点 */
+export interface OilPriceTrendPoint {
+  date: string
+  prices: Partial<Record<FuelCode, number>>
+}
+
+/** 单个省份的历史趋势 */
+export interface OilPriceTrendData {
+  province: string
+  points: OilPriceTrendPoint[]
+  source: string
+}
+
 /** 下次调价预测信息 */
 export interface PriceForecast {
   /** 下次调价时间文案，如 "06月04日 24:00" */

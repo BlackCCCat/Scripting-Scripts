@@ -15,17 +15,28 @@ import {
   TextField,
   Widget,
   gradient,
+  Chart,
+  LineCategoryChart,
+  ProgressView,
 } from "scripting"
 import {
   FUELS,
   FuelCode,
   OilPriceData,
+  OilPriceTrendData,
   ProvincePrice,
   formatFuelPrice,
   fuelMeta,
   isValidFuelPrice,
 } from "./types"
-import { fetchOilPrices, matchProvince, normalizeProvinceName } from "./service"
+import {
+  fetchOilPriceHistory,
+  fetchOilPrices,
+  matchProvince,
+  normalizeProvinceName,
+  oilPriceHistoryUnavailableText,
+  supportsOilPriceHistory,
+} from "./service"
 import { Theme } from "./theme"
 import {
   getLocationMode,
@@ -316,16 +327,235 @@ function DetailRow({ code, price }: { code: FuelCode; price: number }) {
   )
 }
 
+const TREND_COLORS = {
+  "92": "#F5A623",
+  "95": "#E85D3F",
+  "98": "#4A90E2",
+  "0": "#49A078",
+} as const
+
+function trendDateLabel(date: string): string {
+  const parts = date.split("-")
+  return parts.length === 3
+    ? `${Number(parts[1])}/${Number(parts[2])}`
+    : date
+}
+
+function OilPriceTrendCard({
+  province,
+  source,
+}: {
+  province: ProvincePrice
+  source: OilPriceSource
+}) {
+  const supportsHistory = supportsOilPriceHistory(source)
+  const [trend, setTrend] = useState<OilPriceTrendData | null>(null)
+  const [loading, setLoading] = useState(supportsHistory)
+  const [message, setMessage] = useState<string | null>(
+    supportsHistory ? null : oilPriceHistoryUnavailableText(source)
+  )
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSelectedLabel(null)
+    if (!supportsOilPriceHistory(source)) {
+      setTrend(null)
+      setLoading(false)
+      setMessage(oilPriceHistoryUnavailableText(source))
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setTrend(null)
+    setLoading(true)
+    setMessage(null)
+    fetchOilPriceHistory(province.province, source)
+      .then(result => {
+        if (!cancelled) {
+          setTrend(result)
+        }
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setMessage(
+            error instanceof Error ? error.message : "历史趋势加载失败"
+          )
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [province.province, source])
+
+  const marks = trend
+    ? trend.points.flatMap(point =>
+        FUELS.flatMap(fuel => {
+          const price = point.prices[fuel.code]
+          const label = trendDateLabel(point.date)
+          return isValidFuelPrice(price)
+            ? [
+                {
+                  label,
+                  value: price,
+                  category: fuel.label,
+                  interpolationMethod: "catmullRom" as const,
+                  symbol: "circle" as const,
+                  symbolSize: selectedLabel === label ? 42 : 18,
+                  lineStyle: { lineWidth: 2 },
+                },
+              ]
+            : []
+        })
+      )
+    : []
+  const lastLabel = trend?.points.length
+    ? trendDateLabel(trend.points[trend.points.length - 1].date)
+    : ""
+  const selectedPoint = trend?.points.find(
+    point => trendDateLabel(point.date) === selectedLabel
+  )
+
+  return (
+    <VStack
+      alignment="leading"
+      spacing={12}
+      padding={16}
+      glassEffect={Theme.glassCard as any}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+    >
+      <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
+        <Image
+          systemName="chart.xyaxis.line"
+          font={17}
+          foregroundStyle={Theme.orange}
+        />
+        <Text font={18} fontWeight="semibold">
+          油价趋势
+        </Text>
+        <Spacer />
+        {trend ? (
+          <Text font={12} foregroundStyle={Theme.secondary}>
+            {trend.points.length} 次调价
+          </Text>
+        ) : null}
+      </HStack>
+
+      {loading ? (
+        <HStack
+          spacing={8}
+          padding={{ vertical: 48 }}
+          frame={{ maxWidth: "infinity", alignment: "center" as any }}
+        >
+          <ProgressView />
+          <Text font={14} foregroundStyle={Theme.secondary}>
+            正在加载历史油价…
+          </Text>
+        </HStack>
+      ) : trend && marks.length ? (
+        <VStack spacing={10} frame={{ maxWidth: "infinity" }}>
+          <HStack spacing={12} frame={{ maxWidth: "infinity" }}>
+            {FUELS.map(fuel => (
+              <HStack spacing={4} frame={{ maxWidth: "infinity" }}>
+                <Text font={10} foregroundStyle={TREND_COLORS[fuel.code]}>
+                  ●
+                </Text>
+                <Text font={11} foregroundStyle={Theme.secondary}>
+                  {fuel.label}
+                </Text>
+              </HStack>
+            ))}
+          </HStack>
+          <Chart
+            chartXAxis="visible"
+            chartYAxis="visible"
+            chartLegend="hidden"
+            chartScrollableAxes="horizontal"
+            chartXVisibleDomain={7}
+            chartScrollPositionX={lastLabel}
+            chartXSelection={{
+              valueType: "string",
+              value: selectedLabel,
+              onChanged: (value: string | undefined | null) =>
+                setSelectedLabel(value ?? null),
+            }}
+            chartForegroundStyleScale={{
+              "92号": TREND_COLORS["92"],
+              "95号": TREND_COLORS["95"],
+              "98号": TREND_COLORS["98"],
+              "0号柴油": TREND_COLORS["0"],
+            }}
+            frame={{ height: 260, maxWidth: "infinity" }}
+          >
+            <LineCategoryChart labelOnYAxis={false} marks={marks} />
+          </Chart>
+          {selectedPoint ? (
+            <VStack spacing={7} frame={{ maxWidth: "infinity" }}>
+              <Text font={12} fontWeight="semibold">
+                {selectedPoint.date} · 元/升
+              </Text>
+              <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
+                {FUELS.map(fuel => (
+                  <VStack spacing={2} frame={{ maxWidth: "infinity" }}>
+                    <Text font={10} foregroundStyle={Theme.secondary}>
+                      {fuel.label}
+                    </Text>
+                    <Text
+                      font={12}
+                      fontWeight="semibold"
+                      foregroundStyle={TREND_COLORS[fuel.code]}
+                    >
+                      {formatFuelPrice(selectedPoint.prices[fuel.code], {
+                        currency: true,
+                      })}
+                    </Text>
+                  </VStack>
+                ))}
+              </HStack>
+            </VStack>
+          ) : (
+            <Text
+              font={11}
+              foregroundStyle={Theme.secondary}
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
+            >
+              轻触数据点查看价格 · 左右滑动查看全部历史
+            </Text>
+          )}
+        </VStack>
+      ) : (
+        <Text
+          font={14}
+          foregroundStyle={Theme.secondary}
+          multilineTextAlignment="leading"
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        >
+          {message ?? "暂无历史趋势数据"}
+        </Text>
+      )}
+    </VStack>
+  )
+}
+
 function ProvinceDetailPage({
   province,
   forecast,
   preferred,
   source,
+  oilPriceSource,
 }: {
   province: ProvincePrice
   forecast: OilPriceData["forecast"]
   preferred: FuelCode
   source: string
+  oilPriceSource: OilPriceSource
 }) {
   return (
     <ScrollView>
@@ -361,6 +591,8 @@ function ProvinceDetailPage({
           ))}
         </VStack>
 
+        <OilPriceTrendCard province={province} source={oilPriceSource} />
+
         <VStack
           alignment="leading"
           spacing={8}
@@ -387,13 +619,6 @@ function ProvinceDetailPage({
             frame={{ maxWidth: "infinity", alignment: "leading" as any }}
           >
             · 实际价格以加油站公示价格为准
-          </Text>
-          <Text
-            font={14}
-            foregroundStyle={Theme.secondary}
-            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-          >
-            · 当前数据源未提供历史趋势数据
           </Text>
         </VStack>
       </VStack>
@@ -731,6 +956,7 @@ export function HomePage({
                   forecast={data.forecast}
                   preferred={preferred}
                   source={data.source}
+                  oilPriceSource={oilPriceSource}
                 />
               }
             >
@@ -761,6 +987,7 @@ export function HomePage({
                       forecast={data.forecast}
                       preferred={preferred}
                       source={data.source}
+                      oilPriceSource={oilPriceSource}
                     />
                   }
                 >

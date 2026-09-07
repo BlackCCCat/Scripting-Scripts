@@ -1,7 +1,8 @@
-import { fetch, type RequestInit } from "scripting"
+import { fetch, type RequestInit, type Response } from "scripting"
 import {
   FuelCode,
   OilPriceData,
+  OilPriceTrendData,
   PriceForecast,
   ProvincePrice,
   isValidFuelPrice,
@@ -21,19 +22,76 @@ type SinopecProvinceSpec = {
   id: string
   name: string
 }
+type OilPriceHistoryCache = {
+  savedDate: string
+  source: OilPriceSource
+  province: string
+  data: OilPriceTrendData
+}
+type RequestGuardState = {
+  soyoujia?: {
+    lastRequestAt?: number
+    backoffUntil?: number
+  }
+}
+type SoyoujiaTrendPayload = {
+  xlabels?: unknown[]
+  s92?: unknown[]
+  s95?: unknown[]
+  s98?: unknown[]
+  s0?: unknown[]
+}
 
 const QIYOUJIAGE_HOST = "http://www.qiyoujiage.com"
 const AUTOHOME_URL = "https://www.autohome.com.cn/oil"
+const SOYOUJIA_HOST = "https://www.soyoujia.cn"
 const SINOPEC_INIT_URL = "https://cx.sinopecsales.com/yjkqiantai/core/initCpb"
 const SINOPEC_PROVINCE_URL =
   "https://cx.sinopecsales.com/yjkqiantai/data/switchProvince"
-const CACHE_KEY = "oilPriceDataCache.v4"
+const CACHE_KEY = "oilPriceDataCache.v5"
+const HISTORY_CACHE_KEY_PREFIX = "oilPriceHistoryCache.v1."
+const REQUEST_GUARD_KEY = "oilPriceRequestGuard.v1"
 const PRIVATE_STORAGE = { shared: false }
 const SOURCE_TIMEOUT_MS = 8000
 const SUPPLEMENT_TIMEOUT_MS = 3000
 const SINOPEC_CONCURRENCY = 6
+const SOYOUJIA_MIN_INTERVAL_MS = 1200
+const SOYOUJIA_BACKOFF_MS = 10 * 60 * 1000
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
+const SOYOUJIA_PROVINCE_SLUGS: Record<string, string> = {
+  北京: "beijing",
+  上海: "shanghai",
+  江苏: "jiangsu",
+  天津: "tianjin",
+  重庆: "chongqing",
+  江西: "jiangxi",
+  辽宁: "liaoning",
+  安徽: "anhui",
+  内蒙古: "neimenggu",
+  福建: "fujian",
+  宁夏: "ningxia",
+  甘肃: "gansu",
+  青海: "qinghai",
+  广东: "guangdong",
+  山东: "shandong",
+  广西: "guangxi",
+  山西: "shanxi",
+  贵州: "guizhou",
+  陕西: "shaanxi",
+  海南: "hainan",
+  四川: "sichuan",
+  河北: "hebei",
+  西藏: "xizang",
+  河南: "henan",
+  新疆: "xinjiang",
+  黑龙江: "heilongjiang",
+  吉林: "jilin",
+  云南: "yunnan",
+  湖北: "hubei",
+  浙江: "zhejiang",
+  湖南: "hunan",
+}
 const PRICE_PAGES: { code: FuelPageCode; url: string }[] = [
   { code: "92", url: `${QIYOUJIAGE_HOST}/92.shtml` },
   { code: "95", url: `${QIYOUJIAGE_HOST}/95.shtml` },
@@ -133,6 +191,56 @@ function isUsableOilData(data: OilPriceData | undefined): data is OilPriceData {
   )
 }
 
+export function supportsOilPriceHistory(source: OilPriceSource): boolean {
+  return source === "soyoujia"
+}
+
+export function oilPriceHistoryUnavailableText(source: OilPriceSource): string {
+  if (source === "autohome") {
+    return "汽车之家当前页面未提供可解析的省份历史油价数据。"
+  }
+  if (source === "sinopec") {
+    return "中国石化当前接口未提供省份历史油价序列。"
+  }
+  return "汽油价格网页面访问不稳定，当前未接入历史趋势。"
+}
+
+export async function fetchOilPriceHistory(
+  provinceName: string,
+  source: OilPriceSource,
+  forceRefresh = false
+): Promise<OilPriceTrendData> {
+  if (!supportsOilPriceHistory(source)) {
+    throw new Error(oilPriceHistoryUnavailableText(source))
+  }
+
+  const province = normalizeProvinceName(provinceName)
+  const cacheKey = historyCacheKey(province)
+  const cached = Storage.get<OilPriceHistoryCache>(cacheKey, PRIVATE_STORAGE)
+  if (
+    !forceRefresh &&
+    cached?.savedDate === todayKey() &&
+    cached.source === source &&
+    cached.province === province &&
+    cached.data?.points?.length
+  ) {
+    return cached.data
+  }
+
+  const data = await fetchSoyoujiaOilPriceHistory(provinceName)
+  Storage.set<OilPriceHistoryCache>(
+    cacheKey,
+    {
+      savedDate: todayKey(),
+      source,
+      province,
+      data,
+    },
+    PRIVATE_STORAGE
+  )
+  return data
+}
+
 async function fetchCombinedOilPrices(
   preferredSource: OilPriceSource
 ): Promise<OilPriceData> {
@@ -167,7 +275,12 @@ async function fetchCombinedOilPrices(
 }
 
 function sourceOrder(preferredSource: OilPriceSource): OilPriceSource[] {
-  const fallback: OilPriceSource[] = ["sinopec", "autohome", "qiyoujiage"]
+  const fallback: OilPriceSource[] = [
+    "soyoujia",
+    "autohome",
+    "sinopec",
+    "qiyoujiage",
+  ]
   return [
     preferredSource,
     ...fallback.filter(source => source !== preferredSource),
@@ -198,7 +311,9 @@ async function fetchSourceWithTimeout(
 ): Promise<SourceFetchResult> {
   return withTimeout(
     () =>
-      source === "autohome"
+      source === "soyoujia"
+        ? fetchSoyoujiaOilPrices()
+        : source === "autohome"
         ? fetchAutohomeOilPrices()
         : source === "sinopec"
           ? fetchSinopecOilPrices()
@@ -226,6 +341,14 @@ function withTimeout<T>(
         }
       })
   })
+}
+
+async function fetchSoyoujiaOilPrices(): Promise<SourceFetchResult> {
+  const response = await fetchSoyoujia(`${SOYOUJIA_HOST}/`, "搜油价油价")
+  if (!response.ok) {
+    throw new Error(`油价数据请求失败：${SOYOUJIA_HOST}/`)
+  }
+  return normalizeSoyoujiaHome(await response.text())
 }
 
 async function fetchQiyoujiageOilPrices(): Promise<SourceFetchResult> {
@@ -312,6 +435,27 @@ async function fetchSinopecProvince(
   return normalizeSinopecProvince(spec, await response.json())
 }
 
+async function fetchSoyoujiaOilPriceHistory(
+  provinceName: string
+): Promise<OilPriceTrendData> {
+  const slug = soyoujiaSlugForProvince(provinceName)
+  if (!slug) {
+    throw new Error("未找到当前省份对应的搜油价历史页面")
+  }
+
+  const url = `${SOYOUJIA_HOST}/${slug}/lishi`
+  const response = await fetchSoyoujia(url, `搜油价历史-${provinceName}`)
+  if (!response.ok) {
+    throw new Error("搜油价历史数据请求失败")
+  }
+
+  return normalizeSoyoujiaHistory(
+    normalizeProvinceName(provinceName),
+    url,
+    await response.text()
+  )
+}
+
 async function resolveForecast(
   fetched: SourceFetchResult[]
 ): Promise<PriceForecast> {
@@ -358,8 +502,84 @@ function qiyoujiageRequestInit(
   }
 }
 
+async function fetchSoyoujia(url: string, debugLabel: string): Promise<Response> {
+  await waitForSoyoujiaBudget()
+  const response = await fetch(url, {
+    headers: soyoujiaHeaders(),
+    timeout: SOURCE_TIMEOUT_MS / 1000,
+    debugLabel,
+  })
+  recordSoyoujiaResponse(response.status)
+  return response
+}
+
+function soyoujiaHeaders(): Record<string, string> {
+  return {
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    Referer: `${SOYOUJIA_HOST}/`,
+    "User-Agent": BROWSER_USER_AGENT,
+  }
+}
+
+async function waitForSoyoujiaBudget(): Promise<void> {
+  const guard = Storage.get<RequestGuardState>(REQUEST_GUARD_KEY, PRIVATE_STORAGE)
+  const state = guard?.soyoujia
+  const now = Date.now()
+  if (state?.backoffUntil && state.backoffUntil > now) {
+    throw new Error("搜油价请求暂缓，使用缓存或备用源")
+  }
+
+  const waitMs = Math.max(
+    0,
+    SOYOUJIA_MIN_INTERVAL_MS - (now - (state?.lastRequestAt ?? 0))
+  )
+  if (waitMs > 0) {
+    await sleep(waitMs)
+  }
+
+  Storage.set<RequestGuardState>(
+    REQUEST_GUARD_KEY,
+    {
+      ...guard,
+      soyoujia: {
+        ...state,
+        lastRequestAt: Date.now(),
+      },
+    },
+    PRIVATE_STORAGE
+  )
+}
+
+function recordSoyoujiaResponse(status: number): void {
+  if (status !== 403 && status !== 429) {
+    return
+  }
+
+  const guard = Storage.get<RequestGuardState>(REQUEST_GUARD_KEY, PRIVATE_STORAGE)
+  Storage.set<RequestGuardState>(
+    REQUEST_GUARD_KEY,
+    {
+      ...guard,
+      soyoujia: {
+        ...guard?.soyoujia,
+        backoffUntil: Date.now() + SOYOUJIA_BACKOFF_MS,
+      },
+    },
+    PRIVATE_STORAGE
+  )
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 function todayKey(): string {
   return formatDate(new Date())
+}
+
+function historyCacheKey(province: string): string {
+  return `${HISTORY_CACHE_KEY_PREFIX}${encodeURIComponent(province)}`
 }
 
 function normalizePages(
@@ -412,6 +632,113 @@ function normalizePages(
     forecast: parseForecast(pages[0].html),
     source: QIYOUJIAGE_HOST,
   }
+}
+
+function normalizeSoyoujiaHome(html: string): SourceFetchResult {
+  const updatedAt = parseSoyoujiaUpdatedAt(html)
+  const provinces: ProvincePrice[] = []
+  const rowPattern =
+    /<a\s+href="\/([a-z]+)"\s+class="flex flex-row items-center[\s\S]*?<\/a>/g
+  let match: RegExpExecArray | null
+
+  while ((match = rowPattern.exec(html))) {
+    const rowHtml = match[0]
+    const name = stripHtml(
+      rowHtml.match(
+        /<span class="text-\[14px\] text-ink font-body truncate">([\s\S]*?)<\/span>/
+      )?.[1] ?? ""
+    )
+    if (!name) {
+      continue
+    }
+
+    const values = Array.from(
+      rowHtml.matchAll(/font-display">([\s\S]*?)<\/div>/g),
+      item => stripHtml(item[1])
+    )
+    if (values.length < 5) {
+      continue
+    }
+
+    const prices = {
+      "92": parseSoyoujiaPrice(values[1]),
+      "95": parseSoyoujiaPrice(values[2]),
+      "98": parseSoyoujiaPrice(values[3]),
+      "0": parseSoyoujiaPrice(values[4]),
+    }
+    if (!isUsableProvincePrices(prices)) {
+      continue
+    }
+
+    provinces.push({
+      province: name,
+      prices,
+      updatedAt,
+    })
+  }
+
+  if (!provinces.length) {
+    throw new Error("未能从搜油价页面解析到省份价格")
+  }
+
+  return {
+    provinces,
+    forecast: defaultForecast("搜油价暂未提供结构化调价预测。"),
+    source: SOYOUJIA_HOST,
+    sourceId: "soyoujia",
+  }
+}
+
+function normalizeSoyoujiaHistory(
+  province: string,
+  url: string,
+  html: string
+): OilPriceTrendData {
+  const trend = parseSoyoujiaTrend(html)
+  const labels = Array.isArray(trend.xlabels)
+    ? trend.xlabels.map(value => String(value))
+    : []
+  const points = labels
+    .map((date, index): OilPriceTrendData["points"][number] => {
+      const prices: OilPriceTrendData["points"][number]["prices"] = {
+        "92": parseTrendPrice(trend.s92?.[index]),
+        "95": parseTrendPrice(trend.s95?.[index]),
+        "98": parseTrendPrice(trend.s98?.[index]),
+        "0": parseTrendPrice(trend.s0?.[index]),
+      }
+      return {
+        date,
+        prices,
+      }
+    })
+    .filter(point => {
+      return Object.values(point.prices).some(value => isValidFuelPrice(value))
+    })
+
+  if (!points.length) {
+    throw new Error("未能从搜油价历史页面解析到趋势数据")
+  }
+
+  return {
+    province,
+    points,
+    source: url,
+  }
+}
+
+function parseSoyoujiaTrend(html: string): SoyoujiaTrendPayload {
+  const match = html.match(
+    /trend:\s*(\{"s89"[\s\S]*?"xlabels":\[[\s\S]*?\]\})/
+  )
+  if (!match) {
+    throw new Error("未找到搜油价历史趋势数据")
+  }
+  return JSON.parse(match[1])
+}
+
+function parseTrendPrice(value: unknown): number | undefined {
+  const price = Number(value)
+  return isValidFuelPrice(price) ? price : undefined
 }
 
 function normalizeAutohomePage(html: string): SourceFetchResult {
@@ -642,6 +969,9 @@ function sourceLabel(
 }
 
 function sourceLabelText(source: OilPriceSource): string {
+  if (source === "soyoujia") {
+    return "搜油价"
+  }
   if (source === "autohome") {
     return "汽车之家"
   }
@@ -730,6 +1060,21 @@ function stripHtml(html: string): string {
 
 function htmlText(html: string): string {
   return stripHtml(html).replace(/\s+/g, "")
+}
+
+function parseSoyoujiaPrice(text: string): number {
+  const price = Number(text.replace(/[^\d.]/g, ""))
+  return isValidFuelPrice(price) ? price : 0
+}
+
+function parseSoyoujiaUpdatedAt(html: string): string {
+  const match = html.match(/article:modified_time"\s+content="(\d{4}-\d{2}-\d{2})/)
+  return match?.[1] ?? todayKey()
+}
+
+function soyoujiaSlugForProvince(provinceName: string): string | null {
+  const province = normalizeProvinceName(provinceName)
+  return SOYOUJIA_PROVINCE_SLUGS[province] ?? null
 }
 
 function parseUpdatedAt(html: string): string {
