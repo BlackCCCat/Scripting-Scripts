@@ -33,11 +33,11 @@
     "it": ""
   },
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/PDFHelper.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/PDFHelper",
     "hash": "",
     "autoUpdateInterval": 86400
   },
   "runInApp": true,
   "color": "rgba(0, 198, 165,1)",
-  "version": ""
+  "version": "v3.0.0"
 }

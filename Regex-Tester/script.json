@@ -1,9 +1,9 @@
 {
   "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/regex-logo-new.png",
   "color": "rgba(233, 123, 199,1)",
-  "version": "",
+  "version": "v3.0.0",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Regex-Tester.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Regex-Tester",
     "hash": "",
     "autoUpdateInterval": 86400
   },

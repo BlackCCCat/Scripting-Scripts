@@ -1,11 +1,11 @@
 {
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/PhotoSlide.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/PhotoSlide",
     "hash": "",
     "autoUpdateInterval": 86400
   },
   "contributors": [],
-  "version": "",
+  "version": "v3.0.0",
   "intentInputTypes": [],
   "author": {
     "name": "BlackCCCat",

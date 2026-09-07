@@ -1,7 +1,7 @@
 {
   "name": "CAIS",
   "description": "Clipboard all in Scripting",
-  "version": "",
+  "version": "v3.0.0",
   "entry": "index.tsx",
   "icon": "doc.on.clipboard.fill",
   "iconImage": null,
@@ -35,7 +35,7 @@
     "it": ""
   },
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/CAIS.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/CAIS",
     "hash": "",
     "autoUpdateInterval": 86400
   },

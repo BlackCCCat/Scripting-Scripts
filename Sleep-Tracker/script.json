@@ -1,8 +1,8 @@
 {
-  "version": "",
+  "version": "v3.0.0",
   "intentInputTypes": [],
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Sleep-Tracker.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Sleep-Tracker",
     "hash": "",
     "autoUpdateInterval": 86400
   },

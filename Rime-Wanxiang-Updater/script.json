@@ -1,6 +1,6 @@
 {
   "intentInputTypes": [],
-  "version": "",
+  "version": "v3.0.0",
   "runInApp": false,
   "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/wanxiang_logo.PNG",
   "localizedNames": {
@@ -25,7 +25,7 @@
   "description": "万象方案下载更新",
   "color": "rgba(238, 92, 98,1)",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Rime-Wanxiang-Updater.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Rime-Wanxiang-Updater",
     "hash": "",
     "autoUpdateInterval": 86400
   },

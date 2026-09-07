@@ -1,5 +1,5 @@
 {
-  "version": "",
+  "version": "v3.0.0",
   "localizedDescriptions": {
     "pt": "",
     "de": "",
@@ -30,7 +30,7 @@
   "description": "Create one-time, daily, and weekly custom alarms with AlarmManager.",
   "runInApp": true,
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Custom-Alarm.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Custom-Alarm",
     "hash": "",
     "autoUpdateInterval": 86400
   },

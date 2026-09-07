@@ -1,8 +1,8 @@
 {
   "color" : "rgba(28, 140, 255,1)",
-  "version" : "",
+  "version" : "v3.0.0",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/TG-Stickers-Keyboard.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/TG-Stickers-Keyboard",
     "hash": "",
     "autoUpdateInterval": 86400
   },

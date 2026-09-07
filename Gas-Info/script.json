@@ -26,7 +26,7 @@
   },
   "icon": "fuelpump.fill",
   "description": null,
-  "version": "",
+  "version": "v3.0.0",
   "color": "rgba(235, 141, 0, 1.00)",
   "runInApp": false,
   "author": {
@@ -37,7 +37,7 @@
   "entry": "index.tsx",
   "intentInputTypes": [],
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Gas-Info.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Gas-Info",
     "hash": "",
     "autoUpdateInterval": 86400
   }

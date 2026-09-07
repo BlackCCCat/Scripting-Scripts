@@ -1,6 +1,6 @@
 {
   "contributors": [],
-  "version": "",
+  "version": "v3.0.0",
   "localizedNames": {
     "fr": "",
     "pt": "",
@@ -38,7 +38,7 @@
   "icon": "location.fill.viewfinder",
   "runInApp": false,
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/WLOC-Helper.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/WLOC-Helper",
     "hash": "",
     "autoUpdateInterval": 86400
   }

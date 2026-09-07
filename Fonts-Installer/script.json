@@ -25,11 +25,11 @@
 
   ],
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Fonts-Installer.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Fonts-Installer",
     "hash": "",
     "autoUpdateInterval": 86400
   },
-  "version" : "",
+  "version" : "v3.0.0",
   "name" : "Fonts Installer",
   "entry" : "index.tsx",
   "intentInputTypes" : [

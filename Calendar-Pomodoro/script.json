@@ -23,7 +23,7 @@
     "es": ""
   },
   "remoteResource": {
-    "url": "https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Calendar-Pomodoro.zip",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Calendar-Pomodoro",
     "hash": "",
     "autoUpdateInterval": 86400
   },
@@ -38,6 +38,6 @@
   "iconImage": "https://raw.githubusercontent.com/BlackCCCat/Scripting-Scripts/refs/heads/main/src/CalendarTomatoLogger.PNG",
   "name": "Calendar Pomodoro",
   "color": "rgba(252, 124, 93,1)",
-  "version": "2.7.9",
+  "version": "3.0.0",
   "description": ""
 }

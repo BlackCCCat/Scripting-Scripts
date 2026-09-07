@@ -16,7 +16,7 @@
     "zh": "汉典",
     "pt": ""
   },
-  "version": "",
+  "version": "v3.0.0",
   "entry": "index.tsx",
   "iconImage": "",
   "runInApp": false,
@@ -25,7 +25,7 @@
   "color": "rgba(238, 92, 98,1)",
   "remoteResource": {
     "autoUpdateInterval": 86400,
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/ZDict.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/ZDict",
     "hash": ""
   },
   "description": "汉典",

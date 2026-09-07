@@ -1,6 +1,6 @@
 {
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/Package-Helper.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Package-Helper",
     "hash": "",
     "autoUpdateInterval": 86400
   },
@@ -8,7 +8,7 @@
   "color": "rgba(102, 196, 235, 1)",
   "runInApp": true,
   "localizedDescriptions": {},
-  "version": "",
+  "version": "v3.0.0",
   "contributors": [],
   "localizedNames": {},
   "icon": "shippingbox.circle.fill",

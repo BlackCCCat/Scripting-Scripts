@@ -1,6 +1,6 @@
 {
   "remoteResource": {
-    "url": "https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Surge-Module-Manager.zip",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Surge-Module-Manager",
     "hash": "",
     "autoUpdateInterval": null
   },
@@ -39,5 +39,5 @@
     "name": "BlackCCCat",
     "homepage": "https://github.com/BlackCCCat"
   },
-  "version": ""
+  "version": "v3.0.0"
 }

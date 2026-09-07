@@ -14,9 +14,9 @@
   "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/bilifavor.png",
   "runInApp": true,
   "icon": "play.square.stack.fill",
-  "version": "",
+  "version": "v3.0.0",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/BiliFavor.zip",
+    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/BiliFavor",
     "hash": "",
     "autoUpdateInterval": 86400
   },
