@@ -1,3 +1,6 @@
+## v3.0.0
+- 远程资源链接调整，不再使用release链接，直接使用仓库文件夹链接，请手动更换
+
 ## v2.14.12
 - 修复Apple Intelligence无法正常翻译App Store长内容
 
@@ -23,5 +26,3 @@
 
 - 支持 System Translate、Apple Intelligence、Scripting Assistant、Google Translate。
 - 支持添加 AI 接口与 DeepLX 引擎，并按自定义顺序显示结果。
-
-

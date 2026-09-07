@@ -1,6 +1,9 @@
 ## 说明
 该脚本为二次修改，原版为：[Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore)
 
+## v3.0.0
+- 远程资源链接调整，不再使用release链接，直接使用仓库文件夹链接，请手动更换
+
 ## v2.14.8
 - fix:挂载目录无法重命名
 - fix:目录内容变更导致挂载失效
@@ -16,4 +19,3 @@
 - 首个基于原版的二次修改版
 - 调整了设置页的一些设置操作逻辑
 - 首页 UI 增加悬浮按钮，用于切换不同页面
-
