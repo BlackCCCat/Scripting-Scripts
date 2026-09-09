@@ -1,76 +1,76 @@
 # `Scripting` 自用脚本
 
 ## [万象方案下载更新](./Rime-Wanxiang-Updater/)
-快捷下载安装、更新 Rime 输入法万象方案，可自行选择发布源、方案版本、输入法前端（仅限仓、元书及Scripting） [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Rime-Wanxiang-Updater.zip)
+快捷下载安装、更新 Rime 输入法万象方案，可自行选择发布源、方案版本、输入法前端（仅限仓、元书及Scripting） [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Rime-Wanxiang-Updater.zip)
 
 ## [Surge模块管理](./Surge-Module-Manager/)
-Surge模块本地化管理，导入、导出、下载、更新，支持分类、添加本地或远程模块 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Surge-Module-Manager.zip)
+Surge模块本地化管理，导入、导出、下载、更新，支持分类、添加本地或远程模块 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Surge-Module-Manager.zip)
 
 ## [日历番茄钟](./Calendar-Pomodoro/)
-自定义番茄钟，将记录同步到日历，支持正计时、倒计时、历史记录查看、编辑及统计，运行时灵动岛及通知中心计时，且可作为主页UI脚本运行 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Calendar-Pomodoro.zip)
+自定义番茄钟，将记录同步到日历，支持正计时、倒计时、历史记录查看、编辑及统计，运行时灵动岛及通知中心计时，且可作为主页UI脚本运行 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Calendar-Pomodoro.zip)
 
 ## [Vision OCR](./Vision-OCR/)
-截屏识别图片文字内容，可选择进行单个或多个复制，已归档 ~~[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Vision-OCR.zip)~~，配合快捷指令：[Vision OCR](https://www.icloud.com/shortcuts/1c7e7ed35e9f42eebb70ea4c0a9d2417)
+截屏识别图片文字内容，可选择进行单个或多个复制，已归档，配合快捷指令：[Vision OCR](https://www.icloud.com/shortcuts/1c7e7ed35e9f42eebb70ea4c0a9d2417)
 
 ## [PDFHelper](./PDFHelper/)
-简单的PDF工具，使用PDFKit API，支持图片转PDF，PDF合并、页面提取、页面顺序变更等简易功能 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/PDFHelper.zip)
+简单的PDF工具，使用PDFKit API，支持图片转PDF，PDF合并、页面提取、页面顺序变更等简易功能 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/PDFHelper.zip)
 
 ## [API Manager](./API-Manager/)
-OpenAPI的API管理工具，主要识别API是否可用，检测可用模型，已归档 ~~[点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/API-Manager.zip)~~
+OpenAPI的API管理工具，主要识别API是否可用，检测可用模型，已归档
 
 ## [自定义闹钟](./Custom-Alarm/)
-使用系统闹钟注册API，轻松将自定义闹钟注册到系统，特色是支持中国节假日自动识别，也可快速查看节假日休班调整信息等 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Custom-Alarm.zip)
+使用系统闹钟注册API，轻松将自定义闹钟注册到系统，特色是支持中国节假日自动识别，也可快速查看节假日休班调整信息等 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Custom-Alarm.zip)
 
 ## [密码生成器](./Password-Generator/)
-快速生成复杂的密码，支持密码长度自由设置，字母、数字、符号是否参与密码生成，支持历史记录，同时包含键盘拓展，可在 Scripting 键盘中使用脚本 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Password-Generator.zip)
+快速生成复杂的密码，支持密码长度自由设置，字母、数字、符号是否参与密码生成，支持历史记录，同时包含键盘拓展，可在 Scripting 键盘中使用脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Password-Generator)
 
 ## [Regex Tester](./Regex-Tester/)
-正则表达式测试工具，提供常用模版导入、正则表达式解析流程图 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Regex-Tester.zip)
+正则表达式测试工具，提供常用模版导入、正则表达式解析流程图 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Regex-Tester)
 
 ## [翻译器](./Translator/)
-翻译工具，提供脚本运行翻译界面、系统翻译界面（需在设置中将翻译默认app设置为 Scripting），支持Apple Intelligence翻译（需设备支持）、iOS系统翻译、Google翻译、Scripting内置AI助手翻译（需pro及提供相关API）、DeeplX翻译、自定义AI翻译等，支持语言自动检测，支持多种语言翻译，支持App Store翻译，支持文本通过ShareSheet分享翻译 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Translator.zip)
+翻译工具，提供脚本运行翻译界面、系统翻译界面（需在设置中将翻译默认app设置为 Scripting），支持Apple Intelligence翻译（需设备支持）、iOS系统翻译、Google翻译、Scripting内置AI助手翻译（需pro及提供相关API）、DeeplX翻译、自定义AI翻译等，支持语言自动检测，支持多种语言翻译，支持App Store翻译，支持文本通过ShareSheet分享翻译 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Translator)
 
 ## [快递助手](./Package-Helper/)
-配合快捷指令将短信转发给该脚本实现快递取件码自动提取 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Package-Helper.zip)
+配合快捷指令将短信转发给该脚本实现快递取件码自动提取 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts//Package-Helper)
 
 ## [BiliFavor](./BiliFavor/)
-简易的哔哩哔哩脚本，仅显示动态视频、可额外使用内置的storage存储关注的up主（不记录至账号），支持扫码及网页登录、scripting内部播放或跳转到哔哩哔哩app播放 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/BiliFavor.zip)
+简易的哔哩哔哩脚本，仅显示动态视频、可额外使用内置的storage存储关注的up主（不记录至账号），支持扫码及网页登录、scripting内部播放或跳转到哔哩哔哩app播放 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/BiliFavor.zip)
 
 ## [Sleep Tracker](./Sleep-Tracker/)
-睡眠数据的读取及展示，支持多尺寸、多种数据类型小组件 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Sleep-Tracker.zip)
+睡眠数据的读取及展示，支持多尺寸、多种数据类型小组件 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Sleep-Tracker.zip)
 
 ## [CAIS](./CAIS/)
-`Clipboard All in Scripting`，一个完整的剪贴板管理脚本，支持系统剪贴板的自动读取、iCloud同步、剪贴内容收藏、剪贴内容转换、自定义脚本转换、正则提取、图片OCR提取文字、局域网共享等功能，且可作为主页UI脚本运行 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/CAIS.zip)
+`Clipboard All in Scripting`，一个完整的剪贴板管理脚本，支持系统剪贴板的自动读取、iCloud同步、剪贴内容收藏、剪贴内容转换、自定义脚本转换、正则提取、图片OCR提取文字、局域网共享等功能，且可作为主页UI脚本运行 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/CAIS.zip)
 
 ## [Scripting Rime Keyboard](./Scripting-Rime-Keyboard)
-专门适配万象方案的Scripting Rime键盘，UI上移植了[万象皮肤](https://github.com/BlackCCCat/ResourceforHamster/tree/main/Skin_Keyboard/万象-元书)，基本可作为日常键盘使用，同时添加了九键的支持 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Scripting-Rime-Keyboard.zip)
+专门适配万象方案的Scripting Rime键盘，UI上移植了[万象皮肤](https://github.com/BlackCCCat/ResourceforHamster/tree/main/Skin_Keyboard/万象-元书)，基本可作为日常键盘使用，同时添加了九键的支持 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Scripting-Rime-Keyboard.zip)
 
 ## [Media Downloader](./Media-Downloader)
-已变更为 Media Downloader，支持抖音、推特、TikTok、小红书、instagram等网站视频解析下载 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Media-Downloader.zip)
+已变更为 Media Downloader，支持抖音、推特、TikTok、小红书、instagram等网站视频解析下载 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Media-Downloader.zip)
 
 ## [ZDict](./ZDict)
-汉语词典，可查询字、词、成语等 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/ZDict.zip)
+汉语词典，可查询字、词、成语等 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/ZDict.zip)
 
 ## [Gas Info](./ZDict)
-油价脚本，可根据定位或选择展示主省份各型号油价，获取当前位置附近加油站，快速进行导航，支持切换油价数据源 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Gas-Info.zip)
+油价脚本，可根据定位或选择展示主省份各型号油价，获取当前位置附近加油站，快速进行导航，支持切换油价数据源 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Gas-Info.zip)
 
 ## [PhotoSlide](./PhotoSlide)
-简易的相册照片管理工具，左右滑切换照片，上滑进入待删除状态，下滑跳过照片，支持照片归属相簿设置，每个操作可无限撤回 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/PhotoSlide.zip)
+简易的相册照片管理工具，左右滑切换照片，上滑进入待删除状态，下滑跳过照片，支持照片归属相簿设置，每个操作可无限撤回 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/PhotoSlide.zip)
 
 ## [WLOC-Helper](./WLOC-Helper)
-WLOC虚拟定位辅助脚本 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/WLOC-Helper.zip)
+WLOC虚拟定位辅助脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/WLOC-Helper.zip)
 
 ## [Memory-Days](./Memory-Days)
-重要日期记录及展示脚本，主要使用小组件功能 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Memory-Days.zip)
+重要日期记录及展示脚本，主要使用小组件功能 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Memory-Days.zip)
 
 ## [TG-Stickers-Keyboard](./TG-Stickers-Keyboard)
-Telegram贴纸下载，需bot token，支持动图解析转换为GIF保存到相册，支持键盘使用（只能复制图片然后在微信粘贴类似的使用） [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/TG-Stickers-Keyboard.zip)
+Telegram贴纸下载，需bot token，支持动图解析转换为GIF保存到相册，支持键盘使用（只能复制图片然后在微信粘贴类似的使用） [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/TG-Stickers-Keyboard.zip)
 
 ## [Fonts-Installer](./Fonts-Installer)
-字体安装脚本，支持通过sharesheet导入字体文件或脚本内导入字体文件，进行字体识别和安装到系统描述文件 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/Fonts-Installer.zip)
+字体安装脚本，支持通过sharesheet导入字体文件或脚本内导入字体文件，进行字体识别和安装到系统描述文件 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Fonts-Installer.zip)
 
 ## [FileStore](./FileStore)
-功能齐全的文件管理脚本 [点击下载](https://github.com/BlackCCCat/Scripting-Scripts/releases/latest/download/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scipting/FileStore)
+功能齐全的文件管理脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scipting/FileStore)
 
 **Codex完成几乎所有代码**
 
