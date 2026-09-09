@@ -1,5 +1,6 @@
 import {
   Button,
+  Editor,
   Form,
   HStack,
   Navigation,
@@ -47,6 +48,48 @@ function shouldPersistDraft(item: RegexItem) {
     String(item.sampleText ?? "").trim() ||
     String(item.replacementTemplate ?? "").trim() ||
     normalizeName(item.name) !== "Untitled",
+  )
+}
+
+type PatternEditorResult =
+  | { action: "cancel" }
+  | { action: "save"; content: string }
+
+function RegexPatternEditorView(props: { controller: EditorController }) {
+  const dismiss = Navigation.useDismiss()
+
+  return (
+    <NavigationStack>
+      <VStack
+        navigationTitle="编辑正则表达式"
+        navigationBarTitleDisplayMode="inline"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        presentationDetents={["large"]}
+        presentationDragIndicator="visible"
+        toolbar={{
+          cancellationAction: (
+            <Button title="取消" role="cancel" action={() => dismiss({ action: "cancel" })} />
+          ),
+          confirmationAction: (
+            <Button
+              title="保存"
+              action={() => dismiss({
+                action: "save",
+                content: String(props.controller.content ?? ""),
+              })}
+            />
+          ),
+        }}
+      >
+        <Editor
+          controller={props.controller}
+          scriptName="Regex Tester"
+          showAccessoryView
+          searchEnabled
+          ignoresSafeArea={{ regions: "container", edges: "bottom" }}
+        />
+      </VStack>
+    </NavigationStack>
   )
 }
 
@@ -122,10 +165,32 @@ export function RegexEditorView(props: { item?: RegexItem; isNew?: boolean; stan
     }
   }, [])
 
-  async function copyPattern() {
-    if (!pattern.trim()) return
-    await Pasteboard.setString(pattern)
-    await Dialog.alert({ message: "已复制正则表达式" })
+  async function openPatternEditor() {
+    const controller = new EditorController({
+      content: pattern,
+      ext: "txt",
+      readOnly: false,
+    })
+    let latestPattern = pattern
+    controller.onContentChanged = (content) => {
+      latestPattern = content
+    }
+
+    let result: PatternEditorResult | null = null
+    try {
+      result = await Navigation.present<PatternEditorResult | null>({
+        element: <RegexPatternEditorView controller={controller} />,
+        modalPresentationStyle: "pageSheet",
+      })
+      if (result?.action === "cancel") return
+
+      const next = result?.action === "save" ? result.content : latestPattern
+      if (next === pattern) return
+      setPattern(next)
+      setPending(next.trim() ? "已修改表达式，点击测试结果重新匹配" : "点击测试结果开始匹配")
+    } finally {
+      controller.dispose()
+    }
   }
 
   async function copyResult() {
@@ -244,18 +309,7 @@ export function RegexEditorView(props: { item?: RegexItem; isNew?: boolean; stan
       </Section>
 
         <Section header={<Text>正则表达式</Text>}>
-          <TextField
-            title=""
-            value={pattern}
-            axis="vertical"
-            prompt="输入正则表达式"
-            frame={{ minHeight: 96, maxWidth: "infinity", alignment: "topLeading" }}
-            onChanged={(value: string) => {
-              setPattern(value)
-              setPending(value.trim() ? "已修改表达式，点击测试结果重新匹配" : "点击测试结果开始匹配")
-            }}
-          />
-          <PatternHighlightPreview pattern={pattern} onPress={withHaptic(copyPattern)} />
+          <PatternHighlightPreview pattern={pattern} onPress={withHaptic(openPatternEditor)} />
           <Picker
             title="匹配模式"
             value={matchMode}

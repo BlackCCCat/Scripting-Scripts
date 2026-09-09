@@ -8,7 +8,6 @@ export function PatternHighlightPreview(props: { pattern: string; onPress?: () =
   return (
     <Button
       buttonStyle="plain"
-      disabled={!hasValue}
       action={() => {
         void props.onPress?.()
       }}
@@ -33,7 +32,7 @@ export function PatternHighlightPreview(props: { pattern: string; onPress?: () =
             multilineTextAlignment="leading"
             foregroundStyle="secondaryLabel"
           >
-            预览
+            点击编辑正则表达式
           </Text>
         )}
       </VStack>

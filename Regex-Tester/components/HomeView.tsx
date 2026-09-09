@@ -73,6 +73,7 @@ export function HomeView() {
       <List
         navigationTitle="RegEx Test"
         navigationBarTitleDisplayMode="large"
+        onAppear={() => setReloadToken((value) => value + 1)}
         searchable={{ value: query, onChanged: setQuery }}
         toolbar={(
           <Toolbar>
