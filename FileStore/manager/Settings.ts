@@ -17,6 +17,8 @@ export interface AppSettingsCore {
   tabBarMinimizeOnScroll: boolean;
   /** 浏览列表显示模式：list=列表, grid=网格(文件夹视图) */
   browserLayout?: "list" | "grid";
+  /** 网格图标视图下，是否自动滚动显示超长文件名（默认开启） */
+  gridFileNameMarquee?: boolean;
 }
 
 export interface AppSettingsMeta {
@@ -62,6 +64,7 @@ const defaultSettings: AppSettings = {
   showExitButton: false,
   tabBarMinimizeOnScroll: true,
   browserLayout: "list",
+  gridFileNameMarquee: true,
   dualLeftPath: null,
   dualLeftBookmarkName: null,
   dualRightPath: null,

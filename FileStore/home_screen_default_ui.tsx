@@ -152,6 +152,7 @@ export default function HomeScreenDefaultUi() {
             onSettingsChange={setSettings}
             bookmarks={bookmarks}
             isHomeScreenHost
+            isFocused={activeTab === 0}
             secondaryToolbarLeadingItems={
               <ToolbarItem placement="topBarLeading">
                 <Button
@@ -170,6 +171,8 @@ export default function HomeScreenDefaultUi() {
             showFolderItemCounts={settings.showFolderItemCounts}
             onRefresh={refresh}
             onSettingsChange={setSettings}
+            settings={settings}
+            isFocused={activeTab === 1}
           />
         ) : (
           <SettingsTabPage

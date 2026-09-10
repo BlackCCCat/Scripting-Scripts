@@ -62,6 +62,9 @@ export function DualBrowserPage({
       homeCurrentPath: prev.homeCurrentPath,
       homeDirectoryBookmarkName: prev.homeDirectoryBookmarkName,
     }))
+    if (settings.dualModeEnabled !== undefined && settings.dualModeEnabled !== isDualMode) {
+      setIsDualMode(settings.dualModeEnabled)
+    }
   }, [settings])
 
   // 各自独立的 settings 变更处理器
@@ -193,8 +196,10 @@ export function DualBrowserPage({
   // 把文件复制到右侧当前目录
   const handleCopyLeftToRight = useCallback(
     async (filePath: string) => {
-      if (!rightDir) {
-        await Dialog.alert({ title: "提示", message: "右侧尚未进入任何目录", buttonLabel: "确定" })
+      if (!isDualMode || !rightDir) {
+        if (!rightDir) {
+          await Dialog.alert({ title: "提示", message: "右侧尚未进入任何目录", buttonLabel: "确定" })
+        }
         return
       }
       try {
@@ -241,14 +246,16 @@ export function DualBrowserPage({
         await Dialog.alert({ title: "错误", message: "复制失败：" + String(e), buttonLabel: "确定" })
       }
     },
-    [rightDir, layoutDir],
+    [rightDir, layoutDir, isDualMode],
   )
 
   // 把文件复制到左侧当前目录
   const handleCopyRightToLeft = useCallback(
     async (filePath: string) => {
-      if (!leftDir) {
-        await Dialog.alert({ title: "提示", message: "左侧尚未进入任何目录", buttonLabel: "确定" })
+      if (!isDualMode || !leftDir) {
+        if (!leftDir) {
+          await Dialog.alert({ title: "提示", message: "左侧尚未进入任何目录", buttonLabel: "确定" })
+        }
         return
       }
       try {
@@ -295,7 +302,7 @@ export function DualBrowserPage({
         await Dialog.alert({ title: "错误", message: "复制失败：" + String(e), buttonLabel: "确定" })
       }
     },
-    [leftDir, layoutDir],
+    [leftDir, layoutDir, isDualMode],
   )
 
   // 复制到对方目录的顶部提示
@@ -372,8 +379,12 @@ export function DualBrowserPage({
     onSettingsChange?.(nextSettings)
   }
 
+  // 紧凑分栏判定：处于双栏模式且为横向左右分栏时，每栏宽度减半，工具栏与项目进入紧凑模式
+  const isNarrowLayout = isDualMode && layoutDir === "horizontal"
+
   const leftBrowser = useMemo(() => (
     <GeneralBrowser
+      key={isDualMode ? "dual-left" : "single-left"}
       isHomePage={true}
       isHomeScreenHost={isHomeScreenHost}
       settings={leftSettings}
@@ -385,26 +396,28 @@ export function DualBrowserPage({
       onExternalCopy={handleExternalCopy}
       onDirChange={handleLeftDirChange}
       toolbarLeadingItems={dualModeToolbarItem}
-      oppositeDirName={rightDir ? (layoutDir === "horizontal" ? "复制到右侧目录" : "复制到下方目录") : undefined}
-      onCopyToOppositeDir={rightDir ? handleCopyLeftToRight : undefined}
+      oppositeDirName={isDualMode && rightDir ? (layoutDir === "horizontal" ? "复制到右侧目录" : "复制到下方目录") : undefined}
+      onCopyToOppositeDir={isDualMode && rightDir ? handleCopyLeftToRight : undefined}
       addFilesRef={leftAddFilesRef}
       folderCountUpdateRef={leftFolderCountUpdateRef}
       bookmarks={bookmarks}
       isFocused={isFocused}
+      isDualMode={isNarrowLayout}
       onFolderCountChanged={(folderPath, count) => rightFolderCountUpdateRef.current(folderPath, count)}
       onFilesAdded={(files) => {
-        if (leftDir === rightDir && rightDir) rightAddFilesRef.current(files)
+        if (isDualMode && leftDir === rightDir && rightDir) rightAddFilesRef.current(files)
       }}
-      onDropCompleted={() => setRightKey((key) => key + 1)}
+      onDropCompleted={() => { if (isDualMode) setRightKey((key) => key + 1) }}
     />
   ), [
     isHomeScreenHost, leftSettings, handleLeftSettingsChange, leftKey, settings.showFolderItemCounts,
     leftHighlightFile, sharedCopiedPath, handleExternalCopy, handleLeftDirChange, dualModeToolbarItem,
-    rightDir, layoutDir, handleCopyLeftToRight, bookmarks, isFocused, leftDir,
+    rightDir, layoutDir, handleCopyLeftToRight, bookmarks, isFocused, leftDir, isDualMode, isNarrowLayout,
   ])
 
   const rightBrowser = useMemo(() => (
     <GeneralBrowser
+      key={isDualMode ? "dual-right" : "single-right"}
       isHomePage={true}
       isHomeScreenHost={isHomeScreenHost}
       settings={rightSettings}
@@ -416,23 +429,24 @@ export function DualBrowserPage({
       onExternalCopy={handleExternalCopy}
       onDirChange={handleRightDirChange}
       toolbarLeadingItems={secondaryToolbarLeadingItems}
-      oppositeDirName={leftDir ? (layoutDir === "horizontal" ? "复制到左侧目录" : "复制到上方目录") : undefined}
-      onCopyToOppositeDir={leftDir ? handleCopyRightToLeft : undefined}
+      oppositeDirName={isDualMode && leftDir ? (layoutDir === "horizontal" ? "复制到左侧目录" : "复制到上方目录") : undefined}
+      onCopyToOppositeDir={isDualMode && leftDir ? handleCopyRightToLeft : undefined}
       initialLoadDelay={300}
       addFilesRef={rightAddFilesRef}
       folderCountUpdateRef={rightFolderCountUpdateRef}
       bookmarks={bookmarks}
       isFocused={isFocused}
+      isDualMode={isNarrowLayout}
       onFolderCountChanged={(folderPath, count) => leftFolderCountUpdateRef.current(folderPath, count)}
       onFilesAdded={(files) => {
-        if (leftDir === rightDir && leftDir) leftAddFilesRef.current(files)
+        if (isDualMode && leftDir === rightDir && leftDir) leftAddFilesRef.current(files)
       }}
-      onDropCompleted={() => setLeftKey((key) => key + 1)}
+      onDropCompleted={() => { if (isDualMode) setLeftKey((key) => key + 1) }}
     />
   ), [
     isHomeScreenHost, rightSettings, handleRightSettingsChange, rightKey, settings.showFolderItemCounts,
     rightHighlightFile, sharedCopiedPath, handleExternalCopy, handleRightDirChange, secondaryToolbarLeadingItems,
-    leftDir, layoutDir, handleCopyRightToLeft, bookmarks, isFocused, rightDir,
+    leftDir, layoutDir, handleCopyRightToLeft, bookmarks, isFocused, rightDir, isDualMode, isNarrowLayout,
   ])
 
   return (
@@ -461,26 +475,26 @@ export function DualBrowserPage({
             <ZStack animation={{ animation: Animation.smooth({ duration: 0.5 }), value: layoutDir }}>
               {/* ── 内容分栏（根据 layoutDir 选择左右或上下） ── */}
               {!isDualMode ? (
-                <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }} spacing={0}>
+                <VStack key="single-col" frame={{ maxWidth: "infinity", maxHeight: "infinity" }} spacing={0}>
                   {leftBrowser}
                 </VStack>
               ) : layoutDir === "horizontal" ? (
-                <HStack spacing={0}>
-                  <VStack frame={{ width: Math.max(40, totalW * ratio) }} spacing={0}>
+                <HStack key="dual-h" spacing={0}>
+                  <VStack key="dual-left-h" frame={{ width: Math.max(40, totalW * ratio) }} spacing={0}>
                     {leftBrowser}
                   </VStack>
 
-                  <VStack frame={{ width: Math.max(40, totalW * (1 - ratio)) }} spacing={0}>
+                  <VStack key="dual-right-h" frame={{ width: Math.max(40, totalW * (1 - ratio)) }} spacing={0}>
                     {rightBrowser}
                   </VStack>
                 </HStack>
               ) : (
-                <VStack spacing={0}>
-                  <VStack frame={{ height: Math.max(40, totalH * ratio) }} spacing={0}>
+                <VStack key="dual-v" spacing={0}>
+                  <VStack key="dual-left-v" frame={{ height: Math.max(40, totalH * ratio) }} spacing={0}>
                     {leftBrowser}
                   </VStack>
 
-                  <VStack frame={{ height: Math.max(40, totalH * (1 - ratio)) }} spacing={0}>
+                  <VStack key="dual-right-v" frame={{ height: Math.max(40, totalH * (1 - ratio)) }} spacing={0}>
                     {rightBrowser}
                   </VStack>
                 </VStack>

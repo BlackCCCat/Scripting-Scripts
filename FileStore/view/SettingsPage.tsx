@@ -72,6 +72,7 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
             <Text tag="list">列表视图</Text>
             <Text tag="grid">网格图标视图</Text>
           </Picker>
+          <Toggle title="网格文件名自动滚动" value={settings.gridFileNameMarquee ?? true} onChanged={(value: boolean) => onUpdateSettings({ gridFileNameMarquee: value })} />
           <Toggle title="显示文件夹内项目个数" value={settings.showFolderItemCounts ?? true} onChanged={(value: boolean) => onUpdateSettings({ showFolderItemCounts: value })} />
           <Toggle title="滑动时隐藏TAB" value={settings.tabBarMinimizeOnScroll ?? true} onChanged={(value: boolean) => onUpdateSettings({ tabBarMinimizeOnScroll: value })} />
           <Toggle title="独立显示退出按钮" value={settings.showExitButton} onChanged={(value: boolean) => onUpdateSettings({ showExitButton: value })} />

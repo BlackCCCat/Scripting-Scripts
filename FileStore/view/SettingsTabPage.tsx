@@ -171,11 +171,12 @@ function MountedDirectoriesSettingsPage({ onBookmarksChange }: { onBookmarksChan
     <List
       navigationTitle="挂载目录"
       navigationBarTitleDisplayMode="inline"
-      listStyle="plain"
+      listStyle="automatic"
       onAppear={() => setDirectoryBookmarks(getDirectoryBookmarkOptions())}
     >
       {directoryBookmarks.length > 0 ? (
         <Section
+          header={<Text>目录书签</Text>}
           listSectionSeparator={{ visibility: "hidden", edges: "bottom" }}
           footer={<Text foregroundStyle="secondaryLabel">勾选的目录会加入 FileStore；取消勾选不会删除系统书签、目录或其中的文件。</Text>}
         >
@@ -291,8 +292,7 @@ export function SettingsTabPage({ settings, onSettingsChange, bookmarks, onSwitc
   return (
     <NavigationStack>
       <List
-        listStyle="plain" 
-        scrollContentBackground="hidden"
+        listStyle="automatic"
         navigationTitle="设置"
         navigationDestination={{
           isPresented: showMountedDirectories,
@@ -301,6 +301,7 @@ export function SettingsTabPage({ settings, onSettingsChange, bookmarks, onSwitc
         }}
       >
         {/* ── 核心功能一览 ── */}
+        <Section header={<Text>核心功能一览</Text>}>
           <FeatureRow
             icon="tray.2.fill"
             iconColor="systemGreen"
@@ -364,26 +365,25 @@ export function SettingsTabPage({ settings, onSettingsChange, bookmarks, onSwitc
             title="10. 压缩文件/查看/解压缩"
             caption="查看 / 修改 / 解压缩 加密 ZIP / 7z AES256"
           />
+        </Section>
         {/* ── 显示模式（原 SettingsPage） ── */}
-        <Section header={<Text padding={{ leading: 20, trailing: 5 }}>显示模式</Text>}>
+        <Section
+          header={<Text>显示模式</Text>}
+          footer={<HStack frame={{ maxWidth: "infinity", height: 60 }}><EmptyView /></HStack>}
+        >
           <Picker
             title="浏览视图"
             value={settings.browserLayout ?? "list"}
             onChanged={(val: string) => update({ browserLayout: val as "list" | "grid" })}
-            listRowInsets={{ top: 0, bottom: 0, leading: 30, trailing: 10 }}
           >
             <Text tag="list">列表视图</Text>
             <Text tag="grid">网格图标视图</Text>
           </Picker>
-          <Toggle title="显示文件夹内项目个数" value={settings.showFolderItemCounts ?? true} onChanged={(value: boolean) => update({ showFolderItemCounts: value })} listRowInsets={{ top: 0, bottom: 0, leading: 30, trailing: 10 }} />
-          <Toggle title="滑动时隐藏TAB" value={settings.tabBarMinimizeOnScroll ?? true} onChanged={(value: boolean) => update({ tabBarMinimizeOnScroll: value })} listRowInsets={{ top: 0, bottom: 0, leading: 30, trailing: 10 }} />
-          <Toggle title="独立显示退出按钮" value={settings.showExitButton} onChanged={(value: boolean) => update({ showExitButton: value })} listRowInsets={{ top: 0, bottom: 0, leading: 30, trailing: 10 }} />
+          <Toggle title="网格文件名自动滚动" value={settings.gridFileNameMarquee ?? true} onChanged={(value: boolean) => update({ gridFileNameMarquee: value })} />
+          <Toggle title="显示文件夹内项目个数" value={settings.showFolderItemCounts ?? true} onChanged={(value: boolean) => update({ showFolderItemCounts: value })} />
+          <Toggle title="滑动时隐藏TAB" value={settings.tabBarMinimizeOnScroll ?? true} onChanged={(value: boolean) => update({ tabBarMinimizeOnScroll: value })} />
+          <Toggle title="独立显示退出按钮" value={settings.showExitButton} onChanged={(value: boolean) => update({ showExitButton: value })} />
         </Section>
-
-        {/* ── 底部留白 ── */}
-        <HStack frame={{ maxWidth: "infinity", height: 60 }} listRowBackground={<Rectangle fill="clear" />} listRowSeparator={{ visibility: "hidden", edges: "all" }}>
-          <EmptyView />
-        </HStack>
       </List>
     </NavigationStack>
   );

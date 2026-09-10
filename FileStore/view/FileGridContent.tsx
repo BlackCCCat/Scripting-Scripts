@@ -3,6 +3,7 @@
 import { VStack, Text, Image, ZStack, Spacer } from "scripting";
 import { fmtSize, FileInfo } from "../manager/utils";
 import { FolderCountLabel, FolderCountStore } from "./FolderCountLabel";
+import { GridFileName } from "./GridFileName";
 
 export interface FileGridContentProps {
   file: FileInfo;
@@ -14,10 +15,14 @@ export interface FileGridContentProps {
   };
   /** 拖放悬停到文件夹：图标右上角显示绿色 + 徽标*/
   isDropTargeted?: boolean;
+  /** 网格文件名是否自动滚动 */
+  marqueeEnabled?: boolean;
+  /** 是否处于焦点状态 */
+  isFocused?: boolean;
 }
 
 /** 网格项展示：顶部居中大图标，中间文件名（最多2行），底部信息 */
-export function FileGridContent({ file, folderCountStore, selectMode, isDropTargeted }: FileGridContentProps) {
+export function FileGridContent({ file, folderCountStore, selectMode, isDropTargeted, marqueeEnabled, isFocused = true }: FileGridContentProps) {
   return (
     <VStack
       alignment="center"
@@ -50,15 +55,8 @@ export function FileGridContent({ file, folderCountStore, selectMode, isDropTarg
         ) : null}
       </ZStack>
 
-      {/* 文件名（居中，最多 2 行，文字截断，高仿系统文件网格） */}
-      <Text
-        font="footnote"
-        lineLimit={2}
-        multilineTextAlignment="center"
-        foregroundStyle="label"
-      >
-        {file.name}
-      </Text>
+      {/* 文件名（常规长度居中两行展示，超出两行自动平滑往返滚动显示全名） */}
+      <GridFileName name={file.name} marqueeEnabled={marqueeEnabled} isFocused={isFocused} />
 
       {/* 底部详细信息：文件夹项数 或 文件大小 */}
       <VStack alignment="center">

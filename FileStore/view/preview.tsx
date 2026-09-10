@@ -148,7 +148,7 @@ export function HomeView({
 
         <Tab title="挂载目录" systemImage="tray.2.fill" value={1}>
           <Group labelStyle="titleAndIcon">
-            <MountDirectoriesPage bookmarks={bookmarks} showFolderItemCounts={settings.showFolderItemCounts} onRefresh={onRefresh} onSettingsChange={(newSettings) => setSettings(newSettings)} isFocused={tabIndex === 1} />
+            <MountDirectoriesPage bookmarks={bookmarks} showFolderItemCounts={settings.showFolderItemCounts} onRefresh={onRefresh} onSettingsChange={(newSettings) => setSettings(newSettings)} isFocused={tabIndex === 1} settings={settings} />
           </Group>
         </Tab>
 

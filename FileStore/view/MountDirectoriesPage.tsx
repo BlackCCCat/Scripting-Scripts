@@ -22,6 +22,9 @@ import {
   Path,
   ForEach,
   EmptyView,
+  ScrollView,
+  LazyVGrid,
+  Group,
 } from "scripting";
 import {
   addDirectoryBookmark,
@@ -44,6 +47,7 @@ import { FileNavigationDest } from "./MediaViewer";
 import { showToast } from "../manager/ToastManager";
 import { ToastOverlay } from "./ToastOverlay";
 import { DROP_ACCEPTED_TYPES, handleDropToDirectory } from "../manager/dropHandler";
+import { GridFileName } from "./GridFileName";
 
 interface MountDirectoriesPageProps {
   bookmarks: Bookmark[];
@@ -51,6 +55,7 @@ interface MountDirectoriesPageProps {
   onRefresh: () => void;
   onSettingsChange?: (settings: AppSettings) => void;
   isFocused?: boolean;
+  settings?: AppSettings;
 }
 
 function getAccessiblePath(bookmark: Bookmark): string | null {
@@ -133,7 +138,135 @@ function BookmarkInfoDialog({ bookmark }: { bookmark: Bookmark }) {
   );
 }
 
-export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefresh, onSettingsChange, isFocused = true }: MountDirectoriesPageProps) {
+interface DirectoryGridCardProps {
+  name: string;
+  icon: string;
+  iconColor: any;
+  subtitle: string;
+  subtitleColor?: any;
+  isAccessible?: boolean;
+  selectMode?: {
+    isSelected: boolean;
+    onToggle: () => void;
+  };
+  onTap: () => void;
+  contextMenuItems?: {
+    title: string;
+    systemImage?: string;
+    role?: "destructive" | "cancel";
+    action: () => void;
+  }[];
+  marqueeEnabled?: boolean;
+  isFocused?: boolean;
+}
+
+function DirectoryGridCard({
+  name,
+  icon,
+  iconColor,
+  subtitle,
+  subtitleColor = "secondaryLabel",
+  isAccessible = true,
+  selectMode,
+  onTap,
+  contextMenuItems,
+  marqueeEnabled,
+  isFocused = true,
+}: DirectoryGridCardProps) {
+  const contextMenu = contextMenuItems && contextMenuItems.length > 0 ? {
+    menuItems: (
+      <Group>
+        {contextMenuItems.map((item, idx) => (
+          <Button
+            key={idx}
+            title={item.title}
+            systemImage={item.systemImage}
+            role={item.role}
+            action={item.action}
+          />
+        ))}
+      </Group>
+    ),
+  } : undefined;
+
+  return (
+    <Button
+      buttonStyle="plain"
+      action={() => {
+        if (selectMode) {
+          selectMode.onToggle();
+        } else {
+          onTap();
+        }
+      }}
+      contextMenu={contextMenu}
+    >
+      <VStack
+        alignment="center"
+        spacing={6}
+        frame={{ maxWidth: "infinity", minHeight: 110, maxHeight: 125 }}
+        contentShape="rect"
+      >
+        <ZStack alignment="topTrailing" frame={{ height: 52 }}>
+          <VStack alignment="center" frame={{ width: 64, height: 52 }}>
+            <Image
+              systemName={icon}
+              font="largeTitle"
+              foregroundStyle={iconColor as any}
+            />
+          </VStack>
+          {selectMode ? (
+            <Image
+              systemName={selectMode.isSelected ? "checkmark.circle.fill" : "circle"}
+              foregroundStyle={selectMode.isSelected ? "systemBlue" : "secondaryLabel"}
+              font="subheadline"
+            />
+          ) : !isAccessible ? (
+            <Image
+              systemName="exclamationmark.triangle.fill"
+              foregroundStyle="systemRed"
+              font="caption"
+            />
+          ) : null}
+        </ZStack>
+
+        {/* 目录名称（常规长度居中两行展示，超出两行自动平滑往返滚动显示全名） */}
+        <GridFileName name={name} marqueeEnabled={marqueeEnabled} isFocused={isFocused} />
+
+        <Text
+          font="caption2"
+          monospaced
+          lineLimit={1}
+          foregroundStyle={subtitleColor as any}
+        >
+          {subtitle}
+        </Text>
+      </VStack>
+    </Button>
+  );
+}
+
+export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefresh, onSettingsChange, isFocused = true, settings }: MountDirectoriesPageProps) {
+  const [layoutMode, setLayoutMode] = useState<"list" | "grid">(
+    () => settings?.browserLayout || readSettings().browserLayout || "list"
+  );
+
+  useEffect(() => {
+    const currentMode = settings?.browserLayout || readSettings().browserLayout || "list";
+    if (currentMode !== layoutMode) {
+      setLayoutMode(currentMode);
+    }
+  }, [settings?.browserLayout, isFocused]);
+
+  const handleToggleLayout = () => {
+    const next: "list" | "grid" = layoutMode === "grid" ? "list" : "grid";
+    setLayoutMode(next);
+    const current = readSettings();
+    const updated: AppSettings = { ...current, browserLayout: next };
+    saveSettings(updated);
+    onSettingsChange?.(updated);
+  };
+
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Bookmark[]>([]);
   const [orderedBookmarks, setOrderedBookmarks] = useState<Bookmark[]>(() => [...bookmarks]);
@@ -268,6 +401,9 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
           onUpdateSettings={(updates) => {
             const newSettings = { ...currentSettings, ...updates };
             saveSettings(newSettings);
+            if (updates.browserLayout) {
+              setLayoutMode(updates.browserLayout);
+            }
             onSettingsChange?.(newSettings);
             onRefresh();
           }}
@@ -424,243 +560,398 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
     performDrop: handleMountedDirectoryDrop,
   };
 
+  const query = searchQuery.trim().toLowerCase();
+  const filteredSystemDirs = query
+    ? systemDirs.filter((d) => (d.displayName || d.name).toLowerCase().includes(query))
+    : systemDirs;
+
+  const pageToolbar = {
+    topBarTrailing: [
+      <Menu title="" systemImage="ellipsis">
+        <Button
+          title={layoutMode === "grid" ? "列表显示" : "网格显示"}
+          systemImage={layoutMode === "grid" ? "list.bullet" : "square.grid.2x2"}
+          action={handleToggleLayout}
+        />
+        <Divider />
+        <Button
+          title={selectMode ? "完成选择" : "选择"}
+          systemImage="checkmark.circle"
+          action={() => {
+            if (selectMode) {
+              setSelectMode(false);
+              setSelectedNames(new Set());
+            } else {
+              setSelectMode(true);
+            }
+          }}
+        />
+        {selectMode && selectedNames.size > 0 ? (
+          <>
+            <Divider />
+            <Button title="取消挂载选中" systemImage="trash" role="destructive" action={handleDeleteSelected} />
+          </>
+        ) : (
+          <EmptyView />
+        )}
+        <Divider />
+        <Button title="添加目录" systemImage="folder.badge.plus" action={handleAdd} />
+        <Menu title="挂载内置目录" systemImage="internaldrive">
+          {getBuiltinDirectories().map((dir) => (
+            <Button
+              key={dir.path}
+              title={dir.name}
+              systemImage={dir.icon}
+              action={() => {
+                const already = getAllBookmarks().some((b) => b.path === dir.path);
+                if (already) {
+                  showToast(`${dir.name} 已在挂载列表中`);
+                  return;
+                }
+                const added = addBookmarkManually(dir.path, dir.name);
+                if (added) {
+                  showToast(`已挂载 ${dir.name}`);
+                  onRefresh();
+                } else {
+                  showToast("挂载失败");
+                }
+              }}
+            />
+          ))}
+        </Menu>
+        <Divider />
+        <Button title="设置" systemImage="gearshape" action={handleOpenSettings} />
+      </Menu>,
+    ],
+  };
+
+  const sharedContainerProps = {
+    navigationTitle: "挂载目录",
+    navigationBarTitleDisplayMode: "inline" as const,
+    searchable: {
+      value: searchQuery,
+      onChanged: setSearchQuery,
+      placement: "navigationBarDrawer" as const,
+      prompt: "搜索目录...",
+      presented: {
+        value: showSearch,
+        onChanged: (v: boolean) => {
+          setShowSearch(v);
+          if (!v) {
+            setSearchQuery("");
+            setSearchResults([]);
+          }
+        },
+      },
+    },
+    navigationDestination: (
+      <NavigationDestination>
+        {(page) => {
+          if (page.startsWith("browser:")) {
+            let dirPath = page.slice(8);
+            let highlightFile: string | undefined;
+            const sepIdx = dirPath.indexOf("::");
+            if (sepIdx !== -1) {
+              highlightFile = decodeURIComponent(dirPath.slice(sepIdx + 2));
+              dirPath = dirPath.slice(0, sepIdx);
+            }
+            const navArray = navPath?.value && Array.isArray(navPath.value) ? navPath.value : [];
+            const isNavigationFocused = navArray.length > 0 && navArray[navArray.length - 1] === page;
+            const browserIsFocused = isFocused && isNavigationFocused;
+
+            return (
+              <GeneralBrowser
+                dirPath={dirPath}
+                dirName={Path.basename(dirPath)}
+                rootPath={dirPath}
+                navPath={navPath}
+                highlightFile={highlightFile}
+                showFolderItemCounts={showFolderItemCounts}
+                onOpenSettings={handleOpenSettings}
+                refreshKey={directoryDropRefreshKey}
+                isFocused={browserIsFocused}
+                settings={settings}
+                onSettingsChange={onSettingsChange}
+              />
+            );
+          }
+          return <FileNavigationDest page={page} />;
+        }}
+      </NavigationDestination>
+    ),
+    toolbar: pageToolbar,
+  };
+
   return (
     <NavigationStack path={navPath} onDrop={mountedDirectoryDrop}>
       <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-        <List
-          listStyle="plain"
-          navigationTitle="挂载目录"
-          navigationBarTitleDisplayMode="inline"
-          searchable={{
-            value: searchQuery,
-            onChanged: setSearchQuery,
-            placement: "navigationBarDrawer",
-            prompt: "搜索目录...",
-            presented: {
-              value: showSearch,
-              onChanged: (v: boolean) => {
-                setShowSearch(v);
-                if (!v) {
-                  setSearchQuery("");
-                  setSearchResults([]);
-                }
-              },
-            },
-          }}
-          navigationDestination={
-            <NavigationDestination>
-              {(page) => {
-                if (page.startsWith("browser:")) {
-                  let dirPath = page.slice(8);
-                  let highlightFile: string | undefined;
-                  const sepIdx = dirPath.indexOf("::");
-                  if (sepIdx !== -1) {
-                    highlightFile = decodeURIComponent(dirPath.slice(sepIdx + 2));
-                    dirPath = dirPath.slice(0, sepIdx);
-                  }
-                  // 判断当前实例是否是导航栈中最后一项（即当前显示的）
-                  // 结合父级的 isFocused 状态
-                  const navArray = navPath?.value && Array.isArray(navPath.value) ? navPath.value : [];
-                  const isNavigationFocused = navArray.length > 0 && navArray[navArray.length - 1] === page;
-                  const browserIsFocused = isFocused && isNavigationFocused;
-                  
-                  return (
-                    <GeneralBrowser
-                      dirPath={dirPath}
-                      dirName={Path.basename(dirPath)}
-                      rootPath={dirPath}
-                      navPath={navPath}
-                      highlightFile={highlightFile}
-                      showFolderItemCounts={showFolderItemCounts}
-                      onOpenSettings={handleOpenSettings}
-                      refreshKey={directoryDropRefreshKey}
-                      isFocused={browserIsFocused}
-                    />
-                  );
-                }
-                return <FileNavigationDest page={page} />;
-              }}
-            </NavigationDestination>
-          }
-          toolbar={{
-            topBarTrailing: [
-              <Menu title="" systemImage="ellipsis">
-                <Button
-                  title={selectMode ? "完成选择" : "选择"}
-                  systemImage="checkmark.circle"
-                  action={() => {
-                    if (selectMode) {
-                      setSelectMode(false);
-                      setSelectedNames(new Set());
-                    } else {
-                      setSelectMode(true);
-                    }
-                  }}
-                />
-                {selectMode && selectedNames.size > 0 ? (
-                  <>
-                    <Divider />
-                    <Button title="取消挂载选中" systemImage="trash" role="destructive" action={handleDeleteSelected} />
-                  </>
-                ) : (
-                  <EmptyView />
-                )}
-                <Divider />
-                <Button title="添加目录" systemImage="folder.badge.plus" action={handleAdd} />
-                <Menu title="挂载内置目录" systemImage="internaldrive">
-                  {getBuiltinDirectories().map((dir) => (
-                    <Button
-                      key={dir.path}
-                      title={dir.name}
-                      systemImage={dir.icon}
-                      action={() => {
-                        const already = getAllBookmarks().some((b) => b.path === dir.path);
-                        if (already) {
-                          showToast(`${dir.name} 已在挂载列表中`);
-                          return;
-                        }
-                        const added = addBookmarkManually(dir.path, dir.name);
-                        if (added) {
-                          showToast(`已挂载 ${dir.name}`);
-                          onRefresh();
-                        } else {
-                          showToast("挂载失败");
-                        }
-                      }}
-                    />
-                  ))}
-                </Menu>
-                <Divider />
-                <Button title="设置" systemImage="gearshape" action={handleOpenSettings} />
-              </Menu>,
-            ],
-          }}
-        >
-          {/* ── 本机 / 系统目录（不可删除） ── */}
-          <Section>
-            {systemDirs.map((sysDir, idx) => {
-              const count = systemDirCounts.get(sysDir.name);
-              const sysFile = {
-                name: sysDir.name,
-                path: sysDir.path,
-                isDirectory: true,
-                size: 0,
-                modificationDate: Date.now(),
-                extension: "",
-                icon: (sysDir as any).icon || "folder.fill",
-                iconColor: "systemGray",
-                category: "folder",
-              } as any;
-              return (
-                <FileListItem
-                  key={sysDir.name}
-                  file={{
-                    ...sysFile,
-                    name: sysDir.displayName || sysDir.name,
-                  }}
-                  destination={<GeneralBrowser dirPath={sysDir.path} dirName={sysDir.displayName || sysDir.name} rootPath={sysDir.path} refreshKey={directoryDropRefreshKey} />}
-                  subtitle={showFolderItemCounts !== false && count != null ? `${count} 项` : (sysDir as any).tag || "本机"}
-                  subtitleForegroundStyle="tertiaryLabel"
-                  hideTopSeparator={idx === 0}
-                  navPath={navPath}
-                  navPageId={"browser:" + sysDir.path}
-                  trailingActions={[
-                    {
-                      title: "简介",
-                      systemImage: "info.circle",
-                      action: () => {
-                        const fakeBm: Bookmark = { name: sysDir.displayName || sysDir.name, path: sysDir.path, bookmarkId: "" };
-                        Navigation.present({ element: <BookmarkInfoDialog bookmark={fakeBm} />, modalPresentationStyle: "pageSheet" });
-                      },
-                    },
-                  ]}
-                  leadingActions={[{ title: "重命名", systemImage: "pencil", action: () => handleSystemRename(sysDir.name) }]}
-                  contextMenuItems={[
-                    {
-                      title: "简介",
-                      systemImage: "info.circle",
-                      action: () => {
-                        const fakeBm: Bookmark = { name: sysDir.displayName || sysDir.name, path: sysDir.path, bookmarkId: "" };
-                        Navigation.present({ element: <BookmarkInfoDialog bookmark={fakeBm} />, modalPresentationStyle: "pageSheet" });
-                      },
-                    },
-                    { title: "重命名", systemImage: "pencil", action: () => handleSystemRename(sysDir.name) },
-                  ]}
-                />
-              );
-            })}
-          </Section>
+        {layoutMode === "grid" ? (
+          <ScrollView axes="vertical" {...sharedContainerProps}>
+            <VStack spacing={20} padding={{ top: 14, bottom: 28, leading: 16, trailing: 16 }} frame={{ maxWidth: "infinity" }}>
+              {/* ── 本机 / 系统目录（不可删除） ── */}
+              {filteredSystemDirs.length > 0 ? (
+                <VStack alignment="leading" spacing={12} frame={{ maxWidth: "infinity" }}>
+                  <Text font="headline" foregroundStyle="secondaryLabel" padding={{ leading: 4 }}>
+                    系统目录
+                  </Text>
+                  <LazyVGrid
+                    columns={[
+                      { size: { type: "adaptive", min: 80, max: 110 } },
+                    ]}
+                    spacing={12}
+                  >
+                    {filteredSystemDirs.map((sysDir) => {
+                      const count = systemDirCounts.get(sysDir.name);
+                      const displayName = sysDir.displayName || sysDir.name;
+                      const subtitleText = showFolderItemCounts !== false && count != null ? `${count} 项` : (sysDir as any).tag || "本机";
+                      return (
+                        <DirectoryGridCard
+                          key={sysDir.name}
+                          name={displayName}
+                          icon={(sysDir as any).icon || "folder.fill"}
+                          iconColor="systemGray"
+                          subtitle={subtitleText}
+                          isAccessible={true}
+                          marqueeEnabled={settings?.gridFileNameMarquee ?? true}
+                          isFocused={isFocused}
+                          onTap={() => navPath.setValue([...navPath.value, "browser:" + sysDir.path])}
+                          contextMenuItems={[
+                            {
+                              title: "简介",
+                              systemImage: "info.circle",
+                              action: () => {
+                                const fakeBm: Bookmark = { name: displayName, path: sysDir.path, bookmarkId: "" };
+                                Navigation.present({ element: <BookmarkInfoDialog bookmark={fakeBm} />, modalPresentationStyle: "pageSheet" });
+                              },
+                            },
+                            {
+                              title: "重命名",
+                              systemImage: "pencil",
+                              action: () => handleSystemRename(sysDir.name),
+                            },
+                          ]}
+                        />
+                      );
+                    })}
+                  </LazyVGrid>
+                </VStack>
+              ) : null}
 
-          {/* ── 已挂载目录 ── */}
-          {displayBookmarks.length > 0 ? (
-            <Section>
-              <ForEach
-                data={forEachData}
-                builder={(bookmark, index) => {
-                  const dirPath = getAccessiblePath(bookmark);
-                  const bookmarkAsFile = {
-                    name: bookmark.name,
-                    path: bookmark.path,
+              {/* ── 已挂载目录 ── */}
+              {displayBookmarks.length > 0 ? (
+                <VStack alignment="leading" spacing={12} frame={{ maxWidth: "infinity" }}>
+                  <Text font="headline" foregroundStyle="secondaryLabel" padding={{ leading: 4 }}>
+                    已挂载目录
+                  </Text>
+                  <LazyVGrid
+                    columns={[
+                      { size: { type: "adaptive", min: 80, max: 110 } },
+                    ]}
+                    spacing={12}
+                  >
+                    {displayBookmarks.map((bookmark) => {
+                      const dirPath = getAccessiblePath(bookmark);
+                      const isAccessible = dirPath != null && !inaccessiblePaths.has(bookmark.path);
+                      const isSelected = selectedNames.has(bookmark.name);
+                      const count = folderCounts.get(bookmark.path);
+                      const subtitleText = isAccessible
+                        ? showFolderItemCounts !== false && count != null
+                          ? `${count} 项`
+                          : "文件夹"
+                        : "无法访问";
+                      return (
+                        <DirectoryGridCard
+                          key={bookmark.path}
+                          name={bookmark.name}
+                          icon="folder.fill"
+                          iconColor={isAccessible ? "systemBlue" : "systemGray"}
+                          subtitle={subtitleText}
+                          subtitleColor={isAccessible ? "secondaryLabel" : "systemRed"}
+                          isAccessible={isAccessible}
+                          marqueeEnabled={settings?.gridFileNameMarquee ?? true}
+                          isFocused={isFocused}
+                          selectMode={
+                            selectMode
+                              ? {
+                                  isSelected,
+                                  onToggle: () => toggleSelect(bookmark.name),
+                                }
+                              : undefined
+                          }
+                          onTap={() => {
+                            if (isAccessible && dirPath) {
+                              navPath.setValue([...navPath.value, "browser:" + dirPath]);
+                            } else {
+                              showToast("⚠ 软件更新导致路径变化，无法访问，请重新挂载");
+                            }
+                          }}
+                          contextMenuItems={[
+                            {
+                              title: "取消挂载",
+                              systemImage: "trash",
+                              role: "destructive",
+                              action: () => handleRemoveBookmark(bookmark),
+                            },
+                            {
+                              title: "简介",
+                              systemImage: "info.circle",
+                              action: () => {
+                                Navigation.present({ element: <BookmarkInfoDialog bookmark={bookmark} />, modalPresentationStyle: "pageSheet" });
+                              },
+                            },
+                            {
+                              title: "重命名",
+                              systemImage: "pencil",
+                              action: () => handleRename(bookmark, onRefresh),
+                            },
+                          ]}
+                        />
+                      );
+                    })}
+                  </LazyVGrid>
+                </VStack>
+              ) : null}
+
+              {filteredSystemDirs.length === 0 && displayBookmarks.length === 0 ? (
+                <VStack alignment="center" spacing={12} padding={{ top: 60 }} frame={{ maxWidth: "infinity" }}>
+                  <Image systemName="magnifyingglass" font="largeTitle" foregroundStyle="secondaryLabel" />
+                  <Text font="callout" foregroundStyle="secondaryLabel">
+                    未找到匹配的目录
+                  </Text>
+                </VStack>
+              ) : null}
+            </VStack>
+          </ScrollView>
+        ) : (
+          <List listStyle="plain" {...sharedContainerProps}>
+            {/* ── 本机 / 系统目录（不可删除） ── */}
+            {filteredSystemDirs.length > 0 ? (
+              <Section title={query ? "系统目录" : undefined}>
+                {filteredSystemDirs.map((sysDir, idx) => {
+                  const count = systemDirCounts.get(sysDir.name);
+                  const sysFile = {
+                    name: sysDir.name,
+                    path: sysDir.path,
                     isDirectory: true,
                     size: 0,
                     modificationDate: Date.now(),
                     extension: "",
-                    icon: "folder.fill",
-                    iconColor: "systemBlue",
+                    icon: (sysDir as any).icon || "folder.fill",
+                    iconColor: "systemGray",
                     category: "folder",
                   } as any;
-                  const isAccessible = dirPath != null && !inaccessiblePaths.has(bookmark.path);
-                  const isSelected = selectedNames.has(bookmark.name);
-                  if (selectMode) {
-                    return (
-                      <FileListItem
-                        key={bookmark.id}
-                        file={bookmarkAsFile}
-                        hideTopSeparator={index === 0}
-                        selectMode={{
-                          isSelected,
-                          onToggle: () => toggleSelect(bookmark.name),
-                        }}
-                      />
-                    );
-                  }
                   return (
                     <FileListItem
-                      key={bookmark.id}
-                      file={bookmarkAsFile}
-                      destination={isAccessible ? <GeneralBrowser dirPath={dirPath} dirName={bookmark.name} rootPath={dirPath} refreshKey={directoryDropRefreshKey} /> : undefined}
-                      subtitle={
-                        isAccessible
-                          ? showFolderItemCounts !== false && folderCounts.has(bookmark.path)
-                            ? `${folderCounts.get(bookmark.path)} 项`
-                            : "文件夹"
-                          : "⚠ 软件更新导致路径变化，无法访问，请重新挂载"
-                      }
-                      subtitleForegroundStyle={isAccessible ? undefined : "red"}
-                      hideTopSeparator={index === 0}
-                      navPath={isAccessible ? navPath : undefined}
-                      navPageId={isAccessible ? "browser:" + dirPath : undefined}
+                      key={sysDir.name}
+                      file={{
+                        ...sysFile,
+                        name: sysDir.displayName || sysDir.name,
+                      }}
+                      destination={<GeneralBrowser dirPath={sysDir.path} dirName={sysDir.displayName || sysDir.name} rootPath={sysDir.path} refreshKey={directoryDropRefreshKey} settings={settings} onSettingsChange={onSettingsChange} />}
+                      subtitle={showFolderItemCounts !== false && count != null ? `${count} 项` : (sysDir as any).tag || "本机"}
+                      subtitleForegroundStyle="tertiaryLabel"
+                      hideTopSeparator={idx === 0}
+                      navPath={navPath}
+                      navPageId={"browser:" + sysDir.path}
                       trailingActions={[
-                        { title: "取消挂载", systemImage: "trash", role: "destructive", action: () => handleRemoveBookmark(bookmark) },
                         {
                           title: "简介",
                           systemImage: "info.circle",
                           action: () => {
-                            Navigation.present({ element: <BookmarkInfoDialog bookmark={bookmark} />, modalPresentationStyle: "pageSheet" });
+                            const fakeBm: Bookmark = { name: sysDir.displayName || sysDir.name, path: sysDir.path, bookmarkId: "" };
+                            Navigation.present({ element: <BookmarkInfoDialog bookmark={fakeBm} />, modalPresentationStyle: "pageSheet" });
                           },
                         },
                       ]}
-                      leadingActions={[
-                                                  { title: "重命名", systemImage: "pencil", action: () => handleRename(bookmark, onRefresh) },
-                       ]}
+                      leadingActions={[{ title: "重命名", systemImage: "pencil", action: () => handleSystemRename(sysDir.name) }]}
+                      contextMenuItems={[
+                        {
+                          title: "简介",
+                          systemImage: "info.circle",
+                          action: () => {
+                            const fakeBm: Bookmark = { name: sysDir.displayName || sysDir.name, path: sysDir.path, bookmarkId: "" };
+                            Navigation.present({ element: <BookmarkInfoDialog bookmark={fakeBm} />, modalPresentationStyle: "pageSheet" });
+                          },
+                        },
+                        { title: "重命名", systemImage: "pencil", action: () => handleSystemRename(sysDir.name) },
+                      ]}
                     />
                   );
-                }}
-                editActions="move"
-              />
-            </Section>
-          ) : null}
-        </List>
+                })}
+              </Section>
+            ) : null}
+
+            {/* ── 已挂载目录 ── */}
+            {displayBookmarks.length > 0 ? (
+              <Section title={query ? "已挂载目录" : undefined}>
+                <ForEach
+                  data={forEachData}
+                  builder={(bookmark, index) => {
+                    const dirPath = getAccessiblePath(bookmark);
+                    const bookmarkAsFile = {
+                      name: bookmark.name,
+                      path: bookmark.path,
+                      isDirectory: true,
+                      size: 0,
+                      modificationDate: Date.now(),
+                      extension: "",
+                      icon: "folder.fill",
+                      iconColor: "systemBlue",
+                      category: "folder",
+                    } as any;
+                    const isAccessible = dirPath != null && !inaccessiblePaths.has(bookmark.path);
+                    const isSelected = selectedNames.has(bookmark.name);
+                    if (selectMode) {
+                      return (
+                        <FileListItem
+                          key={bookmark.id}
+                          file={bookmarkAsFile}
+                          hideTopSeparator={index === 0}
+                          selectMode={{
+                            isSelected,
+                            onToggle: () => toggleSelect(bookmark.name),
+                          }}
+                        />
+                      );
+                    }
+                    return (
+                      <FileListItem
+                        key={bookmark.id}
+                        file={bookmarkAsFile}
+                        destination={isAccessible ? <GeneralBrowser dirPath={dirPath} dirName={bookmark.name} rootPath={dirPath} refreshKey={directoryDropRefreshKey} settings={settings} onSettingsChange={onSettingsChange} /> : undefined}
+                        subtitle={
+                          isAccessible
+                            ? showFolderItemCounts !== false && folderCounts.has(bookmark.path)
+                              ? `${folderCounts.get(bookmark.path)} 项`
+                              : "文件夹"
+                            : "⚠ 软件更新导致路径变化，无法访问，请重新挂载"
+                        }
+                        subtitleForegroundStyle={isAccessible ? undefined : "red"}
+                        hideTopSeparator={index === 0}
+                        navPath={isAccessible ? navPath : undefined}
+                        navPageId={isAccessible ? "browser:" + dirPath : undefined}
+                        trailingActions={[
+                          { title: "取消挂载", systemImage: "trash", role: "destructive", action: () => handleRemoveBookmark(bookmark) },
+                          {
+                            title: "简介",
+                            systemImage: "info.circle",
+                            action: () => {
+                              Navigation.present({ element: <BookmarkInfoDialog bookmark={bookmark} />, modalPresentationStyle: "pageSheet" });
+                            },
+                          },
+                        ]}
+                        leadingActions={[
+                          { title: "重命名", systemImage: "pencil", action: () => handleRename(bookmark, onRefresh) },
+                        ]}
+                      />
+                    );
+                  }}
+                  editActions={query ? undefined : "move"}
+                />
+              </Section>
+            ) : null}
+          </List>
+        )}
       </VStack>
     </NavigationStack>
   );

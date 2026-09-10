@@ -58,6 +58,7 @@ import {
 import { FileRowContent } from "./FileRowContent";
 import { FileGridContent } from "./FileGridContent";
 import { FileRowContextMenu } from "./FileRowContextMenu";
+import { PathTitleMarquee } from "./PathTitleMarquee";
 import { FolderCountStore } from "./FolderCountLabel";
 import { DeepSearchResult } from "./SearchPanel";
 import { SearchPanel } from "./SearchPanel";
@@ -93,10 +94,12 @@ function ManagedBookmarksSheet({
   showFolderItemCounts,
   onBookmarksChanged,
   onSettingsChange,
+  settings,
 }: {
   showFolderItemCounts?: boolean;
   onBookmarksChanged: () => void;
   onSettingsChange?: (settings: AppSettings) => void;
+  settings?: AppSettings;
 }) {
   const [sheetBookmarks, setSheetBookmarks] = useState<Bookmark[]>(() => getAllBookmarks());
 
@@ -105,7 +108,7 @@ function ManagedBookmarksSheet({
     onBookmarksChanged();
   };
 
-  return <MountDirectoriesPage bookmarks={sheetBookmarks} showFolderItemCounts={showFolderItemCounts ?? true} onRefresh={handleRefresh} onSettingsChange={onSettingsChange} />;
+  return <MountDirectoriesPage bookmarks={sheetBookmarks} showFolderItemCounts={showFolderItemCounts ?? true} onRefresh={handleRefresh} onSettingsChange={onSettingsChange} settings={settings} />;
 }
 
 async function getDirectoryPollToken(dirPath: string): Promise<string | null> {
@@ -153,6 +156,8 @@ function FileRowLink({
   onFolderCountChanged,
   isHomeScreenHost,
   isGrid,
+  marqueeEnabled,
+  isFocused = true,
 }: {
   file: FileInfo;
   onRefresh: () => void;
@@ -175,6 +180,8 @@ function FileRowLink({
   onFolderCountChanged?: (folderPath: string, count: number) => void;
   isHomeScreenHost?: boolean;
   isGrid?: boolean;
+  marqueeEnabled?: boolean;
+  isFocused?: boolean;
 }) {
   const handleRename = async () => {
     const trimmed = await renameWithPrompt(file.name);
@@ -302,6 +309,8 @@ function FileRowLink({
           <FileGridContent
             file={file}
             folderCountStore={folderCountStore}
+            marqueeEnabled={marqueeEnabled}
+            isFocused={isFocused}
             selectMode={{
               isSelected: isSelected || false,
               onToggle: onToggleSelect ? () => onToggleSelect(file.path) : () => { },
@@ -684,7 +693,7 @@ function FileRowLink({
           background={folderDropActive ? <Rectangle fill="systemBlue" opacity={0.16} /> : undefined}
           clipShape={folderDropActive ? { type: "rect", cornerRadius: 12 } : undefined}
         >
-          <FileGridContent file={file} folderCountStore={folderCountStore} isDropTargeted={folderDropActive} />
+          <FileGridContent file={file} folderCountStore={folderCountStore} isDropTargeted={folderDropActive} marqueeEnabled={marqueeEnabled} isFocused={isFocused} />
         </VStack>
       ) : (
         <HStack spacing={12} alignment="center">
@@ -734,6 +743,7 @@ function GeneralBrowser({
   folderCountUpdateRef,
   isHomeScreenHost,
   isFocused = true,
+  isDualMode = false,
 }: {
   dirPath?: string;
   dirName?: string;
@@ -771,6 +781,7 @@ function GeneralBrowser({
   isHomeScreenHost?: boolean;
   folderCountUpdateRef?: { current?: (folderPath: string, count: number) => void };
   isFocused?: boolean;
+  isDualMode?: boolean;
 }) {
   const cachedFiles = !items && dirPath ? getCachedDirectoryListing(dirPath) : null;
   const [files, setFiles] = useState<FileInfo[]>(cachedFiles || []);
@@ -2214,6 +2225,7 @@ function GeneralBrowser({
             void refreshDirectory();
           }}
           onSettingsChange={onSettingsChange}
+          settings={settings}
         />
       ),
       modalPresentationStyle: "pageSheet",
@@ -2475,9 +2487,11 @@ function GeneralBrowser({
     () => (
       <Menu
         label={
-          <Text font="headline" lineLimit={1}>
-            {titleDisplayPath}
-          </Text>
+          <PathTitleMarquee
+            path={displayPath}
+            isDualMode={isDualMode}
+            isFocused={isFocused}
+          />
         }
       >
         <ControlGroup>
@@ -2514,7 +2528,7 @@ function GeneralBrowser({
         )}
       </Menu>
     ),
-    [titleDisplayPath, systemDirEntries, allBookmarks],
+    [displayPath, isDualMode, isFocused, systemDirEntries, allBookmarks],
   );
 
   // 计算当前目录路径（处理子文件夹导航：取导航栈中最新的 browser: 路径）
@@ -2854,6 +2868,8 @@ function GeneralBrowser({
                             onFolderCountChanged={applyFolderCountUpdate}
                             isHomeScreenHost={isHomeScreenHost}
                             isGrid={true}
+                            marqueeEnabled={settings?.gridFileNameMarquee}
+                            isFocused={isFocused}
                           />
                         </Group>
                       ))}
