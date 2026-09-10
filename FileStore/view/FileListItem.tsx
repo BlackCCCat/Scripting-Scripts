@@ -497,9 +497,6 @@ export function FileInfoDialog({ file, nested }: { file: FileInfo; nested?: bool
             <Image systemName={file.icon} frame={{ width: 38, height: 38 }} foregroundStyle={file.iconColor} />
             <VStack alignment="leading" spacing={4}>
               <Text font="headline">{file.name}</Text>
-              {/*   <Text font="caption" foregroundStyle="secondaryLabel">
-              {file.isDirectory ? '文件夹' : file.extension || '未知类型'}
-            </Text> */}
             </VStack>
           </HStack>
         </Section>
@@ -511,11 +508,6 @@ export function FileInfoDialog({ file, nested }: { file: FileInfo; nested?: bool
               <Text font="footnote" foregroundStyle="secondaryLabel">
                 {file.path}
               </Text>
-
-              {/* <HStack spacing={6}> */}
-              {/* <Image systemName="doc.on.doc" frame={{ width: 14, height: 14 }} foregroundStyle="systemBlue" /> */}
-              {/* <Text font="body" foregroundStyle="systemBlue">复制路径</Text> */}
-              {/* </HStack> */}
             </Button>
           </VStack>
         </Section>

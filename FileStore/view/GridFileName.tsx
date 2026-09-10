@@ -1,4 +1,4 @@
-import { Text, ZStack, VStack, useObservable, useMemo, useEffect, useRef, useCallback } from "scripting";
+import { Text, ZStack, VStack, useObservable, useMemo, useEffect } from "scripting";
 import { readSettings } from "../manager/Settings";
 
 /**
@@ -90,18 +90,6 @@ export function getEstimatedHeadlineTextWidth(text: string): number {
 // 网格图标正下方的固定可视宽度：与 64pt 图标及 80pt 最小列宽适配，确保左右与相邻网格保持至少 18pt 物理隔离
 const CARD_TEXT_WIDTH = 74;
 
-/**
- * 判断文件名在 74pt 宽度的网格卡片中是否超出单行视口
- * - 超过单行宽度 CARD_TEXT_WIDTH (74pt) 时，判定为超长，触发单行平滑往返滚动；
- * - 小于等于 74pt 时，无需滚动，单行静态居中展示；
- * - 确保无论文件名包含中英文、数字、斜杠还是特殊符号（例如“iPhone/元书输入法”），判定标准完全统一，
- *   杜绝部分两行能容纳的英文触发滚动而中英文换行两行不滚动的差异。
- */
-export function isFileNameTruncatedInGrid(name: string, maxWidth = CARD_TEXT_WIDTH): boolean {
-  const totalWidth = getEstimatedFootnoteTextWidth(name);
-  return totalWidth > maxWidth;
-}
-
 interface GridFileNameProps {
   name: string;
   /** 是否启用滚动（可选，默认跟随设置中的 gridFileNameMarquee） */
@@ -113,7 +101,7 @@ interface GridFileNameProps {
 export function GridFileName({ name, marqueeEnabled, isFocused = true }: GridFileNameProps) {
   const isMarqueeActive = marqueeEnabled ?? (readSettings().gridFileNameMarquee ?? true);
   const estimatedWidth = useMemo(() => getEstimatedFootnoteTextWidth(name), [name]);
-  const isOverflow = useMemo(() => isFileNameTruncatedInGrid(name, CARD_TEXT_WIDTH), [name]);
+  const isOverflow = estimatedWidth > CARD_TEXT_WIDTH;
 
   if (!isMarqueeActive) {
     // 仅在用户主动关闭设置时使用两行折行：配置 truncationMode="middle"（首尾显示，中间以 ... 替代）

@@ -107,16 +107,6 @@ async function openDatabase(dirPath: string): Promise<SQLite.Database> {
   return db
 }
 
-export function closeDatabase(dirPath?: string): void {
-  if (dirPath) {
-    dbCache.delete(dirPath)
-    indexStatsCache.delete(dirPath)
-  } else {
-    dbCache.clear()
-    indexStatsCache.clear()
-  }
-}
-
 export async function isIndexValid(dirPath: string, maxAge: number = 172800000): Promise<boolean> {
   try {
     const dbPath = getDbPath(dirPath)
@@ -458,31 +448,4 @@ export async function searchFromIndex(
       content: undefined
     }
   })
-}
-
-export async function deleteIndex(dirPath: string): Promise<void> {
-  closeDatabase(dirPath)
-  const dbPath = getDbPath(dirPath)
-  if (await FileManager.exists(dbPath)) {
-    await FileManager.remove(dbPath)
-  }
-}
-
-export async function deleteAllIndexes(): Promise<void> {
-  closeDatabase()
-  const dbDir = Path.join(FileManager.documentsDirectory, '.file_store', '.search-index')
-  if (await FileManager.exists(dbDir)) {
-    await FileManager.remove(dbDir)
-  }
-}
-
-export function formatIndexTime(timestamp: number | null): string {
-  if (!timestamp) return '未知'
-  const now = Date.now()
-  const diff = now - timestamp
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
-  const date = new Date(timestamp)
-  return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`
 }

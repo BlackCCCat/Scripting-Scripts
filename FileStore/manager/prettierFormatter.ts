@@ -88,10 +88,6 @@ export function getPrettierParser(fileNameOrExt: string): string | null {
   return matchedExt ? extToParser[matchedExt] : null
 }
 
-export function isPrettierSupported(fileNameOrExt: string): boolean {
-  return getPrettierParser(fileNameOrExt) != null
-}
-
 /**
  * 使用 Prettier 格式化代码。
  * @param code  源代码

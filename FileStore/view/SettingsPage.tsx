@@ -1,17 +1,15 @@
 // 设置标签 - 显示模式、关于
 
-import { Navigation, NavigationStack, List, Section, Text, Button, Toggle, Picker, HStack, VStack, Spacer, useState, Path } from "scripting";
+import { NavigationStack, List, Section, Text, Button, Toggle, Picker, HStack, VStack, Spacer, useState, Path } from "scripting";
 import { AppSettings } from "../manager/Settings";
 import { getMaxIndexFileSizeKB, setMaxIndexFileSizeKB } from "../manager/SearchState";
 
 interface SettingsPageProps {
   settings: AppSettings;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
-  onToggleFullscreen?: () => void;
 }
 
-export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }: SettingsPageProps) {
-  const dismiss = Navigation.useDismiss();
+export function SettingsPage({ settings, onUpdateSettings }: SettingsPageProps) {
   const defaultDir = Path.join(FileManager.documentsDirectory, "File Store");
   // 本地状态，选完立刻更新显示，无需等 modal 重新传入 props
   const [currentPath, setCurrentPath] = useState(settings.homeCurrentPath || defaultDir);
@@ -81,7 +79,6 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
         <Section title="首页收藏夹">
           <Button action={handleBrowse}>
             <HStack spacing={12} alignment="center">
-              {/* <Image systemName="folder" frame={{ width: 28, height: 28 }} foregroundStyle="systemBlue" /> */}
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">选择文件夹</Text>
                 <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
@@ -92,7 +89,6 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
           </Button>
           <Button action={handleInput}>
             <HStack spacing={12} alignment="center">
-              {/* <Image systemName="text.cursor" frame={{ width: 28, height: 28 }} foregroundStyle="systemGreen" /> */}
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">手动输入路径</Text>
                 <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
@@ -103,7 +99,6 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
           </Button>
           <Button action={handleReset}>
             <HStack spacing={12} alignment="center">
-              {/* <Image systemName="arrow.counterclockwise" frame={{ width: 28, height: 28 }} foregroundStyle="systemOrange" /> */}
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">恢复默认</Text>
                 <Text font="caption2" monospaced foregroundStyle="secondaryLabel">

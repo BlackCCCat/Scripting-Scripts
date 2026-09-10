@@ -9,10 +9,8 @@ import { invalidateDirectoryCache, FileInfo, getFileCategory } from "../manager/
 interface DualBrowserPageProps {
   settings: AppSettings
   refreshKey: number
-  setRefreshKey: (fn: (k: number) => number) => void
   onSettingsChange?: (settings: AppSettings) => void
   bookmarks?: Bookmark[]
-  isHomeScreenHost?: boolean
   secondaryToolbarLeadingItems?: any
   // 保存到 File Store 后需要高亮的文件完整路径
   initialHighlightPath?: string
@@ -25,7 +23,6 @@ export function DualBrowserPage({
   refreshKey,
   bookmarks,
   onSettingsChange,
-  isHomeScreenHost,
   secondaryToolbarLeadingItems,
   initialHighlightPath,
   isFocused = true,
@@ -238,7 +235,6 @@ export function DualBrowserPage({
         invalidateDirectoryCache(rightDir)
         setRightHighlightFile(Path.basename(destPath))
         setRightKey((k) => k + 1)
-        // setTimeout(() => setRightHighlightFile(undefined), 3000)
         // 左右分栏提示右侧，上下分栏提示下方
         showCopyToastAction(layoutDir === "horizontal" ? "已复制到右侧目录" : "已复制到下方目录")
       } catch (e) {
@@ -294,7 +290,6 @@ export function DualBrowserPage({
         invalidateDirectoryCache(leftDir)
         setLeftHighlightFile(Path.basename(destPath))
         setLeftKey((k) => k + 1)
-        // setTimeout(() => setLeftHighlightFile(undefined), 3000)
         // 左右分栏提示左侧，上下分栏提示上方
         showCopyToastAction(layoutDir === "horizontal" ? "已复制到左侧目录" : "已复制到上方目录")
       } catch (e) {
@@ -324,10 +319,6 @@ export function DualBrowserPage({
     copyTimeoutRef.current = setTimeout(() => setShowCopyToast(false), 2000)
   }
 
-  /*   const handleToggleLayout = () => {
-      setLayoutDir((prev) => (prev === "horizontal" ? "vertical" : "horizontal"))
-    } */
-
   const dualModeToolbarItem = useMemo(() => (
     <ToolbarItem placement="topBarLeading">
       <Button
@@ -345,17 +336,6 @@ export function DualBrowserPage({
       />
     </ToolbarItem>
   ), [isDualMode, settings, onSettingsChange])
-
-  // ── layoutDir 变化时持久化保存 ──
-  // useEffect(() => {
-  //   saveSettings({ ...settings, dualLayoutDir: layoutDir })
-  // }, [layoutDir])
-
-  // ── ratio 变化时持久化保存（拖动结束才更新，避免拖动过程中频繁写入） ──
-  /*  useEffect(() => {
-     const rounded = Math.round(ratio * 1000) / 1000;
-     saveSettings({ ...settings, dualRatio: rounded });
-   }, [ratio]); */
 
   // 拖拽松手后的比例保存
   const handleRatioChangeEnd = (newRatio: number) => {
@@ -386,7 +366,6 @@ export function DualBrowserPage({
     <GeneralBrowser
       key={isDualMode ? "dual-left" : "single-left"}
       isHomePage={true}
-      isHomeScreenHost={isHomeScreenHost}
       settings={leftSettings}
       onSettingsChange={handleLeftSettingsChange}
       refreshKey={leftKey}
@@ -410,7 +389,7 @@ export function DualBrowserPage({
       onDropCompleted={() => { if (isDualMode) setRightKey((key) => key + 1) }}
     />
   ), [
-    isHomeScreenHost, leftSettings, handleLeftSettingsChange, leftKey, settings.showFolderItemCounts,
+    leftSettings, handleLeftSettingsChange, leftKey, settings.showFolderItemCounts,
     leftHighlightFile, sharedCopiedPath, handleExternalCopy, handleLeftDirChange, dualModeToolbarItem,
     rightDir, layoutDir, handleCopyLeftToRight, bookmarks, isFocused, leftDir, isDualMode, isNarrowLayout,
   ])
@@ -419,7 +398,6 @@ export function DualBrowserPage({
     <GeneralBrowser
       key={isDualMode ? "dual-right" : "single-right"}
       isHomePage={true}
-      isHomeScreenHost={isHomeScreenHost}
       settings={rightSettings}
       onSettingsChange={handleRightSettingsChange}
       refreshKey={rightKey}
@@ -444,7 +422,7 @@ export function DualBrowserPage({
       onDropCompleted={() => { if (isDualMode) setLeftKey((key) => key + 1) }}
     />
   ), [
-    isHomeScreenHost, rightSettings, handleRightSettingsChange, rightKey, settings.showFolderItemCounts,
+    rightSettings, handleRightSettingsChange, rightKey, settings.showFolderItemCounts,
     rightHighlightFile, sharedCopiedPath, handleExternalCopy, handleRightDirChange, secondaryToolbarLeadingItems,
     leftDir, layoutDir, handleCopyRightToLeft, bookmarks, isFocused, rightDir, isDualMode, isNarrowLayout,
   ])
@@ -541,8 +519,6 @@ function DraggableDivider({
   const wasDraggedRef = useRef(false)
   // 触感触发器：每次事件递增，触发 sensoryFeedback
   const [hapticTrigger, setHapticTrigger] = useState(0)
-  const [hapticEndTrigger, setHapticEndTrigger] = useState(0)
-  const [isSwitchingLayout, setIsSwitchingLayout] = useState(false)
 
   const splitCenterX = totalW * ratio - totalW / 2
   const splitCenterY = totalH * ratio - totalH / 2
@@ -583,21 +559,13 @@ function DraggableDivider({
   const handleTap = () => {
     if (wasDraggedRef.current) return
     setHapticTrigger((v) => v + 1)
-    setIsSwitchingLayout(true)
-    setTimeout(() => setIsSwitchingLayout(false), 200)
     // 立即切换布局，无需等待触感反馈（触感反馈异步执行不阻塞渲染）
     onToggleLayout()
   }
 
 
   return (
-    <VStack
-    //frame={layoutDir === 'horizontal' ? { width: 1, height: totalH } : { width: totalW, height: 1 }}
-    //background={"rgba(128,128,128,0.5)"}
-    //frame={layoutDir === 'horizontal' ? { width: 1, height: totalH } : { width: totalW, height: 1 }}
-    //background={"rgba(128,128,128,0.5)"}
-    >
-      <VStack sensoryFeedback={{ trigger: hapticEndTrigger, feedback: "selection" }}>
+    <VStack>
         <VStack
           frame={layoutDir === "horizontal" ? { width: 35, height: 150 } : { width: 120, height: 35 }}
           background={"rgba(0,0,0,0.0001)"}
@@ -613,12 +581,10 @@ function DraggableDivider({
         >
           <VStack
             frame={layoutDir === "horizontal" ? { width: 4, height: 130 } : { width: 100, height: 4 }}
-            // background={isSwitchingLayout ? "rgba(55, 145, 170, 0.5)" : "regularMaterial"}
             overlay={<VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }} background="rgba(128,128,128,0.25)" />}
             clipShape="capsule"
           />
         </VStack>
-      </VStack>
     </VStack>
   )
 }

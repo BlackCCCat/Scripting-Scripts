@@ -11,19 +11,6 @@ function loadTerser() {
   return require("terser")
 }
 
-export async function formatJS(code: string): Promise<string> {
-  const result = await loadTerser().minify(code, {
-    mangle: false,
-    compress: false,
-    output: {
-      beautify: true,
-      indent_level: 2,
-      comments: true,
-    },
-  })
-  return result.code ?? code
-}
-
 /**
  * terser 关闭 collapse_vars / reduce_vars / inline
  * 保留 defaults: true （sequences / unused / 等）

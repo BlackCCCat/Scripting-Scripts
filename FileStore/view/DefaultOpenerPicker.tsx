@@ -108,14 +108,6 @@ export function showOpenerPicker(ext: string): Promise<OpenerPrefix | null> {
   })
 }
 
-/** 获取某个扩展名当前的默认打开方式的中文标签，没有则返回 null */
-export async function getCurrentOpenerLabel(ext: string): Promise<string | null> {
-  const saved = await getDefaultOpener(ext)
-  if (!saved) return null
-  const opt = OPENER_OPTIONS.find(o => o.prefix === saved)
-  return opt ? opt.label : null
-}
-
 /**
  * 处理文件打开：如果文件类型有专用处理器则直接返回 prefix，
  * 否则查询/弹窗默认打开方式。

@@ -1,7 +1,7 @@
 // 通用搜索面板组件 - 深度搜索功能
 
-import { Section, HStack, VStack, Spacer, Text, Image, Button, useState, useEffect, useRef, useMemo, VirtualNode, Group, Menu, Path, StyledText, EmptyView } from "scripting";
-import { buildIndex, searchFromIndex, DeepSearchResult, getIndexStats, IndexStats, isIndexValid, cancelBuildIndex, closeDatabase } from "../manager/DeepSearch";
+import { Section, HStack, VStack, Spacer, Text, Image, Button, useState, useEffect, useRef, useMemo, Group, Menu, Path, StyledText, EmptyView } from "scripting";
+import { buildIndex, searchFromIndex, DeepSearchResult, getIndexStats, IndexStats, isIndexValid, cancelBuildIndex } from "../manager/DeepSearch";
 import { setDeepSearchPref, getDeepSearchPref } from "../manager/SearchState";
 import { writeClipboardPath, shareFilePath, ensureLocalFile } from "../manager/utils";
 import { ContextMenuItem } from "./FileListItem";
@@ -13,15 +13,12 @@ interface SearchPanelProps {
   searchQuery: string;
   dirPath: string;
   enableDeepSearch?: boolean;
-  destinationForResult?: (result: DeepSearchResult) => VirtualNode;
   onResultTap?: (result: DeepSearchResult) => void;
-  showSize?: boolean;
   onResultsChange?: (results: DeepSearchResult[]) => void;
   navPath?: any;
   onNavigateToParentDirectory?: (result: DeepSearchResult) => void;
   resultLeadingActions?: (result: DeepSearchResult) => ContextMenuItem[];
   resultTrailingActions?: (result: DeepSearchResult) => ContextMenuItem[];
-  resultContextMenuItems?: (result: DeepSearchResult) => ContextMenuItem[];
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -97,14 +94,12 @@ export function SearchPanel({
   searchQuery,
   dirPath,
   enableDeepSearch = true,
-  destinationForResult,
   onResultTap,
   onResultsChange,
   navPath,
   onNavigateToParentDirectory,
   resultLeadingActions,
   resultTrailingActions,
-  resultContextMenuItems
 }: SearchPanelProps) {
   const [deepSearchResults, setDeepSearchResults] = useState<DeepSearchResult[]>([]);
   const deepSearchResultsRef = useRef<DeepSearchResult[]>(deepSearchResults);
@@ -441,19 +436,6 @@ export function SearchPanel({
       }
     };
 
-    const deleteFile = async (result: DeepSearchResult) => {
-      deletedPathsRef.current.add(result.path);
-      const updated = deepSearchResultsRef.current.filter((r) => r.path !== result.path);
-      deepSearchResultsRef.current = updated;
-      setDeepSearchResults(updated);
-      onResultsChange?.(updated);
-      try {
-        await FileManager.remove(result.path);
-      } catch (e) {
-        console.log("删除失败:", e);
-      }
-    };
-
     const copyToStorage = async (result: DeepSearchResult) => {
       try {
         await writeClipboardPath(result.path);
@@ -499,30 +481,10 @@ export function SearchPanel({
       _navPath.setValue([..._navPath.value, navTarget]);
     };
 
-     const renderContextMenu = (result: DeepSearchResult) => {
-      const customItems = resultContextMenuItems?.(result);
-
-      // 1. 如果外部传入了自定义菜单（通常已包含 删除、重命名、分享 等）
-    /*   if (customItems && customItems.length > 10) {
-        const hasGotoDir = customItems.some((item) => item.title === "跳转到目录");
-        return (
-          <Group>
-          
-            {!hasGotoDir && (
-              <Button title="跳转到目录" action={() => gotoParentDir(result)} />
-            )}
-            {customItems.map((item, idx) => (
-              <Button key={idx} title={item.title} role={item.role} action={item.action} />
-            ))}
-          </Group>
-        );
-      } */
-
-      // 2. 未传入自定义菜单时，使用默认的完整菜单
+    const renderContextMenu = (result: DeepSearchResult) => {
       return (
         <Group>
           <Button title="跳转到目录" action={() => gotoParentDir(result)} />
-       {/*    <Button title="删除" role="destructive" action={() => deleteFile(result)} /> */}
           <Button title="拷贝" action={() => copyToStorage(result)} />
           <Button title="复制文件路径" action={() => copyFilePath(result)} />
           {!result.isDirectory ? (
@@ -763,5 +725,4 @@ export function SearchPanel({
   );
 }
 
-export { searchFromIndex, closeDatabase, getIndexStats, buildIndex, cancelBuildIndex };
-export type { DeepSearchResult, IndexStats };
+export type { DeepSearchResult };

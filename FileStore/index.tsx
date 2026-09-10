@@ -3,12 +3,10 @@
 import { Script, Intent, Navigation, Path } from "scripting"
 import { getFileInfo, readTextFile, copyFileToFileStore, uniquePath } from "./manager/utils"
 import { packLivePhoto } from "./manager/LivePhotoPacker"
-import { showToast } from "./manager/ToastManager"
 import { FilePreviewView } from "./view/FilePreview"
 import { ArchiveBrowserPage, ImageViewer, VideoViewerPage, LivePhotoPreviewPage } from "./view/MediaViewer"
 import { HomeView } from "./view/preview"
 import { openEditorDirectly } from "./view/EditorDirectly"
-import { EditorPage } from "./view/EditorPage"
 import { resolveOpenerForFile } from "./view/DefaultOpenerPicker"
 
 async function run() {

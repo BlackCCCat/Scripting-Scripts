@@ -1,6 +1,6 @@
 // 通用文件网格卡片内容组件 — 网格视图 (大图标 + 文件名 + 项数/大小)
 
-import { VStack, Text, Image, ZStack, Spacer } from "scripting";
+import { VStack, Text, Image, ZStack } from "scripting";
 import { fmtSize, FileInfo } from "../manager/utils";
 import { FolderCountLabel, FolderCountStore } from "./FolderCountLabel";
 import { GridFileName } from "./GridFileName";
@@ -11,7 +11,6 @@ export interface FileGridContentProps {
   /** 选择模式配置（可选） */
   selectMode?: {
     isSelected: boolean;
-    onToggle: () => void;
   };
   /** 拖放悬停到文件夹：图标右上角显示绿色 + 徽标*/
   isDropTargeted?: boolean;

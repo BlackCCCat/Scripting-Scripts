@@ -2,16 +2,10 @@
 
 import { FileInfo } from "./utils";
 import { isLivePhotoFile } from "./LivePhotoPacker";
-import { Bookmark } from "./BookmarkManager";
 
 /* ─── 类型 ─── */
 
 export type SortOrder = "modified-asc" | "modified-desc" | "name-asc" | "type-asc";
-
-export interface SortOption {
-  key: SortOrder;
-  title: string;
-}
 
 export interface FilterOption {
   key: string;
@@ -61,22 +55,7 @@ export const FILE_FILTER_OPTIONS: FilterOption[] = [
 /** 默认筛选：全部 */
 export const DEFAULT_FILTER_TYPE = "all";
 
-/* ─── 目录排序/筛选选项 ─── */
-
-export const BOOKMARK_SORT_OPTIONS = [{ key: "name", title: "按名称排序", systemImage: "textformat" }];
-
 /* ─── 排序工具函数 ─── */
-
-/** 获取方向箭头 */
-export function getSortArrow(order: SortOrder, toggleKey: string): string {
-  return "";
-}
-
-/** 将 SortOrder 转为 utils.sortFiles 所需的 (mode, order) */
-export function sortOrderToMode(order: SortOrder): { mode: string; dir: "asc" | "desc" } {
-  const [mode, dir] = order.split("-") as [string, "asc" | "desc"];
-  return { mode, dir };
-}
 
 /** 根据选择的 toggle key 生成新的 SortOrder */
 export function resolveSortOrder(current: SortOrder, toggleKey: string): SortOrder {
@@ -134,11 +113,4 @@ export function filterFiles(files: FileInfo[], type: string): FileInfo[] {
         return true;
     }
   });
-}
-
-/** 对书签列表排序 */
-export function sortBookmarks(bookmarks: Bookmark[], _order?: string): Bookmark[] {
-  const sorted = [...bookmarks];
-  sorted.sort((a, b) => a.name.localeCompare(b.name, "zh-CN", { numeric: true }));
-  return sorted;
 }

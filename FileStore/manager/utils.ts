@@ -2,7 +2,7 @@
 import { Path } from "scripting"
 import { MIME_FALLBACK } from "./fileTypeData"
 import { uniquePath, writeToUniquePath } from "./pathUtils"
-import { searchFiles } from "./searchUtils"
+import { invalidateDirectoryCount } from "./directoryCount"
 export { langMap, MIME_FALLBACK } from "./fileTypeData"
 export { uniquePath, writeToUniquePath, sanitizeExtractDirName } from "./pathUtils"
 export { searchFiles } from "./searchUtils"
@@ -14,12 +14,6 @@ export function markFileImported(filePath: string, timestamp: number = Date.now(
   importedFileDates.set(filePath, timestamp)
 }
 
-import {
-  countDirectoryItems,
-  countDirectoryItemsBatch,
-  invalidateDirectoryCount,
-  clearDirectoryCountCache,
-} from "./directoryCount"
 export { fmtSize, fmtDate } from "./formatUtils"
 export { readClipboardPath, writeClipboardPath } from "./clipboardUtils"
 export { countDirectoryItems, countDirectoryItemsBatch, invalidateDirectoryCount, clearDirectoryCountCache } from "./directoryCount"
@@ -428,7 +422,7 @@ export function pathToDisplayName(filePath: string): string {
   return p.replace(/\/$/, "")
 }
 /** 复制文本到剪贴板并弹出简短提示（无需确认） */
-export async function copyAndToast(text: string, label?: string): Promise<void> {
+export async function copyAndToast(text: string): Promise<void> {
   await Pasteboard.setString(text)
   // 返回提示信息，调用方可用 toast 展示
   return
@@ -615,7 +609,7 @@ export function getFileIconColor(ext: string, isDirectory: boolean, category?: F
  * （1000 文件目录 = 1000 次同步调用）；本地表已覆盖常见类型，未命中回退 octet-stream。
  * 需要精确值时（如“简介”面板）才单独调 FileManager.mimeType。
  */
-export function getMimeType(ext: string, filePath?: string): string {
+export function getMimeType(ext: string): string {
   const e = ext.toLowerCase()
   return MIME_FALLBACK[e] || "application/octet-stream"
 }
@@ -691,12 +685,6 @@ export function getCachedDirectoryListing(path: string): FileInfo[] | null {
   return null
 }
 
-/** 清除所有缓存 */
-export function clearDirectoryCache() {
-  _dirCache.clear()
-  clearDirectoryCountCache()
-}
-
 /** 清除指定目录的缓存（用于新建/粘贴/拖拽后立即刷新） */
 export function invalidateDirectoryCache(dirPath: string) {
   _dirCache.delete(dirPath)
@@ -742,43 +730,6 @@ export async function listDirectory(dirPath: string): Promise<FileInfo[]> {
   } finally {
     _inflightRequests.delete(dirPath)
   }
-}
-
-/** 排序方式 */
-export type SortMode = "name" | "date" | "size" | "type" | "createdate"
-export type SortOrder = "asc" | "desc"
-
-/** 排序文件列表 */
-export function sortFiles(files: FileInfo[], mode: SortMode, order: SortOrder): FileInfo[] {
-  const sorted = [...files]
-  const dirFirst = true
-  const mult = order === "asc" ? 1 : -1
-
-  sorted.sort((a, b) => {
-    // 目录优先
-    if (dirFirst) {
-      if (a.isDirectory && !b.isDirectory) return -1
-      if (!a.isDirectory && b.isDirectory) return 1
-    }
-
-    switch (mode) {
-      case "name":
-        return mult * a.name.localeCompare(b.name, "zh-CN", { numeric: true })
-      case "date":
-        return mult * (a.modificationDate - b.modificationDate)
-      case "createdate":
-        return mult * (a.creationDate - b.creationDate)
-      case "size":
-        return mult * (a.size - b.size)
-      case "type":
-        const catCmp = mult * a.category.localeCompare(b.category)
-        return catCmp !== 0 ? catCmp : mult * a.name.localeCompare(b.name, "zh-CN", { numeric: true })
-      default:
-        return 0
-    }
-  })
-
-  return sorted
 }
 
 /** 将任意路径编码为一个 shell 参数，避免空格、引号和命令替换字符被 shell 解释。 */
@@ -1362,18 +1313,6 @@ async function extractArchiveInto(archivePath: string, destDir: string): Promise
 }
 
 /**
- * 解压到新目录（不经过临时目录）：非 7z 先创建 destDir 再直接解压；7z 由 Archive API 自行创建 destDir。
- * 调用方需保证 destDir 唯一（重名时自行加后缀）。
- * @returns true 解压成功；false 用户取消了 7z 密码输入
- */
-export async function extractArchiveToNewDir(archivePath: string, destDir: string): Promise<boolean> {
-  if (!isSevenZFile(archivePath)) {
-    await FileManager.createDirectory(destDir, true)
-  }
-  return await extractArchiveInto(archivePath, destDir)
-}
-
-/**
  * 统一智能解压 ZIP / 7z 到新目录：按真实魔数识别，支持有密码和无密码归档。
  * ZIP 统一走 extractZipWithPassword，7z 统一走 extractSevenZ。
  * 归档 bytes 只全量读一次，贯穿类型检测与解压后校验/文件名修复全程。
@@ -1388,23 +1327,6 @@ export async function extractArchiveSmartToNewDir(archivePath: string, destDir: 
     return await extractZipWithPassword(archivePath, destDir, bytes)
   }
   throw new Error(`不是有效的 ZIP/7z 文件: ${Path.basename(archivePath)}`)
-}
-
-/** 兼容旧调用名：统一入口现在同时支持 ZIP 与 7z。 */
-export const extractSevenZToNewDir = extractArchiveSmartToNewDir
-
-/** 递归统计目录下所有文件（不含目录本身）的数量 */
-async function countFilesRecursive(dirPath: string): Promise<number> {
-  let count = 0
-  const entries = await FileManager.readDirectory(dirPath)
-  for (const entry of entries) {
-    const p = Path.join(dirPath, entry)
-    try {
-      if (await FileManager.isDirectory(p)) count += await countFilesRecursive(p)
-      else count += 1
-    } catch { }
-  }
-  return count
 }
 
 /** 解压到目标目录，避免覆盖已有文件。先解压到临时目录，再用 uniquePath 逐个移动（用于“解压到当前目录”等已有目录场景） */
@@ -1464,18 +1386,6 @@ export async function renameWithPrompt(oldName: string): Promise<string | null> 
     }
   }
   return null
-}
-
-/**
- * 将文件的修改时间刷新为当前时间。
- * copyFile 会保留源文件的修改时间；这里只读首字节再原样写回首字节，
- * 触发文件内容变更使 mtime 更新，避免全量读回写回（原实现最多 100MB 读写，
- * 且写回中途失败可能损坏副本）。首字节读不到（空文件）则跳过。
- */
-export async function refreshFileModificationTime(path: string): Promise<void> {
-  // 原生 FileManager 无 touch / utimes API。
-  // 不可使用 writeAsBytes(path, bytes.slice(0, 1))，否则会发生文件截断导致文件损坏为 1 字节。
-  // 保持空操作或由上层通过重新落盘更新。
 }
 
 /**

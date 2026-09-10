@@ -1,6 +1,6 @@
 // 预览容器 - TabView 主布局 + 全屏切换 + 退出
 
-import { Script, Navigation, TabView, Tab, Group, EmptyView, ZStack, useState, useEffect, useRef } from "scripting"
+import { Script, TabView, Tab, Group, EmptyView, ZStack, useState, useEffect, useRef } from "scripting"
 import { getAllBookmarks, Bookmark } from "../manager/BookmarkManager"
 import { readSettings, saveSettings } from "../manager/Settings"
 import { MountDirectoriesPage } from "./MountDirectoriesPage"
@@ -22,7 +22,6 @@ export function HomeView({
   initialLeftPath?: string
   initialHighlightPath?: string
 } = {}) {
-  const dismiss = Navigation.useDismiss()
   const loadedSettings = readSettings()
   // 指定初始左栏目录时（如导入非文本文件后回到 File Store），覆盖启动页设置：
   // 跳转到“双栏浏览”Tab(0)，并让左栏进入 initialLeftPath 目录。仅影响本次会话起始状态。
@@ -31,7 +30,6 @@ export function HomeView({
     : loadedSettings
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => getAllBookmarks())
   const [refreshKey, setRefreshKey] = useState(0)
-  // const [clipboardSyncTrigger, setClipboardSyncTrigger] = useState(0)
   // 仅允许 0、1、2 作为可恢复页面；退出 Tab 永不参与启动恢复。
   const initialTabIndex = initialSettings.defaultTab >= 0 && initialSettings.defaultTab <= 2 ? initialSettings.defaultTab : 0
   const [tabIndex, setTabIndex] = useState(initialTabIndex)
@@ -106,10 +104,6 @@ export function HomeView({
         saveSettings({ ...settings, defaultTab: index })
       }, 233)
     }
-    // 切换到首页时刷新剪贴板路径（跨 tab 拷贝文件后粘贴）
-    // if (index === 0) {
-    //   setClipboardSyncTrigger((k) => k + 1)
-    // }
   }
   // UI 已就绪（ToastOverlay 已挂载）后，再检查 npm 运行环境，缺失时自动安装并 Toast 提示
   useEffect(() => {
@@ -137,7 +131,6 @@ export function HomeView({
             <DualBrowserPage
               settings={settings}
               refreshKey={refreshKey}
-              setRefreshKey={setRefreshKey}
               onSettingsChange={setSettings}
               bookmarks={bookmarks}
               initialHighlightPath={initialHighlightPath}

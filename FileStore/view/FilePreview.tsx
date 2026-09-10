@@ -138,7 +138,6 @@ export function FilePreviewView({ fileInfo, content }: FilePreviewViewProps) {
   // ─── 顶层 hooks（不得放在条件分支内） ───
   const [player, setPlayer] = useState<AVPlayer | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  //const dismiss = Navigation.useDismiss()
 
   useEffect(() => {
     if (category !== "audio") return;

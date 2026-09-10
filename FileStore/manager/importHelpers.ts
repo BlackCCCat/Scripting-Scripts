@@ -1,11 +1,8 @@
 // 导入工具函数 — 文件/照片/视频导入通用 helper
 
 import { Path } from 'scripting'
-import { getFileInfo, FileInfo, uniquePath } from './utils'
+import { uniquePath } from './utils'
 import { packLivePhoto } from './LivePhotoPacker'
-
-/** 导入文件存放目录（默认） */
-export const DEFAULT_IMPORT_DIR = Path.join(FileManager.documentsDirectory, 'File Manager Imports')
 
 /** 确保目录存在 */
 export async function ensureDir(dir: string) {
@@ -13,25 +10,6 @@ export async function ensureDir(dir: string) {
   if (!exists) {
     await FileManager.createDirectory(dir, true)
   }
-}
-
-/** 读取目录中的文件列表，按修改日期降序 */
-export async function listFilesInDir(dir: string): Promise<FileInfo[]> {
-  await ensureDir(dir)
-  const entries = await FileManager.readDirectory(dir)
-  const results = await Promise.all(
-    entries.map(async (entry) => {
-      try {
-        const fullPath = Path.join(dir, entry)
-        return await getFileInfo(fullPath)
-      } catch {
-        return null
-      }
-    })
-  )
-  const items: FileInfo[] = results.filter((r): r is FileInfo => r != null)
-  items.sort((a, b) => b.modificationDate - a.modificationDate)
-  return items
 }
 
 /** 生成中国时区的时间戳文件名 YYYYMMDDHHmmss */

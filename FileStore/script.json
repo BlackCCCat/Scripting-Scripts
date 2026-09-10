@@ -1,7 +1,7 @@
 {
   "iconImage" : null,
   "permissions" : null,
-  "version" : "v3.0.1",
+  "version" : "v3.0.2",
   "remoteResource" : {
     "url" : "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/FileStore.zip",
     "hash" : "",

@@ -1,7 +1,7 @@
 // 设置标签 - 核心功能一览 + 应用设置
 // 汇集：10 项核心功能入口，以及原 SettingsPage 的显示模式
 
-import { NavigationStack, List, Section, Text, Button, Toggle, Picker, HStack, VStack, Spacer, Image, EmptyView, Rectangle, ScrollView, Group, useState, useEffect } from "scripting";
+import { NavigationStack, List, Section, Text, Button, Toggle, Picker, HStack, VStack, Spacer, Image, EmptyView, ScrollView, Group, useState, useEffect } from "scripting";
 import { AppSettings } from "../manager/Settings";
 import { Bookmark, getAllBookmarks, getBookmarkAliases, mountExistingBookmark, removeBookmarkById, removeSystemBookmark, renameBookmark, setBookmarkAlias, unmountBookmark, resolveBookmarkPath } from "../manager/BookmarkManager";
 import { getMaxIndexFileSizeKB, setMaxIndexFileSizeKB } from "../manager/SearchState";

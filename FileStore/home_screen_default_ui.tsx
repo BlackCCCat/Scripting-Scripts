@@ -148,10 +148,8 @@ export default function HomeScreenDefaultUi() {
           <DualBrowserPage
             settings={settings}
             refreshKey={refreshKey}
-            setRefreshKey={setRefreshKey}
             onSettingsChange={setSettings}
             bookmarks={bookmarks}
-            isHomeScreenHost
             isFocused={activeTab === 0}
             secondaryToolbarLeadingItems={
               <ToolbarItem placement="topBarLeading">

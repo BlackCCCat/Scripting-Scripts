@@ -122,17 +122,6 @@ export async function stopServer(directory: string): Promise<boolean> {
   return true;
 }
 
-export async function stopAllServers(): Promise<void> {
-  for (const entry of servers) {
-    try {
-      entry.server.stop();
-    } catch {}
-  }
-  servers.length = 0;
-  await updateKeepAlive();
-  notifyListeners();
-}
-
 export function hasActiveServers(): boolean {
   return servers.some((entry) => entry.server.state === "running");
 }

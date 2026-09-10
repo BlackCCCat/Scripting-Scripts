@@ -1,17 +1,3 @@
-// 全局搜索状态 - 用于跨组件通信（避免通过NavigationLink传递props导致白屏）
-
-type SearchStateListener = (show: boolean) => void
-type FocusRequestListener = () => void
-type ScrollToFileListener = (path: string | null) => void
-
-let _showSearch = false
-let _listeners: SearchStateListener[] = []
-let _focusListeners: FocusRequestListener[] = []
-
-// 从深度搜索跳转到目录时，需要滚动到该文件
-let _scrollToFilePath: string | null = null
-let _scrollToFileListeners: ScrollToFileListener[] = []
-
 /* ─── 深度搜索偏好：按目录自动开启 ─── */
 // 内存缓存（即时生效）+ Storage 持久化
 const DEEP_SEARCH_PREFS_KEY = 'FileStore_deepSearch'
@@ -58,65 +44,6 @@ export function setDeepSearchPref(dirPath: string, enabled: boolean): void {
 export function getDeepSearchPref(dirPath: string): boolean {
   const prefs = _ensurePrefs()
   return prefs[dirPath] === true
-}
-
-export function getGlobalShowSearch(): boolean {
-  return _showSearch
-}
-
-export function setGlobalShowSearch(show: boolean): void {
-  _showSearch = show
-  _listeners.forEach(fn => fn(show))
-}
-
-/**
- * 请求搜索输入框聚焦。
- * 当搜索按钮被点击时调用，用于将焦点设置到搜索输入框。
- */
-export function requestSearchFocus(): void {
-  _focusListeners.forEach(fn => fn())
-}
-
-/**
- * 订阅搜索聚焦请求。
- * 返回取消订阅函数。
- */
-export function onSearchFocusRequest(listener: FocusRequestListener): () => void {
-  _focusListeners.push(listener)
-  return () => {
-    _focusListeners = _focusListeners.filter(fn => fn !== listener)
-  }
-}
-
-/**
- * 订阅搜索状态变化。
- * 不会立即调用 listener，请配合 getGlobalShowSearch() 初始化组件状态。
- */
-export function onSearchStateChange(listener: SearchStateListener): () => void {
-  _listeners.push(listener)
-  return () => {
-    _listeners = _listeners.filter(fn => fn !== listener)
-  }
-}
-
-/* ─── 跳转到目录时滚动到文件 ─── */
-
-export function requestScrollToFile(path: string): void {
-  _scrollToFilePath = path
-  _scrollToFileListeners.forEach(fn => fn(path))
-}
-
-export function consumeScrollToFile(): string | null {
-  const path = _scrollToFilePath
-  _scrollToFilePath = null
-  return path
-}
-
-export function onScrollToFileRequest(listener: ScrollToFileListener): () => void {
-  _scrollToFileListeners.push(listener)
-  return () => {
-    _scrollToFileListeners = _scrollToFileListeners.filter(fn => fn !== listener)
-  }
 }
 
 /* ─── 深度搜索索引最大文件限制（KB） ─── */

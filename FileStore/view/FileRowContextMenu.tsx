@@ -11,7 +11,7 @@ import {
 import { FileInfo, getFileCategory } from "../manager/utils";
 import { ArchiveBrowserPage } from "./MediaViewer";
 import { setDefaultOpener, OPENER_OPTIONS } from "../manager/DefaultOpener";
-import { isLivePhotoFile, unpackLivePhoto } from "../manager/LivePhotoPacker";
+import { unpackLivePhoto } from "../manager/LivePhotoPacker";
 import { showToast } from "../manager/ToastManager";
 import { FileInfoDialog } from "./FileListItem";
 
@@ -37,7 +37,6 @@ export interface FileRowContextMenuProps {
   onZipCompress: () => void;
   onSevenZCompress: () => void;
   navPath?: any;
-  dirPath?: string;
 }
 
 export function FileRowContextMenu({
@@ -62,7 +61,6 @@ export function FileRowContextMenu({
   onZipCompress,
   onSevenZCompress,
   navPath,
-  dirPath,
 }: FileRowContextMenuProps) {
   const handleShowInfo = () => {
     Navigation.present({ element: <FileInfoDialog file={file} />, modalPresentationStyle: "pageSheet" });

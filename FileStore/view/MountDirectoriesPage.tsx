@@ -30,7 +30,6 @@ import {
   addDirectoryBookmark,
   addBookmarkManually,
   removeBookmarkById,
-  resolveBookmarkPath,
   renameBookmark,
   Bookmark,
   reorderBookmarks,
@@ -56,10 +55,6 @@ interface MountDirectoriesPageProps {
   onSettingsChange?: (settings: AppSettings) => void;
   isFocused?: boolean;
   settings?: AppSettings;
-}
-
-function getAccessiblePath(bookmark: Bookmark): string | null {
-  return getBookmarkPath(bookmark);
 }
 
 function sameStringSet(a: Set<string>, b: Set<string>): boolean {
@@ -94,7 +89,7 @@ function BookmarkInfoDialog({ bookmark }: { bookmark: Bookmark }) {
   const dismiss = Navigation.useDismiss();
 
   const handleCopyPath = async () => {
-    await copyAndToast(bookmark.path, "路径");
+    await copyAndToast(bookmark.path);
     showToast(copiedMessage(bookmark.path));
   };
 
@@ -750,7 +745,7 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
                     spacing={12}
                   >
                     {displayBookmarks.map((bookmark) => {
-                      const dirPath = getAccessiblePath(bookmark);
+                      const dirPath = getBookmarkPath(bookmark);
                       const isAccessible = dirPath != null && !inaccessiblePaths.has(bookmark.path);
                       const isSelected = selectedNames.has(bookmark.name);
                       const count = folderCounts.get(bookmark.path);
@@ -887,7 +882,7 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
                 <ForEach
                   data={forEachData}
                   builder={(bookmark, index) => {
-                    const dirPath = getAccessiblePath(bookmark);
+                    const dirPath = getBookmarkPath(bookmark);
                     const bookmarkAsFile = {
                       name: bookmark.name,
                       path: bookmark.path,

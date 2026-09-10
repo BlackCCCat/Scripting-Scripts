@@ -268,24 +268,23 @@ export async function addDirectoryBookmark(): Promise<Bookmark | null> {
   }
 }
 
-/** 通过名称删除书签 */
+/** 通过显示名称删除书签，并同步移除对应的系统书签。 */
 export function removeBookmark(name: string): boolean {
   try {
     const bookmarks = readBookmarks();
-    const removed = bookmarks.find((b) => b.name === name);
-    const filtered = bookmarks.filter((b) => b.name !== name);
-    if (filtered.length < bookmarks.length) {
-      saveBookmarks(filtered);
-      if (removed?.bookmarkId) {
-        try {
-          removeSystemBookmark(removed.bookmarkId);
-        } catch {}
-      }
-      return true;
+    const removed = bookmarks.find((bookmark) => bookmark.name === name);
+    const filtered = bookmarks.filter((bookmark) => bookmark.name !== name);
+    if (filtered.length === bookmarks.length) return false;
+
+    saveBookmarks(filtered);
+    if (removed?.bookmarkId) {
+      try {
+        removeSystemBookmark(removed.bookmarkId);
+      } catch {}
     }
-    return false;
-  } catch (e) {
-    console.log("删除书签失败:", e);
+    return true;
+  } catch (error) {
+    console.log("删除书签失败:", error);
     return false;
   }
 }
@@ -321,12 +320,6 @@ export function removeBookmarkById(bookmarkId: string, path?: string): boolean {
     console.log("通过 ID 删除书签失败:", e);
     return false;
   }
-}
-
-/** 检查书签是否存在 */
-export function bookmarkExists(name: string): boolean {
-  const bookmarks = readBookmarks();
-  return bookmarks.some((b) => b.name === name);
 }
 
 /** 重命名书签：如果具备 bookmarkId 则更新显示别名；否则更新存储名称。 */

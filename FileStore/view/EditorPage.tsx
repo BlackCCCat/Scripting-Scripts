@@ -114,7 +114,6 @@ export function EditorPage(props: EditorPageProps) {
   const [content, setContent] = useState(mode === "preview" ? (initialContent ?? null) : null)
   const [ready, setReady] = useState(mode === "preview" ? !!initialContent : false)
   const [loadError, setLoadError] = useState(false)
-  const [encoding, setEncoding] = useState<string>("utf-8")       // 用户选择
   const [actualEncoding, setActualEncoding] = useState<string>("utf-8") // 实际读取
   // 只有确认内容是成功读取/用户明确编辑后，才允许写回文件。
   // 防止编码切换解码失败得到空字符串，然后自动保存/关闭保存把原文件清空。
@@ -153,7 +152,6 @@ export function EditorPage(props: EditorPageProps) {
     setSaveEnabled(false)
     setReady(false)
     setContent(null)
-    setEncoding(newEncoding)
     // 锁定用户的主动选择，避免被后续自动嗅探覆盖
     userPickedEncodingRef.current = newEncoding
     setLoadTrigger((t) => t + 1)
@@ -258,9 +256,6 @@ export function EditorPage(props: EditorPageProps) {
   const handleHTMLCSSMinify = async () => {
     await runFormatting((current) => minifyHTML(current, true))
   }
-  const handleHTMLFormat = async () => {
-    await runFormatting((current) => formatWithPrettier(current, ".html"))
-  }
   const handleHTMLPreview = async () => {
     if (!controllerRef.current) return
     const webView = new WebViewController()
@@ -298,9 +293,6 @@ export function EditorPage(props: EditorPageProps) {
     } finally {
       webView.dispose()
     }
-  }
-  const handleMarkdownFormat = async () => {
-    await runFormatting((current) => formatWithPrettier(current, ".md"))
   }
   const handleMarkdownPreview = async () => {
     if (!controllerRef.current) return
@@ -371,10 +363,6 @@ export function EditorPage(props: EditorPageProps) {
           return
         }
 
-        const isUsableText = (value: string | null | undefined) => {
-          return value != null && isPlausibleText(value) && (value.length > 0 || fileSize === 0)
-        }
-
         // 切换不同文件时，重置用户手动锁定的编码状态
         if (lastLoadedPathRef.current !== path) {
           lastLoadedPathRef.current = path
@@ -394,28 +382,6 @@ export function EditorPage(props: EditorPageProps) {
           candidates = ["utf-8", "gb18030", "gbk", "utf-16", "ascii"]
         }
 
-        /*    // 2. 通过 readAsString 尝试候选编码
-           for (const enc of candidates) {
-             try {
-               const alt = await FileManager.readAsString(path, enc as any)
-               if (isUsableText(alt)) {
-                 if (!cancelled) {
-                   setContent(alt)
-                   baseContentRef.current = alt
-                   // 保持勾选与实际选择一致（如果是别名解开的，依然保留用户选的 gbk）
-                   const finalEnc = userPickedEncodingRef.current ?? enc
-                   setActualEncoding(finalEnc)
-                   setEncoding(finalEnc)
-                   setSaveEnabled(true)
-                   setDecodeFailed(false)
-                   setLoadError(false)
-                   setReady(true)
-                 }
-                 return
-               }
-             } catch {}
-           } */
-
         // 读取原始 Data 进行内存解码兜底
         let data: any = null
         try {
@@ -433,7 +399,6 @@ export function EditorPage(props: EditorPageProps) {
                   baseContentRef.current = alt
                   const finalEnc = userPickedEncodingRef.current ?? enc
                   setActualEncoding(finalEnc)
-                  setEncoding(finalEnc)
                   setSaveEnabled(true)
                   setDecodeFailed(false)
                   setLoadError(false)
@@ -453,7 +418,6 @@ export function EditorPage(props: EditorPageProps) {
                   setContent(decoded)
                   baseContentRef.current = decoded
                   setActualEncoding("utf-8")
-                  setEncoding("utf-8")
                   setSaveEnabled(true)
                   setDecodeFailed(false)
                   setLoadError(false)
@@ -474,7 +438,6 @@ export function EditorPage(props: EditorPageProps) {
           setContent("")
           baseContentRef.current = ""
           const finalEnc = userPickedEncodingRef.current ?? "utf-8"
-          setEncoding(finalEnc)
           setActualEncoding(finalEnc)
           setSaveEnabled(false) // 禁用保存
           setDecodeFailed(true) // 触发无法解码警告横幅
@@ -486,7 +449,6 @@ export function EditorPage(props: EditorPageProps) {
           setContent("")
           baseContentRef.current = ""
           const finalEnc = userPickedEncodingRef.current ?? "utf-8"
-          setEncoding(finalEnc)
           setActualEncoding(finalEnc)
           setSaveEnabled(false)
           setDecodeFailed(true)

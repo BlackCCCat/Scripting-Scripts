@@ -539,7 +539,6 @@ export function FileNavigationDest({ page, navigationPath }: { page: string; nav
 
 /* ───── 实况照片预览页面 ───── */
 export function LivePhotoPreviewPage({ livePath, nested }: { livePath: string; nested?: boolean }) {
-  // const dismiss = Navigation.useDismiss()
   const livePhoto = useObservable<LivePhoto | null>(null);
   const [lpSize, setLpSize] = useState<Size | null>(null);
   const tmpPathsRef = useRef<string[]>([]);
@@ -701,7 +700,7 @@ export function LivePhotoPreviewPage({ livePath, nested }: { livePath: string; n
   }
 
   return (
-    <NavigationStack statusBarHidden={true}>
+    <NavigationStack statusBarHidden={false}>
       <VStack alignment="center" spacing={0}
         onAppear={handleAppear}
         ignoresSafeArea={true}

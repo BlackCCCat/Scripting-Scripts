@@ -62,19 +62,18 @@ import { PathTitleMarquee } from "./PathTitleMarquee";
 import { FolderCountStore } from "./FolderCountLabel";
 import { DeepSearchResult } from "./SearchPanel";
 import { SearchPanel } from "./SearchPanel";
-import { onSearchStateChange } from "../manager/SearchState";
 import { ArchiveBrowserPage, FileNavigationDest } from "./MediaViewer";
 import { ToolbarMenu } from "./ToolbarMenu";
 import { FileListItem, FileInfoDialog } from "./FileListItem";
 import { filterFiles, sortFilesByOrder, normalizeSortOrder, DEFAULT_SORT_ORDER, DEFAULT_FILTER_TYPE } from "../manager/sortFilter";
 import { isLivePhotoFile, unpackLivePhoto } from "../manager/LivePhotoPacker";
 import { resolveOpenerForFile } from "./DefaultOpenerPicker";
-import { getDefaultOpener, setDefaultOpener, OPENER_OPTIONS } from "../manager/DefaultOpener";
+import { getDefaultOpener } from "../manager/DefaultOpener";
 import { AppSettings, saveSettings, readSettings } from "../manager/Settings";
 import { SettingsPage } from "./SettingsPage";
 import { MountDirectoriesPage } from "./MountDirectoriesPage";
 import { Bookmark, getAllBookmarks, addDirectoryBookmark, resolveBookmarkPath, onBookmarksChanged } from "../manager/BookmarkManager";
-import { ensureDir, makeTimestamp, importSinglePhotoResult } from "../manager/importHelpers";
+import { ensureDir, importSinglePhotoResult } from "../manager/importHelpers";
 import { DROP_ACCEPTED_TYPES, handleDropToDirectory } from "../manager/dropHandler";
 import { makeDragConfig } from "./FileListItem";
 import { showToast, showRemountWarning } from "../manager/ToastManager";
@@ -83,9 +82,6 @@ import { WebPreviewPage } from "./WebPreviewPage";
 
 
 // 剪贴板路径文件（用文件持久化，跨 tab/子目录保留）
-const _readClipPath = readClipboardPath;
-const _writeClipPath = writeClipboardPath;
-
 const DIRECTORY_POLL_MIN_INTERVAL_MS = 999;
 const DIRECTORY_POLL_MAX_INTERVAL_MS = 60000;
 const DIRECTORY_POLL_FORCE_FULL_EVERY = 10;
@@ -139,7 +135,6 @@ function tailDisplayPath(pathText: string, maxChars: number = 28): string {
 function FileRowLink({
   file,
   onRefresh,
-  onDeleteFile,
   onRequestDelete,
   selectMode,
   isSelected,
@@ -154,20 +149,16 @@ function FileRowLink({
   dirPath,
   onDropCompleted,
   onFolderCountChanged,
-  isHomeScreenHost,
   isGrid,
   marqueeEnabled,
   isFocused = true,
 }: {
   file: FileInfo;
   onRefresh: () => void;
-  onDeleteFile?: (path: string) => void;
   onRequestDelete?: (file: FileInfo, afterSwipe?: boolean) => void;
   selectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (path: string) => void;
-  rootPath?: string;
-  rootName?: string;
   navPath?: any;
   hideTopSeparator?: boolean;
   folderCountStore: FolderCountStore;
@@ -178,7 +169,6 @@ function FileRowLink({
   dirPath?: string;
   onDropCompleted?: () => void;
   onFolderCountChanged?: (folderPath: string, count: number) => void;
-  isHomeScreenHost?: boolean;
   isGrid?: boolean;
   marqueeEnabled?: boolean;
   isFocused?: boolean;
@@ -213,13 +203,6 @@ function FileRowLink({
   };
 
   const openEditor = async (scrollToLine?: number) => {
-    /*     if (isHomeScreenHost) {
-          await Navigation.present({
-            element: <EditorPage path={file.path} mode="present" scrollToLine={scrollToLine} />,
-            modalPresentationStyle: "pageSheet",
-          });
-          return;
-        } */
     if (navPath) {
       navPath.setValue([...navPath.value, "editor:" + file.path + (scrollToLine ? "::L" + scrollToLine : "")]);
     }
@@ -313,7 +296,6 @@ function FileRowLink({
             isFocused={isFocused}
             selectMode={{
               isSelected: isSelected || false,
-              onToggle: onToggleSelect ? () => onToggleSelect(file.path) : () => { },
             }}
           />
         </Button>
@@ -432,212 +414,7 @@ function FileRowLink({
             onZipCompress={handleZipCompress}
             onSevenZCompress={handleSevenZCompress}
             navPath={navPath}
-            dirPath={dirPath}
           />
-          {false && (
-          <Group>
-            <ControlGroup>
-              <Button title="拷贝" systemImage="doc.on.doc" action={async () => { await onCopyPath?.(file.path); }} />
-              <Button title="重命名" systemImage="pencil" action={handleRename} />
-              <Button title="分享" systemImage="square.and.arrow.up" action={handleShare} />
-            </ControlGroup>
-            {isLivePhoto ? (
-              <Button
-                title="保存到相册"
-                systemImage="square.and.arrow.down"
-                action={async () => {
-                  let tmpImg: string | null = null;
-                  let tmpVid: string | null = null;
-                  try {
-                    const data = await FileManager.readAsData(file.path);
-                    if (!data) {
-                      showToast("读取文件失败");
-                      return;
-                    }
-                    const unpacked = unpackLivePhoto(data);
-                    if (!unpacked) {
-                      showToast("Live Photo 格式无效");
-                      return;
-                    }
-                    const tmpDir = FileManager.temporaryDirectory;
-                    tmpImg = tmpDir + `/_lp_save_${Date.now()}.${unpacked.imageExt}`;
-                    tmpVid = tmpDir + `/_lp_save_${Date.now()}.mov`;
-                    await FileManager.writeAsData(tmpImg, unpacked.imageData);
-                    await FileManager.writeAsData(tmpVid, unpacked.videoData);
-                    await Photos.saveLivePhoto({
-                      imagePath: tmpImg,
-                      videoPath: tmpVid,
-                    });
-                    showToast("已保存到相册");
-                  } catch (e) {
-                    console.log("保存到相册失败:", e);
-                    showToast("保存失败");
-                  } finally {
-                    if (tmpImg) {
-                      try { await FileManager.remove(tmpImg); } catch { }
-                    }
-                    if (tmpVid) {
-                      try { await FileManager.remove(tmpVid); } catch { }
-                    }
-                  }
-                }}
-              />
-            ) : (
-              <EmptyView />
-            )}
-            {isImage ? (
-              <Button
-                title="保存到相册"
-                systemImage="square.and.arrow.down"
-                action={async () => {
-                  try {
-                    await Photos.savePhoto(file.path);
-                    showToast("已保存到相册");
-                  } catch (e) {
-                    console.log("保存图片失败:", e);
-                    showToast("保存失败");
-                  }
-                }}
-              />
-            ) : (
-              <EmptyView />
-            )}
-            {isVideo ? (
-              <Button
-                title="导出到相册"
-                systemImage="square.and.arrow.down"
-                action={async () => {
-                  try {
-                    await Photos.saveVideo(file.path);
-                    showToast("已导出到相册");
-                  } catch (e) {
-                    console.log("导出视频失败:", e);
-                    showToast("导出失败");
-                  }
-                }}
-              />
-            ) : (
-              <EmptyView />
-            )}
-            {isPreviewableText ? (
-              <>
-                {isMarkdown ? (
-                  <Button
-                    title="预览 Markdown"
-                    systemImage="doc.text.magnifyingglass"
-                    action={async () => {
-                      if (navPath) {
-                        navPath.setValue([...navPath.value, 'markdown:' + file.path]);
-                      }
-                    }}
-                  />
-                ) : (
-                  <Button
-                    title="预览网页"
-                    systemImage="safari"
-                    action={async () => {
-                      const wv = new WebViewController();
-                      await wv.loadFile(file.path);
-                      await wv.present({ fullscreen: true, navigationTitle: file.name });
-                      wv.dispose();
-                    }}
-                  />
-                )}
-                <Button
-                  title="编辑"
-                  systemImage="chevron.left.forwardslash.chevron.right"
-                  action={() => openEditor()}
-                />
-                <Divider />
-              </>
-            ) : (
-              <EmptyView />
-            )}
-            {copyToDirTitle && onCopyToDir ? (
-              <Button
-                title={copyToDirTitle!}
-                systemImage="arrow.right.doc.on.clipboard"
-                action={async () => {
-                  await onCopyToDir!(file.path);
-                }}
-              />
-            ) : (
-              <EmptyView />
-            )}
-            {/* 压缩/解压 — 所有文件都有压缩选项，归档文件额外有解压选项 */}
-            {getFileCategory(file.extension) === "archive" ? (
-              <>
-                <Button
-                  title="查看压缩文件"
-                  systemImage="archivebox.fill"
-                  action={() => {
-                    Navigation.present({
-                      element: <ArchiveBrowserPage filePath={file.path} />,
-                      modalPresentationStyle: "pageSheet",
-                    });
-                  }}
-                />
-                <Divider />
-              </>
-            ) : (
-              <EmptyView />
-            )}
-            {!file.isDirectory ? (
-              <Button
-                title={`解压到（${extractFolderName}）`}
-                systemImage="lock.open"
-                action={() => handleExtractToFolder()}
-              />
-            ) : (
-              <EmptyView />
-            )}
-            <Button
-              title="压缩"
-              systemImage="shippingbox"
-              action={async () => {
-                try {
-                  const destPath = await uniquePath(Path.join(dirPath || Path.dirname(file.path), file.name + ".zip"));
-                  await FileManager.zip(file.path, destPath);
-                  invalidateDirectoryCache(dirPath || Path.dirname(file.path));
-                  onRefresh();
-                  showToast("压缩完成");
-                } catch (e) {
-                  console.log("压缩失败:", e);
-                  showToast("压缩失败");
-                }
-              }}
-            />
-            <Button
-              title="ZIP 加密压缩 (AES-256)"
-              systemImage="lock.doc"
-              action={handleZipCompress}
-            />
-            <Button
-              title="7z 加密压缩 (AES-256)"
-              systemImage="lock.doc"
-              action={handleSevenZCompress}
-            />
-            <Divider />
-            {!file.isDirectory ? (
-              <Menu title="默认打开方式" systemImage="gear">
-                {OPENER_OPTIONS.map((opt) => (
-                  <Button
-                    title={opt.label}
-                    systemImage={defaultOpener === opt.prefix ? "checkmark" : undefined}
-                    action={async () => {
-                      setDefaultOpener(Path.extname(file.path), opt.prefix);
-                      onRefresh();
-                    }}
-                  />
-                ))}
-              </Menu>
-            ) : (
-              <EmptyView />
-            )}
-            <Button title="简介" systemImage="info.circle" action={handleShowInfo} />
-            <Button title="删除" systemImage="trash" role="destructive" action={handleDelete} />
-          </Group>
-          )}
           </>
         ),
       }}
@@ -741,7 +518,6 @@ function GeneralBrowser({
   onDropCompleted,
   onFolderCountChanged,
   folderCountUpdateRef,
-  isHomeScreenHost,
   isFocused = true,
   isDualMode = false,
 }: {
@@ -778,14 +554,12 @@ function GeneralBrowser({
   onFilesAdded?: (files: FileInfo[]) => void;
   onDropCompleted?: () => void;
   onFolderCountChanged?: (folderPath: string, count: number) => void;
-  isHomeScreenHost?: boolean;
   folderCountUpdateRef?: { current?: (folderPath: string, count: number) => void };
   isFocused?: boolean;
   isDualMode?: boolean;
 }) {
   const cachedFiles = !items && dirPath ? getCachedDirectoryListing(dirPath) : null;
   const [files, setFiles] = useState<FileInfo[]>(cachedFiles || []);
-  const [isLoading, setIsLoading] = useState(!items && !cachedFiles);
 
   // 暴露 addFiles 给父组件（双栏跨栏复制时乐观更新）
   if (addFilesRef) {
@@ -816,10 +590,6 @@ function GeneralBrowser({
   // 选择模式
   const [selectMode, setSelectMode] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
-  const handleDeleteFile = useCallback((filePath: string) => {
-    setFiles((current) => current.filter((entry) => entry.path !== filePath));
-  }, []);
-
   // 搜索栏是否活跃
   const [copiedFilePath, setCopiedFilePath] = useState<string | null>(null);
   // 跳转到目录时高亮的文件路径
@@ -841,7 +611,7 @@ function GeneralBrowser({
   useEffect(() => {
     if (externalCopiedPath !== undefined) return;
     (async () => {
-      const p = await _readClipPath();
+      const p = await readClipboardPath();
       if (p != null) setCopiedFilePath(p);
     })();
   }, [refreshKey, externalCopiedPath]);
@@ -852,17 +622,15 @@ function GeneralBrowser({
     if (clipboardSyncTrigger == null) return;
     if (externalCopiedPath !== undefined) return;
     (async () => {
-      const p = await _readClipPath();
+      const p = await readClipboardPath();
       if (p != null) setCopiedFilePath(p);
     })();
   }, [clipboardSyncTrigger, externalCopiedPath]);
 
-  // 组件挂载时立即显示 spinner，消除空内容闪屏
-  // 第二次及以后的 isLoading 变化仍由上方 100ms 延迟控制，防闪烁
   const updateCopiedPath = useCallback(async (path: string | null) => {
     // 先更新 UI 状态，再异步写入文件（粘贴按钮立即出现）
     setCopiedFilePath(path);
-    await _writeClipPath(path);
+    await writeClipboardPath(path);
     // 如果有外部剪贴板回调，同步通知（跨栏共享）
     if (onExternalCopy) {
       onExternalCopy(path ?? "");
@@ -997,11 +765,11 @@ function GeneralBrowser({
     if (!items) {
       if (initialLoadDelay && initialLoadDelay > 0) {
         const timer = setTimeout(() => {
-          loadDirectory(true);
+          loadDirectory();
         }, initialLoadDelay);
         return () => clearTimeout(timer);
       } else {
-        loadDirectory(true);
+        loadDirectory();
       }
     }
   }, [activeDirPath, items, initialLoadDelay]);
@@ -1022,7 +790,7 @@ function GeneralBrowser({
             } catch { }
           }
         } else {
-          await loadDirectoryRef.current(true);
+          await loadDirectoryRef.current();
         }
         // 目录刷新完成后，直接从 listDirectory（命中刚填充的缓存）获取子目录列表并计数。
         // 不依赖当前渲染切片，避免刷新后 React 尚未提交新列表时拿到旧数据。
@@ -1042,11 +810,10 @@ function GeneralBrowser({
     }
   }, [refreshKey]);
 
-  const loadDirectory = async (silent = false, retryCount = 0) => {
+  const loadDirectory = async (retryCount = 0): Promise<void> => {
     if (items || !activeDirPath) return;
     const loadSeq = ++loadSeqRef.current;
     const loadingDir = activeDirPath;
-    if (!silent) setIsLoading(true);
     const isLatestLoad = () => loadSeq === loadSeqRef.current && loadingDir === activeDirPath;
     try {
       const itemsList = await listDirectory(loadingDir);
@@ -1066,7 +833,6 @@ function GeneralBrowser({
             setHighlightedPath((current) => (current === matched.path ? null : current));
             routeHighlightTimerRef.current = null;
           }, 2000);
-          setIsLoading(false);
           return;
         }
       }
@@ -1080,7 +846,6 @@ function GeneralBrowser({
           setFiles(itemsList);
         });
       }
-      setIsLoading(false);
     } catch (e) {
       console.log("加载目录失败:", e);
       // iCloud 未下载的目录：readDirectory 可能抛错。触发一次目录级下载后自动重试，
@@ -1092,7 +857,7 @@ function GeneralBrowser({
             await FileManager.downloadFileFromiCloud(loadingDir).catch(() => false);
             if (isLatestLoad()) {
               invalidateDirectoryCache(loadingDir);
-              return await loadDirectory(silent, retryCount + 1);
+              return await loadDirectory(retryCount + 1);
             }
           }
         } catch { }
@@ -1136,7 +901,6 @@ function GeneralBrowser({
           }
         } catch { }
       }
-      if (isLatestLoad()) setIsLoading(false);
     }
   };
   const loadDirectoryRef = useRef(loadDirectory);
@@ -1156,7 +920,7 @@ function GeneralBrowser({
         } catch { }
       }
     } else {
-      await loadDirectory(true);
+      await loadDirectory();
     }
   }, [activeDirPath, items, onItemsChange]);
 
@@ -1497,8 +1261,6 @@ function GeneralBrowser({
     }
   };
 
-  const hasAllSelected = selectedPaths.size > 0 && selectedPaths.size === displayFiles.length;
-
   // ─ 批量操作 ─
   const copySelectedPaths = async () => {
     const paths = Array.from(selectedPaths);
@@ -1544,7 +1306,7 @@ function GeneralBrowser({
     if (activeDirPath) invalidateDirectoryCache(activeDirPath);
     // 目标目录可能是另一栏正在显示的目录，同时失效目标缓存
     invalidateDirectoryCache(destDir);
-    loadDirectory(true);
+    loadDirectory();
     if (failedNames.length > 0) {
       showToast(`移动失败 ${failedNames.length} 项: ${failedNames.slice(0, 3).join("、")}${failedNames.length > 3 ? " …" : ""}`);
     }
@@ -1667,7 +1429,7 @@ function GeneralBrowser({
       setTimeout(() => setHighlightedPath(null), 2500);
       // 后台静默刷新，确保数据与磁盘一致
       invalidateDirectoryCache(activeDirPath);
-      loadDirectory(true);
+      loadDirectory();
     } catch (e) {
       console.log("创建失败:", e);
       // 默认目录不存在时自动创建并重试
@@ -1702,7 +1464,7 @@ function GeneralBrowser({
           setTimeout(() => scrollProxy.current?.scrollTo(targetPath, "center"), 300);
           setTimeout(() => setHighlightedPath(null), 2500);
           invalidateDirectoryCache(activeDirPath);
-          loadDirectory(true);
+          loadDirectory();
           return;
         } catch (e2) { }
       }
@@ -1767,7 +1529,7 @@ function GeneralBrowser({
       setTimeout(() => setHighlightedPath(null), 2500);
       // 后台静默刷新
       if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-      loadDirectory(true);
+      loadDirectory();
     } catch (e) {
       console.log("创建失败:", e);
       // 默认目录不存在时自动创建并重试
@@ -1799,7 +1561,7 @@ function GeneralBrowser({
           setTimeout(() => scrollProxy.current?.scrollTo(targetPath, "center"), 300);
           setTimeout(() => setHighlightedPath(null), 2500);
           if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-          loadDirectory(true);
+          loadDirectory();
           return;
         } catch (e2) { }
       }
@@ -1884,220 +1646,13 @@ function GeneralBrowser({
           setTimeout(() => setHighlightedPath(null), 2500);
         }
         if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
+        loadDirectory();
       }
     } catch (e) {
       console.log("导入失败:", e);
     }
   };
 
-  const handleImportImages = async () => {
-    try {
-      const results = await Photos.pick({ filter: PHPickerFilter.images(), limit: 0 });
-      if (results && results.length > 0) {
-        await ensureDir(activeDirPath);
-        const _newPaths: string[] = [];
-        for (const result of results) {
-          const _p = await importSinglePhotoResult(result, activeDirPath);
-          if (_p) _newPaths.push(_p);
-        }
-        if (_newPaths.length > 0) {
-          const _newItems: FileInfo[] = _newPaths.map((_p) => ({
-            name: Path.basename(_p),
-            path: _p,
-            isDirectory: false,
-            isLink: false,
-            size: 0,
-            creationDate: Date.now(),
-            modificationDate: Date.now(),
-            extension: Path.extname(_p),
-            category: getFileCategory(Path.extname(_p)),
-            mimeType: "",
-            icon: "doc.text",
-            iconColor: "systemGray",
-          }));
-          withAnimation(Animation.smooth({ duration: 0.35 }), () => {
-            setFiles((prev) => [...prev, ..._newItems]);
-          });
-          onFilesAdded?.(_newItems);
-          setHighlightedPath(_newPaths[0]);
-          setTimeout(() => scrollProxy.current?.scrollTo(_newPaths[0], "center"), 300);
-          setTimeout(() => setHighlightedPath(null), 2500);
-        }
-        if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
-      }
-    } catch (e) {
-      console.log("图片导入失败:", e);
-    }
-  };
-
-  const handleImportLivePhotosOnly = async () => {
-    try {
-      const results = await Photos.pick({ filter: PHPickerFilter.livePhotos(), limit: 0 });
-      if (results && results.length > 0) {
-        await ensureDir(activeDirPath);
-        const _newPaths: string[] = [];
-        for (const result of results) {
-          const _p = await importSinglePhotoResult(result, activeDirPath);
-          if (_p) _newPaths.push(_p);
-        }
-        if (_newPaths.length > 0) {
-          const _newItems: FileInfo[] = _newPaths.map((_p) => ({
-            name: Path.basename(_p),
-            path: _p,
-            isDirectory: false,
-            isLink: false,
-            size: 0,
-            creationDate: Date.now(),
-            modificationDate: Date.now(),
-            extension: Path.extname(_p),
-            category: getFileCategory(Path.extname(_p)),
-            mimeType: "",
-            icon: "doc.text",
-            iconColor: "systemGray",
-          }));
-          withAnimation(Animation.smooth({ duration: 0.35 }), () => {
-            setFiles((prev) => [...prev, ..._newItems]);
-          });
-          onFilesAdded?.(_newItems);
-          setHighlightedPath(_newPaths[0]);
-          setTimeout(() => scrollProxy.current?.scrollTo(_newPaths[0], "center"), 300);
-          setTimeout(() => setHighlightedPath(null), 2500);
-        }
-        if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
-      }
-    } catch (e) {
-      console.log("实况照片导入失败:", e);
-    }
-  };
-
-  const handleImportVideos = async () => {
-    try {
-      const results = await Photos.pick({ filter: PHPickerFilter.videos(), limit: 0 });
-      if (results && results.length > 0) {
-        await ensureDir(activeDirPath);
-        const _newPaths: string[] = [];
-        for (const result of results) {
-          const _p = await importSinglePhotoResult(result, activeDirPath);
-          if (_p) _newPaths.push(_p);
-        }
-        if (_newPaths.length > 0) {
-          const _newItems: FileInfo[] = _newPaths.map((_p) => ({
-            name: Path.basename(_p),
-            path: _p,
-            isDirectory: false,
-            isLink: false,
-            size: 0,
-            creationDate: Date.now(),
-            modificationDate: Date.now(),
-            extension: Path.extname(_p),
-            category: getFileCategory(Path.extname(_p)),
-            mimeType: "",
-            icon: "doc.text",
-            iconColor: "systemGray",
-          }));
-          withAnimation(Animation.smooth({ duration: 0.35 }), () => {
-            setFiles((prev) => [...prev, ..._newItems]);
-          });
-          onFilesAdded?.(_newItems);
-          setHighlightedPath(_newPaths[0]);
-          setTimeout(() => scrollProxy.current?.scrollTo(_newPaths[0], "center"), 300);
-          setTimeout(() => setHighlightedPath(null), 2500);
-        }
-        if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
-      }
-    } catch (e) {
-      console.log("视频导入失败:", e);
-    }
-  };
-
-  const handleTakePhoto = async () => {
-    try {
-      await ensureDir(activeDirPath);
-      const result = await Photos.capture({ mode: "photo", mediaTypes: ["public.image"], allowsEditing: false });
-      if (result?.imagePath) {
-        const ts = makeTimestamp();
-        const ext = Path.extname(result.imagePath).toLowerCase() || ".jpg";
-        const dest = await uniquePath(Path.join(activeDirPath, `IMG_${ts}${ext}`));
-        await FileManager.copyFile(result.imagePath, dest);
-        try {
-          await FileManager.remove(result.imagePath);
-        } catch { }
-        // 乐观更新：立即在 UI 中显示新照片
-        const photoExt = ext;
-        const photoItem: FileInfo = {
-          name: Path.basename(dest),
-          path: dest,
-          isDirectory: false,
-          isLink: false,
-          size: 0,
-          creationDate: Date.now(),
-          modificationDate: Date.now(),
-          extension: photoExt,
-          category: getFileCategory(photoExt),
-          mimeType: "",
-          icon: "photo",
-          iconColor: "systemGreen",
-        };
-        withAnimation(Animation.smooth({ duration: 0.35 }), () => {
-          setFiles((prev) => [...prev, photoItem]);
-        });
-        onFilesAdded?.([photoItem]);
-        setHighlightedPath(dest);
-        setTimeout(() => scrollProxy.current?.scrollTo(dest, "center"), 300);
-        setTimeout(() => setHighlightedPath(null), 2500);
-        if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
-      }
-    } catch (e) {
-      console.log("拍照失败:", e);
-    }
-  };
-
-  const handleRecordVideo = async () => {
-    try {
-      await ensureDir(activeDirPath);
-      const result = await Photos.capture({ mode: "video", mediaTypes: ["public.movie"], allowsEditing: false, videoQuality: "high", videoMaximumDuration: 600 });
-      if (result?.mediaPath) {
-        const ts = makeTimestamp();
-        const ext = Path.extname(result.mediaPath).toLowerCase() || ".mov";
-        const dest = await uniquePath(Path.join(activeDirPath, `VID_${ts}${ext}`));
-        await FileManager.copyFile(result.mediaPath, dest);
-        try {
-          await FileManager.remove(result.mediaPath);
-        } catch { }
-        // 乐观更新：立即在 UI 中显示新视频
-        const videoItem: FileInfo = {
-          name: Path.basename(dest),
-          path: dest,
-          isDirectory: false,
-          isLink: false,
-          size: 0,
-          creationDate: Date.now(),
-          modificationDate: Date.now(),
-          extension: ext,
-          category: getFileCategory(ext),
-          mimeType: "",
-          icon: "video",
-          iconColor: "systemPink",
-        };
-        withAnimation(Animation.smooth({ duration: 0.35 }), () => {
-          setFiles((prev) => [...prev, videoItem]);
-        });
-        onFilesAdded?.([videoItem]);
-        setHighlightedPath(dest);
-        setTimeout(() => scrollProxy.current?.scrollTo(dest, "center"), 300);
-        setTimeout(() => setHighlightedPath(null), 2500);
-        if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
-      }
-    } catch (e) {
-      console.log("录像失败:", e);
-    }
-  };
 
   const handleImportFromPhotos = async () => {
     try {
@@ -2133,7 +1688,7 @@ function GeneralBrowser({
           setTimeout(() => setHighlightedPath(null), 2500);
         }
         if (activeDirPath) invalidateDirectoryCache(activeDirPath);
-        loadDirectory(true);
+        loadDirectory();
       }
     } catch (e) {
       console.log("照片导入失败:", e);
@@ -2162,17 +1717,8 @@ function GeneralBrowser({
     <Group>
       <Divider />
       <Button title="从相册导入" systemImage="photo.on.rectangle" action={handleImportFromPhotos} />
-      {/*     <Button title="实况照片" systemImage="livephoto" action={handleImportLivePhotosOnly} /> */}
       <Button title="从文件导入" systemImage="doc.badge.plus" action={handleImportFromFiles} />
       <Divider />
-      {/* <Menu title="更多导入" systemImage="ellipsis">
-        <Button title="图片" systemImage="photo" action={handleImportImages} />
-        <Button title="视频" systemImage="video" action={handleImportVideos} />
-        <Button title="实况照片" systemImage="livephoto" action={handleImportLivePhotosOnly} />
-        <Divider />
-        <Button title="拍照" systemImage="camera.viewfinder" action={handleTakePhoto} />
-        <Button title="录像" systemImage="video.circle" action={handleRecordVideo} />
-      </Menu> */}
     </Group>
   );
 
@@ -2186,7 +1732,6 @@ function GeneralBrowser({
                 key={page + "@navGen" + navGen}
                 page={page}
                 navigationPath={activeNavPath}
-                isHomeScreenHost={isHomeScreenHost}
                 onDirChange={onDirChange}
                 oppositeDirName={oppositeDirName}
                 onCopyToOppositeDir={onCopyToOppositeDir}
@@ -2278,20 +1823,6 @@ function GeneralBrowser({
   }, [activeDirPath, dirName, rootPath, rootName, settings?.homeDirectoryBookmarkName, isHomePage, allBookmarks]);
   const titleDisplayPath = useMemo(() => tailDisplayPath(displayPath), [displayPath]);
 
-  // ─ 首页标题点击：修改首页路径（仅在首页可用） ─
-  const handlePickDirectory = async () => {
-    const bookmark = await addDirectoryBookmark();
-    if (bookmark) {
-      if (isHomePage && settings && onSettingsChange) {
-        const newSettings = { ...settings, homeDirectoryBookmarkName: bookmark.bookmarkId || bookmark.name, homeCurrentPath: bookmark.path };
-        saveSettings(newSettings);
-        onSettingsChange(newSettings);
-      } else if (activeNavPath) {
-        activeNavPath.setValue([...activeNavPath.value, "browser:" + bookmark.path]);
-      }
-    }
-  };
-
   const handleInputPath = async () => {
     const input = await Dialog.prompt({
       title: "输入文件路径",
@@ -2380,18 +1911,6 @@ function GeneralBrowser({
   };
 
 
-
-  // 监听全局搜索关闭事件
-  useEffect(() => {
-    return onSearchStateChange((show) => {
-      if (!show) {
-        withAnimation(Animation.smooth({ duration: 0.35 }), () => {
-          setSearchQuery("");
-          setDeepSearchResults([]);
-        });
-      }
-    });
-  }, []);
 
   const finishDroppedPaths = async (createdPaths: string[]) => {
     // 乐观更新：立即显示新增项（getFileInfo 区分文件夹/文件），不等 refreshDirectory 慢加载
@@ -2849,13 +2368,10 @@ function GeneralBrowser({
                             key={file.path}
                             file={file}
                             onRefresh={refreshDirectory}
-                            onDeleteFile={handleDeleteFile}
                             onRequestDelete={requestFileDelete}
                             selectMode={selectMode}
                             isSelected={selectedPaths.has(file.path)}
                             onToggleSelect={toggleSelect}
-                            rootPath={rootPath || activeDirPath}
-                            rootName={rootName || dirName}
                             navPath={activeNavPath}
                             hideTopSeparator={fileIdx === 0}
                             folderCountStore={folderCountStore}
@@ -2866,7 +2382,6 @@ function GeneralBrowser({
                             dirPath={effectiveDropDir}
                             onDropCompleted={onDropCompleted}
                             onFolderCountChanged={applyFolderCountUpdate}
-                            isHomeScreenHost={isHomeScreenHost}
                             isGrid={true}
                             marqueeEnabled={settings?.gridFileNameMarquee}
                             isFocused={isFocused}
@@ -2907,13 +2422,10 @@ function GeneralBrowser({
                             key={file.path}
                             file={file}
                             onRefresh={refreshDirectory}
-                            onDeleteFile={handleDeleteFile}
                             onRequestDelete={requestFileDelete}
                             selectMode={selectMode}
                             isSelected={selectedPaths.has(file.path)}
                             onToggleSelect={toggleSelect}
-                            rootPath={rootPath || activeDirPath}
-                            rootName={rootName || dirName}
                             navPath={activeNavPath}
                             hideTopSeparator={fileIdx === 0}
                             folderCountStore={folderCountStore}
@@ -2924,7 +2436,6 @@ function GeneralBrowser({
                             dirPath={effectiveDropDir}
                             onDropCompleted={onDropCompleted}
                             onFolderCountChanged={applyFolderCountUpdate}
-                            isHomeScreenHost={isHomeScreenHost}
                           />
                           {hasMore && fileIdx === Math.max(0, visibleFiles.length - 26) ? (
                             <HStack
@@ -3049,12 +2560,10 @@ function GeneralBrowser({
 function BrowserRouteView({
   page,
   navigationPath,
-  isHomeScreenHost,
   ...browserProps
 }: {
   page: string;
   navigationPath: any;
-  isHomeScreenHost?: boolean;
   [key: string]: any;
 }) {
   let dirPath = page.slice(8);
@@ -3080,7 +2589,6 @@ function BrowserRouteView({
       navPath={navigationPath}
       highlightFile={highlightFile}
       isHomePage={false}
-      isHomeScreenHost={isHomeScreenHost}
       isFocused={isFocused}
     />
   );

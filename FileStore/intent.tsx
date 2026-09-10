@@ -1,7 +1,6 @@
 import { Intent, Navigation, Script, Path } from "scripting";
 import { resolveOpenerForFile } from "./view/DefaultOpenerPicker";
-import { getFileCategory, sanitizeExtractDirName, safeUnzip, ensureLocalFile, copyFileToFileStore, uniquePath } from "./manager/utils";
-import { packLivePhoto } from "./manager/LivePhotoPacker";
+import { getFileCategory, sanitizeExtractDirName, safeUnzip, ensureLocalFile, copyFileToFileStore } from "./manager/utils";
 import { EditorPage } from "./view/EditorPage";
 import { ArchiveBrowserPage, ImageViewer, VideoViewerPage, LivePhotoPreviewPage } from "./view/MediaViewer";
 
