@@ -3,7 +3,6 @@
 import { Script, Navigation, TabView, Tab, Group, EmptyView, ZStack, useState, useEffect, useRef } from "scripting"
 import { getAllBookmarks, Bookmark } from "../manager/BookmarkManager"
 import { readSettings, saveSettings } from "../manager/Settings"
-// import { HomePage } from "./HomePage";
 import { MountDirectoriesPage } from "./MountDirectoriesPage"
 import { DualBrowserPage } from "./DualBrowserPage"
 import { SettingsTabPage } from "./SettingsTabPage"
