@@ -15,6 +15,8 @@ export interface AppSettingsCore {
   showExitButton: boolean;
   /** 滑动时隐藏底部标签栏 */
   tabBarMinimizeOnScroll: boolean;
+  /** 浏览列表显示模式：list=列表, grid=网格(文件夹视图) */
+  browserLayout?: "list" | "grid";
 }
 
 export interface AppSettingsMeta {
@@ -32,6 +34,8 @@ export interface AppSettingsMeta {
   dualRightBookmarkName: string | null;
   /** 双栏浏览 - 布局方向（左右分栏/上下分栏） */
   dualLayoutDir: "horizontal" | "vertical";
+  /** 双栏浏览 - 分屏比例（0~1，0.5=各占一半，拖动条位置） */
+  dualRatio: number;
   /** 双栏浏览 - 是否启用双栏显示 */
   dualModeEnabled: boolean;
 }
@@ -57,11 +61,13 @@ const defaultSettings: AppSettings = {
   defaultFilterType: "all",
   showExitButton: false,
   tabBarMinimizeOnScroll: true,
+  browserLayout: "list",
   dualLeftPath: null,
   dualLeftBookmarkName: null,
   dualRightPath: null,
   dualRightBookmarkName: null,
   dualLayoutDir: "horizontal",
+  dualRatio: 0.5,
   dualModeEnabled: true,
 };
 

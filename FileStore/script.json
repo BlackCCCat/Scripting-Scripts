@@ -1,9 +1,9 @@
 {
   "iconImage" : null,
   "permissions" : null,
-  "version" : "v3.0.0",
+  "version" : "3.0.1",
   "remoteResource" : {
-    "url" : "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/FileStore",
+    "url" : "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/releases\/latest\/download\/FileStore.zip",
     "hash" : "",
     "autoUpdateInterval" : 600
   },

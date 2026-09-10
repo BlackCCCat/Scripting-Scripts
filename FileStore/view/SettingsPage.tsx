@@ -1,6 +1,6 @@
 // 设置标签 - 显示模式、关于
 
-import { Navigation, NavigationStack, List, Section, Text, Button, Toggle, HStack, VStack, Spacer, useState, Path } from "scripting";
+import { Navigation, NavigationStack, List, Section, Text, Button, Toggle, Picker, HStack, VStack, Spacer, useState, Path } from "scripting";
 import { AppSettings } from "../manager/Settings";
 import { getMaxIndexFileSizeKB, setMaxIndexFileSizeKB } from "../manager/SearchState";
 
@@ -19,7 +19,8 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
 
   const handleBrowse = async () => {
     try {
-      const result = await DocumentPicker.pickDirectoryBookmark();
+      const uniqueName = `home_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const result = await DocumentPicker.pickDirectoryBookmark({ preferredName: uniqueName });
       if (result) {
         setCurrentPath(result.path);
         onUpdateSettings({ homeCurrentPath: result.path, homeDirectoryBookmarkName: result.bookmarkName });
@@ -63,6 +64,14 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
     <NavigationStack>
       <List listStyle="plain" navigationTitle="设置" navigationBarTitleDisplayMode="inline">
         <Section title="显示模式">
+          <Picker
+            title="浏览视图"
+            value={settings.browserLayout ?? "list"}
+            onChanged={(val: string) => onUpdateSettings({ browserLayout: val as "list" | "grid" })}
+          >
+            <Text tag="list">列表视图</Text>
+            <Text tag="grid">网格图标视图</Text>
+          </Picker>
           <Toggle title="显示文件夹内项目个数" value={settings.showFolderItemCounts ?? true} onChanged={(value: boolean) => onUpdateSettings({ showFolderItemCounts: value })} />
           <Toggle title="滑动时隐藏TAB" value={settings.tabBarMinimizeOnScroll ?? true} onChanged={(value: boolean) => onUpdateSettings({ tabBarMinimizeOnScroll: value })} />
           <Toggle title="独立显示退出按钮" value={settings.showExitButton} onChanged={(value: boolean) => onUpdateSettings({ showExitButton: value })} />
@@ -74,7 +83,7 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
               {/* <Image systemName="folder" frame={{ width: 28, height: 28 }} foregroundStyle="systemBlue" /> */}
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">选择文件夹</Text>
-                <Text font="caption2" foregroundStyle="secondaryLabel">
+                <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
                   从文件 App 浏览选择
                 </Text>
               </VStack>
@@ -85,7 +94,7 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
               {/* <Image systemName="text.cursor" frame={{ width: 28, height: 28 }} foregroundStyle="systemGreen" /> */}
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">手动输入路径</Text>
-                <Text font="caption2" foregroundStyle="secondaryLabel">
+                <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
                   直接输入文件夹路径
                 </Text>
               </VStack>
@@ -96,18 +105,18 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
               {/* <Image systemName="arrow.counterclockwise" frame={{ width: 28, height: 28 }} foregroundStyle="systemOrange" /> */}
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">恢复默认</Text>
-                <Text font="caption2" foregroundStyle="secondaryLabel">
+                <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
                   重置为默认路径
                 </Text>
               </VStack>
             </HStack>
           </Button>
           <HStack spacing={8} alignment="center">
-            <Text font="caption2" foregroundStyle="secondaryLabel">
+            <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
               当前路径:
             </Text>
             <Spacer />
-            <Text font="caption2" foregroundStyle="tertiaryLabel">
+            <Text font="caption2" monospaced foregroundStyle="tertiaryLabel">
               {currentPath}
             </Text>
           </HStack>
@@ -137,7 +146,7 @@ export function SettingsPage({ settings, onUpdateSettings, onToggleFullscreen }:
             <HStack spacing={12} alignment="center">
               <VStack alignment="leading" spacing={2}>
                 <Text font="body">索引最大文件限制</Text>
-                <Text font="caption2" foregroundStyle="secondaryLabel">
+                <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
                   当前 {maxFileSizeKB} KB，点此修改
                 </Text>
               </VStack>

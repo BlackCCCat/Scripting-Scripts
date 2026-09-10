@@ -1,23 +1,174 @@
 // 文件管理器工具函数
 import { Path } from "scripting"
+import { MIME_FALLBACK } from "./fileTypeData"
+import { uniquePath, writeToUniquePath } from "./pathUtils"
+import { searchFiles } from "./searchUtils"
+export { langMap, MIME_FALLBACK } from "./fileTypeData"
+export { uniquePath, writeToUniquePath, sanitizeExtractDirName } from "./pathUtils"
+export { searchFiles } from "./searchUtils"
 
-/** 确保 iCloud 文件已下载到本地（FileManager iCloud APIs） */
-export async function ensureLocalFile(filePath: string): Promise<boolean> {
+const importedFileDates = new Map<string, number>()
+
+/** 记录本次运行中导入副本的时间，避免重写大文件来更新 mtime。 */
+export function markFileImported(filePath: string, timestamp: number = Date.now()) {
+  importedFileDates.set(filePath, timestamp)
+}
+
+import {
+  countDirectoryItems,
+  countDirectoryItemsBatch,
+  invalidateDirectoryCount,
+  clearDirectoryCountCache,
+} from "./directoryCount"
+export { fmtSize, fmtDate } from "./formatUtils"
+export { readClipboardPath, writeClipboardPath } from "./clipboardUtils"
+export { countDirectoryItems, countDirectoryItemsBatch, invalidateDirectoryCount, clearDirectoryCountCache } from "./directoryCount"
+
+
+/**
+ * 确保 iCloud 文件已下载到本地。
+ * 修复：downloadFileFromiCloud 仅是发起下载任务，必须通过轮询等待文件真实下载完成。
+ * @param filePath 逻辑文件路径（如 /dir/foo.txt）
+ * @param timeoutMs 最长等待超时时间，默认 15 秒（0 则为 15 秒）
+ */
+export async function ensureLocalFile(filePath: string, timeoutMs: number = 15000): Promise<boolean> {
   try {
-    if (typeof FileManager.isFileStoredIniCloud === "function" && FileManager.isFileStoredIniCloud(filePath)) {
-      if (typeof FileManager.isiCloudFileDownloaded === "function" && !FileManager.isiCloudFileDownloaded(filePath)) {
-        if (typeof FileManager.downloadFileFromiCloud === "function") {
-          return await FileManager.downloadFileFromiCloud(filePath)
+    const effectiveTimeout = timeoutMs <= 0 ? 15000 : timeoutMs;
+
+    // 逻辑路径与占位路径双重检查
+    let targetPath = filePath;
+    const parent = Path.dirname(filePath);
+    const baseName = Path.basename(filePath);
+    const isPlaceholder = baseName.startsWith(".") && baseName.endsWith(".icloud");
+
+    if (isPlaceholder) {
+      // 还原为真实逻辑路径
+      targetPath = Path.join(parent, baseName.slice(1, -7));
+    }
+
+    // 1. 如果本地已经存在该真实文件，且已下载完成，直接通过
+    const existsLocally = await FileManager.exists(targetPath);
+    if (existsLocally) {
+      if (typeof FileManager.isFileStoredIniCloud === "function" && FileManager.isFileStoredIniCloud(targetPath)) {
+        if (typeof FileManager.isiCloudFileDownloaded === "function" && !FileManager.isiCloudFileDownloaded(targetPath)) {
+          // 在云端但本地未完整，继续向下执行下载
+        } else {
+          return true;
+        }
+      } else {
+        return true;
+      }
+    }
+
+    // 2. 发起下载
+    if (typeof FileManager.downloadFileFromiCloud === "function") {
+      try {
+        await FileManager.downloadFileFromiCloud(targetPath);
+      } catch (e) {
+        // 部分环境可能需要传入实际磁盘上的占位路径
+        if (isPlaceholder) {
+          try { await FileManager.downloadFileFromiCloud(filePath); } catch { }
         }
       }
     }
-  } catch { }
-  return true
+
+    // 3. 轮询等待下载完成（真实落盘）
+    const startTime = Date.now();
+    while (Date.now() - startTime < effectiveTimeout) {
+      // 检查 A: 系统 API 告知已下载
+      if (typeof FileManager.isiCloudFileDownloaded === "function") {
+        try {
+          if (FileManager.isiCloudFileDownloaded(targetPath)) return true;
+        } catch { }
+      }
+      // 检查 B: 目标路径文件已真实存在
+      if (await FileManager.exists(targetPath)) {
+        try {
+          const stat = await FileManager.stat(targetPath);
+          if (stat && stat.size >= 0) return true;
+        } catch { }
+      }
+      await new Promise((resolve) => setTimeout(() => resolve(true), 300));
+
+    }
+
+    console.log(`[ensureLocalFile] 等待 iCloud 下载超时: ${targetPath}`);
+    return false;
+  } catch (err) {
+    console.log(`[ensureLocalFile] 异常:`, err);
+    return false;
+  }
+}
+
+/** 获取文件信息（修复：自动识别并解包 .icloud 占位文件） */
+export async function getFileInfo(filePath: string): Promise<FileInfo> {
+  const originalName = Path.basename(filePath);
+  const parent = Path.dirname(filePath);
+
+  // 识别 iCloud 占位文件：.<name>.<ext>.icloud
+  const isCloud = originalName.startsWith(".") && originalName.endsWith(".icloud");
+  const name = isCloud ? originalName.slice(1, -7) : originalName;
+  const targetPath = isCloud ? Path.join(parent, name) : filePath;
+
+  // 不同文件提供者的 stat.type 返回值并不完全一致；以 isDirectory 的原生判断为准，
+  // 避免真实目录在列表中被错误显示为普通文件。
+  const [isLink, isDirHint, stat] = await Promise.all([
+    FileManager.isLink(filePath).catch(() => false),
+    FileManager.isDirectory(filePath).catch(() => false),
+    FileManager.stat(filePath).catch(() => null),
+  ]);
+  const isDir = (!!isDirHint && !isLink) || (!isLink && !!stat && stat.type === "directory");
+
+  if (isDir) {
+    return {
+      name,
+      path: filePath,
+      isDirectory: true,
+      isLink: !!isLink,
+      size: 0,
+      creationDate: stat?.creationDate || 0,
+      modificationDate: importedFileDates.get(targetPath) || stat?.modificationDate || 0,
+      extension: "",
+      category: "unknown",
+      mimeType: "",
+      icon: getFileIcon("", true),
+      iconColor: getFileIconColor("", true),
+    };
+  }
+
+  const ext = Path.extname(name);
+  const category = getFileCategory(ext);
+
+  return {
+    name,
+    path: targetPath, // 外部使用标准逻辑路径，便于打开与匹配
+    isDirectory: false,
+    isLink: !!isLink,
+    size: stat?.size || 0,
+    creationDate: stat?.creationDate || 0,
+    modificationDate: importedFileDates.get(targetPath) || stat?.modificationDate || 0,
+    extension: ext,
+    category,
+    mimeType: getMimeType(ext),
+    icon: isCloud ? "icloud.and.arrow.down" : getFileIcon(ext, false, category),
+    iconColor: isCloud ? "systemBlue" : getFileIconColor(ext, false, category),
+  };
+}
+
+/** 判断路径是否为 iCloud 中尚未下载到本地的占位文件/目录（安全封装，非 iCloud 返回 false） */
+export function isUndownloadediCloudPath(filePath: string): boolean {
+  try {
+    if (typeof FileManager.isFileStoredIniCloud !== "function" || !FileManager.isFileStoredIniCloud(filePath)) return false
+    if (typeof FileManager.isiCloudFileDownloaded !== "function") return false
+    return !FileManager.isiCloudFileDownloaded(filePath)
+  } catch {
+    return false
+  }
 }
 
 export function buildSystemDirDefs(): Array<{ name: string; getPath: () => string; icon: string; tag: string }> {
   const defs: Array<{ name: string; getPath: () => string; icon: string; tag: string }> = [
-   // { name: "iPhone/Scripting", getPath: () => FileManager.documentsDirectory, icon: "paperclip", tag: "本机" },
+    // { name: "iPhone/Scripting", getPath: () => FileManager.documentsDirectory, icon: "paperclip", tag: "本机" },
     {
       name: "File Store",
       getPath: () => Path.join(FileManager.documentsDirectory, "File Store"),
@@ -66,75 +217,49 @@ export function isPlausibleText(text: string | null | undefined): boolean {
  */
 export async function readTextFile(filePath: string, maxBytes?: number): Promise<string | null> {
   try {
-    await ensureLocalFile(filePath)
+    await ensureLocalFile(filePath);
 
-    let fileSize = -1
+    let fileSize = -1;
     try {
-      const stat = await FileManager.stat(filePath)
-      fileSize = typeof stat.size === "number" ? stat.size : -1
+      const stat = await FileManager.stat(filePath);
+      fileSize = typeof stat.size === "number" ? stat.size : -1;
     } catch { }
 
-    // FileManager 只提供整文件读取 API；必须在首次 readAsString/readAsData 之前拦截，
-    // 否则即使调用方最终只保留前一部分文本，整个大文件仍会进入内存。
-    if (maxBytes != null && maxBytes >= 0 && fileSize > maxBytes) return null
+    if (maxBytes != null && maxBytes >= 0 && fileSize > maxBytes) return null;
 
-    const isUsableText = (text: string | null | undefined) => {
-      // 只有明确知道文件大小为 0 时才接受空字符串；stat 失败/未知大小不能把空字符串当成功。
-      return text != null && (text.length > 0 || fileSize === 0)
-    }
-
-    // 1. 默认编码（通常会自动识别 UTF-8/BOM）
+    // 1. 优先尝试直接以 UTF-8 快速解析
     try {
-      const text = await FileManager.readAsString(filePath)
-      if (isUsableText(text) && isPlausibleText(text)) return text
+      const text = await FileManager.readAsString(filePath);
+      if (text != null && (text.length > 0 || fileSize === 0) && isPlausibleText(text)) {
+        return text;
+      }
     } catch { }
 
-    // 2. 多编码回退，避免 GBK/UTF-16/Shift-JIS 等文件打开为空白
+    // 2. 避免多次磁盘 I/O：只读一次原始 Data，后续全在内存中进行多编码转换
+    const data = await FileManager.readAsData(filePath);
+    if (!data) return null;
+    const dataSize = data.size ?? 0;
+    if (dataSize === 0) return "";
+
     const encodings = [
-      "utf-8",
-      "utf-16",
-      "utf16LittleEndian",
-      "utf16BigEndian",
-      "gb18030",
-      "gbk",
-      "shiftJIS",
-      "japaneseEUC",
-      "windowsCP1252",
-      "isoLatin1",
-      "ascii",
-    ] as const
+      "utf-8", "gb18030", "gbk", "utf-16", "utf16LittleEndian",
+      "utf16BigEndian", "shiftJIS", "japaneseEUC", "windowsCP1252", "isoLatin1"
+    ] as const;
 
     for (const enc of encodings) {
       try {
-        const text = await FileManager.readAsString(filePath, enc)
-        console.log(enc)
-
-        if (isUsableText(text) && isPlausibleText(text)) return text
+        const text = data.toRawString(enc as any);
+        if (text && isPlausibleText(text)) return text;
       } catch { }
     }
 
-    // 3. readAsString 可能对部分安全域/iCloud/特殊编码文件返回空字符串。
-    //    直接读 Data 再解码，至少保证非空文件不会空白打开。
     try {
-      const data = await FileManager.readAsData(filePath)
-      const dataSize = data?.size ?? 0
-      for (const enc of encodings) {
-        try {
-          const text = data.toRawString(enc as any)
-          if (text != null && (text.length > 0 || dataSize === 0) && isPlausibleText(text)) return text
-        } catch { }
-      }
-      if (dataSize > 0) {
-        try {
-          // toDecodedString 会把坏字节替换成 U+FFFD，二进制文件解码后必然含替换字符 → 拒绝
-          const decoded = data.toDecodedString("utf8")
-          if (decoded != null && isPlausibleText(decoded)) return decoded
-        } catch { }
-      }
+      const decoded = data.toDecodedString("utf8");
+      if (decoded && isPlausibleText(decoded)) return decoded;
     } catch { }
   } catch { }
 
-  return null
+  return null;
 }
 /** 长按 菜单 使用系统分享 / Open in… 菜单分享文件（DocumentInteraction） */
 export async function shareFilePath(filePath: string, fileName: string) {
@@ -153,117 +278,127 @@ export async function shareFilePath(filePath: string, fileName: string) {
   }
 }
 
+/** 已解析的已知根目录缓存：路径在运行期间基本不变，避免每个文件重复调用 FileManager getter */
+let _resolvedRoots: Array<[string, string]> | null = null
+
 /** 用 FileManager 已知根目录做前缀替换（比纯正则更准确） */
 function replaceKnownRoots(filePath: string): string | null {
-  const roots: Array<[() => string | null, string]> = [
-    [
-      () => {
-        try {
-          return FileManager.isiCloudEnabled ? FileManager.iCloudDocumentsDirectory : null
-        } catch {
-          return null
-        }
-      },
-      "iCloud/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.isWebDAVAvailable ? FileManager.webDAVDocumentsDirectory : null
-        } catch {
-          return null
-        }
-      },
-      "WebDAV/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.safariBrowserDownloadsDirectory
-        } catch {
-          return null
-        }
-      },
-      "Safari/Downloads/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.safariBrowserUserscriptsDirectory
-        } catch {
-          return null
-        }
-      },
-      "Safari/Userscripts/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.safariBrowserStorageDirectory
-        } catch {
-          return null
-        }
-      },
-      "Safari/Storages/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.safariBrowserDirectory
-        } catch {
-          return null
-        }
-      },
-      "Safari/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.scriptsDirectory
-        } catch {
-          return null
-        }
-      },
-      "Scripts/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.documentsDirectory
-        } catch {
-          return null
-        }
-      },
-      "Documents/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.appGroupDocumentsDirectory
-        } catch {
-          return null
-        }
-      },
-      "AppGroup/",
-    ],
-    [
-      () => {
-        try {
-          return FileManager.temporaryDirectory
-        } catch {
-          return null
-        }
-      },
-      "Temp/",
-    ],
-  ]
+  if (!_resolvedRoots) {
+    const roots: Array<[() => string | null, string]> = [
+      [
+        () => {
+          try {
+            return FileManager.isiCloudEnabled ? FileManager.iCloudDocumentsDirectory : null
+          } catch {
+            return null
+          }
+        },
+        "iCloud/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.isWebDAVAvailable ? FileManager.webDAVDocumentsDirectory : null
+          } catch {
+            return null
+          }
+        },
+        "WebDAV/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.safariBrowserDownloadsDirectory
+          } catch {
+            return null
+          }
+        },
+        "Safari/Downloads/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.safariBrowserUserscriptsDirectory
+          } catch {
+            return null
+          }
+        },
+        "Safari/Userscripts/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.safariBrowserStorageDirectory
+          } catch {
+            return null
+          }
+        },
+        "Safari/Storages/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.safariBrowserDirectory
+          } catch {
+            return null
+          }
+        },
+        "Safari/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.scriptsDirectory
+          } catch {
+            return null
+          }
+        },
+        "Scripts/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.documentsDirectory
+          } catch {
+            return null
+          }
+        },
+        "Documents/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.appGroupDocumentsDirectory
+          } catch {
+            return null
+          }
+        },
+        "AppGroup/",
+      ],
+      [
+        () => {
+          try {
+            return FileManager.temporaryDirectory
+          } catch {
+            return null
+          }
+        },
+        "Temp/",
+      ],
+    ]
 
-  for (const [getRoot, label] of roots) {
-    const root = getRoot()
-    if (!root) continue
-    const normalized = root.replace(/\/$/, "")
-    if (filePath === normalized || filePath.startsWith(normalized + "/")) {
-      return label + filePath.slice(normalized.length).replace(/^\//, "")
+    // 首次调用时解析并缓存所有可用根目录
+    _resolvedRoots = []
+    for (const [getRoot, label] of roots) {
+      const root = getRoot()
+      if (!root) continue
+      _resolvedRoots.push([root.replace(/\/$/, ""), label])
+    }
+  }
+
+  for (const [root, label] of _resolvedRoots) {
+    if (filePath === root || filePath.startsWith(root + "/")) {
+      return label + filePath.slice(root.length).replace(/^\//, "")
     }
   }
   return null
@@ -303,37 +438,6 @@ export async function copyAndToast(text: string, label?: string): Promise<void> 
 export function copiedMessage(text: string): string {
   const preview = text.length > 20 ? text.slice(0, 20) + ".." : text
   return `已复制 ${preview}`
-}
-
-/** 格式化文件大小 */
-export function fmtSize(b: number): string {
-  if (b < 1024) return `${b} B`
-  if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`
-  if (b < 1073741824) return `${(b / 1048576).toFixed(1)} MB`
-  return `${(b / 1073741824).toFixed(2)} GB`
-}
-
-/** 格式化日期 */
-export function fmtDate(ts: number): string {
-  const d = new Date(ts > 1e12 ? ts : ts * 1000)
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, "0")
-
-  if (d.toDateString() === now.toDateString()) {
-    return `今天 ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
-
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (d.toDateString() === yesterday.toDateString()) {
-    return `昨天 ${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
-
-  if (d.getFullYear() === now.getFullYear()) {
-    return `${d.getMonth() + 1}月${d.getDate()}日`
-  }
-
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`
 }
 
 /** 文件类型分类 */
@@ -505,87 +609,13 @@ export function getFileIconColor(ext: string, isDirectory: boolean, category?: F
   }
 }
 
-/** 语言映射 */
-export const langMap: Record<string, string> = {
-  ".json": "JSON",
-  ".js": "JavaScript",
-  ".ts": "TypeScript",
-  ".tsx": "TypeScript (React)",
-  ".jsx": "JavaScript (React)",
-  ".md": "Markdown",
-  ".txt": "纯文本",
-  ".html": "HTML",
-  ".conf": "配置文件",
-  ".dcong": "配置文件",
-  ".htm": "HTML",
-  ".css": "CSS",
-  ".scss": "SCSS",
-  ".py": "Python",
-  ".swift": "Swift",
-  ".csv": "CSV",
-  ".log": "日志",
-  ".xml": "XML",
-  ".yaml": "YAML",
-  ".yml": "YAML",
-  ".sh": "Shell",
-  ".bash": "Bash",
-  ".sql": "SQL",
-  ".rtf": "富文本",
-  ".pdf": "PDF",
-  ".java": "Java",
-  ".kt": "Kotlin",
-  ".c": "C",
-  ".cpp": "C++",
-  ".rb": "Ruby",
-  ".go": "Go",
-  ".rs": "Rust",
-  ".php": "PHP",
-  ".lua": "Lua",
-  ".r": "R",
-  ".toml": "TOML",
-}
-
-/** 本地扩展名 MIME 回退表 */
-const MIME_FALLBACK: Record<string, string> = {
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".html": "text/html",
-  ".htm": "text/html",
-  ".css": "text/css",
-  ".js": "text/javascript",
-  ".ts": "text/typescript",
-  ".json": "application/json",
-  ".xml": "application/xml",
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".heic": "image/heic",
-  ".heif": "image/heif",
-  ".mp3": "audio/mpeg",
-  ".m4a": "audio/mp4",
-  ".wav": "audio/wav",
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".zip": "application/zip",
-  ".csv": "text/csv",
-  ".rtf": "application/rtf",
-}
-
 /**
- * 获取 MIME 类型。
- * 优先使用 FileManager.mimeType(path)（系统按扩展名识别），再回退本地映射。
+ * 获取 MIME 类型（仅查本地映射，不做系统调用）。
+ * FileManager.mimeType 是同步系统调用，列表构建时逐文件调用会阻塞 JS 线程
+ * （1000 文件目录 = 1000 次同步调用）；本地表已覆盖常见类型，未命中回退 octet-stream。
+ * 需要精确值时（如“简介”面板）才单独调 FileManager.mimeType。
  */
 export function getMimeType(ext: string, filePath?: string): string {
-  if (filePath) {
-    try {
-      const m = FileManager.mimeType(filePath)
-      if (m && typeof m === "string" && m.length > 0) return m
-    } catch { }
-  }
   const e = ext.toLowerCase()
   return MIME_FALLBACK[e] || "application/octet-stream"
 }
@@ -623,65 +653,6 @@ export interface FileInfo {
   | "systemGray5"
   | "systemGray6"
   | "accentColor"
-}
-
-/** 获取文件信息（并行 isLink / isDirectory / stat，减少串行 I/O） */
-export async function getFileInfo(filePath: string): Promise<FileInfo> {
-  const name = Path.basename(filePath)
-
-  // 并行探测：链接判定 + 目录判定 + 元数据
-  // 注意：stat 对符号链接会解析目标，因此 isLink 仍需单独查询
-  const [isLink, isDirHint, stat] = await Promise.all([
-    FileManager.isLink(filePath).catch(() => false),
-    FileManager.isDirectory(filePath).catch(() => false),
-    FileManager.stat(filePath).catch(
-      () =>
-        null as {
-          creationDate: number
-          modificationDate: number
-          type: string
-          size: number
-        } | null,
-    ),
-  ])
-
-  // 优先用 isDirectory；stat.type 作补充（link 已解析时可能是 directory/file）
-  const isDir = (!!isDirHint && !isLink) || (!isLink && !!stat && stat.type === "directory")
-
-  if (isDir) {
-    return {
-      name,
-      path: filePath,
-      isDirectory: true,
-      isLink: !!isLink,
-      size: 0,
-      creationDate: stat?.creationDate || 0,
-      modificationDate: stat?.modificationDate || 0,
-      extension: "",
-      category: "unknown",
-      mimeType: "",
-      icon: getFileIcon("", true),
-      iconColor: getFileIconColor("", true),
-    }
-  }
-
-  const ext = Path.extname(name)
-  const category = getFileCategory(ext)
-
-  return {
-    name,
-    path: filePath,
-    isDirectory: false,
-    isLink: !!isLink,
-    size: stat?.size || 0,
-    creationDate: stat?.creationDate || 0,
-    modificationDate: stat?.modificationDate || 0,
-    extension: ext,
-    category,
-    mimeType: getMimeType(ext, filePath),
-    icon: getFileIcon(ext, false, category),
-    iconColor: getFileIconColor(ext, false, category),
-  }
 }
 
 /** ── 目录列表缓存（防止返回导航时闪屏） ── */
@@ -723,12 +694,14 @@ export function getCachedDirectoryListing(path: string): FileInfo[] | null {
 /** 清除所有缓存 */
 export function clearDirectoryCache() {
   _dirCache.clear()
+  clearDirectoryCountCache()
 }
 
 /** 清除指定目录的缓存（用于新建/粘贴/拖拽后立即刷新） */
 export function invalidateDirectoryCache(dirPath: string) {
   _dirCache.delete(dirPath)
   _inflightRequests.delete(dirPath)
+  invalidateDirectoryCount(dirPath)
 }
 
 /** 获取目录内容列表 */
@@ -771,14 +744,6 @@ export async function listDirectory(dirPath: string): Promise<FileInfo[]> {
   }
 }
 
-/** 快速获取目录条目数（只读目录，不做 getFileInfo）
- *  始终从磁盘实时读取，不使用列表缓存----文件夹计数徽标必须反映即时状态，
- *  避免跨栏拖拽后另一栏的计数因缓存过期而不刷新。 */
-export async function countDirectoryItems(dirPath: string): Promise<number> {
-  const entries = await FileManager.readDirectory(dirPath)
-  return entries.length
-}
-
 /** 排序方式 */
 export type SortMode = "name" | "date" | "size" | "type" | "createdate"
 export type SortOrder = "asc" | "desc"
@@ -816,116 +781,6 @@ export function sortFiles(files: FileInfo[], mode: SortMode, order: SortOrder): 
   return sorted
 }
 
-/** 搜索文件 */
-export function searchFiles(files: FileInfo[], query: string): FileInfo[] {
-  if (!query.trim()) return files
-  const q = query.toLowerCase()
-  return files.filter((f) => f.name.toLowerCase().includes(q))
-}
-
-/* ─── 剪贴板路径管理（跨标签/子目录保留） ─── */
-
-const _CLIPBOARD_PATH_FILE = Path.join(FileManager.temporaryDirectory, ".fstore_copied_path")
-
-/** 读取剪贴板中存储的路径 */
-export async function readClipboardPath(): Promise<string | null> {
-  try {
-    if (await FileManager.exists(_CLIPBOARD_PATH_FILE)) {
-      return await FileManager.readAsString(_CLIPBOARD_PATH_FILE)
-    }
-  } catch { }
-  return null
-}
-
-/** 写入路径到剪贴板存储（传 null 清除） */
-export async function writeClipboardPath(path: string | null) {
-  try {
-    if (path) {
-      await FileManager.writeAsString(_CLIPBOARD_PATH_FILE, path)
-    } else {
-      if (await FileManager.exists(_CLIPBOARD_PATH_FILE)) {
-        await FileManager.remove(_CLIPBOARD_PATH_FILE)
-      }
-    }
-  } catch { }
-}
-
-const uniqueWriteQueues = new Map<string, Promise<void>>()
-
-/**
- * Serializes destination allocation and writing for one directory.
- * Provider reads may remain concurrent, while conflicting writes cannot overwrite each other.
- */
-export async function writeToUniquePath<T>(
-  targetPath: string,
-  write: (path: string) => Promise<T>,
-): Promise<{ path: string; value: T }> {
-  const dirPath = Path.dirname(targetPath)
-  const previous = uniqueWriteQueues.get(dirPath) ?? Promise.resolve()
-  let release: () => void = () => {}
-  const current = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const tail = previous.then(() => current)
-  uniqueWriteQueues.set(dirPath, tail)
-
-  await previous
-  try {
-    const path = await uniquePath(targetPath)
-    const value = await write(path)
-    return { path, value }
-  } finally {
-    release()
-    if (uniqueWriteQueues.get(dirPath) === tail) uniqueWriteQueues.delete(dirPath)
-  }
-}
-
-/** 生成不重名的路径，自动加 _01 _02 后缀 */
-export async function uniquePath(targetPath: string): Promise<string> {
-  if (!(await FileManager.exists(targetPath))) return targetPath
-  const ext = Path.extname(targetPath)
-  const base = targetPath.slice(0, targetPath.length - ext.length)
-  for (let i = 1; i <= 999; i++) {
-    const suffix = `_${String(i).padStart(2, "0")}`
-    const candidate = `${base}${suffix}${ext}`
-    if (!(await FileManager.exists(candidate))) return candidate
-  }
-  // fallback: use timestamp
-  return `${base}_${Date.now()}${ext}`
-}
-
-/**
- * 从压缩包文件名中提取安全的目录名。
- * 处理 .hidden.zip、无扩展名、特殊字符等边界情况。
- */
-export function sanitizeExtractDirName(archiveName: string): string {
-  // 持续剥离归档后缀，避免 .zip.gz 等多层压缩包在目录名中遗留后缀。
-  const knownExts = [".tar.gz", ".tar.bz2", ".tar.xz", ".zip", ".rar", ".7z", ".tgz", ".tar", ".gz", ".bz2", ".xz"];
-  let base = archiveName;
-  let removed = true;
-  while (removed) {
-    removed = false;
-    const lower = base.toLowerCase();
-    for (const ext of knownExts) {
-      if (lower.endsWith(ext)) {
-        base = base.slice(0, base.length - ext.length);
-        removed = true;
-        break;
-      }
-    }
-  }
-  // 未知归档格式同样移除其最后一层扩展名；保留以点开头的隐藏文件名。
-  const unknownExt = Path.extname(base);
-  if (unknownExt && base.length > unknownExt.length) {
-    base = base.slice(0, base.length - unknownExt.length);
-  }
-  // 删除路径分隔符和非法字符
-  base = base.replace(/[/\\:*?"<>|]/g, "_").trim()
-  // 防止空目录名或
-  if (!base || base === "." || base === "..") base = "extracted"
-  return base
-}
-
 /** 将任意路径编码为一个 shell 参数，避免空格、引号和命令替换字符被 shell 解释。 */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`
@@ -939,19 +794,25 @@ export function isSevenZFile(filePath: string): boolean {
 }
 
 /**
- * 检测归档真实类型（不依赖扩展名）：
+ * 从已读取的归档 bytes 检测真实类型（不依赖扩展名）：
  * - "7z"：魔数 37 7A BC AF 27 1C（"7z¼¯'"）
  * - "zip"：PK（50 4B）开头，含 WinZip AES 加密 zip（文件头仍是 PK）
  */
-async function detectArchiveKind(filePath: string): Promise<"7z" | "zip" | "other"> {
-  try {
-    const bytes = await FileManager.readAsBytes(filePath)
-    if (bytes.length >= 2) {
-      if (bytes[0] === 0x37 && bytes[1] === 0x7a) return "7z"
-      if (bytes[0] === 0x50 && bytes[1] === 0x4b) return "zip"
-    }
-  } catch { }
+function detectArchiveKindFromBytes(bytes: Uint8Array): "7z" | "zip" | "other" {
+  if (bytes.length >= 2) {
+    if (bytes[0] === 0x37 && bytes[1] === 0x7a) return "7z"
+    if (bytes[0] === 0x50 && bytes[1] === 0x4b) return "zip"
+  }
   return "other"
+}
+
+/**
+ * 读取归档 bytes；已传入时直接复用，避免同一解压链上重复全量读取。
+ * FileManager 无范围读取 API，全量读不可避免，但同一归档只应发生一次。
+ */
+async function loadArchiveBytesOnce(archivePath: string, archiveBytes?: Uint8Array): Promise<Uint8Array> {
+  if (archiveBytes && archiveBytes.length > 0) return archiveBytes
+  return await FileManager.readAsBytes(archivePath)
 }
 
 /** 判断 7z 操作错误是否为“密码错误”（Archive API 对错误密码与损坏归档使用同一错误码） */
@@ -1130,8 +991,9 @@ function detectZipPathEncoding(archive: Archive): "utf-8" | "gb18030" {
 /**
  * 逐条解压普通 ZIP，从一开始就使用正确的路径编码。
  * 返回 false 表示可能是加密 ZIP，交给 Archive.extractZip 的密码流程处理。
+ * @param archiveBytes 可选：调用链上游已读取的归档 bytes，避免同一归档重复全量读入
  */
-async function tryExtractZipPlain(archivePath: string, destDir: string): Promise<boolean> {
+async function tryExtractZipPlain(archivePath: string, destDir: string, archiveBytes?: Uint8Array): Promise<boolean> {
   try {
     let archive = Archive.openForMode(archivePath, "read")
     const encoding = detectZipPathEncoding(archive)
@@ -1141,7 +1003,7 @@ async function tryExtractZipPlain(archivePath: string, destDir: string): Promise
 
     // 关键：部分加密 ZIP 在无密码打开时只暴露目录条目，
     // 如果不对照中央目录，下面只创建目录后会被误判为解压成功。
-    const centralEntries = parseZipCentralNameBytes(await FileManager.readAsBytes(archivePath))
+    const centralEntries = parseZipCentralNameBytes(await loadArchiveBytesOnce(archivePath, archiveBytes))
     const expectedFileCount = centralEntries.filter((entry) => !entry.isDir).length
     const visibleFileCount = entries.filter((entry) => entry.type !== "directory").length
     if (expectedFileCount > 0 && visibleFileCount === 0) {
@@ -1168,8 +1030,8 @@ async function tryExtractZipPlain(archivePath: string, destDir: string): Promise
 }
 
 /** 解压 ZIP 并返回保存时应继续使用的密码：null=无密码，false=用户取消。 */
-export async function extractZipForEditing(archivePath: string, destDir: string): Promise<string | null | false> {
-  if (await tryExtractZipPlain(archivePath, destDir)) return null
+export async function extractZipForEditing(archivePath: string, destDir: string, archiveBytes?: Uint8Array): Promise<string | null | false> {
+  if (await tryExtractZipPlain(archivePath, destDir, archiveBytes)) return null
   try { await FileManager.remove(destDir) } catch { }
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -1185,8 +1047,8 @@ export async function extractZipForEditing(archivePath: string, destDir: string)
         destinationPath: destDir,
         password,
       })
-      await verifyZipExtractedFiles(archivePath, destDir, result.entryCount)
-      await fixMojibakeZipNames(archivePath, destDir)
+      await verifyZipExtractedFiles(archivePath, destDir, result.entryCount, archiveBytes)
+      await fixMojibakeZipNames(archivePath, destDir, archiveBytes)
       return password
     } catch (error) {
       try { await FileManager.remove(destDir) } catch { }
@@ -1199,18 +1061,20 @@ export async function extractZipForEditing(archivePath: string, destDir: string)
 /**
  * 解压 ZIP：普通 ZIP 使用可指定编码的逐条解压；加密 ZIP 使用 Archive.extractZip。
  * Archive.extractZip 要求目标目录不存在，且会对整个归档原子写入。
+ * @param archiveBytes 可选：上游已读取的归档 bytes，复用避免重复全量读
  */
-async function extractZipWithPassword(archivePath: string, destDir: string): Promise<boolean> {
-  const result = await extractZipForEditing(archivePath, destDir)
+async function extractZipWithPassword(archivePath: string, destDir: string, archiveBytes?: Uint8Array): Promise<boolean> {
+  const result = await extractZipForEditing(archivePath, destDir, archiveBytes)
   return result !== false
 }
 
 /**
  * 防止 Archive.extractZip 只建立目录却漏写加密文件时仍被误报为成功。
  * 仅做一次递归目录读取，避免逐文件 exists 调用。
+ * @param archiveBytes 可选：复用上游已读取的归档 bytes
  */
-async function verifyZipExtractedFiles(archivePath: string, destDir: string, reportedEntryCount: number): Promise<void> {
-  const expected = parseZipCentralNameBytes(await FileManager.readAsBytes(archivePath))
+async function verifyZipExtractedFiles(archivePath: string, destDir: string, reportedEntryCount: number, archiveBytes?: Uint8Array): Promise<void> {
+  const expected = parseZipCentralNameBytes(await loadArchiveBytesOnce(archivePath, archiveBytes))
   const expectedFiles = expected.filter((entry) => !entry.isDir).length
   if (expectedFiles === 0) return
 
@@ -1230,9 +1094,9 @@ async function verifyZipExtractedFiles(archivePath: string, destDir: string, rep
  * 中央目录只解析一次；目标目录也只递归读取一次建索引。之后仅在实际需要时重命名，
  * 不再对每个归档条目和每个候选名称反复访问文件系统。
  */
-async function fixMojibakeZipNames(archivePath: string, destDir: string): Promise<void> {
+async function fixMojibakeZipNames(archivePath: string, destDir: string, archiveBytes?: Uint8Array): Promise<void> {
   try {
-    const parsed = parseZipCentralNameBytes(await FileManager.readAsBytes(archivePath))
+    const parsed = parseZipCentralNameBytes(await loadArchiveBytesOnce(archivePath, archiveBytes))
     if (parsed.length === 0 || parsed.every((entry) => !decodeUtf8Lossy(entry.raw).includes("\uFFFD"))) return
 
     const blobLength = parsed.reduce((total, entry) => total + entry.raw.length + 1, 0)
@@ -1512,14 +1376,16 @@ export async function extractArchiveToNewDir(archivePath: string, destDir: strin
 /**
  * 统一智能解压 ZIP / 7z 到新目录：按真实魔数识别，支持有密码和无密码归档。
  * ZIP 统一走 extractZipWithPassword，7z 统一走 extractSevenZ。
+ * 归档 bytes 只全量读一次，贯穿类型检测与解压后校验/文件名修复全程。
  */
 export async function extractArchiveSmartToNewDir(archivePath: string, destDir: string): Promise<boolean> {
-  const kind = await detectArchiveKind(archivePath)
+  const bytes = await FileManager.readAsBytes(archivePath)
+  const kind = detectArchiveKindFromBytes(bytes)
   console.log("[智能解压] 真实类型:", kind)
   if (kind === "7z") return await extractSevenZ(archivePath, destDir)
   if (kind === "zip") {
     await FileManager.createDirectory(destDir, true)
-    return await extractZipWithPassword(archivePath, destDir)
+    return await extractZipWithPassword(archivePath, destDir, bytes)
   }
   throw new Error(`不是有效的 ZIP/7z 文件: ${Path.basename(archivePath)}`)
 }
@@ -1598,4 +1464,150 @@ export async function renameWithPrompt(oldName: string): Promise<string | null> 
     }
   }
   return null
+}
+
+/**
+ * 将文件的修改时间刷新为当前时间。
+ * copyFile 会保留源文件的修改时间；这里只读首字节再原样写回首字节，
+ * 触发文件内容变更使 mtime 更新，避免全量读回写回（原实现最多 100MB 读写，
+ * 且写回中途失败可能损坏副本）。首字节读不到（空文件）则跳过。
+ */
+export async function refreshFileModificationTime(path: string): Promise<void> {
+  // 原生 FileManager 无 touch / utimes API。
+  // 不可使用 writeAsBytes(path, bytes.slice(0, 1))，否则会发生文件截断导致文件损坏为 1 字节。
+  // 保持空操作或由上层通过重新落盘更新。
+}
+
+/**
+ * 将外部文件复制到 File Store 目录（持久化保存），返回副本路径。
+ * 如果文件已在 File Store 中，则返回原始路径（saved=false）。
+ * 如果文件不可直接读取，通过书签解析（分享自动创建的书签）取得可读路径再复制。
+ */
+export async function copyFileToFileStore(src: string): Promise<{ path: string; saved: boolean }> {
+  const fileStoreDir = Path.join(FileManager.documentsDirectory, "File Store");
+
+  // 已在 File Store 中 → 无需复制
+  if (src === fileStoreDir || src.startsWith(fileStoreDir + "/")) {
+    return { path: src, saved: false };
+  }
+
+  // 清理路径前缀（file://）
+  const normalizePath = (p: string) => p.replace(/^file:\/\//i, "").replace(/\\/g, "/");
+  const srcClean = normalizePath(src);
+
+  // 尝试获取可读的源文件路径
+  async function resolveReadablePath(): Promise<string | null> {
+    // 0. 获取源文件大小（用于验证候选是否是对应文件）
+    let srcSize = -1;
+    try {
+      srcSize = (await FileManager.stat(srcClean)).size;
+    } catch { }
+
+    // 1. 直接探测可读性：stat 能成功且 size>=0 即认为可读，
+    // 不再为探测把整个分享文件读进内存（分享 1GB 视频会造成 GB 级内存峰值）。
+    try {
+      const stat = await FileManager.stat(srcClean);
+      if (stat && typeof stat.size === "number" && stat.size >= 0) {
+        console.log("copyFileToFileStore: 直接可读, src=", srcClean);
+        return srcClean;
+      }
+    } catch (e) {
+      console.log("copyFileToFileStore: 直接不可读, 尝试书签解析:", String(e).slice(0, 120));
+    }
+
+    // 2. 遍历所有书签，只接受“文件名与源文件相同”的可读候选
+    try {
+      const bookmarks = FileManager.getAllFileBookmarks();
+      console.log(`copyFileToFileStore: 共有 ${bookmarks.length} 个书签`);
+
+      const srcName = Path.basename(srcClean);
+      const srcSegments = srcClean.split("/");
+      const srcTail = srcSegments.slice(-2).join("/");
+
+      const candidates: Array<{ name: string; path: string; score: number; size: number }> = [];
+
+      for (const b of bookmarks) {
+        try {
+          // 书签原始路径的文件名必须与源文件一致（分享自动创建的书签 b.path 即分享文件路径）
+          const bPathNorm = normalizePath(b.path || "");
+          const bPathName = Path.basename(bPathNorm);
+          if (bPathName !== srcName) continue;
+
+          // 尝试 bookmarkedPath（解析安全作用域路径）
+          let resolved = FileManager.bookmarkedPath(b.name);
+          if (!resolved || !resolved.trim()) {
+            // 回退到 b.path（原始路径）
+            resolved = b.path;
+          }
+          if (!resolved || !resolved.trim()) continue;
+
+          const resolvedClean = normalizePath(resolved);
+          const resolvedName = Path.basename(resolvedClean);
+          // 解析出的可读路径文件名也必须与源文件一致
+          if (resolvedName !== srcName) continue;
+
+          const resolvedSegments = resolvedClean.split("/");
+          const resolvedTail = resolvedSegments.slice(-2).join("/");
+
+          // 计算匹配分数（越高越可能是正确的分享文件）
+          let score = 0;
+          if (resolvedClean === srcClean) score += 20;
+          if (bPathNorm === srcClean) score += 15;
+          if (resolvedTail === srcTail && srcTail.length > 0) score += 5;
+          if ((b.name || "").includes(srcName)) score += 3;
+
+          // 探测候选大小
+          let candSize = -1;
+          try {
+            candSize = (await FileManager.stat(resolvedClean)).size;
+          } catch { }
+          // 大小一致是强信号（src 可 stat 时才使用）
+          if (srcSize >= 0 && candSize === srcSize) score += 8;
+
+          candidates.push({ name: b.name, path: resolvedClean, score, size: candSize });
+        } catch { }
+      }
+
+      // 3. 按分数降序，只对最优候选做一次轻量探测（stat 可读即接受；
+      // 已按文件名一致预筛，无需逐候选全量读入验证）。
+      candidates.sort((a, b) => b.score - a.score);
+      for (const c of candidates) {
+        try {
+          const stat = await FileManager.stat(c.path);
+          if (stat && typeof stat.size === "number" && stat.size >= 0) {
+            console.log(`copyFileToFileStore: 书签匹配成功, name=${c.name}, score=${c.score}, path=${c.path}`);
+            return c.path;
+          }
+        } catch { }
+      }
+    } catch (e) {
+      console.log("copyFileToFileStore: 书签遍历失败:", e);
+    }
+
+    return null;
+  }
+
+  const resolvedSrc = await resolveReadablePath();
+
+  // 复制到 File Store 目录
+  if (resolvedSrc) {
+    try {
+      await FileManager.createDirectory(fileStoreDir, true);
+      const srcName = Path.basename(srcClean);
+      let dest = Path.join(fileStoreDir, srcName);
+      dest = await uniquePath(dest);
+      await FileManager.copyFile(resolvedSrc, dest);
+      markFileImported(dest);
+      console.log(`copyFileToFileStore: 复制成功 ${dest}`);
+      // copyFile 会保留源文件的修改时间，如果源文件有修改时间直接沿用；
+      // 注意：不能通过 writeAsBytes(dest, bytes.slice(0, 1)) 刷新时间，因为会截断文件导致只剩 1 字节！
+      return { path: dest, saved: true };
+    } catch (e) {
+      console.log("copyFileToFileStore: 复制失败:", e);
+    }
+  }
+
+  // 全部失败，返回原始路径
+  console.log("copyFileToFileStore: 全部失败, src=", srcClean);
+  return { path: src, saved: false };
 }

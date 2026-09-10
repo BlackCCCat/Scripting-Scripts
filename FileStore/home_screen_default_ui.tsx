@@ -148,6 +148,7 @@ export default function HomeScreenDefaultUi() {
           <DualBrowserPage
             settings={settings}
             refreshKey={refreshKey}
+            setRefreshKey={setRefreshKey}
             onSettingsChange={setSettings}
             bookmarks={bookmarks}
             isHomeScreenHost

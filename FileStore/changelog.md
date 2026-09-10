@@ -1,5 +1,16 @@
 ## 说明
-该脚本为二次修改，原版为：[Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore)
+该脚本为二次修改，原版为：[Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scripting/FileStore)
+
+## v3.0.1
+- 同步原版 FileStore 2.6.0（8月30日后至9月10日）所有新功能与重构：
+  - 新增 网格视图（Grid View）与列表视图切换，支持在工具栏与设置页切换视图模式
+  - 分享 Intent 体验增强：支持直接导入实况照片（.live）与多媒体文件保存到 File Store，大文件走 App Group 中转
+  - 导入文件后自动定位与高亮显示
+  - 双栏分屏拖动条位置持久化，退出后自动恢复分屏比例
+  - 编辑器与预览支持手动选择与切换文件编码（GBK / GB18030 / UTF-8 等），并防止旧内容延时写回
+  - ToastOverlay 改用层叠栈管理，解决多层弹窗 Toast 派发问题
+  - 架构重构：工具函数按职责拆分为独立模块（clipboardUtils、directoryCount、fileTypeData、formatUtils、pathUtils、searchUtils）
+
 
 ## v3.0.0
 - 远程资源链接调整，不再使用release链接，直接使用仓库文件夹链接，请手动更换

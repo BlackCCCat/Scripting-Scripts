@@ -1,10 +1,11 @@
 // 通用文件列表项组件 — 支持左滑右滑、上下文菜单、选择模式
 
-import { Navigation, NavigationStack, List, Section, HStack, VStack, Spacer, Text, Button, Image, Group, EmptyView, useState, useEffect, Path, type VirtualNode } from "scripting";
+import { Navigation, NavigationStack, List, Section, HStack, VStack, ZStack, Spacer, Text, Button, Image, Group, EmptyView, useState, useEffect, Path, type VirtualNode } from "scripting";
 import { fmtSize, fmtDate, FileInfo, getFileInfo } from "../manager/utils";
 import { unpackLivePhoto } from "../manager/LivePhotoPacker";
 import { setDragSourcePath } from "../manager/dropHandler";
 import { showToast } from "../manager/ToastManager";
+import { ToastOverlay } from "./ToastOverlay";
 
 /* ─── 上下文菜单项配置 ─── */
 export interface ContextMenuItem {
@@ -93,7 +94,7 @@ export function FileListItem(props: FileListItemProps) {
   if (selectMode) {
     return (
       <Button action={selectMode.onToggle} listRowSeparator={hideTopSeparator ? { visibility: "hidden", edges: "top" } : undefined} onDrag={onDrag}>
-        <HStack spacing={12} alignment="center" padding={{ vertical: 4 }}>
+        <HStack spacing={12} alignment="center" padding={{ vertical: 4 }} frame={{ maxWidth: "infinity" }} contentShape="rect">
           <Image systemName={selectMode.isSelected ? "checkmark.circle.fill" : "circle"} frame={{ width: 28, height: 28 }} foregroundStyle={selectMode.isSelected ? "systemBlue" : "tertiaryLabel"} />
           <Image systemName={file.icon} frame={{ width: 28, height: 28 }} foregroundStyle={file.iconColor} />
           <VStack alignment="leading" spacing={2}>
@@ -102,15 +103,15 @@ export function FileListItem(props: FileListItemProps) {
             </Text>
             <HStack spacing={6}>
               {file.isDirectory ? (
-                <Text font="caption2" lineLimit={1} foregroundStyle={(subtitleForegroundStyle as any) || "secondaryLabel"}>
+                <Text font="caption2" monospaced lineLimit={1} foregroundStyle={(subtitleForegroundStyle as any) || "secondaryLabel"}>
                   {subtitle || "文件夹"}
                 </Text>
               ) : (
                 <>
-                  <Text font="caption2" lineLimit={1} foregroundStyle="secondaryLabel">
+                  <Text font="caption2" monospaced lineLimit={1} foregroundStyle="secondaryLabel">
                     {fmtSize(file.size)}
                   </Text>
-                  <Text font="caption2" lineLimit={1} foregroundStyle="tertiaryLabel">
+                  <Text font="caption2" monospaced lineLimit={1} foregroundStyle="tertiaryLabel">
                     {fmtDate(file.modificationDate)}
                   </Text>
                 </>
@@ -141,6 +142,8 @@ export function FileListItem(props: FileListItemProps) {
         <HStack
           spacing={12}
           alignment="center"
+          frame={{ maxWidth: "infinity" }}
+          contentShape="rect"
           //background="#ccc"
         >
           <Image systemName={file.icon} frame={{ width: 28, height: 28 }} foregroundStyle={file.iconColor} />
@@ -150,15 +153,15 @@ export function FileListItem(props: FileListItemProps) {
             </Text>
             <HStack spacing={6}>
               {file.isDirectory ? (
-                <Text font="caption2" lineLimit={1} foregroundStyle={(subtitleForegroundStyle as any) || "secondaryLabel"}>
+                <Text font="caption2" monospaced lineLimit={1} foregroundStyle={(subtitleForegroundStyle as any) || "secondaryLabel"}>
                   {subtitle || "文件夹"}
                 </Text>
               ) : (
                 <>
-                  <Text font="caption2" lineLimit={1} foregroundStyle="secondaryLabel">
+                  <Text font="caption2" monospaced lineLimit={1} foregroundStyle="secondaryLabel">
                     {fmtSize(file.size)}
                   </Text>
-                  <Text font="caption2" lineLimit={1} foregroundStyle="tertiaryLabel">
+                  <Text font="caption2" monospaced lineLimit={1} foregroundStyle="tertiaryLabel">
                     {fmtDate(file.modificationDate)}
                   </Text>
                 </>
@@ -187,6 +190,8 @@ export function FileListItem(props: FileListItemProps) {
         <HStack
           spacing={12}
           alignment="center"
+          frame={{ maxWidth: "infinity" }}
+          contentShape="rect"
           //background="#ccc"
         >
           <Image systemName={file.icon} frame={{ width: 28, height: 28 }} foregroundStyle={file.iconColor} />
@@ -196,15 +201,15 @@ export function FileListItem(props: FileListItemProps) {
             </Text>
             <HStack spacing={6}>
               {file.isDirectory ? (
-                <Text font="caption2" lineLimit={1} foregroundStyle={(subtitleForegroundStyle as any) || "secondaryLabel"}>
+                <Text font="caption2" monospaced lineLimit={1} foregroundStyle={(subtitleForegroundStyle as any) || "secondaryLabel"}>
                   {subtitle || "文件夹"}
                 </Text>
               ) : (
                 <>
-                  <Text font="caption2" lineLimit={1} foregroundStyle="secondaryLabel">
+                  <Text font="caption2" monospaced lineLimit={1} foregroundStyle="secondaryLabel">
                     {fmtSize(file.size)}
                   </Text>
-                  <Text font="caption2" lineLimit={1} foregroundStyle="tertiaryLabel">
+                  <Text font="caption2" monospaced lineLimit={1} foregroundStyle="tertiaryLabel">
                     {fmtDate(file.modificationDate)}
                   </Text>
                 </>
@@ -229,7 +234,7 @@ export function FileListItem(props: FileListItemProps) {
       contextMenu={contextMenuConfig}
       onDrag={onDrag}
     >
-      <HStack spacing={12} alignment="center">
+      <HStack spacing={12} alignment="center" frame={{ maxWidth: "infinity" }} contentShape="rect">
         <Image systemName={file.icon} frame={{ width: 28, height: 28 }} foregroundStyle={file.iconColor} />
         <VStack alignment="leading" spacing={2}>
           <Text font="body" lineLimit={1}>
@@ -237,15 +242,15 @@ export function FileListItem(props: FileListItemProps) {
           </Text>
           <HStack spacing={6}>
             {file.isDirectory ? (
-              <Text font="caption2" foregroundStyle="secondaryLabel">
+              <Text font="caption2" monospaced foregroundStyle="secondaryLabel">
                 {subtitle || "文件夹"}
               </Text>
             ) : (
               <>
-                <Text font="caption2" lineLimit={1} foregroundStyle="secondaryLabel">
+                <Text font="caption2" monospaced lineLimit={1} foregroundStyle="secondaryLabel">
                   {fmtSize(file.size)}
                 </Text>
-                <Text font="caption2" lineLimit={1} foregroundStyle="tertiaryLabel">
+                <Text font="caption2" monospaced lineLimit={1} foregroundStyle="tertiaryLabel">
                   {fmtDate(file.modificationDate)}
                 </Text>
               </>
@@ -254,7 +259,7 @@ export function FileListItem(props: FileListItemProps) {
         </VStack>
         <Spacer />
         {matchInfo ? (
-          <Text font="caption2" foregroundStyle="systemYellow" lineLimit={2}>
+          <Text font="caption2" monospaced foregroundStyle="systemYellow" lineLimit={2}>
             第{matchInfo.line}行: {matchInfo.content}
           </Text>
         ) : (
@@ -477,9 +482,10 @@ export function FileInfoDialog({ file, nested }: { file: FileInfo; nested?: bool
 
   const Wrapper = nested ? (props: any) => <>{props.children}</> : NavigationStack;
   return (
-    <Wrapper>
-      <List
-        navigationTitle="简介"
+    <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      <Wrapper>
+        <List
+          navigationTitle="简介"
         navigationBarTitleDisplayMode="inline"
         toolbar={{
           topBarLeading: nested ? undefined : [<Button title="关闭" systemImage="xmark" action={dismiss} />],
@@ -638,8 +644,10 @@ export function FileInfoDialog({ file, nested }: { file: FileInfo; nested?: bool
         ) : (
           <EmptyView />
         )}
-      </List>
-    </Wrapper>
+        </List>
+      </Wrapper>
+      <ToastOverlay />
+    </ZStack>
   );
 }
 
@@ -666,8 +674,9 @@ export function FileInfoPage({ filePath: fp }: { filePath: string }) {
 /**
  * 根据文件路径创建拖拽配置（ItemProvider + 预览视图）
  * 供 FileListItem 和 GeneralBrowser 的行组件使用
+ * isDirectory：文件夹拖拽预览用 folder.fill 图标（copyFile 支持递归复制目录）
  */
-export function makeDragConfig(filePath: string): {
+export function makeDragConfig(filePath: string, isDirectory?: boolean): {
   data: () => ItemProvider;
   preview: VirtualNode;
 } {
@@ -683,7 +692,7 @@ export function makeDragConfig(filePath: string): {
     },
     preview: (
       <HStack spacing={8} padding={12} background="systemGray">
-        <Image systemName="doc.fill" foregroundStyle="white" frame={{ width: 20, height: 20 }} />
+        <Image systemName={isDirectory ? "folder.fill" : "doc.fill"} foregroundStyle="white" frame={{ width: 20, height: 20 }} />
         <Text font="headline" foregroundStyle="white">
           {Path.basename(filePath)}
         </Text>

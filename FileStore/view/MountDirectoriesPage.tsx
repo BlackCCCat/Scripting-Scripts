@@ -14,6 +14,7 @@ import {
   ZStack,
   useState,
   useEffect,
+  useRef,
   Menu,
   Divider,
   useObservable,
@@ -26,12 +27,13 @@ import {
   addDirectoryBookmark,
   addBookmarkManually,
   removeBookmarkById,
-  getBookmarkPath,
+  resolveBookmarkPath,
   renameBookmark,
   Bookmark,
   reorderBookmarks,
   getBuiltinDirectories,
   getAllBookmarks,
+  getBookmarkPath,
 } from "../manager/BookmarkManager";
 import { copyAndToast, copiedMessage, renameWithPrompt, buildSystemDirDefs, invalidateDirectoryCache } from "../manager/utils";
 import { FileListItem } from "./FileListItem";
@@ -48,6 +50,11 @@ interface MountDirectoriesPageProps {
   showFolderItemCounts: boolean;
   onRefresh: () => void;
   onSettingsChange?: (settings: AppSettings) => void;
+  isFocused?: boolean;
+}
+
+function getAccessiblePath(bookmark: Bookmark): string | null {
+  return getBookmarkPath(bookmark);
 }
 
 function sameStringSet(a: Set<string>, b: Set<string>): boolean {
@@ -126,7 +133,7 @@ function BookmarkInfoDialog({ bookmark }: { bookmark: Bookmark }) {
   );
 }
 
-export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefresh, onSettingsChange }: MountDirectoriesPageProps) {
+export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefresh, onSettingsChange, isFocused = true }: MountDirectoriesPageProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Bookmark[]>([]);
   const [orderedBookmarks, setOrderedBookmarks] = useState<Bookmark[]>(() => [...bookmarks]);
@@ -143,8 +150,9 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
   }, [bookmarks]);
 
   // 异步检查每个书签的目录是否存在 + 统计文件个数
+  const bookmarkCheckSeqRef = useRef(0);
   useEffect(() => {
-    let cancelled = false;
+    const seq = ++bookmarkCheckSeqRef.current;
     (async () => {
       const results = await Promise.all(
         bookmarks.map(async (bm) => {
@@ -153,7 +161,6 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
             if (!path || !(await FileManager.exists(path))) {
               return { path: bm.path, inaccessible: true, count: 0 };
             }
-            // 不显示数量时也检查读取权限，不能只凭 exists 判断可访问。
             const items = await FileManager.readDirectory(path);
             return { path: bm.path, inaccessible: false, count: showFolderItemCounts !== false ? items.length : 0 };
           } catch {
@@ -161,17 +168,16 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
           }
         }),
       );
-      if (cancelled) return;
+      if (seq !== bookmarkCheckSeqRef.current) return;
       const badPaths = new Set<string>();
       const counts = new Map<string, number>();
       for (const r of results) {
         if (r.inaccessible) badPaths.add(r.path);
-        else if (r.count > 0) counts.set(r.path, r.count);
+        else if (showFolderItemCounts !== false) counts.set(r.path, r.count);
       }
       setInaccessiblePaths((prev) => (sameStringSet(prev, badPaths) ? prev : badPaths));
       setFolderCounts((prev) => (sameNumberMap(prev, counts) ? prev : counts));
     })();
-    return () => { cancelled = true; };
   }, [bookmarks, showFolderItemCounts]);
 
   // 导航路径（用于文件夹侧滑进入）
@@ -452,6 +458,12 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
                     highlightFile = decodeURIComponent(dirPath.slice(sepIdx + 2));
                     dirPath = dirPath.slice(0, sepIdx);
                   }
+                  // 判断当前实例是否是导航栈中最后一项（即当前显示的）
+                  // 结合父级的 isFocused 状态
+                  const navArray = navPath?.value && Array.isArray(navPath.value) ? navPath.value : [];
+                  const isNavigationFocused = navArray.length > 0 && navArray[navArray.length - 1] === page;
+                  const browserIsFocused = isFocused && isNavigationFocused;
+                  
                   return (
                     <GeneralBrowser
                       dirPath={dirPath}
@@ -462,6 +474,7 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
                       showFolderItemCounts={showFolderItemCounts}
                       onOpenSettings={handleOpenSettings}
                       refreshKey={directoryDropRefreshKey}
+                      isFocused={browserIsFocused}
                     />
                   );
                 }
@@ -584,7 +597,7 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
               <ForEach
                 data={forEachData}
                 builder={(bookmark, index) => {
-                  const dirPath = getBookmarkPath(bookmark);
+                  const dirPath = getAccessiblePath(bookmark);
                   const bookmarkAsFile = {
                     name: bookmark.name,
                     path: bookmark.path,
@@ -621,7 +634,7 @@ export function MountDirectoriesPage({ bookmarks, showFolderItemCounts, onRefres
                           ? showFolderItemCounts !== false && folderCounts.has(bookmark.path)
                             ? `${folderCounts.get(bookmark.path)} 项`
                             : "文件夹"
-                          : "⚠ 暂时无法访问，请检查目录或书签授权"
+                          : "⚠ 软件更新导致路径变化，无法访问，请重新挂载"
                       }
                       subtitleForegroundStyle={isAccessible ? undefined : "red"}
                       hideTopSeparator={index === 0}
