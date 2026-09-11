@@ -48,7 +48,7 @@ const SOYOUJIA_HOST = "https://www.soyoujia.cn"
 const SINOPEC_INIT_URL = "https://cx.sinopecsales.com/yjkqiantai/core/initCpb"
 const SINOPEC_PROVINCE_URL =
   "https://cx.sinopecsales.com/yjkqiantai/data/switchProvince"
-const CACHE_KEY = "oilPriceDataCache.v5"
+const CACHE_KEY = "oilPriceDataCache.v6"
 const HISTORY_CACHE_KEY_PREFIX = "oilPriceHistoryCache.v1."
 const REQUEST_GUARD_KEY = "oilPriceRequestGuard.v1"
 const PRIVATE_STORAGE = { shared: false }
@@ -466,14 +466,24 @@ async function resolveForecast(
     return qiyoujiage.forecast
   }
 
+  const sourceForecast = fetched.find(item =>
+    hasForecastDate(item.forecast)
+  )?.forecast
+
   try {
-    return await withTimeout(
+    const forecast = await withTimeout(
       fetchQiyoujiageForecast,
       SUPPLEMENT_TIMEOUT_MS,
       "调价预测"
     )
+    return hasForecastDate(forecast)
+      ? forecast
+      : sourceForecast ?? forecast
   } catch {
-    return defaultForecast("下次调价信息以数据来源页面公布为准。")
+    return (
+      sourceForecast ??
+      defaultForecast("下次调价信息以数据来源页面公布为准。")
+    )
   }
 }
 
@@ -683,7 +693,7 @@ function normalizeSoyoujiaHome(html: string): SourceFetchResult {
 
   return {
     provinces,
-    forecast: defaultForecast("搜油价暂未提供结构化调价预测。"),
+    forecast: parseSoyoujiaForecast(html),
     source: SOYOUJIA_HOST,
     sourceId: "soyoujia",
   }
@@ -1118,6 +1128,34 @@ function parseForecast(html: string): OilPriceData["forecast"] {
     perLiterRange,
     sourceText: `目前预计${direction}${perTon}元/吨（${perLiterRange}）`,
   }
+}
+
+function parseSoyoujiaForecast(html: string): PriceForecast {
+  const match = htmlText(html).match(
+    /距下次调整还有(\d+)天[（(](\d{1,2})月(\d{1,2})日/
+  )
+  if (!match) {
+    return defaultForecast("下次调价信息以搜油价调价日历公布为准。")
+  }
+
+  const remainingDays = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  return {
+    nextAdjustText: `${String(month).padStart(2, "0")}月${String(day).padStart(
+      2,
+      "0"
+    )}日 24:00`,
+    remainingDays,
+    direction: "调整",
+    perTon: null,
+    perLiterRange: null,
+    sourceText: "调价结果以搜油价调价日历公布为准。",
+  }
+}
+
+function hasForecastDate(forecast: PriceForecast): boolean {
+  return /^\d{2}月\d{2}日/.test(forecast.nextAdjustText)
 }
 
 function defaultForecast(sourceText: string): PriceForecast {

@@ -26,7 +26,7 @@
   },
   "icon": "fuelpump.fill",
   "description": null,
-  "version": "3.0.1",
+  "version": "3.0.2",
   "color": "rgba(235, 141, 0, 1.00)",
   "runInApp": false,
   "author": {
