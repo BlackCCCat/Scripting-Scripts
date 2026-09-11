@@ -32,6 +32,7 @@ export type RemoteAsset = {
   tag?: string
   body?: string
   updatedAt?: string
+  publishedAt?: string
   remoteIdOrSha?: string
   size?: number
 }
@@ -209,6 +210,7 @@ async function fetchLatestAssetFromGithub(args: {
         name,
         url: a.browser_download_url,
         updatedAt: a.updated_at,
+        publishedAt: rel.published_at ?? rel.created_at ?? rel.updated_at,
         tag: rel.tag_name,
         body: rel.body,
         remoteIdOrSha: pickGithubSha256FromDigest(a?.digest),
@@ -300,6 +302,7 @@ async function fetchLatestAssetFromCnb(args: {
         name,
         url: usableUrl,
         updatedAt: a.updated_at ?? a.updatedAt,
+        publishedAt: rel.published_at ?? rel.created_at ?? rel.updated_at,
         tag: String(rel?.tag_ref ?? rel?.tag_name ?? rel?.tagName ?? "").split("/").pop() || undefined,
         body: rel.body,
         remoteIdOrSha: a?.id != null ? String(a.id) : undefined,
@@ -392,6 +395,7 @@ async function fetchLatestAssetFromCnbOpenApi(args: {
         name,
         url,
         updatedAt: a.updated_at ?? a.updatedAt,
+        publishedAt: rel.published_at ?? rel.created_at ?? rel.updated_at,
         tag: String(rel?.tag_name ?? rel?.tag_ref ?? rel?.tagName ?? "").split("/").pop() || undefined,
         body: rel.body,
         remoteIdOrSha: hash || (a?.id != null ? String(a.id) : undefined),

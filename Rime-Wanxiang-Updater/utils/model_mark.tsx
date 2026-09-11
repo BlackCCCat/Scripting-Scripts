@@ -22,7 +22,7 @@ function parseTime(value?: string): number | undefined {
   return Number.isFinite(time) ? time : undefined
 }
 
-function formatChinaTime(value?: string): string {
+export function formatChinaTime(value?: string): string {
   const raw = clean(value)
   if (!raw) return ""
   const time = parseTime(raw)

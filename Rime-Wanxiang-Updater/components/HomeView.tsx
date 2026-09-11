@@ -26,7 +26,6 @@ import {
   useObservable,
   useRef,
   useState,
-  Markdown,
   Path,
 } from "scripting";
 
@@ -39,7 +38,10 @@ import {
 } from "../utils/config";
 import { SettingsView } from "./SettingsView";
 import { AdaptiveHomeTabView } from "./AdaptiveHomeTabView";
-import { useMarkdownReleaseNotesSheet } from "./MarkdownReleaseNotesSheet";
+import {
+  MarkdownReleaseNotesSheet,
+  useMarkdownReleaseNotesSheet,
+} from "./MarkdownReleaseNotesSheet";
 import { loadMetaAsync, type MetaBundle } from "../utils/meta";
 import {
   detectRimeDir,
@@ -62,7 +64,11 @@ import {
 } from "../utils/update_tasks";
 import { clearWanxiangTempFiles } from "../utils/cache_cleanup";
 import { normalizePath, sleep } from "../utils/common";
-import { isModelUpdateAvailable, modelDisplayMark } from "../utils/model_mark";
+import {
+  formatChinaTime,
+  isModelUpdateAvailable,
+  modelDisplayMark,
+} from "../utils/model_mark";
 
 const FULLSCREEN_SYMBOL =
   "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left";
@@ -418,6 +424,18 @@ function schemeStoredDisplayMark(
   ).trim();
 }
 
+function remoteUpdatedAt(asset: AllUpdateResult["scheme"] | undefined): string {
+  return formatChinaTime(asset?.updatedAt) || "暂无法获取";
+}
+
+function remoteSchemePublishedAt(asset: AllUpdateResult["scheme"] | undefined): string {
+  return formatChinaTime(asset?.publishedAt ?? asset?.updatedAt) || "暂无法获取";
+}
+
+function remoteDetailMark(asset: AllUpdateResult["scheme"] | undefined): string {
+  return String(asset?.remoteIdOrSha ?? asset?.tag ?? asset?.name ?? "暂无法获取").trim();
+}
+
 function buildUpdateDecision(
   localMeta: MetaBundle | undefined,
   remote: AllUpdateResult,
@@ -661,66 +679,6 @@ function FullscreenLogView(props: { logs: LogEntry[] }) {
               </HStack>
             )}
           </VStack>
-        </ScrollView>
-      </VStack>
-    </NavigationStack>
-  );
-}
-
-function FullscreenNotesView(props: { content: string }) {
-  const dismiss = Navigation.useDismiss();
-  const [visibleContent, setVisibleContent] = useState<string | null>(null);
-
-  useEffect(() => {
-    setVisibleContent(null);
-    const timer = setTimeout(() => {
-      setVisibleContent(props.content);
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [props.content]);
-
-  return (
-    <NavigationStack>
-      <VStack
-        navigationTitle={"更新说明"}
-        navigationBarTitleDisplayMode={"inline"}
-        toolbar={{
-          topBarLeading: (
-            <Button
-              title=""
-              systemImage="xmark"
-              action={() => {
-                try {
-                  (globalThis as any).HapticFeedback?.mediumImpact?.();
-                } catch {}
-                dismiss();
-              }}
-            />
-          ),
-        }}
-      >
-        <ScrollView
-          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-          padding
-        >
-          {visibleContent == null ? (
-            <VStack
-              spacing={10}
-              frame={{
-                maxWidth: "infinity",
-                maxHeight: "infinity",
-                alignment: "center" as any,
-              }}
-              padding={{ top: 20, bottom: 20 }}
-            >
-              <ProgressView />
-              <Text font="footnote" foregroundStyle="secondaryLabel">
-                加载更新说明中...
-              </Text>
-            </VStack>
-          ) : (
-            <Markdown content={visibleContent} />
-          )}
         </ScrollView>
       </VStack>
     </NavigationStack>
@@ -1409,6 +1367,7 @@ export function HomeView() {
     storageKey: "wanxiang-helper:release-notes:last-seen-hash",
     title: "更新内容",
   });
+  const [showUpdateNotes, setShowUpdateNotes] = useState(false);
   const [editorRootPath, setEditorRootPath] = useState(() =>
     String(loadConfig().hamsterRootPath ?? "").trim(),
   );
@@ -1419,6 +1378,9 @@ export function HomeView() {
   const [localSchemeVersion, setLocalSchemeVersion] = useState("暂无法获取");
   const [localDictMark, setLocalDictMark] = useState("暂无法获取");
   const [localModelMark, setLocalModelMark] = useState("暂无法获取");
+  const [localSchemeDetail, setLocalSchemeDetail] = useState("暂无法获取");
+  const [localDictDetail, setLocalDictDetail] = useState("暂无法获取");
+  const [localModelDetail, setLocalModelDetail] = useState("暂无法获取");
 
   // 远程信息
   const [remoteSchemeVer, setRemoteSchemeVer] = useState(
@@ -1726,6 +1688,9 @@ export function HomeView() {
       setLocalSchemeVersion("暂无法获取");
       setLocalDictMark("暂无法获取");
       setLocalModelMark(current.downloadModel ? "暂无法获取" : "");
+      setLocalSchemeDetail("暂无法获取");
+      setLocalDictDetail("暂无法获取");
+      setLocalModelDetail("暂无法获取");
       return false;
     }
 
@@ -1735,6 +1700,9 @@ export function HomeView() {
     setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取");
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取");
     setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta.model) || "暂无法获取") : "");
+    setLocalSchemeDetail(meta.scheme?.remoteIdOrSha ?? "暂无法获取");
+    setLocalDictDetail(meta.dict?.remoteIdOrSha ?? "暂无法获取");
+    setLocalModelDetail(current.downloadModel ? (meta.model?.remoteIdOrSha ?? "暂无法获取") : "暂无法获取");
     return true;
   }
 
@@ -1747,8 +1715,11 @@ export function HomeView() {
     if (!remote) return;
     const { meta } = await findLocalMeta(current);
     const nextDecision = buildUpdateDecision(meta, remote, current);
-    setRemoteModelMark(current.downloadModel ? (modelDisplayMark(remote.model, meta?.model) || "暂无法获取") : "");
+    setRemoteModelMark(current.downloadModel ? remoteUpdatedAt(remote.model) : "");
     setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta?.model, remote.model) || "暂无法获取") : "");
+    setLocalSchemeDetail(meta?.scheme?.remoteIdOrSha ?? "暂无法获取");
+    setLocalDictDetail(meta?.dict?.remoteIdOrSha ?? "暂无法获取");
+    setLocalModelDetail(current.downloadModel ? (meta?.model?.remoteIdOrSha ?? "暂无法获取") : "暂无法获取");
     setLastCheck(remote);
     setLastCheckDecision(nextDecision);
     setLastCheckKey(checkKey(current));
@@ -1759,12 +1730,13 @@ export function HomeView() {
     const cache = loadSharedCheckCache();
     if (!cache || cache.key !== checkKey(current)) return false;
     const { meta } = await findLocalMeta(current);
-    setRemoteSchemeVer(
-      schemeRemoteDisplayMark(current, cache.remote.scheme) || "暂无法获取",
-    );
-    setRemoteDictMark(cache.remote.dict?.remoteIdOrSha ?? "暂无法获取");
-    setRemoteModelMark(current.downloadModel ? (modelDisplayMark(cache.remote.model, meta?.model) || "暂无法获取") : "");
+    setRemoteSchemeVer(remoteSchemePublishedAt(cache.remote.scheme));
+    setRemoteDictMark(remoteUpdatedAt(cache.remote.dict));
+    setRemoteModelMark(current.downloadModel ? remoteUpdatedAt(cache.remote.model) : "");
     setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta?.model, cache.remote.model) || "暂无法获取") : "");
+    setLocalSchemeDetail(meta?.scheme?.remoteIdOrSha ?? "暂无法获取");
+    setLocalDictDetail(meta?.dict?.remoteIdOrSha ?? "暂无法获取");
+    setLocalModelDetail(current.downloadModel ? (meta?.model?.remoteIdOrSha ?? "暂无法获取") : "暂无法获取");
     const nextDecision = buildUpdateDecision(meta, cache.remote, current);
     setNotes(cache.remote.scheme?.body ?? "");
     setLastCheck(cache.remote);
@@ -2047,8 +2019,11 @@ export function HomeView() {
   }
 
   function renderMainTrailingToolbar() {
-    return (
+    const hasSchemeUpdate =
+      lastCheckKey === checkKey(cfg) && lastCheckDecision?.scheme === true;
+    const usageButton = (
       <Button
+        key="usage-guide"
         title=""
         systemImage="questionmark.circle"
         action={() => {
@@ -2059,17 +2034,30 @@ export function HomeView() {
         }}
       />
     );
+    if (hasSchemeUpdate) {
+      return [
+        <Button
+          key="update-notes"
+          title=""
+          systemImage="doc.text"
+          action={() => {
+            try {
+              (globalThis as any).HapticFeedback?.mediumImpact?.();
+            } catch {}
+            setShowUpdateNotes(true);
+          }}
+        />,
+        usageButton,
+      ];
+    }
+    return (
+      usageButton
+    );
   }
 
   async function openFullscreenLogs() {
     await Navigation.present({
       element: <FullscreenLogView logs={logs} />,
-    });
-  }
-
-  async function openFullscreenNotes() {
-    await Navigation.present({
-      element: <FullscreenNotesView content={notes} />,
     });
   }
 
@@ -2129,11 +2117,9 @@ export function HomeView() {
         pushLog("ERROR", "CHECK", `${label}请求失败：${message}`, effective);
       });
       const decision = buildUpdateDecision(localMeta, r, effective);
-      setRemoteSchemeVer(
-        schemeRemoteDisplayMark(effective, r.scheme) || "暂无法获取",
-      );
-      setRemoteDictMark(r.dict?.remoteIdOrSha ?? "暂无法获取");
-      setRemoteModelMark(effective.downloadModel ? (modelDisplayMark(r.model, localMeta?.model) || "暂无法获取") : "");
+      setRemoteSchemeVer(remoteSchemePublishedAt(r.scheme));
+      setRemoteDictMark(remoteUpdatedAt(r.dict));
+      setRemoteModelMark(effective.downloadModel ? remoteUpdatedAt(r.model) : "");
       setLocalModelMark(effective.downloadModel ? (modelDisplayMark(localMeta?.model, r.model) || "暂无法获取") : "");
       setNotes(r.scheme?.body ?? "");
       setLastCheck(r);
@@ -2194,12 +2180,9 @@ export function HomeView() {
         pre = shared.remote;
         decision = buildUpdateDecision(localMeta, shared.remote, effective);
         resolvedKey = key;
-        setRemoteSchemeVer(
-          schemeRemoteDisplayMark(effective, shared.remote.scheme) ||
-            "暂无法获取",
-        );
-        setRemoteDictMark(shared.remote.dict?.remoteIdOrSha ?? "暂无法获取");
-        setRemoteModelMark(effective.downloadModel ? (modelDisplayMark(shared.remote.model, localMeta?.model) || "暂无法获取") : "");
+        setRemoteSchemeVer(remoteSchemePublishedAt(shared.remote.scheme));
+        setRemoteDictMark(remoteUpdatedAt(shared.remote.dict));
+        setRemoteModelMark(effective.downloadModel ? remoteUpdatedAt(shared.remote.model) : "");
         setLocalModelMark(effective.downloadModel ? (modelDisplayMark(localMeta?.model, shared.remote.model) || "暂无法获取") : "");
         setNotes(shared.remote.scheme?.body ?? "");
         setLastCheck(shared.remote);
@@ -2220,11 +2203,9 @@ export function HomeView() {
           precheckFailed = true;
           pushLog("ERROR", "AUTO", `${label}请求失败：${message}`, effective);
         });
-        setRemoteSchemeVer(
-          schemeRemoteDisplayMark(effective, pre.scheme) || "暂无法获取",
-        );
-        setRemoteDictMark(pre.dict?.remoteIdOrSha ?? "暂无法获取");
-        setRemoteModelMark(effective.downloadModel ? (modelDisplayMark(pre.model, localMeta?.model) || "暂无法获取") : "");
+        setRemoteSchemeVer(remoteSchemePublishedAt(pre.scheme));
+        setRemoteDictMark(remoteUpdatedAt(pre.dict));
+        setRemoteModelMark(effective.downloadModel ? remoteUpdatedAt(pre.model) : "");
         setLocalModelMark(effective.downloadModel ? (modelDisplayMark(localMeta?.model, pre.model) || "暂无法获取") : "");
         setNotes(pre.scheme?.body ?? "");
         setLastCheck(pre);
@@ -2531,6 +2512,9 @@ export function HomeView() {
   }
 
   function renderSection(key: HomeSectionKey) {
+    const remoteSchemeDetail = remoteDetailMark(lastCheck?.scheme);
+    const remoteDictDetail = remoteDetailMark(lastCheck?.dict);
+    const remoteModelDetail = remoteDetailMark(lastCheck?.model);
     if (key === "local") {
       const currentCheckReady = lastCheckKey === checkKey(cfg) && !!lastCheckDecision;
       const schemeValueColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : undefined;
@@ -2544,14 +2528,14 @@ export function HomeView() {
             v={localSchemeVersion}
             valueColor={schemeValueColor}
             compactMarker
-            onTap={() => showInformationPair("方案信息", "本地方案", localSchemeVersion, "远程方案", remoteSchemeVer)}
+            onTap={() => showInformationPair("方案信息", "本地方案", localSchemeDetail, "远程方案", remoteSchemeDetail)}
           />
           <RowKV
             k="本地词库"
             v={localDictMark}
             valueColor={dictValueColor}
             compactMarker
-            onTap={() => showInformationPair("词库信息", "本地词库", localDictMark, "远程词库", remoteDictMark)}
+            onTap={() => showInformationPair("词库信息", "本地词库", localDictDetail, "远程词库", remoteDictDetail)}
           />
           {cfg.downloadModel ? (
             <RowKV
@@ -2559,7 +2543,7 @@ export function HomeView() {
               v={localModelMark}
               valueColor={modelValueColor}
               compactMarker
-              onTap={() => showInformationPair("模型信息", "本地模型", localModelMark, "远程模型", remoteModelMark)}
+              onTap={() => showInformationPair("模型信息", "本地模型", localModelDetail, "远程模型", remoteModelDetail)}
             />
           ) : null}
         </Section>
@@ -2571,59 +2555,24 @@ export function HomeView() {
           <RowKV
             k="远程方案"
             v={remoteSchemeVer}
-            compactMarker
-            onTap={() => showInformationPair("方案信息", "本地方案", localSchemeVersion, "远程方案", remoteSchemeVer)}
+            onTap={() => showInformationPair("方案信息", "本地方案", localSchemeDetail, "远程方案", remoteSchemeDetail)}
           />
           <RowKV
             k="远程词库"
             v={remoteDictMark}
-            compactMarker
-            onTap={() => showInformationPair("词库信息", "本地词库", localDictMark, "远程词库", remoteDictMark)}
+            onTap={() => showInformationPair("词库信息", "本地词库", localDictDetail, "远程词库", remoteDictDetail)}
           />
           {cfg.downloadModel ? (
             <RowKV
               k="远程模型"
               v={remoteModelMark}
-              compactMarker
-              onTap={() => showInformationPair("模型信息", "本地模型", localModelMark, "远程模型", remoteModelMark)}
+              onTap={() => showInformationPair("模型信息", "本地模型", localModelDetail, "远程模型", remoteModelDetail)}
             />
           ) : null}
         </Section>
       );
     }
-    if (key === "notes") {
-      return (
-        <Section
-          key={key}
-          header={
-            <HStack
-              frame={{ maxWidth: "infinity", alignment: "center" as any }}
-            >
-              <Text>更新说明</Text>
-              <Spacer />
-              <Button
-                buttonStyle="plain"
-                action={() => {
-                  try {
-                    (globalThis as any).HapticFeedback?.mediumImpact?.();
-                  } catch {}
-                  void openFullscreenNotes();
-                }}
-              >
-                <Image
-                  systemName={FULLSCREEN_SYMBOL}
-                  foregroundStyle="systemBlue"
-                />
-              </Button>
-            </HStack>
-          }
-        >
-          <ScrollView frame={{ height: 220 }} padding>
-            <Markdown content={notes} />
-          </ScrollView>
-        </Section>
-      );
-    }
+    if (key !== "status") return null;
     return (
       <Section
         key={key}
@@ -2762,6 +2711,12 @@ export function HomeView() {
     );
   }
 
+  const updateNotesSheet = {
+    isPresented: showUpdateNotes,
+    onChanged: setShowUpdateNotes,
+    content: <MarkdownReleaseNotesSheet content={notes} title="更新说明" />,
+  };
+
   return (
     <VStack
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
@@ -2772,7 +2727,7 @@ export function HomeView() {
         message: alert.message,
         actions: alert.actions,
       }}
-      sheet={releaseNotesSheet}
+      sheet={[releaseNotesSheet, updateNotesSheet]}
     >
       <AdaptiveHomeTabView
         selection={activeTab as any}

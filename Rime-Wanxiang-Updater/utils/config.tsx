@@ -5,17 +5,16 @@ export type ReleaseSource = "cnb" | "github"
 export type SchemeEdition = "base" | "pro" | "pure" | "lite"
 export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou" | "shyplus" | "wx"
 export type InputMethod = "hamster" | "hamster3" | "scripting"
-export type HomeSectionKey = "local" | "remote" | "notes" | "status"
+export type HomeSectionKey = "local" | "remote" | "status"
 
 export const BUILTIN_SCRIPTING_BOOKMARK = "__builtin_scripting_rime__"
 export const BUILTIN_SCRIPTING_LABEL = "Scripting Rime"
 
 export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou", "shyplus", "wx"]
-export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "notes", "status"]
+export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "status"]
 export const HOME_SECTION_LABELS: Record<HomeSectionKey, string> = {
   local: "本地信息",
   remote: "远程信息",
-  notes: "更新说明",
   status: "状态",
 }
 
@@ -74,7 +73,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   syncUpdateToScriptingRimeByBookmark: {},
   autoCheckOnLaunch: false,
   showVerboseLog: true,
-  homeSectionOrder: ["local", "status", "remote", "notes"],
+  homeSectionOrder: ["local", "status", "remote"],
 }
 
 export function normalizeHomeSectionOrder(input: unknown): HomeSectionKey[] {
@@ -150,10 +149,11 @@ export function loadConfig(): AppConfig {
       }
     }
     obj.syncUpdateToScriptingRime = syncUpdateToScriptingRimeForConfig({ ...DEFAULT_CONFIG, ...obj })
+    const originalHomeSectionOrder = JSON.stringify(obj.homeSectionOrder ?? [])
     obj.homeSectionOrder = normalizeHomeSectionOrder(obj?.homeSectionOrder)
     const cfg = { ...DEFAULT_CONFIG, ...obj }
     const currentRaw = readStorageValue(st, STORAGE_KEY)
-    if (!currentRaw) saveConfig(cfg)
+    if (!currentRaw || JSON.stringify(cfg.homeSectionOrder) !== originalHomeSectionOrder) saveConfig(cfg)
     return cfg
   } catch {
     return DEFAULT_CONFIG
