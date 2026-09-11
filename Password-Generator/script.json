@@ -27,16 +27,16 @@
     "ja": "",
     "it": ""
   },
-  "version": "v3.0.0",
+  "version": "3.0.0",
   "author": {
     "email": null,
-    "homepage": "https:\/\/github.com\/BlackCCCat",
+    "homepage": "https://github.com/BlackCCCat",
     "name": "BlackCCCat"
   },
   "description": "Generate secure passwords with history and keyboard support.",
   "name": "Password Generator",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Password-Generator",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Password-Generator",
     "hash": "",
     "autoUpdateInterval": 86400
   }

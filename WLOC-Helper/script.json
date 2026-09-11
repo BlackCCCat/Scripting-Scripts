@@ -1,6 +1,6 @@
 {
   "contributors": [],
-  "version": "v3.0.0",
+  "version": "3.0.0",
   "localizedNames": {
     "fr": "",
     "pt": "",
@@ -19,7 +19,7 @@
   "author": {
     "name": "BlackCCCat",
     "email": null,
-    "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts"
+    "homepage": "https://github.com/BlackCCCat/Scripting-Scripts"
   },
   "localizedDescriptions": {
     "fr": "",
@@ -38,7 +38,7 @@
   "icon": "location.fill.viewfinder",
   "runInApp": false,
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/WLOC-Helper",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/WLOC-Helper",
     "hash": "",
     "autoUpdateInterval": 86400
   }

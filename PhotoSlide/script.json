@@ -1,18 +1,20 @@
 {
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/PhotoSlide",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/PhotoSlide",
     "hash": "",
     "autoUpdateInterval": 86400
   },
   "contributors": [],
-  "version": "v3.0.0",
+  "version": "3.0.0",
   "intentInputTypes": [],
   "author": {
     "name": "BlackCCCat",
     "homepage": "https://github.com/BlackCCCat",
     "email": null
   },
-  "permissions": ["photos"],
+  "permissions": [
+    "photos"
+  ],
   "color": "rgba(230, 190, 1,1)",
   "description": "卡片式照片整理工具，支持全部照片、相簿和截图筛选，左右滑切换照片，上下滑待删、收藏标记和移动到相簿。",
   "runInApp": true,

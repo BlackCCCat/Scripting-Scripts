@@ -1,8 +1,8 @@
 {
   "intentInputTypes": [],
-  "version": "v3.0.0",
+  "version": "3.0.0",
   "runInApp": false,
-  "iconImage": "https:\/\/raw.githubusercontent.com\/BlackCCCat\/Scripting-Scripts\/refs\/heads\/main\/src\/wanxiang_logo.PNG",
+  "iconImage": "https://raw.githubusercontent.com/BlackCCCat/Scripting-Scripts/refs/heads/main/src/wanxiang_logo.PNG",
   "localizedNames": {
     "de": "",
     "it": "",
@@ -17,7 +17,7 @@
   "author": {
     "name": "BlackCCCat",
     "email": null,
-    "homepage": "https:\/\/github.com\/BlackCCCat"
+    "homepage": "https://github.com/BlackCCCat"
   },
   "name": "万象方案助手",
   "icon": "keyboard.fill",
@@ -25,7 +25,7 @@
   "description": "万象方案下载更新",
   "color": "rgba(238, 92, 98,1)",
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Rime-Wanxiang-Updater",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Rime-Wanxiang-Updater",
     "hash": "",
     "autoUpdateInterval": 86400
   },

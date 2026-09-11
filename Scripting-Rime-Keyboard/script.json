@@ -1,15 +1,15 @@
 {
-  "version": "v3.0.0",
+  "version": "3.0.0",
   "name": "Scripting Rime Keyboard",
   "icon": "keyboard.fill",
   "author": {
     "name": "BlackCCCat",
     "email": null,
-    "homepage": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts"
+    "homepage": "https://github.com/BlackCCCat/Scripting-Scripts"
   },
   "runInApp": false,
   "remoteResource": {
-    "url": "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts\/tree\/main\/Scripting-Rime-Keyboard",
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Scripting-Rime-Keyboard",
     "hash": "",
     "autoUpdateInterval": 86400
   },

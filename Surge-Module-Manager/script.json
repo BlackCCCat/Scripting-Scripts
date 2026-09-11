@@ -20,7 +20,9 @@
   "icon": "square.grid.2x2.fill",
   "contributors": [],
   "color": "rgba(28, 140, 255,1)",
-  "intentInputTypes": ["Text"],
+  "intentInputTypes": [
+    "Text"
+  ],
   "localizedDescriptions": {
     "en": "Manage, categorize, download, and update Surge .sgmodule files. Supports recursive folders, custom link prefixes, local modules, concurrent updates, and HTTP remote module toggles.\n\nShortcuts: run this script from Scripting to update modules.\nExamples:\n1. No input, or all: update all remote modules.\n2. Category text, e.g. Ads: update that category only.\n3. JSON: {\"category\":\"Ads\",\"dir\":\"Folder\",\"name\":\"Module Name\"}\n4. Multiple names: {\"names\":[\"Module 1\",\"Module 2\"]}\n\nA valid bookmarked folder must be selected in Settings. If bookmark permission is lost, the Shortcut returns an error asking you to reselect the folder.",
     "ru": "",
@@ -39,5 +41,5 @@
     "name": "BlackCCCat",
     "homepage": "https://github.com/BlackCCCat"
   },
-  "version": "v3.0.0"
+  "version": "3.0.0"
 }
