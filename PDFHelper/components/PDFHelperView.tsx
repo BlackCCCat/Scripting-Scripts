@@ -15,6 +15,7 @@ import {
   VStack,
   ZStack,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from "scripting"
@@ -288,6 +289,7 @@ function WorkspacePanel(props: {
   onDragStarted?: (payload: PdfHelperDragPayload) => void
   onTogglePage: (workspaceId: WorkspaceId, sourceId: string, pageId: string) => void
   onDeletePage: (workspaceId: WorkspaceId, sourceId: string, pageId: string) => void
+  onEnterSelectMode?: (workspaceId: WorkspaceId, sourceId: string, pageId: string) => void
   onDropPayload: (payload: PdfHelperDragPayload, targetWorkspaceId: WorkspaceId, target?: { sourceId?: string; pageId?: string }) => void
 }) {
   const workspaceDrop = buildPdfHelperDropConfig((payload) => {
@@ -348,6 +350,7 @@ function WorkspacePanel(props: {
                 onDragStarted={props.onDragStarted}
                 onTogglePage={(sourceId, pageId) => props.onTogglePage(props.workspace.id, sourceId, pageId)}
                 onDeletePage={(sourceId, pageId) => props.onDeletePage(props.workspace.id, sourceId, pageId)}
+                onEnterSelectMode={props.onEnterSelectMode ? (sourceId, pageId) => props.onEnterSelectMode!(props.workspace.id, sourceId, pageId) : undefined}
                 onDropPayload={(payload, target) => props.onDropPayload(payload, props.workspace.id, target)}
               />
             </VStack>
@@ -471,6 +474,7 @@ export function PDFHelperView() {
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
   const [processing, setProcessing] = useState<boolean>(false)
   const [activeDrag, setActiveDrag] = useState<PdfHelperDragPayload | null>(null)
+  const [isGridSelectMode, setIsGridSelectMode] = useState<boolean>(false)
 
   const visibleWorkspaces = useMemo(
     () => dualEnabled ? workspaces : workspaces.filter((workspace) => workspace.id === "primary"),
@@ -515,12 +519,19 @@ export function PDFHelperView() {
 
   const isBusy = processing || loadingMessage !== null
   const isGridMode = displayMode === "grid"
-  const treatAsAll = isGridMode
+  const treatAsAll = isGridMode && !isGridSelectMode
+  const isSelectionActive = displayMode === "list" || isGridSelectMode
   const canConvert = (treatAsAll ? totalImageCount > 0 : selectedImageCount > 0) && !isBusy
   const canMerge = (treatAsAll ? totalItemCount > 0 : selectedPages.length > 0) && !isBusy
   const canDeleteSelected = selectedPages.length > 0 && !isBusy
   const hasAnyItems = visibleWorkspaces.some((workspace) => workspace.sources.length > 0)
   const deleteButtonDisabled = isBusy || !hasAnyItems
+
+  useEffect(() => {
+    if (isGridSelectMode && !hasAnyItems) {
+      setIsGridSelectMode(false)
+    }
+  }, [isGridSelectMode, hasAnyItems])
 
   const setWorkspaceSources = useCallback((workspaceId: WorkspaceId, updater: (sources: SourceItem[]) => SourceItem[]) => {
     setWorkspaces((prev) => prev.map((workspace) =>
@@ -529,6 +540,44 @@ export function PDFHelperView() {
         : workspace
     ))
   }, [])
+
+  const exitGridSelectMode = useCallback(() => {
+    setIsGridSelectMode(false)
+    setWorkspaces((prev) => prev.map((workspace) => ({
+      ...workspace,
+      sources: workspace.sources.map((source) => ({
+        ...source,
+        pages: source.pages.map((page) =>
+          page.selected
+            ? { ...page, selected: false, selectedOrder: undefined }
+            : page
+        ),
+      })),
+    })))
+  }, [])
+
+  const enterGridSelectMode = useCallback((workspaceId: WorkspaceId, sourceId: string, pageId: string) => {
+    setIsGridSelectMode(true)
+    setWorkspaceSources(workspaceId, (prev) => {
+      const source = prev.find((s) => s.id === sourceId)
+      const page = source?.pages.find((p) => p.id === pageId)
+      if (page?.selected) return prev
+      const currentMax = getMaxSelectedOrder(prev)
+      const next = prev.map((s) =>
+        s.id !== sourceId
+          ? s
+          : {
+            ...s,
+            pages: s.pages.map((p) =>
+              p.id === pageId
+                ? { ...p, selected: true, selectedOrder: currentMax + 1 }
+                : p
+            ),
+          }
+      )
+      return compactSelectionOrders(next)
+    })
+  }, [setWorkspaceSources])
 
   const appendImportedSources = useCallback((sources: SourceItem[], assignments: WorkspaceId[]) => {
     if (sources.length === 0 || sources.length !== assignments.length) return
@@ -705,7 +754,10 @@ export function PDFHelperView() {
         ),
       }
     }))
-  }, [canDeleteSelected, selectedPages.length, visibleWorkspaces])
+    if (isGridSelectMode) {
+      setIsGridSelectMode(false)
+    }
+  }, [canDeleteSelected, isGridSelectMode, selectedPages.length, visibleWorkspaces])
 
   const deleteImportedPdfs = useCallback(async () => {
     if (isBusy || importedPdfSources.length === 0) return
@@ -861,12 +913,14 @@ export function PDFHelperView() {
   }, [displayMode])
 
   const toggleDualMode = useCallback(() => {
+    setIsGridSelectMode(false)
     const next = !dualEnabled
     setDualEnabled(next)
     Storage.set(DUAL_ENABLED_KEY, next)
   }, [dualEnabled])
 
   const toggleDisplayMode = useCallback(() => {
+    setIsGridSelectMode(false)
     setDisplayMode((previous) => {
       const next = previous === "list" ? "grid" : "list"
       Storage.set(DISPLAY_MODE_KEY, next)
@@ -892,7 +946,9 @@ export function PDFHelperView() {
     ? `共 ${totalItemCount} 项 · ${totalPageCount} 页（图片 ${totalImageCount}）`
     : selectedPages.length > 0
       ? `已选择 ${selectedPages.length} 项 · 共 ${selectedTotalPageCount} 页（图片 ${selectedImageCount}）`
-      : `未勾选项目 · 点击列表项按序勾选`
+      : displayMode === "grid"
+        ? `未勾选项目 · 点击卡片按序勾选`
+        : `未勾选项目 · 点击列表项按序勾选`
 
   return (
     <NavigationStack>
@@ -906,7 +962,14 @@ export function PDFHelperView() {
         navigationBarTitleDisplayMode="inline"
         toolbarBackground={{ style: "systemGroupedBackground", bars: ["navigationBar"] }}
         toolbar={{
-          topBarLeading: (
+          topBarLeading: (displayMode === "grid" && isGridSelectMode) ? (
+            <Button
+              title="取消"
+              foregroundStyle={isBusy ? "secondaryLabel" : "systemBlue"}
+              disabled={isBusy}
+              action={exitGridSelectMode}
+            />
+          ) : (
             <HStack spacing={8}>
               <Button
                 title=""
@@ -951,12 +1014,13 @@ export function PDFHelperView() {
                 <WorkspacePanel
                   workspace={workspaces[0]}
                   displayMode={displayMode}
-                  selectionEnabled={displayMode === "list"}
+                  selectionEnabled={isSelectionActive}
                   showEmptyState
                   activeDragPayload={activeDrag}
                   onDragStarted={setActiveDrag}
                   onTogglePage={togglePage}
                   onDeletePage={deletePage}
+                  onEnterSelectMode={enterGridSelectMode}
                   onDropPayload={handleDropPayload}
                 />
               )
@@ -964,12 +1028,13 @@ export function PDFHelperView() {
                 <WorkspacePanel
                   workspace={workspaces[1]}
                   displayMode={displayMode}
-                  selectionEnabled={displayMode === "list"}
+                  selectionEnabled={isSelectionActive}
                   showEmptyState
                   activeDragPayload={activeDrag}
                   onDragStarted={setActiveDrag}
                   onTogglePage={togglePage}
                   onDeletePage={deletePage}
+                  onEnterSelectMode={enterGridSelectMode}
                   onDropPayload={handleDropPayload}
                 />
               )
@@ -1003,12 +1068,13 @@ export function PDFHelperView() {
           <WorkspacePanel
             workspace={workspaces[0]}
             displayMode={displayMode}
-            selectionEnabled={displayMode === "list"}
+            selectionEnabled={isSelectionActive}
             showEmptyState
             activeDragPayload={activeDrag}
             onDragStarted={setActiveDrag}
             onTogglePage={togglePage}
             onDeletePage={deletePage}
+            onEnterSelectMode={enterGridSelectMode}
             onDropPayload={handleDropPayload}
           />
         )}
@@ -1061,12 +1127,16 @@ export function PDFHelperView() {
                 }}
                 action={() => {
                   if (deleteButtonDisabled) return
-                  if (dualEnabled) {
+                  if (canDeleteSelected) {
+                    void deleteSelected()
+                    return
+                  }
+                  if (dualEnabled && !isGridSelectMode) {
                     void Dialog.alert({ message: "双栏模式不使用选择，请左划删除单个项目，或长按打开删除菜单" })
                     return
                   }
-                  if (canDeleteSelected) {
-                    void deleteSelected()
+                  if (displayMode === "grid") {
+                    void Dialog.alert({ message: "请长按卡片选择「选择」进入选择状态，或长按删除按钮打开删除菜单" })
                     return
                   }
                   void Dialog.alert({ message: "请先选择要删除的项目，或长按打开删除菜单" })

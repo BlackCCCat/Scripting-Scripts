@@ -111,12 +111,24 @@ export function buildPdfHelperDropConfig(
   }
 }
 
-function SelectionMark(props: { selected: boolean; selectedOrder?: number }) {
+function SelectionMark(props: { selected: boolean; selectedOrder?: number; isGrid?: boolean }) {
   if (props.selected && typeof props.selectedOrder === "number") {
     return (
       <ZStack frame={{ width: 22, height: 22, alignment: "center" }}>
         <Circle fill="#2563EB" frame={{ width: 22, height: 22 }} />
         <Text font="caption2" foregroundStyle="white">{String(props.selectedOrder)}</Text>
+      </ZStack>
+    )
+  }
+
+  if (props.isGrid) {
+    return (
+      <ZStack frame={{ width: 22, height: 22, alignment: "center" }}>
+        <Circle fill={props.selected ? "clear" : "rgba(0,0,0,0.25)"} frame={{ width: 18, height: 18 }} />
+        <Image
+          systemName={props.selected ? "checkmark.circle.fill" : "circle"}
+          foregroundStyle={props.selected ? "#2563EB" : "white"}
+        />
       </ZStack>
     )
   }
@@ -139,10 +151,13 @@ async function previewPageItem(page: PageItem) {
   } catch { }
 }
 
-function cardContextMenu(onPreview: () => void, onDelete: () => void) {
+function cardContextMenu(onPreview: () => void, onDelete: () => void, onSelect?: () => void) {
   return {
     menuItems: (
       <Group>
+        {onSelect ? (
+          <Button title="选择" systemImage="checkmark.circle" action={onSelect} />
+        ) : null}
         <Button title="快速预览" systemImage="eye" action={onPreview} />
         <Button title="删除" systemImage="trash" role="destructive" action={onDelete} />
       </Group>
@@ -253,6 +268,7 @@ type SourceViewProps = {
   activeDragPayload?: PdfHelperDragPayload | null
   onTogglePage: (sourceId: string, pageId: string) => void
   onDeletePage: (sourceId: string, pageId: string) => void
+  onEnterSelectMode?: (sourceId: string, pageId: string) => void
   onDropPayload?: (payload: PdfHelperDragPayload, target: SourceDropTarget) => void
   onDragStarted?: (payload: PdfHelperDragPayload) => void
 }
@@ -406,9 +422,6 @@ function GridPageContent(props: SourceViewProps & { page: PageItem }) {
         <HStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" }}>
           <Spacer />
           <Text font="caption2" lineLimit={1} multilineTextAlignment="center">{props.source.name}</Text>
-          {props.selectionEnabled ? (
-            <SelectionMark selected={props.page.selected} selectedOrder={props.page.selectedOrder} />
-          ) : null}
           <Spacer />
         </HStack>
         <HStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" }}>
@@ -428,6 +441,7 @@ function GridPageCard(props: SourceViewProps & {
 }) {
   const onPreview = () => void previewPageItem(props.page)
   const onDelete = () => props.onDeletePage(props.source.id, props.page.id)
+  const onSelect = () => props.onEnterSelectMode?.(props.source.id, props.page.id)
   const payload: PdfHelperDragPayload = {
     app: "PDFHelper",
     kind: "page",
@@ -450,12 +464,28 @@ function GridPageCard(props: SourceViewProps & {
       }}
       frame={{ maxWidth: "infinity", alignment: "center" as any }}
       contentShape="rect"
-      contextMenu={cardContextMenu(onPreview, onDelete)}
+      contextMenu={cardContextMenu(onPreview, onDelete, onSelect)}
       onDrag={buildPdfHelperDragConfig(payload, props.source.name, props.page.title, props.onDragStarted)}
       onDrop={buildPdfHelperDropConfig(props.onDropPayload, target, props.onHover)}
     >
       <ZStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" as any }}>
         <GridPageContent {...props} />
+        {props.selectionEnabled ? (
+          <VStack
+            frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topTrailing" as any }}
+            padding={4}
+          >
+            <SelectionMark selected={props.page.selected} selectedOrder={props.page.selectedOrder} isGrid />
+          </VStack>
+        ) : null}
+        {props.page.selected ? (
+          <RoundedRectangle
+            cornerRadius={10}
+            fill="rgba(37, 99, 235, 0.08)"
+            stroke="#2563EB"
+            frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          />
+        ) : null}
         {props.isHoverTarget ? (
           <RoundedRectangle
             cornerRadius={14}
