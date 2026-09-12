@@ -315,6 +315,7 @@ type HomeSessionState = {
   notes: string;
   lastCheck: AllUpdateResult | null;
   lastCheckDecision: UpdateDecision | null;
+  hasSchemeUpdateNotes: boolean;
   lastCheckKey: string;
   logs: LogEntry[];
 };
@@ -334,6 +335,7 @@ const DEFAULT_HOME_SESSION_STATE: HomeSessionState = {
   notes: "请检查更新",
   lastCheck: null,
   lastCheckDecision: null,
+  hasSchemeUpdateNotes: false,
   lastCheckKey: "",
   logs: [],
 };
@@ -1398,6 +1400,9 @@ export function HomeView() {
   );
   const [lastCheckDecision, setLastCheckDecision] =
     useState<UpdateDecision | null>(() => homeSessionState.lastCheckDecision);
+  const [hasSchemeUpdateNotes, setHasSchemeUpdateNotes] = useState(
+    () => homeSessionState.hasSchemeUpdateNotes,
+  );
   const [lastCheckKey, setLastCheckKey] = useState(
     () => homeSessionState.lastCheckKey,
   );
@@ -1440,6 +1445,7 @@ export function HomeView() {
     setNotes(DEFAULT_HOME_SESSION_STATE.notes);
     setLastCheck(DEFAULT_HOME_SESSION_STATE.lastCheck);
     setLastCheckDecision(DEFAULT_HOME_SESSION_STATE.lastCheckDecision);
+    setHasSchemeUpdateNotes(DEFAULT_HOME_SESSION_STATE.hasSchemeUpdateNotes);
     setLastCheckKey(DEFAULT_HOME_SESSION_STATE.lastCheckKey);
   }
 
@@ -1754,6 +1760,7 @@ export function HomeView() {
       notes,
       lastCheck,
       lastCheckDecision,
+      hasSchemeUpdateNotes,
       lastCheckKey,
       logs,
     };
@@ -1764,6 +1771,7 @@ export function HomeView() {
     notes,
     lastCheck,
     lastCheckDecision,
+    hasSchemeUpdateNotes,
     lastCheckKey,
     logs,
   ]);
@@ -2019,8 +2027,6 @@ export function HomeView() {
   }
 
   function renderMainTrailingToolbar() {
-    const hasSchemeUpdate =
-      lastCheckKey === checkKey(cfg) && lastCheckDecision?.scheme === true;
     const usageButton = (
       <Button
         key="usage-guide"
@@ -2034,7 +2040,7 @@ export function HomeView() {
         }}
       />
     );
-    if (hasSchemeUpdate) {
+    if (hasSchemeUpdateNotes) {
       return [
         <Button
           key="update-notes"
@@ -2117,6 +2123,7 @@ export function HomeView() {
         pushLog("ERROR", "CHECK", `${label}请求失败：${message}`, effective);
       });
       const decision = buildUpdateDecision(localMeta, r, effective);
+      if (decision.scheme) setHasSchemeUpdateNotes(true);
       setRemoteSchemeVer(remoteSchemePublishedAt(r.scheme));
       setRemoteDictMark(remoteUpdatedAt(r.dict));
       setRemoteModelMark(effective.downloadModel ? remoteUpdatedAt(r.model) : "");
@@ -2217,6 +2224,8 @@ export function HomeView() {
         decision = buildUpdateDecision(localMeta, pre, effective);
         setLastCheckDecision(decision);
       }
+
+      if (decision?.scheme) setHasSchemeUpdateNotes(true);
 
       if (decision?.scheme) pushLog("SUCCESS", "AUTO", "方案有可用更新");
       if (decision?.dict) pushLog("SUCCESS", "AUTO", "词库有可用更新");
