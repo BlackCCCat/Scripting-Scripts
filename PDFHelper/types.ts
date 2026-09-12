@@ -48,3 +48,23 @@ export type ImportResult = {
   sources: SourceItem[]
   notices: string[]
 }
+
+export type WorkspaceId = "primary" | "secondary"
+
+export type WorkspaceState = {
+  id: WorkspaceId
+  title: string
+  sources: SourceItem[]
+}
+
+export type WorkspaceLayoutDirection = "horizontal" | "vertical"
+
+export type WorkspaceDisplayMode = "list" | "grid"
+
+export type PdfHelperDragPayload = {
+  app: "PDFHelper"
+  kind: "source" | "page"
+  workspaceId: WorkspaceId
+  sourceId: string
+  pageId?: string
+}

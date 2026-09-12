@@ -1,4 +1,3 @@
-import { Path } from "scripting"
 import type { PageItem, SourceItem } from "../types"
 
 export function getSelectedPages(sources: SourceItem[]): PageItem[] {

@@ -1,8 +1,6 @@
 import { Path } from "scripting"
 
 const PREVIEW_DIR_NAME = "PDFHelperPreviews"
-const THUMB_WIDTH = 176
-const THUMB_HEIGHT = 244
 
 let _previewDirCache: string | null = null
 
@@ -16,23 +14,13 @@ export async function cleanUpPreviewDirectory(): Promise<void> {
   } catch { }
 }
 
+/**
+ * Scripting 目前仅封装了 PDFKit 数据操作层（PDFDocument、PDFPage），未提供页面位图光栅化渲染能力。
+ * 返回 null 以使用 Apple HIG 规范的原生 PDF 卡片展示；实际页面查看由 QuickLook.previewURLs 提供。
+ */
 export async function buildPdfPagePreview(
-  page: PDFPage
+  _page: PDFPage,
+  _document?: PDFDocument
 ): Promise<{ previewImage: UIImage | null; previewFilePath: string | null }> {
-  const pageData = await page.data
-  if (!pageData) {
-    return { previewImage: null, previewFilePath: null }
-  }
-
-  // Convert PDF page data → UIImage → small thumbnail
-  const fullImage = UIImage.fromData(pageData)
-  if (fullImage) {
-    const thumb = fullImage.preparingThumbnail({ width: THUMB_WIDTH, height: THUMB_HEIGHT })
-    if (thumb) {
-      // Return tiny in-memory thumbnail, no file I/O needed
-      return { previewImage: thumb, previewFilePath: null }
-    }
-  }
-
   return { previewImage: null, previewFilePath: null }
 }
