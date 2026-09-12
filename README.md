@@ -70,7 +70,7 @@ Telegram贴纸下载，需bot token，支持动图解析转换为GIF保存到相
 字体安装脚本，支持通过sharesheet导入字体文件或脚本内导入字体文件，进行字体识别和安装到系统描述文件 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Fonts-Installer.zip)
 
 ## [FileStore](./FileStore)
-功能齐全的文件管理脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scipting/FileStore)
+功能齐全的文件管理脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scripting/FileStore)
 
 **Codex完成几乎所有代码**
 
