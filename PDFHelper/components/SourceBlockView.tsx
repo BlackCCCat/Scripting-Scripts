@@ -437,7 +437,7 @@ function GridPageContent(props: SourceViewProps & { page: PageItem }) {
 function GridPageCard(props: SourceViewProps & {
   page: PageItem
   isHoverTarget?: boolean
-  onHover?: (target: SourceDropTarget | null) => void
+  onDropTargetChanged?: (target: SourceDropTarget | null) => void
 }) {
   const onPreview = () => void previewPageItem(props.page)
   const onDelete = () => props.onDeletePage(props.source.id, props.page.id)
@@ -466,7 +466,7 @@ function GridPageCard(props: SourceViewProps & {
       contentShape="rect"
       contextMenu={cardContextMenu(onPreview, onDelete, onSelect)}
       onDrag={buildPdfHelperDragConfig(payload, props.source.name, props.page.title, props.onDragStarted)}
-      onDrop={buildPdfHelperDropConfig(props.onDropPayload, target, props.onHover)}
+      onDrop={buildPdfHelperDropConfig(props.onDropPayload, target, props.onDropTargetChanged)}
     >
       <ZStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" as any }}>
         <GridPageContent {...props} />
@@ -500,7 +500,7 @@ function GridPageCard(props: SourceViewProps & {
               cornerRadius={2}
               fill="#2563EB"
               frame={{ width: 4, height: 104 }}
-              offset={{ x: -2 }}
+              offset={{ x: -2, y: 0 }}
             />
             <Spacer />
           </HStack>
@@ -545,7 +545,7 @@ function SourceGridBlockView(props: SourceViewProps & {
   showHeader: boolean
   hoverTarget: SourceDropTarget | null
   activeDrag: PdfHelperDragPayload | null
-  onHover: (target: SourceDropTarget | null) => void
+  onDropTargetChanged: (target: SourceDropTarget | null) => void
 }) {
   return (
     <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
@@ -562,7 +562,7 @@ function SourceGridBlockView(props: SourceViewProps & {
             {...props}
             page={page}
             isHoverTarget={props.hoverTarget?.pageId === page.id && props.activeDrag?.pageId !== page.id}
-            onHover={props.onHover}
+            onDropTargetChanged={props.onDropTargetChanged}
           />
         ))}
       </LazyVGrid>
@@ -633,7 +633,7 @@ export function WorkspaceGridView(props: Omit<SourceViewProps, "source"> & { sou
             showHeader
             hoverTarget={hoverTarget}
             activeDrag={activeDrag}
-            onHover={handleHover}
+            onDropTargetChanged={handleHover}
           />
         ) : (
           <LazyVGrid
@@ -652,7 +652,7 @@ export function WorkspaceGridView(props: Omit<SourceViewProps, "source"> & { sou
                   source={source}
                   page={page}
                   isHoverTarget={hoverTarget?.pageId === page.id && activeDrag?.pageId !== page.id}
-                  onHover={handleHover}
+                  onDropTargetChanged={handleHover}
                 />
               )
             })}
