@@ -183,6 +183,8 @@ function AddFavoriteView() {
 
 function ClipContentEditorView(props: {
   content: string
+  navigationTitle?: string
+  iconOnlyToolbar?: boolean
 }) {
   const dismiss = Navigation.useDismiss()
   const [controller] = useState(() => new EditorController({
@@ -200,14 +202,18 @@ function ClipContentEditorView(props: {
   return (
     <NavigationStack>
       <VStack
-        navigationTitle="编辑内容"
+        navigationTitle={props.navigationTitle ?? "编辑内容"}
         navigationBarTitleDisplayMode="inline"
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         presentationDetents={["large"]}
         presentationDragIndicator="visible"
         toolbar={{
-          topBarLeading: <Button title="取消" role="cancel" action={() => dismiss(null)} />,
-          topBarTrailing: <Button title="保存" action={() => dismiss(controller.content)} />,
+          topBarLeading: props.iconOnlyToolbar
+            ? <Button title="" systemImage="xmark" accessibilityLabel="取消" role="cancel" action={() => dismiss(null)} />
+            : <Button title="取消" role="cancel" action={() => dismiss(null)} />,
+          topBarTrailing: props.iconOnlyToolbar
+            ? <Button title="" systemImage="checkmark" accessibilityLabel="保存" action={() => dismiss(controller.content)} />
+            : <Button title="保存" action={() => dismiss(controller.content)} />,
         }}
       >
         <Editor
@@ -833,17 +839,33 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
-  async function captureNow() {
+  async function openBlankEditor() {
     setLoading(true)
     try {
-      const result = await captureCurrentClipboard(settings)
-      const message =
-        result.status === "created" ? `已采集：${result.item.title}` :
-        result.status === "updated" ? `已更新：${result.item.title}` :
-        result.reason
-      showToast(message)
-      await refresh()
-    } catch {
+      const content = await Navigation.present<string | null>({
+        element: (
+          <ClipContentEditorView
+            content=""
+            navigationTitle="添加内容"
+            iconOnlyToolbar
+          />
+        ),
+        modalPresentationStyle: "pageSheet",
+      })
+      if (content == null) return
+
+      const result = await addClipFromPayload(
+        { kind: "text", text: content },
+        { ...settingsRef.current, captureText: true },
+      )
+      if (result.status === "created" || result.status === "updated") {
+        showToast(result.status === "created" ? "已保存" : "已更新")
+        await refresh()
+      } else {
+        showToast(result.reason)
+      }
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "保存失败") })
     } finally {
       setLoading(false)
     }
@@ -1441,7 +1463,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           title=""
           systemImage="doc.badge.plus"
           disabled={loading}
-          action={withHaptic(captureNow)}
+          action={withHaptic(openBlankEditor)}
         />
       </HStack>
     )
@@ -1659,7 +1681,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             title="采集剪贴板"
             systemImage="doc.badge.plus"
             disabled={loading}
-            action={withHaptic(captureNow)}
+            action={withHaptic(openBlankEditor)}
           />
         ) : null}
       </HStack>
