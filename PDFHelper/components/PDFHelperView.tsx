@@ -37,9 +37,9 @@ import {
 import {
   chooseImportInitialDirectory,
   importFileCandidates,
+  pickSourcesFromPhotos,
   pickFileImportCandidates,
   pickSourcesFromFiles,
-  pickSourcesFromPhotos,
 } from "../utils/importer"
 import { buildOutputFileName } from "../utils/id"
 import { convertSelectedImagesToPdf, getSelectedPages, mergeSelectedPagesToPdf } from "../utils/pdf_ops"

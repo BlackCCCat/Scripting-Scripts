@@ -90,7 +90,7 @@ export function moveDraggedItem(
     } else if (
       targetSource &&
       target.pageId &&
-      (movingFromMultiPageSource || movingAcrossWorkspaces) &&
+      (movingFromMultiPageSource || movingAcrossWorkspaces || targetSource.pages.length > 1) &&
       (targetSource.kind === movingPageSourceKind || targetSource.kind === "pdf")
     ) {
       let insertIndex = targetSource.pages.findIndex((page) => page.id === target.pageId)
