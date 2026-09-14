@@ -65,11 +65,12 @@ export function moveDraggedItem(
     const originSourceIndex = originWorkspace.sources.findIndex((source) => source.id === payload.sourceId)
     if (originSourceIndex < 0 || !payload.pageId) return workspaces
     const originSource = originWorkspace.sources[originSourceIndex]
-    const originalSourceSnapshot = { ...originSource, pages: [...originSource.pages] }
     const movingFromMultiPageSource = originSource.pages.length > 1
+    const movingAcrossWorkspaces = originWorkspace.id !== targetWorkspace.id
     const pageIndex = originSource.pages.findIndex((page) => page.id === payload.pageId)
     if (pageIndex < 0) return workspaces
     const [movingPage] = originSource.pages.splice(pageIndex, 1)
+    const movingPageSourceKind = movingPage.kind === "image" ? "image" : "pdf"
     let reusableSourceId = false
     if (originSource.pages.length === 0) {
       originWorkspace.sources.splice(originSourceIndex, 1)
@@ -89,16 +90,18 @@ export function moveDraggedItem(
     } else if (
       targetSource &&
       target.pageId &&
-      movingFromMultiPageSource &&
-      targetSource.kind === originalSourceSnapshot.kind
+      (movingFromMultiPageSource || movingAcrossWorkspaces) &&
+      (targetSource.kind === movingPageSourceKind || targetSource.kind === "pdf")
     ) {
       let insertIndex = targetSource.pages.findIndex((page) => page.id === target.pageId)
       if (insertIndex < 0) insertIndex = targetSource.pages.length
       targetSource.pages.splice(insertIndex, 0, movingPage)
     } else {
-      const pageSource = {
-        ...originalSourceSnapshot,
-        id: reusableSourceId ? originalSourceSnapshot.id : createId("source"),
+      const pageSource: SourceItem = {
+        id: reusableSourceId ? originSource.id : createId("source"),
+        kind: movingPageSourceKind,
+        name: movingPage.sourceName,
+        originalPath: movingPage.kind === "image" ? undefined : movingPage.pdfPath,
         pages: [movingPage],
       }
       let insertIndex = target.sourceId

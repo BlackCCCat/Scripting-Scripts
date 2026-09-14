@@ -156,7 +156,7 @@ export async function chooseImportWorkspaceAssignments(
   sources: SourceItem[],
   defaultWorkspaceId: WorkspaceId
 ): Promise<WorkspaceId[] | null> {
-  if (sources.length <= 1) return sources.map(() => defaultWorkspaceId)
+  if (sources.length === 0) return []
 
   const result = await Navigation.present<WorkspaceId[] | null>({
     element: <ImportWorkspacePicker sources={sources} defaultWorkspaceId={defaultWorkspaceId} />,

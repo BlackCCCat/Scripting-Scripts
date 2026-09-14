@@ -920,13 +920,13 @@ export function PDFHelperView() {
   }, [dualEnabled])
 
   const toggleDisplayMode = useCallback(() => {
-    setIsGridSelectMode(false)
+    exitGridSelectMode()
     setDisplayMode((previous) => {
       const next = previous === "list" ? "grid" : "list"
       Storage.set(DISPLAY_MODE_KEY, next)
       return next
     })
-  }, [])
+  }, [exitGridSelectMode])
 
   const handleRatioChangeEnd = useCallback((nextRatio: number) => {
     const rounded = Math.round(clampRatio(nextRatio) * 1000) / 1000

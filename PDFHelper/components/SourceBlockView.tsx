@@ -330,7 +330,7 @@ function ListPageContent(props: SourceViewProps & { page: PageItem }) {
           background="rgba(0,0,0,0.0001)"
           contentShape="rect"
         >
-          <Text lineLimit={1}>{props.source.name}</Text>
+          <Text lineLimit={1}>{props.page.sourceName}</Text>
           <Spacer />
           {props.selectionEnabled ? (
             <SelectionMark selected={props.page.selected} selectedOrder={props.page.selectedOrder} />
@@ -352,7 +352,7 @@ function ListPageContent(props: SourceViewProps & { page: PageItem }) {
       <PdfPreview page={props.page} />
       <VStack alignment="leading" spacing={3}>
         <Text lineLimit={1}>{props.page.title}</Text>
-        <Text font="footnote" foregroundStyle="secondaryLabel" lineLimit={1}>{props.source.name}</Text>
+        <Text font="footnote" foregroundStyle="secondaryLabel" lineLimit={1}>{props.page.sourceName}</Text>
       </VStack>
       <Spacer />
       {props.selectionEnabled ? (
@@ -387,7 +387,7 @@ function ListPageRow(props: SourceViewProps & { page: PageItem }) {
       background="rgba(0,0,0,0.0001)"
       contentShape="rect"
       contextMenu={cardContextMenu(onPreview, onDelete)}
-      onDrag={buildPdfHelperDragConfig(payload, props.source.name, props.page.title, props.onDragStarted)}
+      onDrag={buildPdfHelperDragConfig(payload, props.page.sourceName, props.page.title, props.onDragStarted)}
       onDrop={buildPdfHelperDropConfig(props.onDropPayload, target)}
     >
       <ListPageContent {...props} />
@@ -421,7 +421,7 @@ function GridPageContent(props: SourceViewProps & { page: PageItem }) {
       <VStack alignment="center" spacing={2} frame={{ maxWidth: "infinity", alignment: "center" }}>
         <HStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" }}>
           <Spacer />
-          <Text font="caption2" lineLimit={1} multilineTextAlignment="center">{props.source.name}</Text>
+          <Text font="caption2" lineLimit={1} multilineTextAlignment="center">{props.page.sourceName}</Text>
           <Spacer />
         </HStack>
         <HStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" }}>
@@ -465,7 +465,7 @@ function GridPageCard(props: SourceViewProps & {
       frame={{ maxWidth: "infinity", alignment: "center" as any }}
       contentShape="rect"
       contextMenu={cardContextMenu(onPreview, onDelete, onSelect)}
-      onDrag={buildPdfHelperDragConfig(payload, props.source.name, props.page.title, props.onDragStarted)}
+      onDrag={buildPdfHelperDragConfig(payload, props.page.sourceName, props.page.title, props.onDragStarted)}
       onDrop={buildPdfHelperDropConfig(props.onDropPayload, target, props.onDropTargetChanged)}
     >
       <ZStack alignment="center" frame={{ maxWidth: "infinity", alignment: "center" as any }}>
