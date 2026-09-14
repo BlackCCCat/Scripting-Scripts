@@ -547,10 +547,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
     finishTranslation(translatedText)
   })
 
-  const rerunAllTranslations = useEffectEvent(async () => {
-    await runTranslation()
-  })
-
   const toggleSourceExpanded = useEffectEvent(() => {
     setIsSourceExpanded((current) => !current)
   })
@@ -559,8 +555,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
     const engine = visibleEngines.find((item) => item.id === engineId)
     if (!engine || !hasInput) return
 
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
+    const requestId = requestIdRef.current
     const startedAt = Date.now()
     setErrorText("")
     setEngineResults((current) => current.map((item) => (
@@ -769,7 +764,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
               <CopyableTextRow
                 text={result.translatedText}
                 canReplace={props.allowsReplacement}
-                onRetranslate={rerunAllTranslations}
+                onRetranslate={() => rerunSingleEngine(result.engineId)}
                 onReplace={() => useTranslation(result.translatedText)}
               />
             ) : (
@@ -778,7 +773,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
                 emptyText={result.errorText || errorText || "暂无译文"}
                 foregroundStyle={(result.errorText || errorText) ? "systemRed" : "secondaryLabel"}
                 onTapWhenEmpty={() => rerunSingleEngine(result.engineId)}
-                onRetranslate={rerunAllTranslations}
+                onRetranslate={() => rerunSingleEngine(result.engineId)}
               />
             )}
           </Section>

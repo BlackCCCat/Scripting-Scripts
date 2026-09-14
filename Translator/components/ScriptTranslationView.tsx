@@ -559,8 +559,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     const engine = visibleEngines.find((item) => item.id === engineId)
     if (!engine || !hasInput) return
 
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
+    const requestId = requestIdRef.current
     const startedAt = Date.now()
     setErrorText("")
     setEngineResults((current) => current.map((item) => (
@@ -874,7 +873,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
               ) : result.translatedText ? (
                 <CopyableTextRow
                   text={result.translatedText}
-                  onRetranslate={runTranslation}
+                  onRetranslate={() => rerunSingleEngine(result.engineId)}
                 />
               ) : (
                 <CopyableTextRow
@@ -882,7 +881,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                   emptyText={result.errorText || errorText || "暂无译文"}
                   foregroundStyle={(result.errorText || errorText) ? "systemRed" : "secondaryLabel"}
                   onTapWhenEmpty={() => rerunSingleEngine(result.engineId)}
-                  onRetranslate={runTranslation}
+                  onRetranslate={() => rerunSingleEngine(result.engineId)}
                 />
               )}
             </Section>
