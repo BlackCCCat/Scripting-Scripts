@@ -498,16 +498,23 @@ function parseAiSseResponse(raw: string) {
     const data = trimmed.slice(5).trim()
     if (!data || data === "[DONE]") continue
 
+    let payload: any
     try {
-      const payload = JSON.parse(data)
-      const piece = parseAiTranslatedText(payload)
-      if (piece) {
-        text += piece
-      }
+      payload = JSON.parse(data)
+    } catch {
+      text += data
       continue
-    } catch {}
+    }
 
-    text += data
+    const update = parseAiStreamPayload(payload)
+    if (update.mode === "error") {
+      throw new Error(update.message)
+    }
+    if (update.mode === "append") {
+      text += update.text
+    } else if (update.mode === "replace") {
+      text = update.text
+    }
   }
 
   return normalizeAiTranslatedText(text)
@@ -542,6 +549,20 @@ function parseAiStreamPayload(payload: any): StreamTextUpdate {
   if (eventType === "response.output_text.done") {
     const text = normalizeAiTranslatedText(String(payload?.text ?? ""))
     return text ? { mode: "replace", text } : { mode: "done" }
+  }
+
+  if (eventType === "content_block_start" && payload?.content_block?.type === "text") {
+    const text = String(payload?.content_block?.text ?? "")
+    return text ? { mode: "append", text } : { mode: "ignore" }
+  }
+
+  if (eventType === "content_block_delta" && payload?.delta?.type === "text_delta") {
+    const delta = String(payload?.delta?.text ?? "")
+    return delta ? { mode: "append", text: delta } : { mode: "ignore" }
+  }
+
+  if (eventType === "message_stop") {
+    return { mode: "done" }
   }
 
   const delta = String(
@@ -638,7 +659,7 @@ async function readAiStreamResponse(
     }
   }
 
-  if (buffer.trim().startsWith("data:")) {
+  if (buffer.trim()) {
     const update = parseAiSseBlock(buffer)
     if (update.mode === "error") {
       throw new Error(update.message)
@@ -692,8 +713,7 @@ function parseAiResponseText(raw: string) {
   } catch {}
 
   if (trimmed.includes("\ndata:") || trimmed.startsWith("data:")) {
-    const sseText = parseAiSseResponse(trimmed)
-    if (sseText) return sseText
+    return parseAiSseResponse(trimmed)
   }
 
   if (looksLikeHtmlDocument(trimmed) || (/^\s*</.test(trimmed) && /<\/?[a-z][^>]*>/i.test(trimmed))) {

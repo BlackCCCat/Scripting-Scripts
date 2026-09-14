@@ -7,7 +7,7 @@
   "contributors": [],
   "name": "Translator",
   "description": "一个支持系统翻译、Apple Intelligence、Google 网页翻译和可配置 AI 接口的翻译脚本。",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "localizedNames": {
     "en": "Translator",
     "de": "",
