@@ -1,8 +1,6 @@
 export type PhotoItem = {
   id: string
   asset: PHAsset
-  image: UIImage | null
-  loading: boolean
 }
 
 export type PhotoSourceKind = "all" | "screenshots" | "album"
@@ -29,4 +27,9 @@ export type CardMotion = {
   offset: PointOffset
   scale: number
   opacity: number
+}
+
+export type CardMotionController = {
+  value: CardMotion
+  onChange?: (motion: CardMotion) => void
 }

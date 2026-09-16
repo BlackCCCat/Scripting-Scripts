@@ -4,17 +4,17 @@ import {
   Text,
   Image,
   ProgressView,
+  useEffect,
+  useState,
 } from "scripting"
 import { CARD_CORNER_RADIUS, cardHeight, cardWidth } from "../constants"
-import type { PhotoItem, PointOffset } from "../types"
+import type { CardMotionController, PointOffset } from "../types"
 import { nextCardOffsetY, nextCardOpacity, nextCardScale } from "../utils"
 
 type PhotoCardStackProps = {
-  currentItem: PhotoItem
-  nextItem?: PhotoItem
-  dragOffset: PointOffset
-  cardScale: number
-  cardOpacity: number
+  currentImage: UIImage | null
+  nextImage: UIImage | null
+  motionController: CardMotionController
   onDragChanged: (value: any) => void
   onDragEnded: (value: any) => void
 }
@@ -91,18 +91,27 @@ function FixedGestureLayer({
 }
 
 export function PhotoCardStack({
-  currentItem,
-  nextItem,
-  dragOffset,
-  cardScale,
-  cardOpacity,
+  currentImage,
+  nextImage,
+  motionController,
   onDragChanged,
   onDragEnded,
 }: PhotoCardStackProps) {
+  const [motion, setMotion] = useState(() => motionController.value)
+  useEffect(() => {
+    // Keep high-frequency gesture updates inside the two-card subtree.
+    motionController.onChange = setMotion
+    setMotion(motionController.value)
+    return () => {
+      if (motionController.onChange === setMotion) motionController.onChange = undefined
+    }
+  }, [motionController])
+  const { offset: dragOffset, scale: cardScale, opacity: cardOpacity } = motion
+
   return (
     <ZStack frame={{ width: cardWidth, height: cardHeight }}>
       <PhotoImageCard
-        image={nextItem?.image ?? null}
+        image={nextImage}
         scaleEffect={nextCardScale(dragOffset)}
         offset={{ x: 0, y: nextCardOffsetY(dragOffset) }}
         opacity={nextCardOpacity(dragOffset)}
@@ -111,7 +120,7 @@ export function PhotoCardStack({
       />
 
       <PhotoImageCard
-        image={currentItem.image}
+        image={currentImage}
         scaleEffect={cardScale}
         offset={dragOffset}
         opacity={cardOpacity}

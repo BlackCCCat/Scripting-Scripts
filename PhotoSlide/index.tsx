@@ -16,6 +16,7 @@ import {
   Toolbar,
   ToolbarItem,
   useEffect,
+  useMemo,
   useRef,
   useState,
   ScrollView,
@@ -29,14 +30,14 @@ import {
   cardWidth,
   screenWidth,
   screenHeight,
-  skipTargetOffset,
 } from "./constants"
-import type { AlbumOption, PhotoItem, PhotoSource, PointOffset } from "./types"
+import type { AlbumOption, CardMotion, CardMotionController, PhotoItem, PhotoSource } from "./types"
 import { formatDate, interactiveMotion, trashFlightMotion } from "./utils"
 import { instructionsMarkdown } from "./instructions"
 import { useMarkdownReleaseNotesSheet } from "./components/ReleaseNotesSheet"
+import { PhotoImageCache } from "./photo-image-cache"
 
-const initialOffset: PointOffset = { x: 0, y: 0 }
+const initialMotion: CardMotion = { offset: { x: 0, y: 0 }, scale: 1, opacity: 1 }
 const allPhotosSource: PhotoSource = { kind: "all" }
 const screenshotsSource: PhotoSource = { kind: "screenshots" }
 const dayInMilliseconds = 24 * 60 * 60 * 1000
@@ -103,9 +104,7 @@ function App() {
   const [undoStack, setUndoStack] = useState<UndoAction[]>([])
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([])
   const [deletedPhotoIds, setDeletedPhotoIds] = useState<string[]>([])
-  const [dragOffset, setDragOffset] = useState<PointOffset>(initialOffset)
-  const [cardScale, setCardScale] = useState(1)
-  const [cardOpacity, setCardOpacity] = useState(1)
+  const motionController = useMemo<CardMotionController>(() => ({ value: initialMotion }), [])
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingAlbums, setIsLoadingAlbums] = useState(false)
   const [isThrowing, setIsThrowing] = useState(false)
@@ -159,26 +158,41 @@ function App() {
     })
   }
 
-  const loadingImageIdsRef = useRef<Set<string>>(new Set())
+  const [, setImageRevision] = useState(0)
+  const imageCache = useMemo(() => new PhotoImageCache(async item => {
+    const imageScale = Math.min(Device.screen.scale, 2)
+    return item.asset.requestImage({
+      targetWidth: Math.round(cardWidth * imageScale),
+      targetHeight: Math.round(cardHeight * imageScale),
+      contentMode: "aspectFit",
+      deliveryMode: "highQualityFormat",
+      allowNetworkAccess: true,
+    })
+  }, () => setImageRevision(revision => revision + 1)), [])
   const allSourceAssetsRef = useRef<PHAsset[]>([])
-  const unavailablePhotoIds = [...deletedPhotoIds, ...pendingDeleteIds]
+  const unavailablePhotoIds = useMemo(
+    () => [...deletedPhotoIds, ...pendingDeleteIds],
+    [deletedPhotoIds, pendingDeleteIds]
+  )
+  const skippedIdSet = useMemo(() => new Set(skippedPhotoIds), [skippedPhotoIds])
+  const unavailableIdSet = useMemo(() => new Set(unavailablePhotoIds), [unavailablePhotoIds])
 
   function findPreviousActiveIndex(
     fromIndex: number,
-    currentSkipped = skippedPhotoIds,
-    currentDeleted = unavailablePhotoIds
+    currentSkipped: ReadonlySet<string> = skippedIdSet,
+    currentDeleted: ReadonlySet<string> = unavailableIdSet
   ): number {
     for (let i = fromIndex - 1; i >= 0; i--) {
       const id = items[i].id
-      const isDeleted = currentDeleted.includes(id)
+      const isDeleted = currentDeleted.has(id)
       if (isDeleted) continue
 
       if (showSkippedOnly) {
-        if (currentSkipped.includes(id)) {
+        if (currentSkipped.has(id)) {
           return i
         }
       } else {
-        if (!currentSkipped.includes(id)) {
+        if (!currentSkipped.has(id)) {
           return i
         }
       }
@@ -188,20 +202,20 @@ function App() {
 
   function findNextActiveIndex(
     fromIndex: number,
-    currentSkipped = skippedPhotoIds,
-    currentDeleted = unavailablePhotoIds
+    currentSkipped: ReadonlySet<string> = skippedIdSet,
+    currentDeleted: ReadonlySet<string> = unavailableIdSet
   ): number {
     for (let i = fromIndex + 1; i < items.length; i++) {
       const id = items[i].id
-      const isDeleted = currentDeleted.includes(id)
+      const isDeleted = currentDeleted.has(id)
       if (isDeleted) continue
 
       if (showSkippedOnly) {
-        if (currentSkipped.includes(id)) {
+        if (currentSkipped.has(id)) {
           return i
         }
       } else {
-        if (!currentSkipped.includes(id)) {
+        if (!currentSkipped.has(id)) {
           return i
         }
       }
@@ -210,7 +224,8 @@ function App() {
   }
 
   const currentItem = items[currentIndex]
-  const nextItem = items[findNextActiveIndex(currentIndex)]
+  const nextIndex = useMemo(() => findNextActiveIndex(currentIndex), [items, currentIndex, skippedIdSet, unavailableIdSet, showSkippedOnly])
+  const nextItem = items[nextIndex]
   const selectedAlbum = selectedSource.kind === "album"
     ? albums.find(album => album.id === selectedSource.albumId)
     : undefined
@@ -219,35 +234,31 @@ function App() {
     : selectedSource.kind === "album"
       ? selectedAlbum?.title ?? "相簿"
       : "全部照片"
-  const targetAlbums = albums.filter(album => album.collection.type === "album")
-
-  const skippedCount = allSourceAssetsRef.current.filter(asset =>
-    skippedPhotoIds.includes(asset.localIdentifier) &&
-    !unavailablePhotoIds.includes(asset.localIdentifier)
-  ).length
-
-  const remainingCount = showSkippedOnly
-    ? allSourceAssetsRef.current.filter(asset =>
-        skippedPhotoIds.includes(asset.localIdentifier) &&
-        !unavailablePhotoIds.includes(asset.localIdentifier)
-      ).length
-    : allSourceAssetsRef.current.filter(asset =>
-        !skippedPhotoIds.includes(asset.localIdentifier) &&
-        !unavailablePhotoIds.includes(asset.localIdentifier)
-      ).length
+  const targetAlbums = useMemo(() => albums.filter(album => album.collection.type === "album"), [albums])
+  const sourceIds = useMemo(() => allSourceAssetsRef.current.map(asset => asset.localIdentifier), [allSourceAssetsRef.current])
+  const { skippedCount, remainingCount } = useMemo(() => {
+    let skipped = 0
+    let remaining = 0
+    for (const id of sourceIds) {
+      if (unavailableIdSet.has(id)) continue
+      if (skippedIdSet.has(id)) skipped++
+      else remaining++
+    }
+    return { skippedCount: skipped, remainingCount: showSkippedOnly ? skipped : remaining }
+  }, [sourceIds, skippedIdSet, unavailableIdSet, showSkippedOnly])
   const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto
   const isEmpty = !isLoading && items.length === 0
   const isFinished = !isLoading && items.length > 0 && currentIndex >= items.length
-  const getProgressStats = () => {
+  const activeStats = useMemo(() => {
     let currentActiveDisplayIndex = 0
     let totalActiveCount = 0
 
     for (let i = 0; i < items.length; i++) {
       const id = items[i].id
-      const isDeleted = unavailablePhotoIds.includes(id)
+      const isDeleted = unavailableIdSet.has(id)
       if (isDeleted) continue
 
-      const isSkipped = skippedPhotoIds.includes(id)
+      const isSkipped = skippedIdSet.has(id)
       const isActive = showSkippedOnly ? isSkipped : !isSkipped
 
       if (isActive) {
@@ -258,8 +269,8 @@ function App() {
       }
     }
 
-    const isCurrentActive = currentItem && !unavailablePhotoIds.includes(currentItem.id) &&
-      (showSkippedOnly ? skippedPhotoIds.includes(currentItem.id) : !skippedPhotoIds.includes(currentItem.id))
+    const isCurrentActive = currentItem && !unavailableIdSet.has(currentItem.id) &&
+      (showSkippedOnly ? skippedIdSet.has(currentItem.id) : !skippedIdSet.has(currentItem.id))
     
     const displayIndex = isCurrentActive ? currentActiveDisplayIndex + 1 : currentActiveDisplayIndex
 
@@ -267,9 +278,7 @@ function App() {
       displayIndex,
       total: totalActiveCount
     }
-  }
-
-  const activeStats = getProgressStats()
+  }, [items, currentIndex, skippedIdSet, unavailableIdSet, showSkippedOnly])
   const progressText = isLoading
     ? "正在读取照片…"
     : isFinished
@@ -284,18 +293,22 @@ function App() {
     setShowToast(true)
   }
 
+  function setCardMotion(motion: CardMotion) {
+    const previous = motionController.value
+    if (previous.offset.x === motion.offset.x && previous.offset.y === motion.offset.y &&
+        previous.scale === motion.scale && previous.opacity === motion.opacity) return
+    motionController.value = motion
+    motionController.onChange?.(motion)
+  }
+
   function resetCardState() {
-    setDragOffset(initialOffset)
-    setCardScale(1)
-    setCardOpacity(1)
+    setCardMotion(initialMotion)
   }
 
   function buildPhotoItems(assets: PHAsset[]): PhotoItem[] {
     return assets.map(asset => ({
       id: asset.localIdentifier,
       asset,
-      image: null,
-      loading: false,
     }))
   }
 
@@ -387,49 +400,6 @@ function App() {
     }
   }
 
-  async function loadImagesForIndexes(sourceItems: PhotoItem[], indexes: number[]) {
-    const validIndexes = indexes.filter(index => index >= 0 && index < sourceItems.length)
-    if (validIndexes.length === 0) return
-
-    const imageScale = Math.min(Device.screen.scale, 2)
-
-    for (const index of validIndexes) {
-      const item = sourceItems[index]
-      if (!item || item.image || loadingImageIdsRef.current.has(item.id)) continue
-      loadingImageIdsRef.current.add(item.id)
-
-      let image: UIImage | null = null
-      try {
-        image = await item.asset.requestImage({
-          targetWidth: Math.round(cardWidth * imageScale),
-          targetHeight: Math.round(cardHeight * imageScale),
-          contentMode: "aspectFit",
-          deliveryMode: "highQualityFormat",
-          allowNetworkAccess: true,
-        })
-      } catch (error) {
-        console.error(error)
-      } finally {
-        loadingImageIdsRef.current.delete(item.id)
-      }
-
-      if (!image) continue
-
-      setItems(list => {
-        const current = list[index]
-        if (!current || current.id !== item.id) return list
-
-        const copy = [...list]
-        copy[index] = {
-          ...current,
-          image,
-          loading: false,
-        }
-        return copy
-      })
-    }
-  }
-
   async function fetchAssetsForSource(source: PhotoSource): Promise<PHAsset[]> {
     const options: PHFetchOptions = {
       mediaType: "image",
@@ -473,9 +443,10 @@ function App() {
       allSourceAssetsRef.current = assets
       const syncedSkippedPhotoIds = await syncAlbumMoveHiddenState(skippedPhotoIds)
 
+      const syncedSkippedIdSet = new Set(syncedSkippedPhotoIds)
       const filteredAssets = assets.filter(asset => {
-        const isPendingDelete = unavailablePhotoIds.includes(asset.localIdentifier)
-        const isSkipped = syncedSkippedPhotoIds.includes(asset.localIdentifier)
+        const isPendingDelete = unavailableIdSet.has(asset.localIdentifier)
+        const isSkipped = syncedSkippedIdSet.has(asset.localIdentifier)
 
         if (isPendingDelete) return false
 
@@ -488,13 +459,11 @@ function App() {
 
       const photoItems = buildPhotoItems(filteredAssets)
 
-      loadingImageIdsRef.current.clear()
+      imageCache.clear()
       setItems(photoItems)
       setCurrentIndex(0)
       resetCardState()
       setIsLoading(false)
-
-      await loadImagesForIndexes(photoItems, [0, 1])
     } catch (error) {
       console.error(error)
       setIsLoading(false)
@@ -511,8 +480,13 @@ function App() {
   }, [sourceKey(selectedSource), dateFilterKey, showSkippedOnly])
 
   useEffect(() => {
-    loadImagesForIndexes(items, [currentIndex, currentIndex + 1, currentIndex + 2])
-  }, [currentIndex])
+    if (isLoading) return
+    const previousIndex = findPreviousActiveIndex(currentIndex)
+    const indexes = [currentIndex, nextIndex, findNextActiveIndex(nextIndex), previousIndex, findPreviousActiveIndex(previousIndex)]
+    imageCache.setWindow(indexes.filter(index => index >= 0 && index < items.length).map(index => items[index]))
+  }, [items, currentIndex, nextIndex, skippedIdSet, unavailableIdSet, showSkippedOnly, isLoading])
+
+  useEffect(() => () => imageCache.dispose(), [imageCache])
 
   async function refreshCurrentView() {
     await loadAlbums()
@@ -553,13 +527,11 @@ function App() {
 
     setIsThrowing(true)
 
-    const flight = trashFlightMotion(dragOffset)
+    const flight = trashFlightMotion(motionController.value.offset)
     await withAnimation(
       Animation.easeIn(0.44),
       () => {
-        setDragOffset(flight.offset)
-        setCardScale(flight.scale)
-        setCardOpacity(flight.opacity)
+        setCardMotion(flight)
       }
     )
 
@@ -575,10 +547,10 @@ function App() {
     }])
 
     resetCardState()
-    setCurrentIndex(findNextActiveIndex(currentIndex, skippedPhotoIds, [
+    setCurrentIndex(findNextActiveIndex(currentIndex, skippedIdSet, new Set([
       ...deletedPhotoIds,
       ...updatedDeleted,
-    ]))
+    ])))
     setIsThrowing(false)
   }
 
@@ -592,9 +564,7 @@ function App() {
     await withAnimation(
       Animation.easeOut(0.26),
       () => {
-        setDragOffset({ x: 0, y: targetY })
-        setCardScale(0.92)
-        setCardOpacity(0)
+        setCardMotion({ offset: { x: 0, y: targetY }, scale: 0.92, opacity: 0 })
       }
     )
 
@@ -614,7 +584,7 @@ function App() {
     const nextSkipped = skippedPhotoIds.includes(currentItem.id)
       ? skippedPhotoIds
       : [...skippedPhotoIds, currentItem.id]
-    setCurrentIndex(findNextActiveIndex(currentIndex, nextSkipped))
+    setCurrentIndex(findNextActiveIndex(currentIndex, new Set(nextSkipped)))
     setIsThrowing(false)
   }
 
@@ -628,9 +598,7 @@ function App() {
     await withAnimation(
       Animation.easeOut(0.26),
       () => {
-        setDragOffset({ x: 0, y: targetY })
-        setCardScale(0.92)
-        setCardOpacity(0)
+        setCardMotion({ offset: { x: 0, y: targetY }, scale: 0.92, opacity: 0 })
       }
     )
 
@@ -642,7 +610,7 @@ function App() {
 
     resetCardState()
     const nextSkipped = skippedPhotoIds.filter(id => id !== currentItem.id)
-    setCurrentIndex(findNextActiveIndex(currentIndex, nextSkipped))
+    setCurrentIndex(findNextActiveIndex(currentIndex, new Set(nextSkipped)))
     setIsThrowing(false)
   }
 
@@ -656,9 +624,7 @@ function App() {
     await withAnimation(
       Animation.easeOut(0.26),
       () => {
-        setDragOffset({ x: targetX, y: 0 })
-        setCardScale(0.92)
-        setCardOpacity(0)
+        setCardMotion({ offset: { x: targetX, y: 0 }, scale: 0.92, opacity: 0 })
       }
     )
 
@@ -677,17 +643,13 @@ function App() {
     }
 
     setIsThrowing(true)
-    setDragOffset({ x: -screenWidth * 1.1, y: 0 })
-    setCardScale(0.92)
-    setCardOpacity(0)
+    setCardMotion({ offset: { x: -screenWidth * 1.1, y: 0 }, scale: 0.92, opacity: 0 })
     setCurrentIndex(prevIndex)
 
     await withAnimation(
       Animation.spring({ response: 0.32, dampingFraction: 0.8 }),
       () => {
-        setDragOffset({ x: 0, y: 0 })
-        setCardScale(1)
-        setCardOpacity(1)
+        resetCardState()
       }
     )
 
@@ -799,8 +761,6 @@ function App() {
         const restoredItem: PhotoItem = {
           id: undoAction.id,
           asset,
-          image: null,
-          loading: false,
         }
         setItems(list => {
           if (list.some(item => item.id === undoAction.id)) return list
@@ -1101,9 +1061,7 @@ function App() {
       x: value.translation.width,
       y: value.translation.height,
     })
-    setDragOffset(motion.offset)
-    setCardScale(motion.scale)
-    setCardOpacity(motion.opacity)
+    setCardMotion(motion)
   }
 
   function handleDragEnded(value: any) {
@@ -1736,11 +1694,9 @@ function App() {
             ) : currentItem ? (
               <VStack spacing={12} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
                 <PhotoCardStack
-                  currentItem={currentItem}
-                  nextItem={nextItem}
-                  dragOffset={dragOffset}
-                  cardScale={cardScale}
-                  cardOpacity={cardOpacity}
+                  currentImage={imageCache.get(currentItem.id)}
+                  nextImage={imageCache.get(nextItem?.id)}
+                  motionController={motionController}
                   onDragChanged={handleDragChanged}
                   onDragEnded={handleDragEnded}
                 />
