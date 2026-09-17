@@ -426,6 +426,17 @@ function schemeStoredDisplayMark(
   ).trim();
 }
 
+function schemeDetailMark(
+  cfg: AppConfig,
+  metaScheme: MetaBundle["scheme"] | undefined,
+): string {
+  return (
+    schemeLocalDisplayMark(cfg, metaScheme) ||
+    schemeStoredDisplayMark(metaScheme) ||
+    "暂无法获取"
+  );
+}
+
 function remoteUpdatedAt(asset: AllUpdateResult["scheme"] | undefined): string {
   return formatChinaTime(asset?.updatedAt) || "暂无法获取";
 }
@@ -436,6 +447,13 @@ function remoteSchemePublishedAt(asset: AllUpdateResult["scheme"] | undefined): 
 
 function remoteDetailMark(asset: AllUpdateResult["scheme"] | undefined): string {
   return String(asset?.remoteIdOrSha ?? asset?.tag ?? asset?.name ?? "暂无法获取").trim();
+}
+
+function remoteSchemeDetailMark(
+  cfg: AppConfig,
+  asset: AllUpdateResult["scheme"] | undefined,
+): string {
+  return schemeRemoteDisplayMark(cfg, asset) || "暂无法获取";
 }
 
 function buildUpdateDecision(
@@ -1496,12 +1514,11 @@ export function HomeView() {
     const entry = makeLogEntry(level, scope, normalizedMessage);
     setLogs((prev) => {
       const next = prev.concat(entry);
-      const trimmed = next.length > 200 ? next.slice(next.length - 200) : next;
       homeSessionState = {
         ...homeSessionState,
-        logs: trimmed,
+        logs: next,
       };
-      return trimmed;
+      return next;
     });
   }
 
@@ -1706,7 +1723,7 @@ export function HomeView() {
     setLocalSchemeVersion(schemeStoredDisplayMark(meta.scheme) || "暂无法获取");
     setLocalDictMark(meta.dict?.remoteIdOrSha ?? "暂无法获取");
     setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta.model) || "暂无法获取") : "");
-    setLocalSchemeDetail(meta.scheme?.remoteIdOrSha ?? "暂无法获取");
+    setLocalSchemeDetail(schemeDetailMark(current, meta.scheme));
     setLocalDictDetail(meta.dict?.remoteIdOrSha ?? "暂无法获取");
     setLocalModelDetail(current.downloadModel ? (meta.model?.remoteIdOrSha ?? "暂无法获取") : "暂无法获取");
     return true;
@@ -1723,7 +1740,7 @@ export function HomeView() {
     const nextDecision = buildUpdateDecision(meta, remote, current);
     setRemoteModelMark(current.downloadModel ? remoteUpdatedAt(remote.model) : "");
     setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta?.model, remote.model) || "暂无法获取") : "");
-    setLocalSchemeDetail(meta?.scheme?.remoteIdOrSha ?? "暂无法获取");
+    setLocalSchemeDetail(schemeDetailMark(current, meta?.scheme));
     setLocalDictDetail(meta?.dict?.remoteIdOrSha ?? "暂无法获取");
     setLocalModelDetail(current.downloadModel ? (meta?.model?.remoteIdOrSha ?? "暂无法获取") : "暂无法获取");
     setLastCheck(remote);
@@ -1740,7 +1757,7 @@ export function HomeView() {
     setRemoteDictMark(remoteUpdatedAt(cache.remote.dict));
     setRemoteModelMark(current.downloadModel ? remoteUpdatedAt(cache.remote.model) : "");
     setLocalModelMark(current.downloadModel ? (modelDisplayMark(meta?.model, cache.remote.model) || "暂无法获取") : "");
-    setLocalSchemeDetail(meta?.scheme?.remoteIdOrSha ?? "暂无法获取");
+    setLocalSchemeDetail(schemeDetailMark(current, meta?.scheme));
     setLocalDictDetail(meta?.dict?.remoteIdOrSha ?? "暂无法获取");
     setLocalModelDetail(current.downloadModel ? (meta?.model?.remoteIdOrSha ?? "暂无法获取") : "暂无法获取");
     const nextDecision = buildUpdateDecision(meta, cache.remote, current);
@@ -2521,7 +2538,7 @@ export function HomeView() {
   }
 
   function renderSection(key: HomeSectionKey) {
-    const remoteSchemeDetail = remoteDetailMark(lastCheck?.scheme);
+    const remoteSchemeDetail = remoteSchemeDetailMark(cfg, lastCheck?.scheme);
     const remoteDictDetail = remoteDetailMark(lastCheck?.dict);
     const remoteModelDetail = remoteDetailMark(lastCheck?.model);
     if (key === "local") {
