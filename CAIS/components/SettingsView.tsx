@@ -746,6 +746,13 @@ export function SettingsView(props: {
         >
           <Text>Core Haptics 按键音</Text>
         </Toggle>
+        <Toggle
+          value={settings.launchAnimationEnabled}
+          onChanged={(launchAnimationEnabled: boolean) => update({ launchAnimationEnabled })}
+          toggleStyle="switch"
+        >
+          <Text>开屏动画</Text>
+        </Toggle>
       </Section>
 
       <Section header={<Text>长按菜单</Text>}>

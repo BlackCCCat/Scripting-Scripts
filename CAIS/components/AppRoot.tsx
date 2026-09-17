@@ -56,6 +56,7 @@ import { formatDateTime, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow, NonGlassClipRow } from "./ClipRow"
+import { LaunchSplash } from "./LaunchSplash"
 import { PipStatusView } from "./PipStatusView"
 import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SettingsView } from "./SettingsView"
@@ -414,11 +415,12 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const deleteDialogPresented = useObservable(false)
   const toastPresented = useObservable(false)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
+  const [showLaunchSplash, setShowLaunchSplash] = useState(() => settings.launchAnimationEnabled)
   const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [clipKindCounts, setClipKindCounts] = useState<ClipKindCountsByScope>(EMPTY_CLIP_KIND_COUNTS)
   const [clipKindFilters, setClipKindFilters] = useState<Record<ClipListScope, ClipKindFilter>>({ favorites: null, clipboard: null })
-  const [homeInitialDataReady, setHomeInitialDataReady] = useState(!homeScreenMode)
+  const [initialDataReady, setInitialDataReady] = useState(false)
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
   const [query, setQuery] = useState("")
@@ -701,7 +703,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         await activatePipFromApp()
       }
     } catch {
-      if (homeScreenMode) setHomeInitialDataReady(true)
     } finally {
       setLoading(false)
     }
@@ -762,7 +763,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     setFavoriteGroups(nextFavoriteGroups)
     setClipboardGroups(nextClipboardGroups)
     setClipKindCounts(nextClipKindCounts)
-    if (homeScreenMode) setHomeInitialDataReady(true)
+    setInitialDataReady(true)
   }
 
   async function updateSettings(nextSettings: CaisSettings) {
@@ -1384,6 +1385,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   function renderGroupedClipList(groups: ClipGroup[], emptyMessage: string, options: { allowDelete?: (item: ClipItem) => boolean } = {}) {
+    if (!initialDataReady) return null
     if (!groups.some((group) => group.items.length)) {
       return (
         <Section
@@ -1628,7 +1630,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   function rootPresentationProps() {
     return {
-      sheet: releaseNotesSheet,
+      sheet: showLaunchSplash ? undefined : releaseNotesSheet,
+      allowsHitTesting: !showLaunchSplash,
+      overlay: showLaunchSplash ? <LaunchSplash onFinished={() => setShowLaunchSplash(false)} /> : undefined,
       ...(pipPresented.value ? {
         pip: {
           isPresented: pipPresented,
@@ -1707,9 +1711,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           toast={toastOptions()}
         >
           {searchPanel("favorites")}
-          {homeInitialDataReady
-            ? renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")
-            : null}
+          {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
         </Form>
       )
     }
@@ -1742,13 +1744,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       >
         {pipControlPanel()}
         {searchPanel("clipboard")}
-        {homeInitialDataReady
-          ? renderGroupedClipList(
-            clipboardGroups,
-            query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-            { allowDelete: (item) => !item.manualFavorite }
-          )
-          : null}
+        {renderGroupedClipList(
+          clipboardGroups,
+          query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+          { allowDelete: (item) => !item.manualFavorite }
+        )}
       </Form>
     )
   }

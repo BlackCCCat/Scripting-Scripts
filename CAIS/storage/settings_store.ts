@@ -106,6 +106,7 @@ function sanitizeSettings(raw: any): CaisSettings {
       ? false
       : Boolean(raw?.inputClicks ?? DEFAULT_CAIS_SETTINGS.inputClicks),
     hapticEngineClicks: Boolean(raw?.hapticEngineClicks ?? DEFAULT_CAIS_SETTINGS.hapticEngineClicks),
+    launchAnimationEnabled: Boolean(raw?.launchAnimationEnabled ?? DEFAULT_CAIS_SETTINGS.launchAnimationEnabled),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
       builtins,

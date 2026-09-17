@@ -68,6 +68,7 @@ export type CaisSettings = {
   showRimeKeyboardSwitch: boolean
   inputClicks: boolean
   hapticEngineClicks: boolean
+  launchAnimationEnabled: boolean
   keyboardMaxItems: number
   keyboardMenu: KeyboardMenuSettings
 }
@@ -131,6 +132,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   showRimeKeyboardSwitch: false,
   inputClicks: false,
   hapticEngineClicks: true,
+  launchAnimationEnabled: true,
   keyboardMaxItems: 30,
   keyboardMenu: {
     builtins: {
