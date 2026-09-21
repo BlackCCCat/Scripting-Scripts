@@ -165,10 +165,13 @@ export async function editClipContent(item: ClipItem, value: string): Promise<Cl
     if (duplicate) throw new Error("相同内容已存在")
   }
   const kind = item.kind === "image" ? "text" : isLikelyURL(content) ? "url" : "text"
+  const title = item.title === clipTitle(item.kind, item.content)
+    ? clipTitle(kind, content)
+    : item.title
   const next: ClipItem = {
     ...item,
     kind,
-    title: clipTitle(kind, content),
+    title,
     content,
     contentHash: hashString(`text:${content}`),
     updatedAt: Date.now(),
