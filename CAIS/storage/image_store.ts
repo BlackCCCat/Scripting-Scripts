@@ -1,9 +1,19 @@
-import { ensureAppDirectories, imagePathForId, thumbnailPathForId, thumbnailPathForImagePath } from "./paths"
+import {
+  ensureAppDirectories,
+  imagePathForId,
+  listPreviewPathForId,
+  listPreviewPathForImagePath,
+  thumbnailPathForId,
+  thumbnailPathForImagePath,
+} from "./paths"
 import { hashString } from "../utils/common"
 
 const THUMBNAIL_SIZE = 220
 const THUMBNAIL_QUALITY = 0.68
+const LIST_PREVIEW_SIZE = 1024
+const LIST_PREVIEW_QUALITY = 0.82
 const previewPathCache = new Map<string, string>()
+const listPreviewPathCache = new Map<string, string>()
 
 function imageData(image: UIImage): Data | null {
   const dataClass = (globalThis as any).Data
@@ -43,12 +53,12 @@ async function writeData(path: string, data: Data): Promise<boolean> {
   return false
 }
 
-function imageThumbnail(image: UIImage): UIImage | null {
+function imageThumbnail(image: UIImage, size: number): UIImage | null {
   if (typeof image.preparingThumbnail === "function") {
-    return image.preparingThumbnail({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE })
+    return image.preparingThumbnail({ width: size, height: size })
   }
   if (typeof image.renderedIn === "function") {
-    return image.renderedIn({ width: THUMBNAIL_SIZE, height: THUMBNAIL_SIZE })
+    return image.renderedIn({ width: size, height: size })
   }
   return null
 }
@@ -72,7 +82,12 @@ export async function saveImageForClip(id: string, image: UIImage): Promise<stri
   const data = imageData(image)
   if (!data) return undefined
   if (!(await writeData(path, data))) return undefined
-  const thumb = imageThumbnail(image)
+  const listPreview = imageThumbnail(image, LIST_PREVIEW_SIZE)
+  const listPreviewData = listPreview ? jpegData(listPreview, LIST_PREVIEW_QUALITY) : null
+  if (listPreviewData) {
+    try { await writeData(listPreviewPathForId(id), listPreviewData) } catch {}
+  }
+  const thumb = imageThumbnail(listPreview ?? image, THUMBNAIL_SIZE)
   const thumbData = thumb ? jpegData(thumb, THUMBNAIL_QUALITY) : null
   if (thumbData) {
     try { await writeData(thumbnailPathForId(id), thumbData) } catch {}
@@ -83,8 +98,9 @@ export async function saveImageForClip(id: string, image: UIImage): Promise<stri
 export async function removeImage(path?: string | null): Promise<void> {
   if (!path) return
   previewPathCache.delete(path)
+  listPreviewPathCache.delete(path)
   const fm = (globalThis as any).FileManager
-  const paths = [path, thumbnailPathForImagePath(path)].filter(Boolean) as string[]
+  const paths = [path, thumbnailPathForImagePath(path), listPreviewPathForImagePath(path)].filter(Boolean) as string[]
   try {
     for (const filePath of paths) {
       if (typeof fm?.exists === "function" && await fm.exists(filePath)) {
@@ -111,5 +127,21 @@ export function imagePreviewPath(path?: string | null): string | undefined {
   } catch {
   }
   previewPathCache.set(path, path)
+  return path
+}
+
+export function imageListPreviewPath(path?: string | null): string | undefined {
+  if (!path) return undefined
+  const cached = listPreviewPathCache.get(path)
+  if (cached) return cached
+  const preview = listPreviewPathForImagePath(path)
+  const fm = (globalThis as any).FileManager
+  try {
+    if (preview && typeof fm?.existsSync === "function" && fm.existsSync(preview)) {
+      listPreviewPathCache.set(path, preview)
+      return preview
+    }
+  } catch {
+  }
   return path
 }

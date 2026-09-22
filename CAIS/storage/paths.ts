@@ -78,6 +78,10 @@ export function thumbnailPathForId(id: string): string {
   return joinPath(imageDirectory(), `${id}.thumb.jpg`)
 }
 
+export function listPreviewPathForId(id: string): string {
+  return joinPath(imageDirectory(), `${id}.preview.jpg`)
+}
+
 export function thumbnailPathForImagePath(path?: string | null): string | undefined {
   if (!path) return undefined
   const slashIndex = path.lastIndexOf("/")
@@ -85,6 +89,15 @@ export function thumbnailPathForImagePath(path?: string | null): string | undefi
   const fileName = slashIndex >= 0 ? path.slice(slashIndex + 1) : path
   const baseName = fileName.replace(/\.[^.]+$/, "")
   return `${directory}${baseName}.thumb.jpg`
+}
+
+export function listPreviewPathForImagePath(path?: string | null): string | undefined {
+  if (!path) return undefined
+  const slashIndex = path.lastIndexOf("/")
+  const directory = slashIndex >= 0 ? path.slice(0, slashIndex + 1) : ""
+  const fileName = slashIndex >= 0 ? path.slice(slashIndex + 1) : path
+  const baseName = fileName.replace(/\.[^.]+$/, "")
+  return `${directory}${baseName}.preview.jpg`
 }
 
 export async function ensureAppDirectories(): Promise<void> {

@@ -1,7 +1,9 @@
 import { HStack, Image, Spacer, Text, VStack, useColorScheme } from "scripting"
 import type { ClipItem } from "../types"
 import { formatDateTime, summarizeContent } from "../utils/common"
-import { imagePreviewPath } from "../storage/image_store"
+import { imageListPreviewPath } from "../storage/image_store"
+
+const IMAGE_PREVIEW_HEIGHT = 180
 
 function iconName(item: ClipItem): string {
   if (item.favoriteFormat === "fields") return "list.bullet.rectangle"
@@ -27,7 +29,7 @@ function ClipRowContent(props: {
     <>
       <Image
         systemName={iconName(item)}
-        frame={{ width: 28 }}
+        frame={{ width: 28, maxHeight: "infinity", alignment: "center" as any }}
         foregroundStyle={item.pinned ? "systemOrange" : "systemBlue"}
       />
       <VStack
@@ -43,15 +45,14 @@ function ClipRowContent(props: {
           {item.pinned ? <Image systemName="pin.fill" foregroundStyle="systemOrange" /> : null}
         </HStack>
         {props.previewPath ? (
-          <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-            <Image
-              filePath={props.previewPath}
-              resizable
-              scaleToFit
-              frame={{ width: 96, height: 64, alignment: "center" as any }}
-              clipShape={{ type: "rect", cornerRadius: 8 } as any}
-            />
-          </HStack>
+          <Image
+            filePath={props.previewPath}
+            resizable
+            scaleToFill
+            frame={{ maxWidth: "infinity", height: IMAGE_PREVIEW_HEIGHT, alignment: "center" as any }}
+            clipShape={{ type: "rect", cornerRadius: 10 } as any}
+            clipped
+          />
         ) : (
           <Text
             font="subheadline"
@@ -78,7 +79,7 @@ export function NonGlassClipRow(props: {
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
-  const previewPath = item.kind === "image" ? imagePreviewPath(item.imagePath) : undefined
+  const previewPath = item.kind === "image" ? imageListPreviewPath(item.imagePath) : undefined
   const colorScheme = useColorScheme()
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
 
@@ -105,7 +106,7 @@ export function ClipRow(props: {
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
-  const previewPath = item.kind === "image" ? imagePreviewPath(item.imagePath) : undefined
+  const previewPath = item.kind === "image" ? imageListPreviewPath(item.imagePath) : undefined
 
   return (
     <HStack
@@ -114,49 +115,7 @@ export function ClipRow(props: {
       padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
       glassEffect={{ type: "rect", cornerRadius: 18 } as any}
     >
-      <Image
-        systemName={iconName(item)}
-        frame={{ width: 28 }}
-        foregroundStyle={item.pinned ? "systemOrange" : "systemBlue"}
-      />
-      <VStack
-        frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
-        spacing={5}
-      >
-        <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="headline" lineLimit={1} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-            {item.title}
-          </Text>
-          <Spacer />
-          {item.favorite ? <Image systemName="star.fill" foregroundStyle="systemYellow" /> : null}
-          {item.pinned ? <Image systemName="pin.fill" foregroundStyle="systemOrange" /> : null}
-        </HStack>
-        {previewPath ? (
-          <HStack frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-            <Image
-              filePath={previewPath}
-              resizable
-              scaleToFit
-              frame={{ width: 96, height: 64, alignment: "center" as any }}
-              clipShape={{ type: "rect", cornerRadius: 8 } as any}
-            />
-          </HStack>
-        ) : (
-          <Text
-            font="subheadline"
-            foregroundStyle="secondaryLabel"
-            lineLimit={lineLimit}
-            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            multilineTextAlignment="leading"
-          >
-            {item.kind === "image" ? "图片已保存" : summarizeContent(item.content, Math.max(140, lineLimit * 90))}
-          </Text>
-        )}
-        <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item)}</Text>
-          <Text font="caption" foregroundStyle="tertiaryLabel">{formatDateTime(item.updatedAt)}</Text>
-        </HStack>
-      </VStack>
+      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} />
     </HStack>
   )
 }
