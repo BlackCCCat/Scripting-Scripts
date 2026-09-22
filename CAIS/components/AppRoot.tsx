@@ -53,7 +53,7 @@ import { initializeDatabase, readDatabaseDataVersion } from "../storage/database
 import { readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
 import { loadSettings, saveSettings } from "../storage/settings_store"
 import { applyICloudSyncSettings } from "../storage/icloud_sync"
-import { formatDateTime, isLikelyURL, withHaptic } from "../utils/common"
+import { formatDateTime, isLikelyURL, makeId, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow, NonGlassClipRow } from "./ClipRow"
@@ -110,7 +110,7 @@ type ClipKindFilter = ClipKind | null
 type HomeRoute =
   | { kind: "addContent" }
   | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number }
-  | { kind: "favoriteEditor"; item?: ClipItem; initial?: FavoriteDraft }
+  | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft }
   | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
   | { kind: "image"; item: ClipItem }
   | { kind: "tokens"; tokens: CaisToken[] }
@@ -1194,6 +1194,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   async function presentFavoriteEditor(item?: ClipItem, preferredFormat?: "plain" | "fields") {
     try {
+      const sessionId = makeId("favorite-editor")
       const initial: FavoriteDraft | undefined = item ? {
         title: item.title,
         content: await getFullClipContent(item.id),
@@ -1201,12 +1202,13 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         fieldDelimiter: item.fieldDelimiterOverride ? item.fieldDelimiter : undefined,
       } : undefined
       if (embeddedHomeNavigation) {
-        presentHomeRoute({ kind: "favoriteEditor", item, initial })
+        presentHomeRoute({ kind: "favoriteEditor", sessionId, item, initial })
         return
       }
       const result = await Navigation.present<FavoriteDraft | null>({
         element: (
           <FavoriteEditorView
+            key={sessionId}
             initial={initial}
             defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
             onPreviewCopy={copyFavoriteField}
@@ -2074,6 +2076,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       const route = homeRoute
       return (
         <FavoriteEditorView
+          key={route.sessionId}
           initial={route.initial}
           defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
           onPreviewCopy={copyFavoriteField}
