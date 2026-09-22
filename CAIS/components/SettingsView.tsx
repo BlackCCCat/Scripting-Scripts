@@ -1,10 +1,10 @@
 import {
   Button,
+  EmptyView,
   ForEach,
   Form,
   HStack,
   Image,
-  Menu,
   Navigation,
   NavigationLink,
   NavigationStack,
@@ -112,7 +112,12 @@ function customActionModeFromIndex(index: number): KeyboardCustomActionMode {
   return "template";
 }
 
-function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
+function CustomActionEditorView(props: {
+  action?: KeyboardCustomAction;
+  embedded?: boolean;
+  onCancel?: () => void;
+  onSave?: (action: KeyboardCustomAction) => void;
+}) {
   const dismiss = Navigation.useDismiss();
   const [title, setTitle] = useState(props.action?.title ?? "");
   const [mode, setMode] = useState<KeyboardCustomActionMode>(
@@ -197,7 +202,7 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
         return;
       }
     }
-    dismiss({
+    const next = {
       id: props.action?.id ?? makeId("menu"),
       title: fixedTitle,
       mode,
@@ -207,21 +212,34 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
       script: mode === "javascript" || mode === "networkRequest" ? fixedScript : "",
       writeToClipboard: mode === "networkRequest" ? writeToClipboard : true,
       enabled: props.action?.enabled ?? true,
-    });
+    };
+    if (props.onSave) {
+      props.onSave(next);
+    } else {
+      dismiss(next);
+    }
   }
 
-  return (
-    <NavigationStack>
-      <Form
+  function cancel() {
+    if (props.onCancel) {
+      props.onCancel();
+    } else {
+      dismiss(null);
+    }
+  }
+
+  const form = (
+    <Form
         navigationTitle={props.action ? "编辑功能" : "添加功能"}
         navigationBarTitleDisplayMode="inline"
+        tabBarVisibility={props.embedded ? "visible" : undefined}
         formStyle="grouped"
         presentationDetents={[0.72, "large"]}
         presentationDragIndicator="visible"
         toolbar={{
-          topBarLeading: (
-            <Button title="取消" role="cancel" action={() => dismiss(null)} />
-          ),
+          topBarLeading: props.embedded
+            ? undefined
+            : <Button title="取消" role="cancel" action={cancel} />,
           topBarTrailing: <Button title="保存" action={() => void save()} />,
         }}
       >
@@ -360,9 +378,10 @@ function CustomActionEditorView(props: { action?: KeyboardCustomAction }) {
             ) : null}
           </Section>
         )}
-      </Form>
-    </NavigationStack>
+    </Form>
   );
+
+  return props.embedded ? form : <NavigationStack>{form}</NavigationStack>;
 }
 
 export function SettingsView(props: {
@@ -374,8 +393,11 @@ export function SettingsView(props: {
   onRotateLanShareToken?: () => void;
   leadingToolbar?: any;
   trailingToolbar?: any;
+  embeddedNavigation?: boolean;
 }) {
   const settings = props.value;
+  const [embeddedCustomAction, setEmbeddedCustomAction] = useState<KeyboardCustomAction | null | undefined>(undefined);
+  const [embeddedCustomActionPresented, setEmbeddedCustomActionPresented] = useState(false);
 
   function update(next: Partial<CaisSettings>) {
     props.onChanged({ ...settings, ...next });
@@ -508,6 +530,11 @@ export function SettingsView(props: {
   }
 
   async function presentCustomActionEditor(action?: KeyboardCustomAction) {
+    if (props.embeddedNavigation) {
+      setEmbeddedCustomAction(action ?? null);
+      setEmbeddedCustomActionPresented(true);
+      return;
+    }
     const next = await Navigation.present<KeyboardCustomAction | null>({
       element: <CustomActionEditorView action={action} />,
       modalPresentationStyle: "pageSheet",
@@ -519,6 +546,24 @@ export function SettingsView(props: {
     <Form
       formStyle="grouped"
       toolbar={renderToolbar()}
+      navigationDestination={props.embeddedNavigation ? {
+        isPresented: embeddedCustomActionPresented,
+        onChanged: (isPresented: boolean) => {
+          setEmbeddedCustomActionPresented(isPresented);
+          if (!isPresented) setEmbeddedCustomAction(undefined);
+        },
+        content: embeddedCustomAction !== undefined ? (
+          <CustomActionEditorView
+            action={embeddedCustomAction ?? undefined}
+            embedded
+            onCancel={() => setEmbeddedCustomActionPresented(false)}
+            onSave={(action) => {
+              saveCustomAction(action);
+              setEmbeddedCustomActionPresented(false);
+            }}
+          />
+        ) : <EmptyView />,
+      } : undefined}
     >
       <Section header={<Text>数据管理</Text>}>
         <Toggle
@@ -587,6 +632,20 @@ export function SettingsView(props: {
               }
             }
           }}
+        />
+      </Section>
+
+      <Section
+        header={<Text>收藏设置</Text>}
+        footer={<Text>字段收藏默认使用此分隔符；可在编辑单个字段收藏时开启独立分隔符进行覆盖。</Text>}
+      >
+        <TextField
+          title="默认分隔符"
+          value={settings.favoriteFieldDelimiter}
+          prompt=":"
+          onChanged={(value: string) => update({
+            favoriteFieldDelimiter: value.replace(/[\r\n]/g, "").slice(0, 8),
+          })}
         />
       </Section>
 
@@ -699,6 +758,13 @@ export function SettingsView(props: {
           toggleStyle="switch"
         >
           <Text>条目卡片玻璃效果</Text>
+        </Toggle>
+        <Toggle
+          value={settings.homeScreenEmbeddedNavigation}
+          onChanged={(homeScreenEmbeddedNavigation: boolean) => update({ homeScreenEmbeddedNavigation })}
+          toggleStyle="switch"
+        >
+          <Text>首页使用内嵌导航</Text>
         </Toggle>
         <Toggle
           value={settings.keyboardShowTitle}

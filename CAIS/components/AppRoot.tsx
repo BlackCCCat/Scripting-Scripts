@@ -47,12 +47,13 @@ import {
   togglePinned,
   updateClipTitle,
   addFavoriteFromInput,
+  updateFavoriteFromInput,
 } from "../storage/clip_repository"
 import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
 import { readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
 import { loadSettings, saveSettings } from "../storage/settings_store"
 import { applyICloudSyncSettings } from "../storage/icloud_sync"
-import { formatDateTime, withHaptic } from "../utils/common"
+import { formatDateTime, isLikelyURL, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
 import { readAppFullscreen, writeAppFullscreen } from "../utils/window_state"
 import { ClipRow, NonGlassClipRow } from "./ClipRow"
@@ -81,6 +82,14 @@ import {
 } from "../services/lan_share_server"
 import { rotateLanShareAccessToken } from "../services/lan_share_credentials"
 import { recognizeTextFromImagePath } from "../services/image_text_recognition"
+import { playCaisHaptic } from "../utils/feedback"
+import { favoriteDelimiterForItem, isFieldFavorite, parseFavoriteFields, type FavoriteField } from "../utils/favorite_fields"
+import {
+  FavoriteEditorView,
+  FavoriteFieldsDetailView,
+  type FavoriteDraft,
+} from "./FavoriteFieldsView"
+import { FavoriteFieldActionMenu } from "./FavoriteFieldActionMenu"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
@@ -98,6 +107,13 @@ let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
 type AppRootMode = "app" | "home"
 type ClipKindFilter = ClipKind | null
+type HomeRoute =
+  | { kind: "addContent" }
+  | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number }
+  | { kind: "favoriteEditor"; item?: ClipItem; initial?: FavoriteDraft }
+  | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
+  | { kind: "image"; item: ClipItem }
+  | { kind: "tokens"; tokens: CaisToken[] }
 const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
   favorites: { total: 0, text: 0, url: 0, image: 0 },
   clipboard: { total: 0, text: 0, url: 0, image: 0 },
@@ -142,50 +158,13 @@ function EmptyState(props: {
   )
 }
 
-function AddFavoriteView() {
-  const dismiss = Navigation.useDismiss()
-  const [title, setTitle] = useState("")
-  const [content, setContent] = useState("")
-  return (
-    <NavigationStack>
-      <Form
-        navigationTitle="添加收藏"
-        navigationBarTitleDisplayMode="inline"
-        formStyle="grouped"
-        presentationDetents={[0.72, "large"]}
-        presentationDragIndicator="visible"
-        toolbar={{
-          topBarLeading: <Button title="取消" role="cancel" action={() => dismiss(null)} />,
-          topBarTrailing: <Button title="保存" disabled={!content.trim()} action={() => {
-            dismiss({ title, content })
-          }} />
-        }}
-      >
-        <Section>
-          <TextField title="标题" value={title} prompt="可选，留空则自动生成" onChanged={setTitle} />
-        </Section>
-        <Section
-          header={<Text>内容</Text>}
-          footer={<Text>{"可使用 {{text}}、{{date}}、{{time}}、{{datetime}}、{{timestamp}}。"}</Text>}
-        >
-          <TextField
-            title=""
-            value={content}
-            prompt="输入你想收藏的内容"
-            axis="vertical"
-            frame={{ minHeight: 120, maxWidth: "infinity", alignment: "topLeading" as any }}
-            onChanged={setContent}
-          />
-        </Section>
-      </Form>
-    </NavigationStack>
-  )
-}
-
 function ClipContentEditorView(props: {
   content: string
   navigationTitle?: string
   iconOnlyToolbar?: boolean
+  embedded?: boolean
+  onCancel?: () => void
+  onSave?: (content: string) => void
 }) {
   const dismiss = Navigation.useDismiss()
   const [controller] = useState(() => new EditorController({
@@ -200,21 +179,39 @@ function ClipContentEditorView(props: {
     }
   }, [controller])
 
-  return (
-    <NavigationStack>
-      <VStack
+  function cancel() {
+    if (props.onCancel) {
+      props.onCancel()
+    } else {
+      dismiss(null)
+    }
+  }
+
+  function save() {
+    if (props.onSave) {
+      props.onSave(controller.content)
+    } else {
+      dismiss(controller.content)
+    }
+  }
+
+  const page = (
+    <VStack
         navigationTitle={props.navigationTitle ?? "编辑内容"}
         navigationBarTitleDisplayMode="inline"
+        tabBarVisibility={props.embedded ? "visible" : undefined}
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         presentationDetents={["large"]}
         presentationDragIndicator="visible"
         toolbar={{
-          topBarLeading: props.iconOnlyToolbar
-            ? <Button title="" systemImage="xmark" accessibilityLabel="取消" role="cancel" action={() => dismiss(null)} />
-            : <Button title="取消" role="cancel" action={() => dismiss(null)} />,
+          topBarLeading: props.embedded
+            ? undefined
+            : props.iconOnlyToolbar
+              ? <Button title="" systemImage="xmark" accessibilityLabel="取消" role="cancel" action={cancel} />
+              : <Button title="取消" role="cancel" action={cancel} />,
           topBarTrailing: props.iconOnlyToolbar
-            ? <Button title="" systemImage="checkmark" accessibilityLabel="保存" action={() => dismiss(controller.content)} />
-            : <Button title="保存" action={() => dismiss(controller.content)} />,
+            ? <Button title="" systemImage="checkmark" accessibilityLabel="保存" action={save} />
+            : <Button title="保存" action={save} />,
         }}
       >
         <Editor
@@ -222,15 +219,18 @@ function ClipContentEditorView(props: {
           scriptName="CAIS"
           showAccessoryView
           searchEnabled
-          ignoresSafeArea={{ regions: "container", edges: "bottom" }}
+          ignoresSafeArea={props.embedded ? undefined : { regions: "container", edges: "bottom" }}
         />
-      </VStack>
-    </NavigationStack>
+    </VStack>
   )
+
+  return props.embedded ? page : <NavigationStack>{page}</NavigationStack>
 }
 
 function AppTokenResultView(props: {
   tokens: CaisToken[]
+  embedded?: boolean
+  onCopySelection?: (content: string) => void
 }) {
   const dismiss = Navigation.useDismiss()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -242,16 +242,24 @@ function AppTokenResultView(props: {
       : [...ids, token.id])
   }
 
-  return (
-    <NavigationStack>
-      <VStack
+  function submit() {
+    if (props.onCopySelection) {
+      props.onCopySelection(selectedText)
+    } else {
+      dismiss(selectedText)
+    }
+  }
+
+  const page = (
+    <VStack
         navigationTitle="分词结果"
         navigationBarTitleDisplayMode="inline"
+        tabBarVisibility={props.embedded ? "visible" : undefined}
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         padding={16}
         toolbar={{
           topBarLeading: <Button title="清空" systemImage="arrow.counterclockwise.circle" disabled={!selectedText} action={() => setSelectedIds([])} />,
-          topBarTrailing: <Button title="复制" systemImage="doc.on.doc" disabled={!selectedText} action={() => dismiss(selectedText)} />,
+          topBarTrailing: <Button title="复制" systemImage="doc.on.doc" disabled={!selectedText} action={submit} />,
         }}
       >
         <TokenSelectionPanel
@@ -261,13 +269,16 @@ function AppTokenResultView(props: {
           minHeight={420}
           onToggle={toggleToken}
         />
-      </VStack>
-    </NavigationStack>
+    </VStack>
   )
+
+  return props.embedded ? page : <NavigationStack>{page}</NavigationStack>
 }
 
 function ImageViewerView(props: {
   item: ClipItem
+  embedded?: boolean
+  onClose?: () => void
 }) {
   const dismiss = Navigation.useDismiss()
   const imagePath = props.item.imagePath
@@ -320,15 +331,23 @@ function ImageViewerView(props: {
     }, nextScale, viewport)
   }
 
-  return (
-    <NavigationStack>
-      <VStack
+  function close() {
+    if (props.onClose) {
+      props.onClose()
+    } else {
+      dismiss(null)
+    }
+  }
+
+  const page = (
+    <VStack
         navigationTitle={props.item.title || "图片"}
         navigationBarTitleDisplayMode="inline"
+        tabBarVisibility={props.embedded ? "visible" : undefined}
         frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
         padding={16}
         toolbar={{
-          topBarTrailing: <Button title="完成" action={() => dismiss(null)} />,
+          topBarTrailing: <Button title="完成" action={close} />,
         }}
       >
         {imagePath ? (
@@ -395,9 +414,10 @@ function ImageViewerView(props: {
         ) : (
           <Text foregroundStyle="secondaryLabel">图片文件不可读取</Text>
         )}
-      </VStack>
-    </NavigationStack>
+    </VStack>
   )
+
+  return props.embedded ? page : <NavigationStack>{page}</NavigationStack>
 }
 
 export function AppRoot(props: { mode?: AppRootMode } = {}) {
@@ -421,12 +441,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const [clipKindCounts, setClipKindCounts] = useState<ClipKindCountsByScope>(EMPTY_CLIP_KIND_COUNTS)
   const [clipKindFilters, setClipKindFilters] = useState<Record<ClipListScope, ClipKindFilter>>({ favorites: null, clipboard: null })
   const [initialDataReady, setInitialDataReady] = useState(false)
+  const [homeRoute, setHomeRoute] = useState<HomeRoute | null>(null)
+  const [homeRoutePresented, setHomeRoutePresented] = useState(false)
   const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
   const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
   const [query, setQuery] = useState("")
   const settingsRef = useRef(settings)
   const queryRef = useRef(query)
   const clipKindFiltersRef = useRef(clipKindFilters)
+  const homeRouteRef = useRef<HomeRoute | null>(null)
+  const listRefreshBlocked = useRef(false)
+  const listRefreshDeferred = useRef(false)
   const lastObservedPasteboardChangeCount = useRef<number | null>(null)
   const toastHideTimer = useRef<any>(null)
   const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
@@ -440,6 +465,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     capturedCount: 0,
   })
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+  const embeddedHomeNavigation = homeScreenMode && settings.homeScreenEmbeddedNavigation
 
   useEffect(() => {
     settingsRef.current = settings
@@ -507,6 +533,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
     function scheduleRefresh() {
       if (stopped) return
+      if (listRefreshBlocked.current) {
+        listRefreshDeferred.current = true
+        return
+      }
       if (refreshQueued) {
         refreshRequested = true
         return
@@ -840,7 +870,37 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
+  function presentHomeRoute(route: HomeRoute) {
+    homeRouteRef.current = route
+    setHomeRoute(route)
+    setHomeRoutePresented(true)
+  }
+
+  function takeHomeRoute(): HomeRoute | null {
+    const route = homeRouteRef.current
+    homeRouteRef.current = null
+    setHomeRoutePresented(false)
+    return route
+  }
+
+  async function persistNewContent(content: string) {
+    const result = await addClipFromPayload(
+      { kind: "text", text: content },
+      { ...settingsRef.current, captureText: true },
+    )
+    if (result.status === "created" || result.status === "updated") {
+      showToast(result.status === "created" ? "已保存" : "已更新")
+      await refresh()
+    } else {
+      showToast(result.reason)
+    }
+  }
+
   async function openBlankEditor() {
+    if (embeddedHomeNavigation) {
+      presentHomeRoute({ kind: "addContent" })
+      return
+    }
     setLoading(true)
     try {
       const content = await Navigation.present<string | null>({
@@ -854,17 +914,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         modalPresentationStyle: "pageSheet",
       })
       if (content == null) return
-
-      const result = await addClipFromPayload(
-        { kind: "text", text: content },
-        { ...settingsRef.current, captureText: true },
-      )
-      if (result.status === "created" || result.status === "updated") {
-        showToast(result.status === "created" ? "已保存" : "已更新")
-        await refresh()
-      } else {
-        showToast(result.reason)
-      }
+      await persistNewContent(content)
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "保存失败") })
     } finally {
@@ -872,15 +922,86 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
-  async function copyItem(item: ClipItem) {
+  async function copyItem(
+    item: ClipItem,
+    options: { notify?: boolean; refresh?: boolean } = {},
+  ): Promise<string | void> {
     try {
+      const { notify = true, refresh: refreshNow = true } = options
       const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
       await markCopied(item)
-      showToast("已复制")
-      await refresh()
+      if (notify) showToast("已复制")
+      if (refreshNow) await refresh()
+      return "已复制"
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "复制失败") })
+    }
+  }
+
+  async function persistFavoriteFieldCopy(value: string) {
+    try {
+      await addClipFromPayload(
+        { kind: "text", text: value },
+        { ...settingsRef.current, captureText: true },
+      )
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "记录复制内容失败") })
+    }
+  }
+
+  async function copyFavoriteField(field: FavoriteField): Promise<string | void> {
+    try {
+      playCaisHaptic()
+      const value = renderRuntimeTemplate(field.value)
+      await writeTextToPasteboard(value)
+      const run = () => void persistFavoriteFieldCopy(value)
+      if ((globalThis as any).setTimeout) {
+        ;(globalThis as any).setTimeout(run, 0)
+      } else {
+        run()
+      }
+      return `已复制：${field.name}`
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "复制失败") })
+    }
+  }
+
+  async function openFavoriteFields(item: ClipItem) {
+    const content = await getFullClipContent(item.id)
+    const parsed = parseFavoriteFields(content, favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter))
+    if (parsed.errors.length) {
+      await Dialog.alert({ title: "字段内容无法解析", message: parsed.errors[0] })
+      return
+    }
+    if (embeddedHomeNavigation) {
+      listRefreshBlocked.current = true
+      presentHomeRoute({ kind: "favoriteFields", item, fields: parsed.fields })
+      return
+    }
+    listRefreshBlocked.current = true
+    try {
+      await Navigation.present({
+        element: (
+          <FavoriteFieldsDetailView
+            title={item.title}
+            fields={parsed.fields}
+            onCopy={copyFavoriteField}
+            renderFieldContextMenu={renderFavoriteFieldContextMenu}
+            onCopyAll={() => {
+              playCaisHaptic()
+              return copyItem(item, { notify: false, refresh: false })
+            }}
+          />
+        ),
+        modalPresentationStyle: "pageSheet",
+      })
+    } finally {
+      listRefreshBlocked.current = false
+      if (listRefreshDeferred.current) {
+        listRefreshDeferred.current = false
+        await refresh(true, settingsRef.current)
+      }
     }
   }
 
@@ -955,34 +1076,201 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     await refresh()
   }
 
+  async function completeContentEdit(
+    item: ClipItem,
+    originalContent: string,
+    initialChangeCount: number,
+    nextContent: string | null,
+  ) {
+    let needsRefresh = false
+    if (await currentChangeCount() !== initialChangeCount) {
+      await captureCurrentClipboard(settingsRef.current)
+      needsRefresh = true
+    }
+    if (nextContent != null && nextContent !== originalContent) {
+      await editClipContent(item, nextContent, settingsRef.current.favoriteFieldDelimiter)
+      needsRefresh = true
+    }
+    if (needsRefresh) await refresh()
+  }
+
+  async function persistFavoriteDraft(item: ClipItem | undefined, result: FavoriteDraft) {
+    if (item) {
+      await updateFavoriteFromInput(
+        item,
+        result.title,
+        result.content,
+        result.format,
+        result.fieldDelimiter,
+        settingsRef.current.favoriteFieldDelimiter,
+      )
+      showToast("已保存收藏")
+    } else {
+      await addFavoriteFromInput(result.title, result.content, {
+        format: result.format,
+        fieldDelimiter: result.fieldDelimiter,
+        defaultFieldDelimiter: settingsRef.current.favoriteFieldDelimiter,
+      })
+      showToast("已添加到收藏")
+    }
+    await refresh()
+  }
+
+  async function persistTokenResult(result: string) {
+    await writeTextToPasteboard(result)
+    await addClipFromPayload(
+      { kind: "text", text: result },
+      { ...settingsRef.current, captureText: true },
+    )
+    showToast("已复制")
+    await refresh()
+  }
+
+  async function finishFavoriteFieldsNavigation() {
+    listRefreshBlocked.current = false
+    if (listRefreshDeferred.current) {
+      listRefreshDeferred.current = false
+      await refresh(true, settingsRef.current)
+    }
+  }
+
+  async function closeHomeRoute() {
+    const route = takeHomeRoute()
+    if (!route) return
+    await finishCanceledHomeRoute(route)
+  }
+
+  function homeRoutePresentationChanged(isPresented: boolean) {
+    setHomeRoutePresented(isPresented)
+    if (isPresented) return
+    const route = homeRouteRef.current
+    homeRouteRef.current = null
+    setHomeRoute(null)
+    if (route) void finishCanceledHomeRoute(route)
+  }
+
+  async function finishCanceledHomeRoute(route: HomeRoute) {
+    try {
+      if (route.kind === "editContent") {
+        await completeContentEdit(route.item, route.content, route.initialChangeCount, null)
+      } else if (route.kind === "favoriteFields") {
+        await finishFavoriteFieldsNavigation()
+      }
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "关闭页面失败") })
+    }
+  }
+
   async function editItem(item: ClipItem) {
+    if (isFieldFavorite(item)) {
+      await presentFavoriteEditor(item)
+      return
+    }
     if (item.kind === "image") {
       await Dialog.alert({ message: "图片条目暂不支持编辑文本内容" })
       return
     }
     const fullContent = await getFullClipContent(item.id)
     const initialChangeCount = await currentChangeCount()
+    if (embeddedHomeNavigation) {
+      presentHomeRoute({
+        kind: "editContent",
+        item,
+        content: fullContent,
+        initialChangeCount,
+      })
+      return
+    }
     try {
       const nextContent = await Navigation.present<string | null>({
         element: <ClipContentEditorView content={fullContent} />,
         modalPresentationStyle: "pageSheet",
       })
-      let needsRefresh = false
-      if (await currentChangeCount() !== initialChangeCount) {
-        await captureCurrentClipboard(settings)
-        needsRefresh = true
-      }
-      if (nextContent != null && nextContent !== fullContent) {
-        await editClipContent(item, nextContent)
-        needsRefresh = true
-      }
-      if (needsRefresh) await refresh()
+      await completeContentEdit(item, fullContent, initialChangeCount, nextContent)
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "编辑失败") })
     }
   }
 
+  async function presentFavoriteEditor(item?: ClipItem, preferredFormat?: "plain" | "fields") {
+    try {
+      const initial: FavoriteDraft | undefined = item ? {
+        title: item.title,
+        content: await getFullClipContent(item.id),
+        format: preferredFormat ?? (item.favoriteFormat === "fields" ? "fields" : "plain"),
+        fieldDelimiter: item.fieldDelimiterOverride ? item.fieldDelimiter : undefined,
+      } : undefined
+      if (embeddedHomeNavigation) {
+        presentHomeRoute({ kind: "favoriteEditor", item, initial })
+        return
+      }
+      const result = await Navigation.present<FavoriteDraft | null>({
+        element: (
+          <FavoriteEditorView
+            initial={initial}
+            defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
+            onPreviewCopy={copyFavoriteField}
+            renderFieldContextMenu={renderFavoriteFieldContextMenu}
+            onEditContentInEditor={(value) => Navigation.present<string | null>({
+              element: (
+                <ClipContentEditorView
+                  content={value}
+                  navigationTitle="编辑收藏内容"
+                />
+              ),
+              modalPresentationStyle: "pageSheet",
+            })}
+          />
+        ),
+        modalPresentationStyle: "pageSheet",
+      })
+      if (!result) return
+      await persistFavoriteDraft(item, result)
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "收藏保存失败") })
+    }
+  }
+
+  async function toggleFavoriteWithType(item: ClipItem) {
+    try {
+      if (item.favorite || item.kind === "image") {
+        await toggleFavorite(item)
+        await refresh()
+        return
+      }
+      const selected = await Dialog.actionSheet({
+        title: "选择收藏类型",
+        actions: [
+          { label: "普通收藏" },
+          { label: "字段收藏" },
+        ],
+      })
+      if (selected == null) return
+      if (selected === 1) {
+        await presentFavoriteEditor(item, "fields")
+        return
+      }
+      const content = await getFullClipContent(item.id)
+      await updateFavoriteFromInput(
+        item,
+        item.title,
+        content,
+        "plain",
+        undefined,
+        settingsRef.current.favoriteFieldDelimiter,
+      )
+      showToast("已收藏")
+      await refresh()
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "收藏失败") })
+    }
+  }
+
   async function viewImageItem(item: ClipItem) {
+    if (embeddedHomeNavigation) {
+      presentHomeRoute({ kind: "image", item })
+      return
+    }
     await Navigation.present({
       element: <ImageViewerView item={item} />,
       modalPresentationStyle: "pageSheet",
@@ -1027,16 +1315,15 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     return renderClipOutput(item, await getFullClipContent(item.id))
   }
 
-  async function openTokenResultForItem(item: ClipItem) {
-    if (item.kind === "image") {
-      showToast("图片条目不支持分词")
-      return
-    }
+  async function openTokenResultForText(source: string) {
     try {
-      const source = await itemSource(item)
       const tokens = tokenizeWords(source)
       if (!tokens.length) {
         showToast("没有可用的分词结果")
+        return
+      }
+      if (embeddedHomeNavigation) {
+        presentHomeRoute({ kind: "tokens", tokens })
         return
       }
       const result = await Navigation.present<string | null>({
@@ -1044,16 +1331,18 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         modalPresentationStyle: "pageSheet",
       })
       if (!result) return
-      await writeTextToPasteboard(result)
-      await addClipFromPayload(
-        { kind: "text", text: result },
-        { ...settingsRef.current, captureText: true },
-      )
-      showToast("已复制")
-      await refresh()
+      await persistTokenResult(result)
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "分词失败") })
     }
+  }
+
+  async function openTokenResultForItem(item: ClipItem) {
+    if (item.kind === "image") {
+      showToast("图片条目不支持分词")
+      return
+    }
+    await openTokenResultForText(await itemSource(item))
   }
 
   async function saveTransformedResult(result: MenuActionResult, source: string): Promise<number> {
@@ -1148,6 +1437,56 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "自定义功能执行失败") })
     }
+  }
+
+  function favoriteFieldSource(field: FavoriteField): string {
+    return renderRuntimeTemplate(field.value)
+  }
+
+  async function runBuiltinActionForFavoriteField(field: FavoriteField, action: KeyboardMenuBuiltinAction) {
+    const source = favoriteFieldSource(field)
+    if (!source) return
+    if (action === "tokenize") {
+      await openTokenResultForText(source)
+      return
+    }
+    try {
+      const result = applyBuiltinMenuAction({ action, source, isImage: false })
+      if (!result) {
+        showToast("当前子字段不支持该功能")
+        return
+      }
+      await copyMenuResult(result, source)
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? `${menuBuiltinTitle(action)}失败`) })
+    }
+  }
+
+  async function runCustomActionForFavoriteField(field: FavoriteField, action: KeyboardCustomAction) {
+    const source = favoriteFieldSource(field)
+    if (!source) return
+    try {
+      const result = await applyCustomMenuAction(action, source)
+      if (!result) {
+        showToast("当前子字段不支持该自定义功能")
+        return
+      }
+      await copyMenuResult(result, source)
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "自定义功能执行失败") })
+    }
+  }
+
+  function renderFavoriteFieldContextMenu(field: FavoriteField, copy: () => void) {
+    return (
+      <FavoriteFieldActionMenu
+        settings={settingsRef.current}
+        supportsOpenUrl={isLikelyURL(favoriteFieldSource(field))}
+        onCopy={copy}
+        onBuiltin={(action) => runBuiltinActionForFavoriteField(field, action)}
+        onCustom={(action) => runCustomActionForFavoriteField(field, action)}
+      />
+    )
   }
 
   function startPipMonitor() {
@@ -1281,7 +1620,13 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           kind: "contextMenuPreview",
           shape: { type: "rect", cornerRadius: 18 },
         } as any}
-        onTapGesture={withHaptic(() => copyItem(item))}
+        onTapGesture={withHaptic(() => {
+          if (isFieldFavorite(item)) {
+            void openFavoriteFields(item)
+          } else {
+            void copyItem(item)
+          }
+        })}
         contextMenu={{
           menuItems: (
             <Group>
@@ -1295,6 +1640,13 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
                 <Button title="分享" systemImage="square.and.arrow.up" action={() => void shareItem(item)} />
               </ControlGroup>
               <Divider />
+              {item.favorite && item.kind !== "image" && !isFieldFavorite(item) ? (
+                <Button
+                  title="转换为字段收藏"
+                  systemImage="list.bullet.rectangle"
+                  action={() => void presentFavoriteEditor(item, "fields")}
+                />
+              ) : null}
               {item.kind === "image" ? (
                 <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractTextFromImage(item)} />
               ) : null}
@@ -1339,7 +1691,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
                 title=""
                 systemImage={item.favorite ? "star.slash" : "star"}
                 tint="systemYellow"
-                action={() => void toggleFavorite(item).then(() => refresh())}
+                action={() => void toggleFavoriteWithType(item)}
               />,
             ]),
             <Button
@@ -1478,17 +1830,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         <Button
           title=""
           systemImage="plus"
-          action={withHaptic(async () => {
-            const result = await Navigation.present<{ title: string, content: string } | null>({
-              element: <AddFavoriteView />,
-              modalPresentationStyle: "pageSheet"
-            })
-            if (result) {
-              await addFavoriteFromInput(result.title, result.content)
-              showToast("已添加到收藏")
-              await refresh()
-            }
-          })}
+          action={withHaptic(() => presentFavoriteEditor())}
         />
       </HStack>
     )
@@ -1667,17 +2009,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           <Button
             title="添加常用语"
             systemImage="plus"
-            action={withHaptic(async () => {
-              const result = await Navigation.present<{ title: string, content: string } | null>({
-                element: <AddFavoriteView />,
-                modalPresentationStyle: "pageSheet"
-              })
-              if (result) {
-                await addFavoriteFromInput(result.title, result.content)
-                showToast("已添加到收藏")
-                await refresh()
-              }
-            })}
+            action={withHaptic(() => presentFavoriteEditor())}
           />
         ) : null}
         {activeTab.value !== TAB_FAVORITES ? (
@@ -1698,6 +2030,107 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       topBarTrailing: homeToolbarTrailing(),
       principal: pagePicker(),
     }
+  }
+
+  function renderHomeDestination() {
+    if (!homeRoute) return <EmptyView />
+
+    if (homeRoute.kind === "addContent") {
+      return (
+        <ClipContentEditorView
+          content=""
+          navigationTitle="添加内容"
+          iconOnlyToolbar
+          embedded
+          onCancel={() => void closeHomeRoute()}
+          onSave={(content) => {
+            takeHomeRoute()
+            setLoading(true)
+            void persistNewContent(content)
+              .catch((error: any) => Dialog.alert({ message: String(error?.message ?? error ?? "保存失败") }))
+              .finally(() => setLoading(false))
+          }}
+        />
+      )
+    }
+
+    if (homeRoute.kind === "editContent") {
+      const route = homeRoute
+      return (
+        <ClipContentEditorView
+          content={route.content}
+          embedded
+          onCancel={() => void closeHomeRoute()}
+          onSave={(content) => {
+            takeHomeRoute()
+            void completeContentEdit(route.item, route.content, route.initialChangeCount, content)
+              .catch((error: any) => Dialog.alert({ message: String(error?.message ?? error ?? "编辑失败") }))
+          }}
+        />
+      )
+    }
+
+    if (homeRoute.kind === "favoriteEditor") {
+      const route = homeRoute
+      return (
+        <FavoriteEditorView
+          initial={route.initial}
+          defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
+          onPreviewCopy={copyFavoriteField}
+          renderFieldContextMenu={renderFavoriteFieldContextMenu}
+          embedded
+          onCancel={() => void closeHomeRoute()}
+          onSave={(draft) => {
+            takeHomeRoute()
+            void persistFavoriteDraft(route.item, draft)
+              .catch((error: any) => Dialog.alert({ message: String(error?.message ?? error ?? "收藏保存失败") }))
+          }}
+          renderEmbeddedContentEditor={(content, onSave, onCancel) => (
+            <ClipContentEditorView
+              content={content}
+              navigationTitle="编辑收藏内容"
+              embedded
+              onCancel={onCancel}
+              onSave={onSave}
+            />
+          )}
+        />
+      )
+    }
+
+    if (homeRoute.kind === "favoriteFields") {
+      const route = homeRoute
+      return (
+        <FavoriteFieldsDetailView
+          title={route.item.title}
+          fields={route.fields}
+          embedded
+          onClose={() => void closeHomeRoute()}
+          onCopy={copyFavoriteField}
+          renderFieldContextMenu={renderFavoriteFieldContextMenu}
+          onCopyAll={() => {
+            playCaisHaptic()
+            return copyItem(route.item, { notify: false, refresh: false })
+          }}
+        />
+      )
+    }
+
+    if (homeRoute.kind === "image") {
+      return <ImageViewerView item={homeRoute.item} embedded onClose={() => void closeHomeRoute()} />
+    }
+
+    return (
+      <AppTokenResultView
+        tokens={homeRoute.tokens}
+        embedded
+        onCopySelection={(content) => {
+          takeHomeRoute()
+          void persistTokenResult(content)
+            .catch((error: any) => Dialog.alert({ message: String(error?.message ?? error ?? "分词失败") }))
+        }}
+      />
+    )
   }
 
   function renderHomeCurrentPage() {
@@ -1729,6 +2162,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             onClearClipboard={(range) => void requestClear(range)}
             lanShareStatus={lanShareStatus}
             onRotateLanShareToken={() => void rotateLanShareToken()}
+            embeddedNavigation={embeddedHomeNavigation}
           />
         </VStack>
       )
@@ -1758,8 +2192,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       <VStack
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         navigationBarTitleDisplayMode="inline"
+        tabBarVisibility="visible"
         toolbarTitleDisplayMode="inline"
         toolbar={homePageToolbar()}
+        navigationDestination={embeddedHomeNavigation ? {
+          isPresented: homeRoutePresented,
+          onChanged: homeRoutePresentationChanged,
+          content: renderHomeDestination(),
+        } : undefined}
         {...rootPresentationProps()}
       >
         {renderHomeCurrentPage()}

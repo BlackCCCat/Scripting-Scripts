@@ -1,5 +1,6 @@
-import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, ClipPayload, CaisSettings } from "../types"
+import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, ClipPayload, CaisSettings, FavoriteFormat } from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeClipContent, normalizeText } from "../utils/common"
+import { favoriteDelimiterForItem, normalizeFavoriteDelimiter, parseFavoriteFields } from "../utils/favorite_fields"
 import { countClipKindsByScope, countClipsByScope, deleteClipboardClipsByRange, deleteClip, deleteFavoriteClips, findClipByHash, findClipById, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 import { bumpClipDataVersion } from "./change_signal"
@@ -157,14 +158,27 @@ export async function clearClipboardClipsByRange(range: ClipboardClearRange): Pr
   bumpClipDataVersion()
 }
 
-export async function editClipContent(item: ClipItem, value: string): Promise<ClipItem> {
+export async function editClipContent(
+  item: ClipItem,
+  value: string,
+  defaultFieldDelimiter?: string,
+): Promise<ClipItem> {
   const content = normalizeClipContent(value)
   if (!content.trim()) throw new Error("内容不能为空")
+  if (item.favoriteFormat === "fields") {
+    const parsed = parseFavoriteFields(
+      content,
+      favoriteDelimiterForItem(item, defaultFieldDelimiter ?? ":"),
+    )
+    if (parsed.errors.length) throw new Error(parsed.errors[0])
+  }
   if (!item.manualFavorite) {
     const duplicate = (await findTextClipsByContent(content)).find((match) => match.id !== item.id)
     if (duplicate) throw new Error("相同内容已存在")
   }
-  const kind = item.kind === "image" ? "text" : isLikelyURL(content) ? "url" : "text"
+  const kind = item.favoriteFormat === "fields"
+    ? "text"
+    : item.kind === "image" ? "text" : isLikelyURL(content) ? "url" : "text"
   const title = item.title === clipTitle(item.kind, item.content)
     ? clipTitle(kind, content)
     : item.title
@@ -197,28 +211,100 @@ export async function updateClipTitle(item: ClipItem, value: string): Promise<Cl
   return { ...item, title }
 }
 
-export async function addFavoriteFromInput(title: string, content: string): Promise<ClipItem> {
+export async function addFavoriteFromInput(
+  title: string,
+  content: string,
+  options: { format?: FavoriteFormat; fieldDelimiter?: string; defaultFieldDelimiter?: string } = {},
+): Promise<ClipItem> {
   const fixedContent = normalizeClipContent(content)
   if (!fixedContent.trim()) throw new Error("内容不能为空")
-  const kind = isLikelyURL(fixedContent) ? "url" : "text"
+  const favoriteFormat: FavoriteFormat = options.format === "fields" ? "fields" : "plain"
+  const fieldDelimiter = favoriteFormat === "fields" && options.fieldDelimiter != null
+    ? normalizeFavoriteDelimiter(options.fieldDelimiter)
+    : undefined
+  if (favoriteFormat === "fields") {
+    const parsed = parseFavoriteFields(
+      fixedContent,
+      fieldDelimiter ?? normalizeFavoriteDelimiter(options.defaultFieldDelimiter),
+    )
+    if (parsed.errors.length) throw new Error(parsed.errors[0])
+  }
+  const kind = favoriteFormat === "fields" ? "text" : isLikelyURL(fixedContent) ? "url" : "text"
   const now = Date.now()
   const item: ClipItem = {
     id: makeId("phrase"),
     kind,
     title: title.trim() || clipTitle(kind, fixedContent),
     content: fixedContent,
-    contentHash: hashString(`manual:${kind}:${fixedContent}`),
+    contentHash: hashString(`manual:${favoriteFormat}:${kind}:${fieldDelimiter ?? ""}:${fixedContent}`),
     sourceChangeCount: 0,
     createdAt: now,
     updatedAt: now,
     pinned: false,
     favorite: true,
     manualFavorite: true,
+    favoriteFormat,
+    fieldDelimiter,
+    fieldDelimiterOverride: Boolean(fieldDelimiter),
     deletedAt: null,
   }
   await insertClip(item)
   bumpClipDataVersion()
   return item
+}
+
+export async function updateFavoriteFromInput(
+  item: ClipItem,
+  title: string,
+  content: string,
+  format: FavoriteFormat,
+  fieldDelimiter?: string,
+  defaultFieldDelimiter?: string,
+): Promise<ClipItem> {
+  const fixedContent = normalizeClipContent(content)
+  if (!fixedContent.trim()) throw new Error("内容不能为空")
+  const favoriteFormat: FavoriteFormat = format === "fields" ? "fields" : "plain"
+  const delimiter = favoriteFormat === "fields" && fieldDelimiter != null
+    ? normalizeFavoriteDelimiter(fieldDelimiter)
+    : undefined
+  if (favoriteFormat === "fields") {
+    const parsed = parseFavoriteFields(
+      fixedContent,
+      delimiter ?? normalizeFavoriteDelimiter(defaultFieldDelimiter),
+    )
+    if (parsed.errors.length) throw new Error(parsed.errors[0])
+  }
+  if (!item.manualFavorite) {
+    const duplicate = (await findTextClipsByContent(fixedContent)).find((match) => match.id !== item.id)
+    if (duplicate) throw new Error("相同内容已存在")
+  }
+  const kind = favoriteFormat === "fields" ? "text" : isLikelyURL(fixedContent) ? "url" : "text"
+  const next: ClipItem = {
+    ...item,
+    kind,
+    title: normalizeText(title) || clipTitle(kind, fixedContent),
+    content: fixedContent,
+    contentHash: item.manualFavorite
+      ? hashString(`manual:${favoriteFormat}:${kind}:${delimiter ?? ""}:${fixedContent}`)
+      : hashString(`text:${fixedContent}`),
+    updatedAt: Date.now(),
+    favorite: true,
+    favoriteFormat,
+    fieldDelimiter: delimiter,
+    fieldDelimiterOverride: Boolean(delimiter),
+  }
+  try {
+    await updateClipContent(next)
+    if (!item.favorite) await updateClipState(item.id, { favorite: true })
+  } catch (error) {
+    if (!item.manualFavorite) {
+      const duplicate = (await findTextClipsByContent(fixedContent)).find((match) => match.id !== item.id)
+      if (duplicate) throw new Error("相同内容已存在")
+    }
+    throw error
+  }
+  bumpClipDataVersion()
+  return next
 }
 
 export { getFullClipContent }

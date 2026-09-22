@@ -3,15 +3,17 @@ import type { ClipItem } from "../types"
 import { formatDateTime, summarizeContent } from "../utils/common"
 import { imagePreviewPath } from "../storage/image_store"
 
-function iconName(kind: ClipItem["kind"]): string {
-  if (kind === "image") return "photo"
-  if (kind === "url") return "link"
+function iconName(item: ClipItem): string {
+  if (item.favoriteFormat === "fields") return "list.bullet.rectangle"
+  if (item.kind === "image") return "photo"
+  if (item.kind === "url") return "link"
   return "doc.text"
 }
 
-function kindLabel(kind: ClipItem["kind"]): string {
-  if (kind === "image") return "图片"
-  if (kind === "url") return "链接"
+function kindLabel(item: ClipItem): string {
+  if (item.favoriteFormat === "fields") return "字段收藏"
+  if (item.kind === "image") return "图片"
+  if (item.kind === "url") return "链接"
   return "文本"
 }
 
@@ -24,7 +26,7 @@ function ClipRowContent(props: {
   return (
     <>
       <Image
-        systemName={iconName(item.kind)}
+        systemName={iconName(item)}
         frame={{ width: 28 }}
         foregroundStyle={item.pinned ? "systemOrange" : "systemBlue"}
       />
@@ -62,7 +64,7 @@ function ClipRowContent(props: {
           </Text>
         )}
         <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item.kind)}</Text>
+          <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item)}</Text>
           <Text font="caption" foregroundStyle="tertiaryLabel">{formatDateTime(item.updatedAt)}</Text>
         </HStack>
       </VStack>
@@ -113,7 +115,7 @@ export function ClipRow(props: {
       glassEffect={{ type: "rect", cornerRadius: 18 } as any}
     >
       <Image
-        systemName={iconName(item.kind)}
+        systemName={iconName(item)}
         frame={{ width: 28 }}
         foregroundStyle={item.pinned ? "systemOrange" : "systemBlue"}
       />
@@ -151,7 +153,7 @@ export function ClipRow(props: {
           </Text>
         )}
         <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item.kind)}</Text>
+          <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item)}</Text>
           <Text font="caption" foregroundStyle="tertiaryLabel">{formatDateTime(item.updatedAt)}</Text>
         </HStack>
       </VStack>

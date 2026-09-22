@@ -1,5 +1,6 @@
 import { Device } from "scripting"
 import { DEFAULT_CAIS_SETTINGS, type CaisSettings, type KeyboardCustomAction, type KeyboardMenuBuiltinAction } from "../types"
+import { normalizeFavoriteDelimiter } from "../utils/favorite_fields"
 
 const SETTINGS_KEY = "cais_settings_v1"
 const LEGACY_SHARED_OPTIONS = { shared: true }
@@ -99,6 +100,9 @@ function sanitizeSettings(raw: any): CaisSettings {
       : DEFAULT_CAIS_SETTINGS.lanSharingPort,
     appContentLineLimit: Math.max(1, Math.min(12, appContentLineLimit || DEFAULT_CAIS_SETTINGS.appContentLineLimit)),
     appClipRowGlassEffect: Boolean(raw?.appClipRowGlassEffect ?? defaultNativeGlassEffect()),
+    homeScreenEmbeddedNavigation: Boolean(
+      raw?.homeScreenEmbeddedNavigation ?? DEFAULT_CAIS_SETTINGS.homeScreenEmbeddedNavigation,
+    ),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
     keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? defaultNativeGlassEffect()),
     showRimeKeyboardSwitch: Boolean(raw?.showRimeKeyboardSwitch ?? DEFAULT_CAIS_SETTINGS.showRimeKeyboardSwitch),
@@ -107,6 +111,10 @@ function sanitizeSettings(raw: any): CaisSettings {
       : Boolean(raw?.inputClicks ?? DEFAULT_CAIS_SETTINGS.inputClicks),
     hapticEngineClicks: Boolean(raw?.hapticEngineClicks ?? DEFAULT_CAIS_SETTINGS.hapticEngineClicks),
     launchAnimationEnabled: Boolean(raw?.launchAnimationEnabled ?? DEFAULT_CAIS_SETTINGS.launchAnimationEnabled),
+    favoriteFieldDelimiter: normalizeFavoriteDelimiter(
+      raw?.favoriteFieldDelimiter,
+      DEFAULT_CAIS_SETTINGS.favoriteFieldDelimiter,
+    ),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
       builtins,

@@ -9,7 +9,7 @@ type DB = {
 let cachedDb: DB | null = null
 let initialized = false
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at"
+const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, deleted_at"
 const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
 
 function rowToClip(row: any): ClipItem {
@@ -27,6 +27,9 @@ function rowToClip(row: any): ClipItem {
     pinned: Number(row.pinned ?? 0) === 1,
     favorite: Number(row.favorite ?? 0) === 1,
     manualFavorite: Number(row.manual_favorite ?? 0) === 1,
+    favoriteFormat: row.favorite_format === "fields" ? "fields" : "plain",
+    fieldDelimiter: row.field_delimiter ? String(row.field_delimiter) : undefined,
+    fieldDelimiterOverride: Number(row.field_delimiter_override ?? 0) === 1,
     deletedAt: row.deleted_at == null ? null : Number(row.deleted_at),
   }
 }
@@ -46,6 +49,9 @@ function clipParams(item: ClipItem): any[] {
     item.pinned ? 1 : 0,
     item.favorite ? 1 : 0,
     item.manualFavorite ? 1 : 0,
+    item.favoriteFormat === "fields" ? "fields" : "plain",
+    item.fieldDelimiter ?? null,
+    item.fieldDelimiterOverride ? 1 : 0,
     item.deletedAt ?? null,
   ]
 }
@@ -129,11 +135,26 @@ async function ensureSchema(db: DB): Promise<void> {
       pinned INTEGER NOT NULL DEFAULT 0,
       favorite INTEGER NOT NULL DEFAULT 0,
       manual_favorite INTEGER NOT NULL DEFAULT 0,
+      favorite_format TEXT NOT NULL DEFAULT 'plain',
+      field_delimiter TEXT,
+      field_delimiter_override INTEGER NOT NULL DEFAULT 0,
       deleted_at INTEGER
     )
   `)
   try {
     await db.execute("ALTER TABLE clips ADD COLUMN manual_favorite INTEGER NOT NULL DEFAULT 0")
+  } catch {
+  }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN favorite_format TEXT NOT NULL DEFAULT 'plain'")
+  } catch {
+  }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN field_delimiter TEXT")
+  } catch {
+  }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN field_delimiter_override INTEGER NOT NULL DEFAULT 0")
   } catch {
   }
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active ON clips(deleted_at, pinned, updated_at)")
@@ -158,8 +179,9 @@ export async function insertClip(item: ClipItem): Promise<void> {
   await db.execute(`
     INSERT INTO clips (
       id, kind, title, content, content_hash, image_path, source_change_count,
-      created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite,
+      favorite_format, field_delimiter, field_delimiter_override, deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, clipParams(item))
 }
 
@@ -445,11 +467,21 @@ export async function listImagePaths(options: { favoritesOnly?: boolean; clipboa
   return rows.map((row) => String(row.image_path ?? "")).filter(Boolean)
 }
 
-export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "title" | "content" | "contentHash" | "updatedAt">): Promise<void> {
+export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "title" | "content" | "contentHash" | "updatedAt" | "favoriteFormat" | "fieldDelimiter" | "fieldDelimiterOverride">): Promise<void> {
   const db = await initializeDatabase()
   await db.execute(
-    "UPDATE clips SET kind = ?, title = ?, content = ?, content_hash = ?, updated_at = ? WHERE id = ?",
-    [row.kind, row.title, row.content, row.contentHash, row.updatedAt, row.id]
+    "UPDATE clips SET kind = ?, title = ?, content = ?, content_hash = ?, updated_at = ?, favorite_format = ?, field_delimiter = ?, field_delimiter_override = ? WHERE id = ?",
+    [
+      row.kind,
+      row.title,
+      row.content,
+      row.contentHash,
+      row.updatedAt,
+      row.favoriteFormat === "fields" ? "fields" : "plain",
+      row.fieldDelimiter ?? null,
+      row.fieldDelimiterOverride ? 1 : 0,
+      row.id,
+    ]
   )
 }
 

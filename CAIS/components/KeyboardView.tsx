@@ -31,7 +31,7 @@ import type {
   KeyboardMenuBuiltinAction,
   MonitorStatus,
 } from "../types"
-import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
+import { captureCurrentClipboard, startClipboardMonitor } from "../services/clipboard_capture"
 import { writeClipToPasteboard, writeImageToPasteboard } from "../services/pasteboard_adapter"
 import {
   addClipFromPayload,
@@ -45,7 +45,7 @@ import { readClipDataVersion } from "../storage/change_signal"
 import { readDatabaseDataVersion } from "../storage/database"
 import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
-import { summarizeContent } from "../utils/common"
+import { isLikelyURL, summarizeContent } from "../utils/common"
 import { disposeCaisFeedback, playCaisFeedback, prepareCaisFeedback } from "../utils/feedback"
 import { renderRuntimeTemplate } from "../utils/template"
 import { PipStatusView } from "./PipStatusView"
@@ -54,6 +54,7 @@ import { readPipControlState, requestPipStart, requestPipStop } from "../service
 import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
 import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
 import { recognizeTextFromImagePath } from "../services/image_text_recognition"
+import { favoriteDelimiterForItem, isFieldFavorite, parseFavoriteFields, type FavoriteField } from "../utils/favorite_fields"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -63,6 +64,8 @@ import {
   menuBuiltinTitle,
   type MenuActionResult,
 } from "../utils/menu_actions"
+import { FavoriteFieldsPanel } from "./FavoriteFieldsPanel"
+import { FavoriteFieldActionMenu } from "./FavoriteFieldActionMenu"
 
 const TAB_FAVORITE = 0
 const TAB_CLIPS = 1
@@ -99,6 +102,10 @@ type KeyboardTokenPage = {
   title: string
   tokens: CaisToken[]
   selectedIds: string[]
+}
+type KeyboardFavoriteFieldsPage = {
+  title: string
+  fields: FavoriteField[]
 }
 
 function keyboard(): any {
@@ -358,6 +365,9 @@ function clipListKey(items: ClipItem[]): string {
     item.favorite ? "f" : "",
     item.pinned ? "p" : "",
     item.manualFavorite ? "m" : "",
+    item.favoriteFormat ?? "plain",
+    item.fieldDelimiter ?? "",
+    item.fieldDelimiterOverride ? "d" : "",
     item.contentHash,
     item.imagePath ?? "",
   ].join(":")).join("|")
@@ -828,6 +838,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const [keyboardLayout, setKeyboardLayout] = useState<KeyboardLayoutMode>(() => readKeyboardLayout())
   const [layoutRevision, setLayoutRevision] = useState(0)
   const [tokenPage, setTokenPage] = useState<KeyboardTokenPage | null>(null)
+  const [favoriteFieldsPage, setFavoriteFieldsPage] = useState<KeyboardFavoriteFieldsPage | null>(null)
   const [cursorMode, setCursorMode] = useState(false)
   const [appPipActive, setAppPipActive] = useState(() => readPipControlState().active)
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>({
@@ -1001,6 +1012,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   async function insertClip(item: ClipItem) {
+    if (isFieldFavorite(item)) {
+      await openFavoriteFieldsPage(item)
+      return
+    }
     if (item.kind === "image") {
       try {
         await writeClipToPasteboard(item)
@@ -1012,16 +1027,109 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     insertKeyboardText(fullContent)
   }
 
+  async function openFavoriteFieldsPage(item: ClipItem) {
+    const content = await getFullClipContent(item.id)
+    const parsed = parseFavoriteFields(content, favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter))
+    if (!parsed.fields.length || parsed.errors.length) return
+    setTokenPage(null)
+    setFavoriteFieldsPage({ title: item.title, fields: parsed.fields })
+  }
+
+  function insertFavoriteField(field: FavoriteField) {
+    const text = favoriteFieldSource(field)
+    if (!text) return
+    playClick()
+    insertKeyboardText(text)
+    lastPastedText = text
+  }
+
+  function favoriteFieldSource(field: FavoriteField): string {
+    return renderRuntimeTemplate(field.value, selectedKeyboardText())
+  }
+
+  async function copyFavoriteFieldValue(field: FavoriteField) {
+    const source = favoriteFieldSource(field)
+    if (!source) return
+    playClick()
+    await Pasteboard.setString(source)
+    lastPastedText = source
+  }
+
+  function openTokenPageForText(title: string, source: string) {
+    const tokens = tokenizeWords(source)
+    if (!tokens.length) return
+    setFavoriteFieldsPage(null)
+    setTokenPage({ title, tokens, selectedIds: [] })
+  }
+
+  async function saveFavoriteFieldMenuResult(result: MenuActionResult, source: string) {
+    const saveSettings = { ...settings, captureText: true, captureImages: true }
+    if (result.kind === "text") {
+      if (!result.text.trim() || result.text === source) return
+      await addClipFromPayload({ kind: "text", text: result.text }, saveSettings)
+      await refresh()
+      return
+    }
+    if (result.kind === "texts") {
+      for (const text of result.texts) {
+        if (!text.trim() || text === source) continue
+        await addClipFromPayload({ kind: "text", text }, saveSettings)
+      }
+      await refresh()
+      return
+    }
+    if (result.kind === "image") {
+      await addClipFromPayload({
+        kind: "image",
+        image: result.image,
+        imageContentHash: result.imageContentHash,
+      }, saveSettings)
+      await refresh()
+    }
+  }
+
+  async function handleFavoriteFieldMenuResult(result: MenuActionResult | null, source: string) {
+    if (!result || result.kind === "none") return
+    if (result.kind === "openUrl") {
+      await Safari.openURL(result.url)
+      return
+    }
+    if (result.kind === "text") {
+      if (result.writeToClipboard === true) await Pasteboard.setString(result.text)
+      insertKeyboardText(result.text)
+      lastPastedText = result.text
+    } else if (result.kind === "image") {
+      await writeImageToPasteboard(result.image)
+    }
+    await saveFavoriteFieldMenuResult(result, source)
+  }
+
+  async function runFavoriteFieldBuiltin(field: FavoriteField, action: KeyboardMenuBuiltinAction) {
+    const source = favoriteFieldSource(field)
+    if (!source) return
+    if (action === "tokenize") {
+      openTokenPageForText(field.name, source)
+      return
+    }
+    try {
+      await handleFavoriteFieldMenuResult(applyBuiltinMenuAction({ action, source, isImage: false }), source)
+    } catch {
+    }
+  }
+
+  async function runFavoriteFieldCustom(field: FavoriteField, action: KeyboardCustomAction) {
+    const source = favoriteFieldSource(field)
+    if (!source) return
+    try {
+      await handleFavoriteFieldMenuResult(await applyCustomMenuAction(action, source), source)
+    } catch {
+    }
+  }
+
   async function openTokenPage(item: ClipItem) {
     if (item.kind === "image") return
     const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
-    const tokens = tokenizeWords(fullContent)
-    if (!tokens.length) return
-    setTokenPage({
-      title: item.title,
-      tokens,
-      selectedIds: [],
-    })
+    openTokenPageForText(item.title, fullContent)
   }
 
   function toggleToken(token: CaisToken) {
@@ -1162,6 +1270,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   const tokenSelectedText = tokenPage ? selectedTokenText(tokenPage.tokens, tokenPage.selectedIds) : ""
+  const detailPageVisible = Boolean(tokenPage || favoriteFieldsPage)
   const useNativeGlassEffect = settings.keyboardNativeGlassEffect !== false
   const showRimeKeyboardSwitch = Boolean(settings.showRimeKeyboardSwitch)
   const rimeScript = showRimeKeyboardSwitch ? rimeKeyboardScript() : null
@@ -1215,6 +1324,22 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
               />
             </HStack>
           </ZStack>
+        ) : favoriteFieldsPage ? (
+          <ZStack
+            frame={{ minWidth: 112, maxWidth: "infinity", height: 36 }}
+            background={"rgba(0,0,0,0.001)" as any}
+            contentShape="rect"
+          >
+            <HStack spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
+              <IconButton
+                systemImage="chevron.left"
+                onPress={() => setFavoriteFieldsPage(null)}
+              />
+              <Text font="subheadline" lineLimit={1} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                {favoriteFieldsPage.title}
+              </Text>
+            </HStack>
+          </ZStack>
         ) : (
           useNativeGlassEffect ? (
             <ZStack
@@ -1246,7 +1371,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             </Picker>
           )
         )}
-        {!tokenPage && showRimeKeyboardSwitch ? (
+        {!detailPageVisible && showRimeKeyboardSwitch ? (
           <IconButton
             systemImage={rimeScript?.icon ?? "keyboard.fill"}
             frame={{ width: 34, height: 36 }}
@@ -1289,6 +1414,26 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             compact
             nativeGlassEffect={useNativeGlassEffect}
             onToggle={toggleToken}
+          />
+        </VStack>
+      ) : favoriteFieldsPage ? (
+        <VStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+          padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
+        >
+          <FavoriteFieldsPanel
+            fields={favoriteFieldsPage.fields}
+            nativeGlassEffect={useNativeGlassEffect}
+            onSelect={insertFavoriteField}
+            renderContextMenu={(field) => (
+              <FavoriteFieldActionMenu
+                settings={settings}
+                supportsOpenUrl={isLikelyURL(favoriteFieldSource(field))}
+                onCopy={() => copyFavoriteFieldValue(field)}
+                onBuiltin={(action) => runFavoriteFieldBuiltin(field, action)}
+                onCustom={(action) => runFavoriteFieldCustom(field, action)}
+              />
+            )}
           />
         </VStack>
       ) : (

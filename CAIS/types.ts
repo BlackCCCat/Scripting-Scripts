@@ -1,4 +1,5 @@
 export type ClipKind = "text" | "url" | "image"
+export type FavoriteFormat = "plain" | "fields"
 
 export type ClipPayload = {
   kind: ClipKind
@@ -23,6 +24,9 @@ export type ClipItem = {
   pinned: boolean
   favorite: boolean
   manualFavorite?: boolean
+  favoriteFormat?: FavoriteFormat
+  fieldDelimiter?: string
+  fieldDelimiterOverride?: boolean
   deletedAt?: number | null
 }
 
@@ -63,12 +67,14 @@ export type CaisSettings = {
   lanSharingPort: number
   appContentLineLimit: number
   appClipRowGlassEffect: boolean
+  homeScreenEmbeddedNavigation: boolean
   keyboardShowTitle: boolean
   keyboardNativeGlassEffect: boolean
   showRimeKeyboardSwitch: boolean
   inputClicks: boolean
   hapticEngineClicks: boolean
   launchAnimationEnabled: boolean
+  favoriteFieldDelimiter: string
   keyboardMaxItems: number
   keyboardMenu: KeyboardMenuSettings
 }
@@ -127,12 +133,14 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   lanSharingPort: 8787,
   appContentLineLimit: 3,
   appClipRowGlassEffect: true,
+  homeScreenEmbeddedNavigation: true,
   keyboardShowTitle: true,
   keyboardNativeGlassEffect: true,
   showRimeKeyboardSwitch: false,
   inputClicks: false,
   hapticEngineClicks: true,
   launchAnimationEnabled: true,
+  favoriteFieldDelimiter: ":",
   keyboardMaxItems: 30,
   keyboardMenu: {
     builtins: {

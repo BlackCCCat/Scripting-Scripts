@@ -421,7 +421,7 @@ function registerRoutes(nextServer: HttpServer): void {
         const current = await getClipById(id)
         if (!current) throw new Error("条目不存在")
         if (current.kind === "image") throw new Error("图片条目只能修改标题")
-        return editClipContent(current, content)
+        return editClipContent(current, content, loadSettings().favoriteFieldDelimiter)
       })
       return jsonResponse({ item: webItem(item) })
     } catch (error: any) {
