@@ -301,6 +301,7 @@ export function RegexEditorView(props: { item?: RegexItem; isNew?: boolean; stan
           title=""
           value={name}
           prompt="输入名称"
+          contentShape="rect"
           frame={{ height: 52, maxWidth: "infinity", alignment: "leading" }}
           onChanged={(value: string) => {
             setName(value)
@@ -336,6 +337,8 @@ export function RegexEditorView(props: { item?: RegexItem; isNew?: boolean; stan
             value={sampleText}
             axis="vertical"
             prompt="输入示例文字或测试文本"
+            lineLimit={{ min: 5, max: 5 }}
+            contentShape="rect"
             frame={{ minHeight: 132, maxWidth: "infinity", alignment: "topLeading" }}
             onChanged={(value: string) => {
               setSampleText(value)
@@ -350,6 +353,8 @@ export function RegexEditorView(props: { item?: RegexItem; isNew?: boolean; stan
             value={replacementTemplate}
             axis="vertical"
             prompt="例如：Price: $$$1.$2\\n"
+            lineLimit={{ min: 3, max: 3 }}
+            contentShape="rect"
             frame={{ minHeight: 92, maxWidth: "infinity", alignment: "topLeading" }}
             onChanged={(value: string) => {
               setReplacementTemplate(value)
