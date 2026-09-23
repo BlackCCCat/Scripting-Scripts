@@ -94,6 +94,7 @@ import { FavoriteFieldActionMenu } from "./FavoriteFieldActionMenu"
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
 const TAB_SETTINGS = 2
+const ACTIVE_TAB_STORAGE_KEY = "cais_active_tab_v1"
 const APP_GROUP_PAGE_SIZE = 300
 const TOAST_DURATION_MS = 1200
 const CAIS_APP_RESUME_HANDLER = "__CAIS_APP_RESUME_HANDLER__"
@@ -117,6 +118,24 @@ type HomeRoute =
 const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
   favorites: { total: 0, text: 0, url: 0, image: 0 },
   clipboard: { total: 0, text: 0, url: 0, image: 0 },
+}
+
+function readActiveTab(): number {
+  try {
+    const value = Number((globalThis as any).Storage?.get?.(ACTIVE_TAB_STORAGE_KEY))
+    return value === TAB_FAVORITES || value === TAB_CLIPS || value === TAB_SETTINGS
+      ? value
+      : TAB_CLIPS
+  } catch {
+    return TAB_CLIPS
+  }
+}
+
+function writeActiveTab(value: number): void {
+  try {
+    ;(globalThis as any).Storage?.set?.(ACTIVE_TAB_STORAGE_KEY, value)
+  } catch {
+  }
 }
 
 function renderClipOutput(item: ClipItem, content: string): string {
@@ -430,7 +449,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     storageKey: "cais:release-notes:release-notes.md:last-seen-hash",
   })
   const colorScheme = useColorScheme()
-  const activeTab = useObservable(TAB_CLIPS)
+  const activeTab = useObservable(readActiveTab())
   const pipPresented = useObservable(false)
   const deleteDialogPresented = useObservable(false)
   const toastPresented = useObservable(false)
@@ -476,6 +495,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }, [query])
 
   useEffect(() => {
+    writeActiveTab(activeTab.value)
     deleteDialogPresented.setValue(false)
     setPendingDeleteItem(null)
     setPendingDeleteTab(null)
@@ -997,11 +1017,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         modalPresentationStyle: "pageSheet",
       })
     } finally {
-      listRefreshBlocked.current = false
-      if (listRefreshDeferred.current) {
-        listRefreshDeferred.current = false
-        await refresh(true, settingsRef.current)
-      }
+      await finishFavoriteFieldsNavigation()
     }
   }
 
@@ -2108,7 +2124,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           title={route.item.title}
           fields={route.fields}
           embedded
-          onClose={() => void closeHomeRoute()}
           onCopy={copyFavoriteField}
           renderFieldContextMenu={renderFavoriteFieldContextMenu}
           onCopyAll={() => {

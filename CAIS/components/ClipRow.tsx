@@ -107,7 +107,6 @@ export function ClipRow(props: {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
   const previewPath = item.kind === "image" ? imageListPreviewPath(item.imagePath) : undefined
-
   return (
     <HStack
       spacing={12}

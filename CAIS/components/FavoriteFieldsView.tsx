@@ -42,6 +42,31 @@ function presentCopyToast(
   ;(globalThis as any).setTimeout?.(() => presented.setValue(true), 0)
 }
 
+function FavoriteFieldContent(props: { field: FavoriteField }) {
+  return (
+    <VStack spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+        <Text
+          font="headline"
+          frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+          multilineTextAlignment="leading"
+        >
+          {props.field.name}
+        </Text>
+        <Spacer />
+        <Image systemName="doc.on.doc" foregroundStyle="systemBlue" />
+      </HStack>
+      <Text
+        foregroundStyle="secondaryLabel"
+        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        multilineTextAlignment="leading"
+      >
+        {props.field.value}
+      </Text>
+    </VStack>
+  )
+}
+
 export function FavoriteEditorView(props: {
   initial?: FavoriteDraft
   defaultDelimiter: string
@@ -260,37 +285,18 @@ export function FavoriteEditorView(props: {
             footer={<Text>点击子字段可复制对应的值。</Text>}
           >
             {parsed?.fields.length ? parsed.fields.map((field) => (
-              <Button
+              <HStack
                 key={field.id}
-                buttonStyle="plain"
                 frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 background="rgba(0,0,0,0.001)"
-                contentShape="rect"
-                action={() => void copyPreviewField(field)}
+                contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+                onTapGesture={() => void copyPreviewField(field)}
                 contextMenu={props.renderFieldContextMenu ? {
                   menuItems: props.renderFieldContextMenu(field, () => void copyPreviewField(field)),
                 } : undefined}
               >
-                <VStack spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                  <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-                    <Text
-                      font="headline"
-                      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                      multilineTextAlignment="leading"
-                    >
-                      {field.name}
-                    </Text>
-                    <Image systemName="doc.on.doc" foregroundStyle="systemBlue" />
-                  </HStack>
-                  <Text
-                    foregroundStyle="secondaryLabel"
-                    frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                    multilineTextAlignment="leading"
-                  >
-                    {field.value}
-                  </Text>
-                </VStack>
-              </Button>
+                <FavoriteFieldContent field={field} />
+              </HStack>
             )) : (
               <Text foregroundStyle="secondaryLabel">输入内容后将在这里显示解析结果</Text>
             )}
@@ -311,7 +317,6 @@ export function FavoriteFieldsDetailView(props: {
   onCopy: (field: FavoriteField) => Promise<string | void> | string | void
   onCopyAll: () => Promise<string | void> | string | void
   embedded?: boolean
-  onClose?: () => void
   renderFieldContextMenu?: (
     field: FavoriteField,
     copy: () => void,
@@ -333,82 +338,54 @@ export function FavoriteFieldsDetailView(props: {
     presentCopyToast(copyToastPresented, setCopyToastMessage, message)
   }
 
-  function close() {
-    if (props.onClose) {
-      props.onClose()
-    } else {
-      dismiss()
-    }
-  }
-
   const form = (
     <Form
-        navigationTitle={props.title}
-        navigationBarTitleDisplayMode="inline"
-        tabBarVisibility={props.embedded ? "visible" : undefined}
-        formStyle="grouped"
-        toast={{
-          isPresented: copyToastPresented,
-          message: copyToastMessage,
-          duration: 2,
-          position: "bottom",
-        }}
-        presentationDetents={[0.72, "large"]}
-        presentationDragIndicator="visible"
-        toolbar={{
-          topBarLeading: props.embedded
-            ? undefined
-            : <Button title="" systemImage="xmark" accessibilityLabel="关闭" role="cancel" action={close} />,
-          topBarTrailing: <Button title="" systemImage="doc.on.doc" accessibilityLabel="复制全部" action={() => void copyAll()} />,
-        }}
+      navigationTitle={props.title}
+      navigationBarTitleDisplayMode="inline"
+      tabBarVisibility={props.embedded ? "visible" : undefined}
+      formStyle="grouped"
+      toast={{
+        isPresented: copyToastPresented,
+        message: copyToastMessage,
+        duration: 2,
+        position: "bottom",
+      }}
+      presentationDetents={[0.72, "large"]}
+      presentationDragIndicator="visible"
+      toolbar={{
+        topBarLeading: props.embedded
+          ? undefined
+          : <Button title="" systemImage="xmark" accessibilityLabel="关闭" role="cancel" action={() => dismiss()} />,
+        topBarTrailing: <Button title="" systemImage="doc.on.doc" accessibilityLabel="复制全部" action={() => void copyAll()} />,
+      }}
+    >
+      <Section
+        header={(
+          <Text
+            font="headline"
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            multilineTextAlignment="leading"
+          >
+            子字段
+          </Text>
+        )}
+        footer={<Text>点击任意子字段可复制对应的值。</Text>}
       >
-        <Section
-          header={(
-            <Text
-              font="headline"
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-              multilineTextAlignment="leading"
-            >
-              子字段
-            </Text>
-          )}
-          footer={<Text>点击任意子字段可复制对应的值。</Text>}
-        >
-          {props.fields.map((field) => (
-            <Button
-              key={field.id}
-              buttonStyle="plain"
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-              background="rgba(0,0,0,0.001)"
-              contentShape="rect"
-              action={() => void copyField(field)}
-              contextMenu={props.renderFieldContextMenu ? {
-                menuItems: props.renderFieldContextMenu(field, () => void copyField(field)),
-              } : undefined}
-            >
-              <VStack spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-                  <Text
-                    font="headline"
-                    frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                    multilineTextAlignment="leading"
-                  >
-                    {field.name}
-                  </Text>
-                  <Spacer />
-                  <Image systemName="doc.on.doc" foregroundStyle="systemBlue" />
-                </HStack>
-                <Text
-                  foregroundStyle="secondaryLabel"
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  multilineTextAlignment="leading"
-                >
-                  {field.value}
-                </Text>
-              </VStack>
-            </Button>
-          ))}
-        </Section>
+        {props.fields.map((field) => (
+          <HStack
+            key={field.id}
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            background="rgba(0,0,0,0.001)"
+            contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+            onTapGesture={() => void copyField(field)}
+            contextMenu={props.renderFieldContextMenu ? {
+              menuItems: props.renderFieldContextMenu(field, () => void copyField(field)),
+            } : undefined}
+          >
+            <FavoriteFieldContent field={field} />
+          </HStack>
+        ))}
+      </Section>
     </Form>
   )
 
