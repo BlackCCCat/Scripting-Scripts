@@ -209,10 +209,9 @@ export async function getClipById(id: string): Promise<ClipItem | null> {
   return findClipById(id)
 }
 
-export async function markCopied(item: ClipItem): Promise<void> {
-  const now = Date.now()
-  await updateClipState(item.id, { updatedAt: now, lastCopiedAt: now })
-  bumpClipDataVersion()
+export async function markCopied(item: ClipItem, changeSource?: unknown, copiedAt = Date.now()): Promise<void> {
+  await updateClipState(item.id, { updatedAt: copiedAt, lastCopiedAt: copiedAt })
+  bumpClipDataVersion(changeSource)
 }
 
 export async function togglePinned(item: ClipItem): Promise<void> {

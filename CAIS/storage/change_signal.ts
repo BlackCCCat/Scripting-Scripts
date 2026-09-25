@@ -1,6 +1,6 @@
 const CLIP_DATA_VERSION_KEY = "cais_clip_data_version_v1"
 const LEGACY_SHARED_OPTIONS = { shared: true }
-const listeners = new Set<(version: number) => void>()
+const listeners = new Set<(version: number, source?: unknown) => void>()
 let memoryVersion = 0
 
 function getStorage(): any {
@@ -50,17 +50,17 @@ export function readClipDataVersion(): number {
   }
 }
 
-export function bumpClipDataVersion(): number {
+export function bumpClipDataVersion(source?: unknown): number {
   const next = Math.max(Date.now(), readClipDataVersion() + 1)
   memoryVersion = next
   if (writeClipDataVersionValue(next)) removeLegacySharedClipDataVersion()
   for (const listener of listeners) {
-    try { listener(next) } catch {}
+    try { listener(next, source) } catch {}
   }
   return next
 }
 
-export function subscribeClipDataChanges(listener: (version: number) => void): () => void {
+export function subscribeClipDataChanges(listener: (version: number, source?: unknown) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }

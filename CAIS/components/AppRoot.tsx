@@ -479,6 +479,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const queryRef = useRef(query)
   const clipKindFiltersRef = useRef(clipKindFilters)
   const homeRouteRef = useRef<HomeRoute | null>(null)
+  const copyChangeSource = useRef({}).current
   const listRefreshBlocked = useRef(false)
   const listRefreshDeferred = useRef(false)
   const lastObservedPasteboardChangeCount = useRef<number | null>(null)
@@ -592,9 +593,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       }
     }
 
-    function refreshForVersion(version: number) {
+    function refreshForVersion(version: number, source?: unknown) {
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
+      if (source === copyChangeSource) return
       scheduleRefresh()
     }
 
@@ -952,6 +954,40 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
+  function moveCopiedItemToTop(item: ClipItem, copiedAt: number) {
+    setClipboardGroups((current) => {
+      let sourceGroupIndex = -1
+      let sourceItemIndex = -1
+      for (let groupIndex = 0; groupIndex < current.length; groupIndex += 1) {
+        const itemIndex = current[groupIndex].items.findIndex((candidate) => candidate.id === item.id)
+        if (itemIndex < 0) continue
+        sourceGroupIndex = groupIndex
+        sourceItemIndex = itemIndex
+        break
+      }
+      const recentIndex = current.findIndex((group) => group.title === "最近内容")
+      if (sourceGroupIndex < 0 || recentIndex < 0) return current
+
+      const sourceItem = current[sourceGroupIndex].items[sourceItemIndex]
+      const updatedItem = { ...sourceItem, updatedAt: copiedAt, lastCopiedAt: copiedAt }
+      const groups = [...current]
+      const recentItems = [...current[recentIndex].items]
+      if (sourceGroupIndex === recentIndex) {
+        recentItems.splice(sourceItemIndex, 1)
+      } else {
+        const sourceItems = [...current[sourceGroupIndex].items]
+        sourceItems.splice(sourceItemIndex, 1)
+        groups[sourceGroupIndex] = { ...current[sourceGroupIndex], items: sourceItems }
+      }
+      const insertIndex = updatedItem.pinned
+        ? 0
+        : recentItems.findIndex((candidate) => !candidate.pinned)
+      recentItems.splice(insertIndex < 0 ? recentItems.length : insertIndex, 0, updatedItem)
+      groups[recentIndex] = { ...current[recentIndex], items: recentItems }
+      return groups
+    })
+  }
+
   async function copyItem(
     item: ClipItem,
     options: { notify?: boolean; refresh?: boolean; updateRecency?: boolean } = {},
@@ -960,9 +996,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       const { notify = true, refresh: refreshNow = true, updateRecency = true } = options
       const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
-      if (updateRecency) await markCopied(item)
+      const copiedAt = updateRecency ? Date.now() : 0
+      if (updateRecency && refreshNow) moveCopiedItemToTop(item, copiedAt)
       if (notify) showToast("已复制")
-      if (refreshNow) await refresh()
+      if (notify && updateRecency && typeof (globalThis as any).setTimeout === "function") {
+        await new Promise<void>((resolve) => (globalThis as any).setTimeout(resolve, 0))
+      }
+      if (updateRecency) await markCopied(item, copyChangeSource, copiedAt)
+      if (refreshNow && !updateRecency) await refresh()
       return "已复制"
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "复制失败") })
