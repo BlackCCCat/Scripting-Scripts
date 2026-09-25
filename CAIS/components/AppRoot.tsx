@@ -5,6 +5,7 @@ import {
   DragGesture,
   EmptyView,
   Editor,
+  ForEach,
   Group,
   GeometryReader,
   HStack,
@@ -113,8 +114,8 @@ const APP_SCROLL_CONTENT_MARGINS = {
 
 type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
-let appRefreshGeneration = 0
 let appMonitorStopper: (() => void) | null = null
+let appRefreshGeneration = 0
 type AppRootMode = "app" | "home"
 type ClipKindFilter = ClipKind | null
 type HomeRoute =
@@ -140,6 +141,23 @@ function removingClipFromGroups(groups: ClipGroup[], id: string): ClipGroup[] {
     items: groups[groupIndex].items.filter((item) => item.id !== id),
   }
   return next
+}
+
+type FavoriteDisplayGroup = ClipGroup & { id: string }
+
+function visibleFavoriteGroups(groups: ClipGroup[]): FavoriteDisplayGroup[] {
+  return groups.filter((group): group is FavoriteDisplayGroup => Boolean(group.id) && group.items.length > 0)
+}
+
+function orderFavoriteGroupsForDisplay(groups: FavoriteDisplayGroup[], ids: string[] | null): FavoriteDisplayGroup[] {
+  if (!ids) return groups
+  const positions = new Map(ids.map((id, index) => [`favorite-group:${id}`, index]))
+  const rank = (group: ClipGroup) => {
+    if (group.id === "favorite:plain") return -2
+    if (group.id === "favorite:fields") return -1
+    return positions.get(group.id ?? "") ?? Number.MAX_SAFE_INTEGER
+  }
+  return [...groups].sort((a, b) => rank(a) - rank(b))
 }
 
 function InteractiveClipRow(props: {
@@ -562,9 +580,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const activeTab = useObservable(readActiveTab())
   const pipPresented = useObservable(false)
   const toastPresented = useObservable(false)
+  const favoriteGroupDisplayOrder = useRef<string[] | null>(null)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [showLaunchSplash, setShowLaunchSplash] = useState(() => settings.launchAnimationEnabled)
-  const [favoriteGroups, setFavoriteGroups] = useState<ClipGroup[]>([])
+  const favoriteGroups = useObservable<FavoriteDisplayGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [clipKindCounts, setClipKindCounts] = useState<ClipKindCountsByScope>(EMPTY_CLIP_KIND_COUNTS)
   const [clipKindFilters, setClipKindFilters] = useState<Record<ClipListScope, ClipKindFilter>>({ favorites: null, clipboard: null })
@@ -579,6 +598,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const copyChangeSource = useRef({}).current
   const listRefreshBlocked = useRef(false)
   const listRefreshDeferred = useRef(false)
+  const favoriteGroupOrderWrites = useRef<Promise<void>>(Promise.resolve())
+  const favoriteGroupOrderWritesPending = useRef(0)
+  const favoriteGroupOrderRevision = useRef(0)
   const lastObservedPasteboardChangeCount = useRef<number | null>(null)
   const blankEditorOpening = useRef(false)
   const toastHideTimer = useRef<any>(null)
@@ -911,6 +933,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   async function refresh(currentSettings = settingsRef.current) {
     const generation = ++appRefreshGeneration
+    const orderRevision = favoriteGroupOrderRevision.current
+    const canUseDatabaseOrder = favoriteGroupOrderWritesPending.current === 0
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
     const search = queryRef.current.trim()
     const filters = clipKindFiltersRef.current
@@ -920,7 +944,23 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       getClipKindCounts(),
     ])
     if (generation !== appRefreshGeneration) return
-    setFavoriteGroups(nextFavoriteGroups)
+    const displayOrder = favoriteGroupDisplayOrder.current
+    if (
+      canUseDatabaseOrder &&
+      favoriteGroupOrderWritesPending.current === 0 &&
+      orderRevision === favoriteGroupOrderRevision.current &&
+      displayOrder &&
+      nextFavoriteGroups
+        .filter((group) => group.id?.startsWith("favorite-group:"))
+        .map((group) => group.id)
+        .join("\0") === displayOrder.map((id) => `favorite-group:${id}`).join("\0")
+    ) {
+      favoriteGroupDisplayOrder.current = null
+    }
+    favoriteGroups.setValue(orderFavoriteGroupsForDisplay(
+      visibleFavoriteGroups(nextFavoriteGroups),
+      favoriteGroupDisplayOrder.current,
+    ))
     setClipboardGroups(nextClipboardGroups)
     setClipKindCounts(nextClipKindCounts)
     setInitialDataReady(true)
@@ -1180,7 +1220,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   async function confirmDeleteItem(item: ClipItem) {
     setClipboardGroups((groups) => removingClipFromGroups(groups, item.id))
-    setFavoriteGroups((groups) => removingClipFromGroups(groups, item.id))
+    favoriteGroups.setValue(visibleFavoriteGroups(removingClipFromGroups(favoriteGroups.value, item.id)))
     if (typeof (globalThis as any).setTimeout === "function") {
       await new Promise<void>((resolve) => (globalThis as any).setTimeout(resolve, 0))
     }
@@ -1447,7 +1487,26 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   async function reorderManagedFavoriteGroups(groups: FavoriteGroup[]) {
-    await runFavoriteMutation(() => reorderFavoriteGroups(groups.map((group) => group.id)))
+    const ids = groups.map((group) => group.id)
+    const previousOrder = favoriteGroupDisplayOrder.current
+    const previousGroups = favoriteGroups.value
+    const revision = ++favoriteGroupOrderRevision.current
+    favoriteGroupDisplayOrder.current = ids
+    favoriteGroups.setValue(orderFavoriteGroupsForDisplay(favoriteGroups.value, ids))
+    favoriteGroupOrderWritesPending.current++
+    const write = favoriteGroupOrderWrites.current.catch(() => {}).then(() => reorderFavoriteGroups(ids))
+    favoriteGroupOrderWrites.current = write
+    try {
+      await write
+    } catch (error) {
+      if (revision === favoriteGroupOrderRevision.current) {
+        favoriteGroupDisplayOrder.current = previousOrder
+        favoriteGroups.setValue(previousGroups)
+      }
+      throw error
+    } finally {
+      favoriteGroupOrderWritesPending.current--
+    }
   }
 
   async function presentFavoriteGroupEditor() {
@@ -2001,8 +2060,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   function renderFavoriteList() {
     if (!initialDataReady) return null
-    const visibleGroups = favoriteGroups.filter((group) => group.items.length)
-    if (!visibleGroups.length) {
+    if (!favoriteGroups.value.length) {
       return (
         <Section
           listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
@@ -2017,18 +2075,19 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       )
     }
     return (
-      <Group>
-        {visibleGroups.map((group) => (
+      <ForEach
+        data={favoriteGroups}
+        builder={(group) => (
           <Section
-            key={group.id ?? group.title}
+            key={group.id}
             header={<Text>{group.title}</Text>}
             listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
             listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
           >
             {group.items.map((item) => renderClipRow(item, { favoriteView: true }))}
           </Section>
-        ))}
-      </Group>
+        )}
+      />
     )
   }
 

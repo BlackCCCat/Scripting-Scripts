@@ -304,9 +304,20 @@ async function fetchClipRows(db: DB, options: {
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""
   const limit = Math.max(1, Math.min(500, Number(options.limit ?? 100) || 100))
+  const order = options.scope === "favorites"
+    ? `CASE
+         WHEN favorite_group_id IS NOT NULL THEN 2
+         WHEN favorite_format = 'fields' THEN 1
+         ELSE 0
+       END ASC,
+       (SELECT sort_order FROM favorite_groups WHERE id = clips.favorite_group_id) ASC,
+       (SELECT created_at FROM favorite_groups WHERE id = clips.favorite_group_id) ASC,
+       COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC,
+       favorite_updated_at DESC`
+    : "pinned DESC, updated_at DESC"
   params.push(limit)
   return db.fetchAll(
-    `SELECT ${CLIP_ROW_SELECT} FROM clips ${where} ORDER BY pinned DESC, updated_at DESC LIMIT ?`,
+    `SELECT ${CLIP_ROW_SELECT} FROM clips ${where} ORDER BY ${order} LIMIT ?`,
     params
   )
 }
