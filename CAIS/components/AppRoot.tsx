@@ -28,6 +28,7 @@ import {
   Form,
   Navigation,
   useColorScheme,
+  type VirtualNode,
 } from "scripting"
 
 import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, FavoriteGroup, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
@@ -128,6 +129,105 @@ type HomeRoute =
 const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
   favorites: { total: 0, text: 0, url: 0, image: 0 },
   clipboard: { total: 0, text: 0, url: 0, image: 0 },
+}
+
+function removingClipFromGroups(groups: ClipGroup[], id: string): ClipGroup[] {
+  const groupIndex = groups.findIndex((group) => group.items.some((item) => item.id === id))
+  if (groupIndex < 0) return groups
+  const next = [...groups]
+  next[groupIndex] = {
+    ...groups[groupIndex],
+    items: groups[groupIndex].items.filter((item) => item.id !== id),
+  }
+  return next
+}
+
+function InteractiveClipRow(props: {
+  item: ClipItem
+  allowDelete: boolean
+  onTap: () => void
+  onConfirmDelete: (item: ClipItem) => Promise<void>
+  contextMenuItems: VirtualNode
+  leadingActions: VirtualNode[]
+  primaryTrailingAction: VirtualNode
+  content: VirtualNode
+}) {
+  const deleteDialogPresenter = useRef<() => void>()
+  const trailingActions = [
+    props.primaryTrailingAction,
+    ...(props.allowDelete ? [
+      <Button
+        title=""
+        systemImage="trash"
+        tint="systemRed"
+        action={withHaptic(() => deleteDialogPresenter.current?.())}
+      />,
+    ] : []),
+  ]
+
+  return (
+    <HStack
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      background="rgba(0,0,0,0.001)"
+      contentShape={{
+        kind: "contextMenuPreview",
+        shape: { type: "rect", cornerRadius: 18 },
+      } as any}
+      onTapGesture={props.onTap}
+      contextMenu={{ menuItems: props.contextMenuItems }}
+      leadingSwipeActions={{ allowsFullSwipe: false, actions: props.leadingActions }}
+      trailingSwipeActions={{ allowsFullSwipe: false, actions: trailingActions }}
+      listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
+      listRowBackground={<EmptyView />}
+      listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
+      listRowSeparatorTint={{ color: "clear", edges: "all" as any }}
+      overlay={props.allowDelete ? (
+        <ClipDeleteConfirmationHost
+          presenter={deleteDialogPresenter}
+          item={props.item}
+          onConfirm={props.onConfirmDelete}
+        />
+      ) : undefined}
+    >
+      {props.content}
+    </HStack>
+  )
+}
+
+function ClipDeleteConfirmationHost(props: {
+  presenter: { current: (() => void) | undefined }
+  item: ClipItem
+  onConfirm: (item: ClipItem) => Promise<void>
+}) {
+  const isPresented = useObservable(false)
+  props.presenter.current = () => isPresented.setValue(true)
+
+  return (
+    <HStack
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      allowsHitTesting={false}
+      confirmationDialog={{
+        title: "是否删除？",
+        isPresented,
+        actions: (
+          <Group>
+            <Button
+              title="删除"
+              systemImage="trash"
+              role="destructive"
+              action={() => {
+                isPresented.setValue(false)
+                void props.onConfirm(props.item)
+              }}
+            />
+            <Button title="取消" role="cancel" action={() => isPresented.setValue(false)} />
+          </Group>
+        ),
+      }}
+    >
+      <EmptyView />
+    </HStack>
+  )
 }
 
 function readActiveTab(): number {
@@ -461,7 +561,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const colorScheme = useColorScheme()
   const activeTab = useObservable(readActiveTab())
   const pipPresented = useObservable(false)
-  const deleteDialogPresented = useObservable(false)
   const toastPresented = useObservable(false)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [showLaunchSplash, setShowLaunchSplash] = useState(() => settings.launchAnimationEnabled)
@@ -472,8 +571,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const [initialDataReady, setInitialDataReady] = useState(false)
   const [homeRoute, setHomeRoute] = useState<HomeRoute | null>(null)
   const [homeRoutePresented, setHomeRoutePresented] = useState(false)
-  const [pendingDeleteItem, setPendingDeleteItem] = useState<ClipItem | null>(null)
-  const [pendingDeleteTab, setPendingDeleteTab] = useState<number | null>(null)
   const [query, setQuery] = useState("")
   const settingsRef = useRef(settings)
   const queryRef = useRef(query)
@@ -507,9 +604,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   useEffect(() => {
     writeActiveTab(activeTab.value)
-    deleteDialogPresented.setValue(false)
-    setPendingDeleteItem(null)
-    setPendingDeleteTab(null)
   }, [activeTab.value])
 
   useEffect(() => {
@@ -1072,25 +1166,19 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
-  function requestDeleteItem(item: ClipItem) {
-    setPendingDeleteItem(item)
-    setPendingDeleteTab(activeTab.value)
-    deleteDialogPresented.setValue(true)
-  }
-
-  function dismissDeleteDialog() {
-    deleteDialogPresented.setValue(false)
-    setPendingDeleteItem(null)
-    setPendingDeleteTab(null)
-  }
-
-  async function confirmDeleteItem() {
-    const item = pendingDeleteItem
-    dismissDeleteDialog()
-    if (!item) return
-    await clearCurrentClipboardIfMatchesDeletedItem(item)
-    await softDeleteClip(item)
-    await refresh()
+  async function confirmDeleteItem(item: ClipItem) {
+    setClipboardGroups((groups) => removingClipFromGroups(groups, item.id))
+    setFavoriteGroups((groups) => removingClipFromGroups(groups, item.id))
+    if (typeof (globalThis as any).setTimeout === "function") {
+      await new Promise<void>((resolve) => (globalThis as any).setTimeout(resolve, 0))
+    }
+    try {
+      await clearCurrentClipboardIfMatchesDeletedItem(item)
+      await softDeleteClip(item)
+    } catch (error: any) {
+      await refresh()
+      await Dialog.alert({ message: String(error?.message ?? error ?? "删除失败") })
+    }
   }
 
   async function requestClear(scope: ClearScope) {
@@ -1752,7 +1840,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     options: { allowDelete?: boolean; favoriteView?: boolean } = {},
   ) {
     const allowDelete = options.allowDelete ?? true
-    const trailingActions = [
+    const primaryTrailingAction = (
       <Button
         title=""
         systemImage={item.kind === "image" ? "photo" : "square.and.pencil"}
@@ -1764,27 +1852,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             void editItem(item)
           }
         })}
-      />,
-      ...(allowDelete ? [
-        <Button
-          title=""
-          systemImage="trash"
-          tint="systemRed"
-          action={withHaptic(() => requestDeleteItem(item))}
-        />,
-      ] : []),
-    ]
+      />
+    )
 
     return (
-      <HStack
+      <InteractiveClipRow
         key={item.id}
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        background="rgba(0,0,0,0.001)"
-        contentShape={{
-          kind: "contextMenuPreview",
-          shape: { type: "rect", cornerRadius: 18 },
-        } as any}
-        onTapGesture={withHaptic(() => {
+        item={item}
+        allowDelete={allowDelete}
+        onConfirmDelete={confirmDeleteItem}
+        primaryTrailingAction={primaryTrailingAction}
+        onTap={withHaptic(() => {
           if (isFieldFavorite(item)) {
             void openFavoriteFields(item)
           } else {
@@ -1795,101 +1873,77 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             })
           }
         })}
-        contextMenu={{
-          menuItems: (
-            <Group>
-              <ControlGroup controlSize="large">
-                <Button title="增加标题" systemImage="textformat" action={() => void editItemTitle(item)} />
-                {item.kind === "image" ? (
-                  <Button title="查看" systemImage="photo" action={() => void viewImageItem(item)} />
-                ) : (
-                  <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
-                )}
-                <Button title="分享" systemImage="square.and.arrow.up" action={() => void shareItem(item)} />
-              </ControlGroup>
-              <Divider />
-              {item.favorite && item.kind !== "image" && !isFieldFavorite(item) ? (
-                <Button
-                  title="转换为字段收藏"
-                  systemImage="list.bullet.rectangle"
-                  action={() => void presentFavoriteEditor(item, "fields")}
-                />
-              ) : null}
+        contextMenuItems={(
+          <Group>
+            <ControlGroup controlSize="large">
+              <Button title="增加标题" systemImage="textformat" action={() => void editItemTitle(item)} />
               {item.kind === "image" ? (
-                <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractTextFromImage(item)} />
-              ) : null}
-              {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
-                <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
-              ) : null}
-              {getOrderedMenuBuiltins(settings).map((action) => {
-                const enabled = settings.keyboardMenu.builtins[action]
-                const supported = action !== "tokenize" && (
-                  action === "base64Encode" ||
-                  (action === "openUrl" ? item.kind === "url" : item.kind !== "image")
-                )
-                return enabled && supported ? (
-                  <Button
-                    key={action}
-                    title={menuBuiltinTitle(action)}
-                    systemImage={menuBuiltinSystemImage(action)}
-                    action={() => void runBuiltinActionForItem(item, action)}
-                  />
-                ) : null
-              })}
-              {item.kind !== "image" ? (
-                settings.keyboardMenu.customActions
-                  .filter((action) => action.enabled)
-                  .map((action) => (
-                    <Button
-                      key={action.id}
-                      title={action.title}
-                      systemImage={customActionSystemImage(action)}
-                      action={() => void runCustomActionForItem(item, action)}
-                    />
-                  ))
-              ) : null}
-            </Group>
-          ),
-        }}
-        leadingSwipeActions={{
-          allowsFullSwipe: false,
-          actions: [
-            ...(item.manualFavorite ? [] : [
+                <Button title="查看" systemImage="photo" action={() => void viewImageItem(item)} />
+              ) : (
+                <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
+              )}
+              <Button title="分享" systemImage="square.and.arrow.up" action={() => void shareItem(item)} />
+            </ControlGroup>
+            <Divider />
+            {item.favorite && item.kind !== "image" && !isFieldFavorite(item) ? (
               <Button
-                title=""
-                systemImage={item.favorite ? "star.slash" : "star"}
-                tint="systemYellow"
-                action={() => void toggleFavoriteWithType(item)}
-              />,
-            ]),
+                title="转换为字段收藏"
+                systemImage="list.bullet.rectangle"
+                action={() => void presentFavoriteEditor(item, "fields")}
+              />
+            ) : null}
+            {item.kind === "image" ? (
+              <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractTextFromImage(item)} />
+            ) : null}
+            {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
+              <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
+            ) : null}
+            {getOrderedMenuBuiltins(settings).map((action) => {
+              const enabled = settings.keyboardMenu.builtins[action]
+              const supported = action !== "tokenize" && (
+                action === "base64Encode" ||
+                (action === "openUrl" ? item.kind === "url" : item.kind !== "image")
+              )
+              return enabled && supported ? (
+                <Button
+                  key={action}
+                  title={menuBuiltinTitle(action)}
+                  systemImage={menuBuiltinSystemImage(action)}
+                  action={() => void runBuiltinActionForItem(item, action)}
+                />
+              ) : null
+            })}
+            {item.kind !== "image" ? (
+              settings.keyboardMenu.customActions
+                .filter((action) => action.enabled)
+                .map((action) => (
+                  <Button
+                    key={action.id}
+                    title={action.title}
+                    systemImage={customActionSystemImage(action)}
+                    action={() => void runCustomActionForItem(item, action)}
+                  />
+                ))
+            ) : null}
+          </Group>
+        )}
+        leadingActions={[
+          ...(item.manualFavorite ? [] : [
             <Button
               title=""
-              systemImage={item.pinned ? "pin.slash" : "pin"}
-              tint="systemOrange"
-              action={() => void togglePinned(item).then(() => refresh())}
+              systemImage={item.favorite ? "star.slash" : "star"}
+              tint="systemYellow"
+              action={() => void toggleFavoriteWithType(item)}
             />,
-          ],
-        }}
-        trailingSwipeActions={{
-          allowsFullSwipe: false,
-          actions: trailingActions,
-        }}
-        confirmationDialog={pendingDeleteItem?.id === item.id && pendingDeleteTab === activeTab.value ? {
-          title: "是否删除？",
-          isPresented: deleteDialogPresented,
-          actions: (
-            <Group>
-              <Button title="删除" systemImage="trash" role="destructive" action={() => void confirmDeleteItem()} />
-              <Button title="取消" role="cancel" action={dismissDeleteDialog} />
-            </Group>
-          ),
-        } : undefined}
-        listRowInsets={{ top: 5, bottom: 5, leading: 12, trailing: 12 }}
-        listRowBackground={<EmptyView />}
-        listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
-        listRowSeparatorTint={{ color: "clear", edges: "all" as any }}
-      >
-        {settings.appClipRowGlassEffect ? (
+          ]),
+          <Button
+            title=""
+            systemImage={item.pinned ? "pin.slash" : "pin"}
+            tint="systemOrange"
+            action={() => void togglePinned(item).then(() => refresh())}
+          />,
+        ]}
+        content={settings.appClipRowGlassEffect ? (
           <ClipRow
             item={item}
             contentLineLimit={settings.appContentLineLimit}
@@ -1902,7 +1956,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             displayTimestamp={options.favoriteView ? item.favoriteUpdatedAt ?? item.updatedAt : undefined}
           />
         )}
-      </HStack>
+      />
     )
   }
 

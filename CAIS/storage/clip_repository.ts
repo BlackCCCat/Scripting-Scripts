@@ -248,8 +248,8 @@ export async function toggleFavorite(item: ClipItem): Promise<void> {
 }
 
 export async function softDeleteClip(item: ClipItem): Promise<void> {
-  await removeImage(item.imagePath)
   await deleteClip(item.id)
+  await removeImage(item.imagePath)
   bumpClipDataVersion()
 }
 
