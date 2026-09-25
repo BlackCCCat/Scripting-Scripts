@@ -524,6 +524,9 @@ function stopOwnedServer(): void {
 async function applyDesiredState(settings: CaisSettings): Promise<LanShareRuntimeStatus> {
   const port = settings.lanSharingPort
   if (!settings.lanSharingEnabled) {
+    if (!server && runtimeStatus.state === "stopped" && runtimeStatus.port === port) {
+      return runtimeStatus
+    }
     stopOwnedServer()
     return setRuntimeStatus(statusFor("stopped", port, "局域网共享已关闭"))
   }

@@ -580,6 +580,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const listRefreshBlocked = useRef(false)
   const listRefreshDeferred = useRef(false)
   const lastObservedPasteboardChangeCount = useRef<number | null>(null)
+  const blankEditorOpening = useRef(false)
   const toastHideTimer = useRef<any>(null)
   const [appFullscreen, setAppFullscreen] = useState(() => readAppFullscreen(false))
   const [loading, setLoading] = useState(false)
@@ -593,6 +594,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   })
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   const embeddedHomeNavigation = homeScreenMode && settings.homeScreenEmbeddedNavigation
+  const orderedMenuBuiltins = getOrderedMenuBuiltins(settings)
+  const enabledCustomActions = settings.keyboardMenu.customActions.filter((action) => action.enabled)
 
   useEffect(() => {
     settingsRef.current = settings
@@ -672,7 +675,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           refreshQueued = false
           return
         }
-        void refresh(true, settingsRef.current).catch(() => {}).finally(() => {
+        void refresh(settingsRef.current).catch(() => {}).finally(() => {
           refreshQueued = false
           if (refreshRequested) {
             refreshRequested = false
@@ -842,8 +845,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }, [])
 
   useEffect(() => {
+    if (!initialDataReady) return
     const timer = (globalThis as any).setTimeout?.(() => {
-      void refresh(true)
+      void refresh()
     }, 180)
     return () => {
       if (timer) (globalThis as any).clearTimeout?.(timer)
@@ -866,14 +870,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   async function captureClipboardAndRefresh(currentSettings = settingsRef.current, force = false) {
     await captureClipboardIfChanged(currentSettings, force)
-    await refresh(true, currentSettings)
+    await refresh(currentSettings)
   }
 
   async function captureClipboardChangeAndRefresh() {
     if (pipPresented.value || appMonitorStopper) return
     const changed = await captureClipboardIfChanged(settingsRef.current)
     if (changed) {
-      await refresh(true, settingsRef.current)
+      await refresh(settingsRef.current)
     }
   }
 
@@ -905,7 +909,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     void captureClipboardChangeAndRefresh()
   }
 
-  async function refresh(_force = false, currentSettings = settings) {
+  async function refresh(currentSettings = settingsRef.current) {
     const generation = ++appRefreshGeneration
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
     const search = queryRef.current.trim()
@@ -938,7 +942,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       ) {
         publishLanShareStatus(await reconcileLanShareServer(next))
       }
-      void refresh(true, next)
+      if (needsStorageMigration || previous.maxItems !== next.maxItems) {
+        void refresh(next)
+      }
     } catch (error: any) {
       await Dialog.alert({
         title: "iCloud 同步失败",
@@ -1023,11 +1029,12 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   async function openBlankEditor() {
+    if (blankEditorOpening.current) return
     if (embeddedHomeNavigation) {
       presentHomeRoute({ kind: "addContent" })
       return
     }
-    setLoading(true)
+    blankEditorOpening.current = true
     try {
       const content = await Navigation.present<string | null>({
         element: (
@@ -1040,11 +1047,16 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         modalPresentationStyle: "pageSheet",
       })
       if (content == null) return
-      await persistNewContent(content)
+      setLoading(true)
+      try {
+        await persistNewContent(content)
+      } finally {
+        setLoading(false)
+      }
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "保存失败") })
     } finally {
-      setLoading(false)
+      blankEditorOpening.current = false
     }
   }
 
@@ -1254,7 +1266,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     listRefreshBlocked.current = true
     try {
       const result = await operation()
-      await refresh(true, settingsRef.current)
+      await refresh(settingsRef.current)
       return result
     } finally {
       listRefreshBlocked.current = wasBlocked
@@ -1301,7 +1313,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     listRefreshBlocked.current = false
     if (listRefreshDeferred.current) {
       listRefreshDeferred.current = false
-      await refresh(true, settingsRef.current)
+      await refresh(settingsRef.current)
     }
   }
 
@@ -1898,7 +1910,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
               <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
             ) : null}
-            {getOrderedMenuBuiltins(settings).map((action) => {
+            {orderedMenuBuiltins.map((action) => {
               const enabled = settings.keyboardMenu.builtins[action]
               const supported = action !== "tokenize" && (
                 action === "base64Encode" ||
@@ -1914,16 +1926,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
               ) : null
             })}
             {item.kind !== "image" ? (
-              settings.keyboardMenu.customActions
-                .filter((action) => action.enabled)
-                .map((action) => (
-                  <Button
-                    key={action.id}
-                    title={action.title}
-                    systemImage={customActionSystemImage(action)}
-                    action={() => void runCustomActionForItem(item, action)}
-                  />
-                ))
+              enabledCustomActions.map((action) => (
+                <Button
+                  key={action.id}
+                  title={action.title}
+                  systemImage={customActionSystemImage(action)}
+                  action={() => void runCustomActionForItem(item, action)}
+                />
+              ))
             ) : null}
           </Group>
         )}
@@ -2161,7 +2171,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       const next = { ...clipKindFiltersRef.current, [scope]: kind }
       clipKindFiltersRef.current = next
       setClipKindFilters(next)
-      void refresh(true, settingsRef.current)
+      void refresh(settingsRef.current)
     }
 
     return (

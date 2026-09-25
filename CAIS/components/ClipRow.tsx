@@ -1,4 +1,4 @@
-import { HStack, Image, Spacer, Text, VStack, useColorScheme } from "scripting"
+import { HStack, Image, Spacer, Text, VStack, useColorScheme, useMemo } from "scripting"
 import type { ClipItem } from "../types"
 import { formatDateTime, summarizeContent } from "../utils/common"
 import { imageListPreviewPath } from "../storage/image_store"
@@ -26,6 +26,8 @@ function ClipRowContent(props: {
   displayTimestamp?: number
 }) {
   const item = props.item
+  const displayedAt = props.displayTimestamp ?? item.updatedAt
+  const timestampText = useMemo(() => formatDateTime(displayedAt), [displayedAt])
   return (
     <>
       <Image
@@ -68,7 +70,7 @@ function ClipRowContent(props: {
         <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
           <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item)}</Text>
           <Text font="caption" foregroundStyle="tertiaryLabel">
-            {formatDateTime(props.displayTimestamp ?? item.updatedAt)}
+            {timestampText}
           </Text>
         </HStack>
       </VStack>

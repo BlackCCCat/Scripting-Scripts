@@ -1,3 +1,7 @@
+## v3.0.9
+- improve:代码清理
+- improve:性能优化，现在打开Editor添加内容更顺滑
+
 ## v3.0.8
 - improve:剪贴板列表性能优化
 
