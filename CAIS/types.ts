@@ -1,5 +1,17 @@
 export type ClipKind = "text" | "url" | "image"
 export type FavoriteFormat = "plain" | "fields"
+export type FavoriteGroupRuleType = "keyword" | "regex"
+
+export type FavoriteGroup = {
+  id: string
+  title: string
+  ruleType: FavoriteGroupRuleType
+  pattern: string
+  ignoreCase: boolean
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
+}
 
 export type ClipPayload = {
   kind: ClipKind
@@ -27,6 +39,10 @@ export type ClipItem = {
   favoriteFormat?: FavoriteFormat
   fieldDelimiter?: string
   fieldDelimiterOverride?: boolean
+  favoriteGroupId?: string
+  favoriteGroupManual?: boolean
+  favoriteOrder?: number
+  favoriteUpdatedAt?: number
   deletedAt?: number | null
 }
 
@@ -44,6 +60,7 @@ export type ClipKindCountsByScope = Record<ClipListScope, ClipKindCounts>
 export type ClipboardClearRange = "recent" | "threeDays" | "sevenDays" | "older"
 
 export type ClipGroup = {
+  id?: string
   title: string
   items: ClipItem[]
 }

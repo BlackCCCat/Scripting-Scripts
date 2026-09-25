@@ -30,7 +30,7 @@ import {
   useColorScheme,
 } from "scripting"
 
-import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
+import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, FavoriteGroup, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
@@ -47,6 +47,11 @@ import {
   togglePinned,
   updateClipTitle,
   addFavoriteFromInput,
+  createFavoriteGroup,
+  getFavoriteGroupDefinitions,
+  removeFavoriteGroup,
+  reorderFavoriteGroups,
+  saveFavoriteGroup,
   updateFavoriteFromInput,
 } from "../storage/clip_repository"
 import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
@@ -90,6 +95,8 @@ import {
   type FavoriteDraft,
 } from "./FavoriteFieldsView"
 import { FavoriteFieldActionMenu } from "./FavoriteFieldActionMenu"
+import { FavoriteGroupEditorView, type FavoriteGroupDraft } from "./FavoriteGroupEditorView"
+import { FavoriteGroupManagerView } from "./FavoriteGroupManagerView"
 
 const TAB_FAVORITES = 0
 const TAB_CLIPS = 1
@@ -102,6 +109,7 @@ const APP_SCROLL_CONTENT_MARGINS = {
   insets: { top: 0, bottom: 0, leading: 0, trailing: 0 },
   placement: "scrollContent" as const,
 }
+
 type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appRefreshGeneration = 0
@@ -111,7 +119,9 @@ type ClipKindFilter = ClipKind | null
 type HomeRoute =
   | { kind: "addContent" }
   | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number }
-  | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft }
+  | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[] }
+  | { kind: "favoriteGroupEditor" }
+  | { kind: "favoriteGroupManager"; groups: FavoriteGroup[] }
   | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
   | { kind: "image"; item: ClipItem }
   | { kind: "tokens"; tokens: CaisToken[] }
@@ -944,13 +954,13 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   async function copyItem(
     item: ClipItem,
-    options: { notify?: boolean; refresh?: boolean } = {},
+    options: { notify?: boolean; refresh?: boolean; updateRecency?: boolean } = {},
   ): Promise<string | void> {
     try {
-      const { notify = true, refresh: refreshNow = true } = options
+      const { notify = true, refresh: refreshNow = true, updateRecency = true } = options
       const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
-      await markCopied(item)
+      if (updateRecency) await markCopied(item)
       if (notify) showToast("已复制")
       if (refreshNow) await refresh()
       return "已复制"
@@ -1010,7 +1020,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             renderFieldContextMenu={renderFavoriteFieldContextMenu}
             onCopyAll={() => {
               playCaisHaptic()
-              return copyItem(item, { notify: false, refresh: false })
+              return copyItem(item, { notify: false, refresh: false, updateRecency: false })
             }}
           />
         ),
@@ -1110,26 +1120,42 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     if (needsRefresh) await refresh()
   }
 
-  async function persistFavoriteDraft(item: ClipItem | undefined, result: FavoriteDraft) {
-    if (item) {
-      await updateFavoriteFromInput(
-        item,
-        result.title,
-        result.content,
-        result.format,
-        result.fieldDelimiter,
-        settingsRef.current.favoriteFieldDelimiter,
-      )
-      showToast("已保存收藏")
-    } else {
-      await addFavoriteFromInput(result.title, result.content, {
-        format: result.format,
-        fieldDelimiter: result.fieldDelimiter,
-        defaultFieldDelimiter: settingsRef.current.favoriteFieldDelimiter,
-      })
-      showToast("已添加到收藏")
+  async function runFavoriteMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const wasBlocked = listRefreshBlocked.current
+    listRefreshBlocked.current = true
+    try {
+      const result = await operation()
+      await refresh(true, settingsRef.current)
+      return result
+    } finally {
+      listRefreshBlocked.current = wasBlocked
+      if (!wasBlocked) listRefreshDeferred.current = false
     }
-    await refresh()
+  }
+
+  async function persistFavoriteDraft(item: ClipItem | undefined, result: FavoriteDraft) {
+    await runFavoriteMutation(async () => {
+      if (item) {
+        await updateFavoriteFromInput(
+          item,
+          result.title,
+          result.content,
+          result.format,
+          result.fieldDelimiter,
+          settingsRef.current.favoriteFieldDelimiter,
+          result.favoriteGroupId,
+          result.favoriteGroupManual,
+        )
+      } else {
+        await addFavoriteFromInput(result.title, result.content, {
+          format: result.format,
+          fieldDelimiter: result.fieldDelimiter,
+          defaultFieldDelimiter: settingsRef.current.favoriteFieldDelimiter,
+          favoriteGroupId: result.favoriteGroupId,
+        })
+      }
+    })
+    showToast(item ? "已保存收藏" : "已添加到收藏")
   }
 
   async function persistTokenResult(result: string) {
@@ -1211,14 +1237,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   async function presentFavoriteEditor(item?: ClipItem, preferredFormat?: "plain" | "fields") {
     try {
       const sessionId = makeId("favorite-editor")
+      const favoriteGroups = await getFavoriteGroupDefinitions()
       const initial: FavoriteDraft | undefined = item ? {
         title: item.title,
         content: await getFullClipContent(item.id),
         format: preferredFormat ?? (item.favoriteFormat === "fields" ? "fields" : "plain"),
         fieldDelimiter: item.fieldDelimiterOverride ? item.fieldDelimiter : undefined,
+        favoriteGroupId: item.favoriteGroupId,
+        favoriteGroupManual: item.favoriteGroupManual,
       } : undefined
       if (embeddedHomeNavigation) {
-        presentHomeRoute({ kind: "favoriteEditor", sessionId, item, initial })
+        presentHomeRoute({ kind: "favoriteEditor", sessionId, item, initial, preferredFormat, favoriteGroups })
         return
       }
       const result = await Navigation.present<FavoriteDraft | null>({
@@ -1226,6 +1255,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           <FavoriteEditorView
             key={sessionId}
             initial={initial}
+            preferredFormat={preferredFormat}
+            favoriteGroups={favoriteGroups}
             defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
             onPreviewCopy={copyFavoriteField}
             renderFieldContextMenu={renderFavoriteFieldContextMenu}
@@ -1246,6 +1277,76 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       await persistFavoriteDraft(item, result)
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error ?? "收藏保存失败") })
+    }
+  }
+
+  async function persistFavoriteGroupDraft(draft: FavoriteGroupDraft) {
+    const result = await runFavoriteMutation(
+      () => createFavoriteGroup(draft.title, draft.ruleType, draft.pattern, draft.ignoreCase),
+    )
+    showToast(result.matchedCount
+      ? `已创建分组，归类 ${result.matchedCount} 条`
+      : "已创建分组，暂无匹配内容")
+    return result.group
+  }
+
+  async function saveManagedFavoriteGroup(group: FavoriteGroup, draft: FavoriteGroupDraft) {
+    const result = await runFavoriteMutation(
+      () => saveFavoriteGroup(group, draft.title, draft.ruleType, draft.pattern, draft.ignoreCase),
+    )
+    showToast(result.matchedCount
+      ? `已更新分组，归类 ${result.matchedCount} 条`
+      : "已更新分组，暂无匹配内容")
+    return result.group
+  }
+
+  async function deleteManagedFavoriteGroup(group: FavoriteGroup) {
+    await runFavoriteMutation(() => removeFavoriteGroup(group))
+    showToast("已删除收藏分组")
+  }
+
+  async function reorderManagedFavoriteGroups(groups: FavoriteGroup[]) {
+    await runFavoriteMutation(() => reorderFavoriteGroups(groups.map((group) => group.id)))
+  }
+
+  async function presentFavoriteGroupEditor() {
+    try {
+      if (embeddedHomeNavigation) {
+        presentHomeRoute({ kind: "favoriteGroupEditor" })
+        return
+      }
+      const result = await Navigation.present<FavoriteGroupDraft | null>({
+        element: <FavoriteGroupEditorView />,
+        modalPresentationStyle: "pageSheet",
+      })
+      if (!result) return
+      await persistFavoriteGroupDraft(result)
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "收藏分组保存失败") })
+    }
+  }
+
+  async function presentFavoriteGroupManager() {
+    try {
+      const groups = await getFavoriteGroupDefinitions()
+      if (embeddedHomeNavigation) {
+        presentHomeRoute({ kind: "favoriteGroupManager", groups })
+        return
+      }
+      await Navigation.present({
+        element: (
+          <FavoriteGroupManagerView
+            initialGroups={groups}
+            onCreateGroup={persistFavoriteGroupDraft}
+            onSaveGroup={saveManagedFavoriteGroup}
+            onDeleteGroup={deleteManagedFavoriteGroup}
+            onReorderGroups={reorderManagedFavoriteGroups}
+          />
+        ),
+        modalPresentationStyle: "pageSheet",
+      })
+    } catch (error: any) {
+      await Dialog.alert({ message: String(error?.message ?? error ?? "分组管理打开失败") })
     }
   }
 
@@ -1605,7 +1706,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
-  function renderClipRow(item: ClipItem, options: { allowDelete: boolean } = { allowDelete: true }) {
+  function renderClipRow(
+    item: ClipItem,
+    options: { allowDelete?: boolean; favoriteView?: boolean } = {},
+  ) {
+    const allowDelete = options.allowDelete ?? true
     const trailingActions = [
       <Button
         title=""
@@ -1619,7 +1724,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           }
         })}
       />,
-      ...(options.allowDelete ? [
+      ...(allowDelete ? [
         <Button
           title=""
           systemImage="trash"
@@ -1642,7 +1747,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           if (isFieldFavorite(item)) {
             void openFavoriteFields(item)
           } else {
-            void copyItem(item)
+            const onFavoritesPage = activeTab.value === TAB_FAVORITES
+            void copyItem(item, {
+              refresh: !onFavoritesPage,
+              updateRecency: !onFavoritesPage,
+            })
           }
         })}
         contextMenu={{
@@ -1743,11 +1852,13 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           <ClipRow
             item={item}
             contentLineLimit={settings.appContentLineLimit}
+            displayTimestamp={options.favoriteView ? item.favoriteUpdatedAt ?? item.updatedAt : undefined}
           />
         ) : (
           <NonGlassClipRow
             item={item}
             contentLineLimit={settings.appContentLineLimit}
+            displayTimestamp={options.favoriteView ? item.favoriteUpdatedAt ?? item.updatedAt : undefined}
           />
         )}
       </HStack>
@@ -1779,6 +1890,39 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
               {group.items.map((item) => renderClipRow(item, { allowDelete: options.allowDelete?.(item) ?? true }))}
             </Section>
           ))}
+      </Group>
+    )
+  }
+
+  function renderFavoriteList() {
+    if (!initialDataReady) return null
+    const visibleGroups = favoriteGroups.filter((group) => group.items.length)
+    if (!visibleGroups.length) {
+      return (
+        <Section
+          listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+          listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
+        >
+          <EmptyState
+            title="暂无内容"
+            message={query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加收藏，或右滑剪贴板条目点星标。"}
+            systemImage="star"
+          />
+        </Section>
+      )
+    }
+    return (
+      <Group>
+        {visibleGroups.map((group) => (
+          <Section
+            key={group.id ?? group.title}
+            header={<Text>{group.title}</Text>}
+            listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+            listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
+          >
+            {group.items.map((item) => renderClipRow(item, { favoriteView: true }))}
+          </Section>
+        ))}
       </Group>
     )
   }
@@ -1845,12 +1989,38 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     return (
       <HStack spacing={10}>
         {pipToolbarButton()}
-        <Button
-          title=""
-          systemImage="plus"
-          action={withHaptic(() => presentFavoriteEditor())}
-        />
+        {favoriteAddMenu()}
       </HStack>
+    )
+  }
+
+  function favoriteAddMenu() {
+    return (
+      <Menu
+        menuIndicator="hidden"
+        label={<Image systemName="plus" accessibilityLabel="添加收藏" />}
+      >
+        <Button
+          title="添加收藏分组"
+          systemImage="folder.badge.plus"
+          action={withHaptic(() => void presentFavoriteGroupEditor())}
+        />
+        <Button
+          title="分组管理"
+          systemImage="folder"
+          action={withHaptic(() => void presentFavoriteGroupManager())}
+        />
+        <Button
+          title="添加普通收藏"
+          systemImage="star"
+          action={withHaptic(() => void presentFavoriteEditor(undefined, "plain"))}
+        />
+        <Button
+          title="添加字段收藏"
+          systemImage="list.bullet.rectangle"
+          action={withHaptic(() => void presentFavoriteEditor(undefined, "fields"))}
+        />
+      </Menu>
     )
   }
 
@@ -2024,11 +2194,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     return (
       <HStack spacing={8}>
         {activeTab.value === TAB_FAVORITES ? (
-          <Button
-            title="添加常用语"
-            systemImage="plus"
-            action={withHaptic(() => presentFavoriteEditor())}
-          />
+          favoriteAddMenu()
         ) : null}
         {activeTab.value !== TAB_FAVORITES ? (
           <Button
@@ -2094,14 +2260,16 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         <FavoriteEditorView
           key={route.sessionId}
           initial={route.initial}
+          preferredFormat={route.preferredFormat}
+          favoriteGroups={route.favoriteGroups}
           defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
           onPreviewCopy={copyFavoriteField}
           renderFieldContextMenu={renderFavoriteFieldContextMenu}
           embedded
           onCancel={() => void closeHomeRoute()}
           onSave={(draft) => {
-            takeHomeRoute()
             void persistFavoriteDraft(route.item, draft)
+              .then(() => takeHomeRoute())
               .catch((error: any) => Dialog.alert({ message: String(error?.message ?? error ?? "收藏保存失败") }))
           }}
           renderEmbeddedContentEditor={(content, onSave, onCancel) => (
@@ -2117,6 +2285,32 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       )
     }
 
+    if (homeRoute.kind === "favoriteGroupEditor") {
+      return (
+        <FavoriteGroupEditorView
+          embedded
+          onCancel={() => void closeHomeRoute()}
+          onSave={async (draft) => {
+            await persistFavoriteGroupDraft(draft)
+            takeHomeRoute()
+          }}
+        />
+      )
+    }
+
+    if (homeRoute.kind === "favoriteGroupManager") {
+      return (
+        <FavoriteGroupManagerView
+          initialGroups={homeRoute.groups}
+          embedded
+          onCreateGroup={persistFavoriteGroupDraft}
+          onSaveGroup={saveManagedFavoriteGroup}
+          onDeleteGroup={deleteManagedFavoriteGroup}
+          onReorderGroups={reorderManagedFavoriteGroups}
+        />
+      )
+    }
+
     if (homeRoute.kind === "favoriteFields") {
       const route = homeRoute
       return (
@@ -2128,7 +2322,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           renderFieldContextMenu={renderFavoriteFieldContextMenu}
           onCopyAll={() => {
             playCaisHaptic()
-            return copyItem(route.item, { notify: false, refresh: false })
+            return copyItem(route.item, { notify: false, refresh: false, updateRecency: false })
           }}
         />
       )
@@ -2162,7 +2356,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           toast={toastOptions()}
         >
           {searchPanel("favorites")}
-          {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+          {renderFavoriteList()}
         </Form>
       )
     }
@@ -2244,7 +2438,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             toast={toastOptions()}
           >
             {searchPanel("favorites")}
-            {renderGroupedClipList(favoriteGroups, query.trim() ? "没有匹配的收藏内容。" : "点击右上角添加常用语，或右滑剪贴板条目点星标。")}
+            {renderFavoriteList()}
           </Form>
         </NavigationStack>
       </Tab>

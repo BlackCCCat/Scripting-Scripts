@@ -23,6 +23,7 @@ function ClipRowContent(props: {
   item: ClipItem
   lineLimit: number
   previewPath?: string
+  displayTimestamp?: number
 }) {
   const item = props.item
   return (
@@ -66,7 +67,9 @@ function ClipRowContent(props: {
         )}
         <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
           <Text font="caption" foregroundStyle="tertiaryLabel">{kindLabel(item)}</Text>
-          <Text font="caption" foregroundStyle="tertiaryLabel">{formatDateTime(item.updatedAt)}</Text>
+          <Text font="caption" foregroundStyle="tertiaryLabel">
+            {formatDateTime(props.displayTimestamp ?? item.updatedAt)}
+          </Text>
         </HStack>
       </VStack>
     </>
@@ -76,6 +79,7 @@ function ClipRowContent(props: {
 export function NonGlassClipRow(props: {
   item: ClipItem
   contentLineLimit: number
+  displayTimestamp?: number
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
@@ -95,7 +99,7 @@ export function NonGlassClipRow(props: {
         y: 4,
       }}
     >
-      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} />
+      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} />
     </HStack>
   )
 }
@@ -103,6 +107,7 @@ export function NonGlassClipRow(props: {
 export function ClipRow(props: {
   item: ClipItem
   contentLineLimit: number
+  displayTimestamp?: number
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
@@ -114,7 +119,7 @@ export function ClipRow(props: {
       padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
       glassEffect={{ type: "rect", cornerRadius: 18 } as any}
     >
-      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} />
+      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} />
     </HStack>
   )
 }

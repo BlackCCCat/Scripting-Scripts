@@ -1,15 +1,27 @@
-import type { ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope } from "../types"
+import type {
+  ClipboardClearRange,
+  ClipGroup,
+  ClipItem,
+  ClipKind,
+  ClipKindCountsByScope,
+  ClipListScope,
+  FavoriteGroup,
+} from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
 
 type DB = {
   execute: (sql: string, params?: any[]) => Promise<any>
   fetchAll: (sql: string, params?: any[]) => Promise<any[]>
+  transaction: (
+    steps: Array<{ sql: string; args?: any[] }>,
+    options?: { kind?: "deferred" | "immediate" | "exclusive" },
+  ) => Promise<void>
 }
 
 let cachedDb: DB | null = null
 let initialized = false
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, deleted_at"
+const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at"
 const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
 
 function rowToClip(row: any): ClipItem {
@@ -30,6 +42,10 @@ function rowToClip(row: any): ClipItem {
     favoriteFormat: row.favorite_format === "fields" ? "fields" : "plain",
     fieldDelimiter: row.field_delimiter ? String(row.field_delimiter) : undefined,
     fieldDelimiterOverride: Number(row.field_delimiter_override ?? 0) === 1,
+    favoriteGroupId: row.favorite_group_id ? String(row.favorite_group_id) : undefined,
+    favoriteGroupManual: Number(row.favorite_group_manual ?? 0) === 1,
+    favoriteOrder: row.favorite_order == null ? undefined : Number(row.favorite_order),
+    favoriteUpdatedAt: row.favorite_updated_at == null ? undefined : Number(row.favorite_updated_at),
     deletedAt: row.deleted_at == null ? null : Number(row.deleted_at),
   }
 }
@@ -52,8 +68,25 @@ function clipParams(item: ClipItem): any[] {
     item.favoriteFormat === "fields" ? "fields" : "plain",
     item.fieldDelimiter ?? null,
     item.fieldDelimiterOverride ? 1 : 0,
+    item.favoriteGroupId ?? null,
+    item.favoriteGroupManual ? 1 : 0,
+    item.favoriteOrder ?? null,
+    item.favoriteUpdatedAt ?? null,
     item.deletedAt ?? null,
   ]
+}
+
+function rowToFavoriteGroup(row: any): FavoriteGroup {
+  return {
+    id: String(row.id),
+    title: String(row.title ?? ""),
+    ruleType: row.rule_type === "regex" ? "regex" : "keyword",
+    pattern: String(row.pattern ?? ""),
+    ignoreCase: Number(row.ignore_case ?? 1) === 1,
+    sortOrder: Number(row.sort_order ?? 0),
+    createdAt: Number(row.created_at ?? Date.now()),
+    updatedAt: Number(row.updated_at ?? Date.now()),
+  }
 }
 
 async function ensureUniqueActiveTextIndex(db: DB): Promise<void> {
@@ -138,6 +171,10 @@ async function ensureSchema(db: DB): Promise<void> {
       favorite_format TEXT NOT NULL DEFAULT 'plain',
       field_delimiter TEXT,
       field_delimiter_override INTEGER NOT NULL DEFAULT 0,
+      favorite_group_id TEXT,
+      favorite_group_manual INTEGER NOT NULL DEFAULT 0,
+      favorite_order INTEGER,
+      favorite_updated_at INTEGER,
       deleted_at INTEGER
     )
   `)
@@ -157,12 +194,49 @@ async function ensureSchema(db: DB): Promise<void> {
     await db.execute("ALTER TABLE clips ADD COLUMN field_delimiter_override INTEGER NOT NULL DEFAULT 0")
   } catch {
   }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN favorite_group_id TEXT")
+  } catch {
+  }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN favorite_group_manual INTEGER NOT NULL DEFAULT 0")
+    await db.execute("UPDATE clips SET favorite_group_manual = 1 WHERE favorite_group_id IS NOT NULL")
+  } catch {
+  }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN favorite_order INTEGER")
+  } catch {
+  }
+  try {
+    await db.execute("ALTER TABLE clips ADD COLUMN favorite_updated_at INTEGER")
+  } catch {
+  }
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS favorite_groups (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      rule_type TEXT NOT NULL DEFAULT 'keyword',
+      pattern TEXT NOT NULL,
+      ignore_case INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  try {
+    await db.execute("ALTER TABLE favorite_groups ADD COLUMN ignore_case INTEGER NOT NULL DEFAULT 1")
+  } catch {
+  }
+  await db.execute("UPDATE clips SET favorite_order = -updated_at WHERE favorite = 1 AND favorite_order IS NULL")
+  await db.execute("UPDATE clips SET favorite_updated_at = updated_at WHERE favorite = 1 AND favorite_updated_at IS NULL")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active ON clips(deleted_at, pinned, updated_at)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active_order ON clips(deleted_at, pinned DESC, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_favorite_order ON clips(deleted_at, favorite, pinned DESC, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_clipboard_order ON clips(deleted_at, manual_favorite, pinned DESC, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_trim_order ON clips(deleted_at, pinned, favorite, updated_at DESC)")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash)")
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_favorite_group_order ON clips(deleted_at, favorite, favorite_group_id, favorite_order)")
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_favorite_groups_order ON favorite_groups(sort_order, created_at)")
   await ensureUniqueActiveTextIndex(db)
 }
 
@@ -180,8 +254,9 @@ export async function insertClip(item: ClipItem): Promise<void> {
     INSERT INTO clips (
       id, kind, title, content, content_hash, image_path, source_change_count,
       created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite,
-      favorite_format, field_delimiter, field_delimiter_override, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      favorite_format, field_delimiter, field_delimiter_override, favorite_group_id,
+      favorite_group_manual, favorite_order, favorite_updated_at, deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, clipParams(item))
 }
 
@@ -321,6 +396,71 @@ async function fetchClipGroupRows(db: DB, options: {
   )
 }
 
+async function fetchFavoriteClipGroups(db: DB, options: {
+  search?: string
+  kind?: ClipKind
+  limit?: number
+  offset?: number
+}): Promise<ClipGroup[]> {
+  const definitions = await db.fetchAll(
+    "SELECT * FROM favorite_groups ORDER BY sort_order ASC, created_at ASC",
+  )
+  const groups: ClipGroup[] = [
+    { id: "favorite:plain", title: "普通收藏", items: [] },
+    { id: "favorite:fields", title: "字段收藏", items: [] },
+    ...definitions.map((row) => {
+      const definition = rowToFavoriteGroup(row)
+      return { id: `favorite-group:${definition.id}`, title: definition.title, items: [] }
+    }),
+  ]
+  const params: any[] = []
+  const clauses = ["deleted_at IS NULL", "favorite = 1"]
+  if (options.kind) {
+    clauses.push("kind = ?")
+    params.push(options.kind)
+  }
+  const search = String(options.search ?? "").trim()
+  if (search) {
+    clauses.push("(title LIKE ? OR content LIKE ?)")
+    params.push(`%${search}%`, `%${search}%`)
+  }
+  const limit = Math.max(1, Math.min(300, Number(options.limit ?? 120) || 120))
+  const offset = Math.max(0, Number(options.offset ?? 0) || 0)
+  params.push(offset, offset + limit)
+  const rows = await db.fetchAll(`
+    WITH ranked_favorites AS (
+      SELECT
+        ${CLIP_ROW_SELECT},
+        CASE
+          WHEN favorite_group_id IS NOT NULL THEN 'favorite-group:' || favorite_group_id
+          WHEN favorite_format = 'fields' THEN 'favorite:fields'
+          ELSE 'favorite:plain'
+        END AS section_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY CASE
+            WHEN favorite_group_id IS NOT NULL THEN 'favorite-group:' || favorite_group_id
+            WHEN favorite_format = 'fields' THEN 'favorite:fields'
+            ELSE 'favorite:plain'
+          END
+          ORDER BY COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC, favorite_updated_at DESC
+        ) AS section_rank
+      FROM clips
+      WHERE ${clauses.join(" AND ")}
+    )
+    SELECT * FROM ranked_favorites
+    WHERE section_rank > ? AND section_rank <= ?
+    ORDER BY section_id, section_rank
+  `, params)
+  const groupById = new Map(groups.map((group) => [group.id, group]))
+  for (const row of rows) {
+    const sectionId = String(row.section_id ?? "")
+    const fallbackId = row.favorite_format === "fields" ? "favorite:fields" : "favorite:plain"
+    const group = groupById.get(sectionId) ?? groupById.get(fallbackId)
+    group?.items.push(rowToClip(row))
+  }
+  return groups
+}
+
 async function fetchClipGroups(db: DB, options: {
   scope: ClipListScope
   search?: string
@@ -328,10 +468,13 @@ async function fetchClipGroups(db: DB, options: {
   limit?: number
   offset?: number
 }): Promise<ClipGroup[]> {
+  if (options.scope === "favorites") {
+    return fetchFavoriteClipGroups(db, options)
+  }
   const groups: ClipGroup[] = []
   for (const group of clipTimeGroups(Date.now())) {
     const rows = await fetchClipGroupRows(db, { ...options, group })
-    groups.push({ title: group.title, items: rows.map(rowToClip) })
+    groups.push({ id: `time:${group.title}`, title: group.title, items: rows.map(rowToClip) })
   }
   return groups
 }
@@ -405,7 +548,15 @@ export async function countClipsByScope(): Promise<Record<ClipListScope, number>
   }
 }
 
-export async function updateClipState(id: string, updates: Partial<Pick<ClipItem, "updatedAt" | "lastCopiedAt" | "pinned" | "favorite">>): Promise<void> {
+export async function updateClipState(
+  id: string,
+  updates: Partial<Pick<ClipItem, "updatedAt" | "lastCopiedAt" | "pinned" | "favorite">> & {
+    favoriteGroupId?: string | null
+    favoriteGroupManual?: boolean
+    favoriteOrder?: number | null
+    favoriteUpdatedAt?: number | null
+  },
+): Promise<void> {
   const db = await initializeDatabase()
   const sets: string[] = []
   const params: any[] = []
@@ -424,6 +575,22 @@ export async function updateClipState(id: string, updates: Partial<Pick<ClipItem
   if (updates.favorite != null) {
     sets.push("favorite = ?")
     params.push(updates.favorite ? 1 : 0)
+  }
+  if (updates.favoriteGroupId !== undefined) {
+    sets.push("favorite_group_id = ?")
+    params.push(updates.favoriteGroupId)
+  }
+  if (updates.favoriteGroupManual !== undefined) {
+    sets.push("favorite_group_manual = ?")
+    params.push(updates.favoriteGroupManual ? 1 : 0)
+  }
+  if (updates.favoriteOrder !== undefined) {
+    sets.push("favorite_order = ?")
+    params.push(updates.favoriteOrder)
+  }
+  if (updates.favoriteUpdatedAt !== undefined) {
+    sets.push("favorite_updated_at = ?")
+    params.push(updates.favoriteUpdatedAt)
   }
   if (!sets.length) return
   params.push(id)
@@ -467,10 +634,10 @@ export async function listImagePaths(options: { favoritesOnly?: boolean; clipboa
   return rows.map((row) => String(row.image_path ?? "")).filter(Boolean)
 }
 
-export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "title" | "content" | "contentHash" | "updatedAt" | "favoriteFormat" | "fieldDelimiter" | "fieldDelimiterOverride">): Promise<void> {
+export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "title" | "content" | "contentHash" | "updatedAt" | "favoriteFormat" | "fieldDelimiter" | "fieldDelimiterOverride" | "favoriteGroupId" | "favoriteGroupManual" | "favoriteOrder" | "favoriteUpdatedAt">): Promise<void> {
   const db = await initializeDatabase()
   await db.execute(
-    "UPDATE clips SET kind = ?, title = ?, content = ?, content_hash = ?, updated_at = ?, favorite_format = ?, field_delimiter = ?, field_delimiter_override = ? WHERE id = ?",
+    "UPDATE clips SET kind = ?, title = ?, content = ?, content_hash = ?, updated_at = ?, favorite_format = ?, field_delimiter = ?, field_delimiter_override = ?, favorite_group_id = ?, favorite_group_manual = ?, favorite_order = ?, favorite_updated_at = ? WHERE id = ?",
     [
       row.kind,
       row.title,
@@ -480,14 +647,123 @@ export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "tit
       row.favoriteFormat === "fields" ? "fields" : "plain",
       row.fieldDelimiter ?? null,
       row.fieldDelimiterOverride ? 1 : 0,
+      row.favoriteGroupId ?? null,
+      row.favoriteGroupManual ? 1 : 0,
+      row.favoriteOrder ?? null,
+      row.favoriteUpdatedAt ?? null,
       row.id,
     ]
   )
 }
 
-export async function updateClipTitle(id: string, title: string): Promise<void> {
+export async function updateClipTitle(id: string, title: string, updatedAt: number, favoriteUpdatedAt?: number): Promise<void> {
   const db = await initializeDatabase()
-  await db.execute("UPDATE clips SET title = ? WHERE id = ?", [title, id])
+  await db.execute(
+    "UPDATE clips SET title = ?, updated_at = ?, favorite_updated_at = COALESCE(?, favorite_updated_at) WHERE id = ?",
+    [title, updatedAt, favoriteUpdatedAt ?? null, id],
+  )
+}
+
+export async function listFavoriteGroupDefinitions(): Promise<FavoriteGroup[]> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT * FROM favorite_groups ORDER BY sort_order ASC, created_at ASC",
+  )
+  return rows.map(rowToFavoriteGroup)
+}
+
+export async function favoriteGroupTitleExists(title: string, excludingId?: string): Promise<boolean> {
+  const db = await initializeDatabase()
+  const rows = excludingId
+    ? await db.fetchAll(
+        "SELECT 1 FROM favorite_groups WHERE title = ? COLLATE NOCASE AND id <> ? LIMIT 1",
+        [title, excludingId],
+      )
+    : await db.fetchAll(
+        "SELECT 1 FROM favorite_groups WHERE title = ? COLLATE NOCASE LIMIT 1",
+        [title],
+      )
+  return rows.length > 0
+}
+
+export async function insertFavoriteGroup(group: FavoriteGroup): Promise<void> {
+  const db = await initializeDatabase()
+  await db.execute(
+    `INSERT INTO favorite_groups (id, title, rule_type, pattern, ignore_case, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [group.id, group.title, group.ruleType, group.pattern, group.ignoreCase ? 1 : 0, group.sortOrder, group.createdAt, group.updatedAt],
+  )
+}
+
+export async function updateFavoriteGroup(group: FavoriteGroup): Promise<void> {
+  const db = await initializeDatabase()
+  await db.execute(
+    "UPDATE favorite_groups SET title = ?, rule_type = ?, pattern = ?, ignore_case = ?, updated_at = ? WHERE id = ?",
+    [group.title, group.ruleType, group.pattern, group.ignoreCase ? 1 : 0, group.updatedAt, group.id],
+  )
+}
+
+export async function deleteFavoriteGroup(id: string): Promise<void> {
+  const db = await initializeDatabase()
+  await db.transaction([
+    {
+      sql: "UPDATE clips SET favorite_group_id = NULL, favorite_group_manual = 0 WHERE favorite_group_id = ?",
+      args: [id],
+    },
+    { sql: "DELETE FROM favorite_groups WHERE id = ?", args: [id] },
+  ])
+}
+
+export async function nextFavoriteGroupSortOrder(): Promise<number> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM favorite_groups")
+  return Number(rows[0]?.next_order ?? 0)
+}
+
+export async function reorderFavoriteGroups(ids: string[]): Promise<void> {
+  if (!ids.length) return
+  const db = await initializeDatabase()
+  await db.transaction(
+    ids.map((id, index) => ({
+      sql: "UPDATE favorite_groups SET sort_order = ? WHERE id = ?",
+      args: [index, id],
+    })),
+  )
+}
+
+export async function nextFavoriteItemOrder(favoriteGroupId?: string): Promise<number> {
+  const db = await initializeDatabase()
+  const rows = favoriteGroupId
+    ? await db.fetchAll(
+        "SELECT MIN(COALESCE(favorite_order, -favorite_updated_at, -updated_at)) AS first_order FROM clips WHERE deleted_at IS NULL AND favorite = 1 AND favorite_group_id = ?",
+        [favoriteGroupId],
+      )
+    : await db.fetchAll(
+        "SELECT MIN(COALESCE(favorite_order, -favorite_updated_at, -updated_at)) AS first_order FROM clips WHERE deleted_at IS NULL AND favorite = 1 AND favorite_group_id IS NULL",
+      )
+  const first = rows[0]?.first_order
+  return first == null ? 0 : Number(first) - 1
+}
+
+export async function listAutomaticFavoriteItems(): Promise<ClipItem[]> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT * FROM clips WHERE deleted_at IS NULL AND favorite = 1 AND favorite_group_manual = 0 ORDER BY COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC",
+  )
+  return rows.map(rowToClip)
+}
+
+export async function replaceAutomaticFavoriteGroupAssignments(
+  assignments: Array<{ id: string; favoriteGroupId?: string; favoriteOrder: number }>,
+): Promise<void> {
+  if (!assignments.length) return
+  const db = await initializeDatabase()
+  await db.transaction(
+    assignments.map((assignment) => ({
+      sql: "UPDATE clips SET favorite_group_id = ?, favorite_group_manual = 0, favorite_order = ? WHERE id = ?",
+      args: [assignment.favoriteGroupId ?? null, assignment.favoriteOrder, assignment.id],
+    })),
+  )
 }
 
 export async function trimActiveClips(maxItems: number): Promise<void> {

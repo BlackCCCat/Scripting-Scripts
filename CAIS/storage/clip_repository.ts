@@ -1,7 +1,49 @@
-import type { CaptureResult, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, ClipPayload, CaisSettings, FavoriteFormat } from "../types"
+import type {
+  CaptureResult,
+  ClipboardClearRange,
+  ClipGroup,
+  ClipItem,
+  ClipKind,
+  ClipKindCountsByScope,
+  ClipListScope,
+  ClipPayload,
+  CaisSettings,
+  FavoriteFormat,
+  FavoriteGroup,
+  FavoriteGroupRuleType,
+} from "../types"
 import { clipTitle, hashString, isLikelyURL, makeId, normalizeClipContent, normalizeText } from "../utils/common"
 import { favoriteDelimiterForItem, normalizeFavoriteDelimiter, parseFavoriteFields } from "../utils/favorite_fields"
-import { countClipKindsByScope, countClipsByScope, deleteClipboardClipsByRange, deleteClip, deleteFavoriteClips, findClipByHash, findClipById, findTextClipsByContent, insertClip, listClipGroups, listClips, listImagePaths, trimActiveClips, updateClipContent, updateClipState, updateClipTitle as updateClipTitleRow, getFullClipContent } from "./database"
+import { makeRegex } from "../utils/custom_action"
+import {
+  countClipKindsByScope,
+  countClipsByScope,
+  deleteClipboardClipsByRange,
+  deleteClip,
+  deleteFavoriteClips,
+  deleteFavoriteGroup as deleteFavoriteGroupRow,
+  favoriteGroupTitleExists,
+  findClipByHash,
+  findClipById,
+  findTextClipsByContent,
+  getFullClipContent,
+  insertClip,
+  insertFavoriteGroup,
+  listClipGroups,
+  listClips,
+  listFavoriteGroupDefinitions,
+  listAutomaticFavoriteItems,
+  listImagePaths,
+  nextFavoriteGroupSortOrder,
+  nextFavoriteItemOrder,
+  reorderFavoriteGroups as reorderFavoriteGroupRows,
+  replaceAutomaticFavoriteGroupAssignments,
+  trimActiveClips,
+  updateClipContent,
+  updateClipState,
+  updateClipTitle as updateClipTitleRow,
+  updateFavoriteGroup as updateFavoriteGroupRow,
+} from "./database"
 import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
 import { bumpClipDataVersion } from "./change_signal"
 
@@ -14,6 +56,51 @@ function payloadContent(payload: ClipPayload): string {
 function shouldCapture(payload: ClipPayload, settings: CaisSettings): boolean {
   if (payload.kind === "image") return settings.captureImages
   return settings.captureText
+}
+
+function favoriteGroupMatches(group: FavoriteGroup, title: string, content: string): boolean {
+  const source = `${title}\n${content}`
+  if (group.ruleType === "regex") {
+    return makeRegex(group.pattern).test(source)
+  }
+  const keyword = group.pattern.trim()
+  return group.ignoreCase
+    ? source.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())
+    : source.includes(keyword)
+}
+
+async function resolveFavoriteGroupId(
+  title: string,
+  content: string,
+  requestedGroupId?: string,
+  requestedGroupManual = false,
+): Promise<string | undefined> {
+  const groups = await listFavoriteGroupDefinitions()
+  if (requestedGroupManual && requestedGroupId && groups.some((group) => group.id === requestedGroupId)) {
+    return requestedGroupId
+  }
+  return groups.find((group) => favoriteGroupMatches(group, title, content))?.id
+}
+
+async function reclassifyAutomaticFavorites(preferredGroupId?: string): Promise<number> {
+  const definitions = await listFavoriteGroupDefinitions()
+  const preferred = definitions.find((group) => group.id === preferredGroupId)
+  const groups = preferred
+    ? [preferred, ...definitions.filter((group) => group.id !== preferred.id)]
+    : definitions
+  const counters = new Map<string, number>()
+  let preferredMatches = 0
+  const assignments = (await listAutomaticFavoriteItems()).flatMap((item) => {
+    const group = groups.find((candidate) => favoriteGroupMatches(candidate, item.title, item.content))
+    const key = group?.id ?? ""
+    const favoriteOrder = counters.get(key) ?? 0
+    counters.set(key, favoriteOrder + 1)
+    if (group?.id === preferredGroupId) preferredMatches += 1
+    if (group?.id === item.favoriteGroupId && favoriteOrder === item.favoriteOrder) return []
+    return [{ id: item.id, favoriteGroupId: group?.id, favoriteOrder }]
+  })
+  await replaceAutomaticFavoriteGroupAssignments(assignments)
+  return preferredMatches
 }
 
 async function resolveDuplicate(
@@ -129,12 +216,35 @@ export async function markCopied(item: ClipItem): Promise<void> {
 }
 
 export async function togglePinned(item: ClipItem): Promise<void> {
-  await updateClipState(item.id, { pinned: !item.pinned, updatedAt: Date.now() })
+  await updateClipState(item.id, item.favorite
+    ? { pinned: !item.pinned }
+    : { pinned: !item.pinned, updatedAt: Date.now() })
   bumpClipDataVersion()
 }
 
 export async function toggleFavorite(item: ClipItem): Promise<void> {
-  await updateClipState(item.id, { favorite: !item.favorite })
+  if (item.favorite) {
+    await updateClipState(item.id, {
+      favorite: false,
+      favoriteGroupId: null,
+      favoriteGroupManual: false,
+      favoriteOrder: null,
+      favoriteUpdatedAt: null,
+    })
+  } else {
+    const content = await getFullClipContent(item.id)
+    const favoriteGroupId = await resolveFavoriteGroupId(item.title, content)
+    const favoriteOrder = await nextFavoriteItemOrder(favoriteGroupId)
+    const now = Date.now()
+    await updateClipState(item.id, {
+      favorite: true,
+      updatedAt: now,
+      favoriteGroupId: favoriteGroupId ?? null,
+      favoriteGroupManual: false,
+      favoriteOrder,
+      favoriteUpdatedAt: now,
+    })
+  }
   bumpClipDataVersion()
 }
 
@@ -182,13 +292,24 @@ export async function editClipContent(
   const title = item.title === clipTitle(item.kind, item.content)
     ? clipTitle(kind, content)
     : item.title
+  const updatedAt = Date.now()
+  const favoriteGroupId = item.favorite && !item.favoriteGroupManual
+    ? await resolveFavoriteGroupId(title, content)
+    : item.favoriteGroupId
+  const favoriteOrder = favoriteGroupId !== item.favoriteGroupId
+    ? await nextFavoriteItemOrder(favoriteGroupId)
+    : item.favoriteOrder
   const next: ClipItem = {
     ...item,
     kind,
     title,
     content,
     contentHash: hashString(`text:${content}`),
-    updatedAt: Date.now(),
+    updatedAt,
+    favoriteUpdatedAt: item.favorite ? updatedAt : item.favoriteUpdatedAt,
+    favoriteGroupId,
+    favoriteGroupManual: item.favoriteGroupManual,
+    favoriteOrder,
     imagePath: undefined,
   }
   try {
@@ -206,15 +327,36 @@ export async function editClipContent(
 
 export async function updateClipTitle(item: ClipItem, value: string): Promise<ClipItem> {
   const title = normalizeText(value) || clipTitle(item.kind, item.content)
-  await updateClipTitleRow(item.id, title)
+  const updatedAt = Date.now()
+  const favoriteGroupId = item.favorite && !item.favoriteGroupManual
+    ? await resolveFavoriteGroupId(title, await getFullClipContent(item.id))
+    : item.favoriteGroupId
+  const favoriteOrder = favoriteGroupId !== item.favoriteGroupId
+    ? await nextFavoriteItemOrder(favoriteGroupId)
+    : item.favoriteOrder
+  await updateClipTitleRow(item.id, title, updatedAt, item.favorite ? updatedAt : undefined)
+  if (favoriteGroupId !== item.favoriteGroupId) {
+    await updateClipState(item.id, {
+      favoriteGroupId: favoriteGroupId ?? null,
+      favoriteOrder: favoriteOrder ?? null,
+    })
+  }
   bumpClipDataVersion()
-  return { ...item, title }
+  return {
+    ...item,
+    title,
+    updatedAt,
+    favoriteUpdatedAt: item.favorite ? updatedAt : item.favoriteUpdatedAt,
+    favoriteGroupId,
+    favoriteGroupManual: item.favoriteGroupManual,
+    favoriteOrder,
+  }
 }
 
 export async function addFavoriteFromInput(
   title: string,
   content: string,
-  options: { format?: FavoriteFormat; fieldDelimiter?: string; defaultFieldDelimiter?: string } = {},
+  options: { format?: FavoriteFormat; fieldDelimiter?: string; defaultFieldDelimiter?: string; favoriteGroupId?: string } = {},
 ): Promise<ClipItem> {
   const fixedContent = normalizeClipContent(content)
   if (!fixedContent.trim()) throw new Error("内容不能为空")
@@ -231,10 +373,18 @@ export async function addFavoriteFromInput(
   }
   const kind = favoriteFormat === "fields" ? "text" : isLikelyURL(fixedContent) ? "url" : "text"
   const now = Date.now()
+  const normalizedTitle = title.trim() || clipTitle(kind, fixedContent)
+  const favoriteGroupId = await resolveFavoriteGroupId(
+    normalizedTitle,
+    fixedContent,
+    options.favoriteGroupId,
+    Boolean(options.favoriteGroupId),
+  )
+  const favoriteOrder = await nextFavoriteItemOrder(favoriteGroupId)
   const item: ClipItem = {
     id: makeId("phrase"),
     kind,
-    title: title.trim() || clipTitle(kind, fixedContent),
+    title: normalizedTitle,
     content: fixedContent,
     contentHash: hashString(`manual:${favoriteFormat}:${kind}:${fieldDelimiter ?? ""}:${fixedContent}`),
     sourceChangeCount: 0,
@@ -246,6 +396,10 @@ export async function addFavoriteFromInput(
     favoriteFormat,
     fieldDelimiter,
     fieldDelimiterOverride: Boolean(fieldDelimiter),
+    favoriteGroupId,
+    favoriteGroupManual: Boolean(options.favoriteGroupId),
+    favoriteOrder,
+    favoriteUpdatedAt: now,
     deletedAt: null,
   }
   await insertClip(item)
@@ -260,6 +414,8 @@ export async function updateFavoriteFromInput(
   format: FavoriteFormat,
   fieldDelimiter?: string,
   defaultFieldDelimiter?: string,
+  requestedFavoriteGroupId?: string,
+  requestedFavoriteGroupManual = false,
 ): Promise<ClipItem> {
   const fixedContent = normalizeClipContent(content)
   if (!fixedContent.trim()) throw new Error("内容不能为空")
@@ -279,19 +435,34 @@ export async function updateFavoriteFromInput(
     if (duplicate) throw new Error("相同内容已存在")
   }
   const kind = favoriteFormat === "fields" ? "text" : isLikelyURL(fixedContent) ? "url" : "text"
+  const titleValue = normalizeText(title) || clipTitle(kind, fixedContent)
+  const favoriteGroupId = await resolveFavoriteGroupId(
+    titleValue,
+    fixedContent,
+    requestedFavoriteGroupId,
+    requestedFavoriteGroupManual,
+  )
+  const favoriteOrder = favoriteGroupId === item.favoriteGroupId && item.favoriteOrder != null
+    ? item.favoriteOrder
+    : await nextFavoriteItemOrder(favoriteGroupId)
+  const updatedAt = Date.now()
   const next: ClipItem = {
     ...item,
     kind,
-    title: normalizeText(title) || clipTitle(kind, fixedContent),
+    title: titleValue,
     content: fixedContent,
     contentHash: item.manualFavorite
       ? hashString(`manual:${favoriteFormat}:${kind}:${delimiter ?? ""}:${fixedContent}`)
       : hashString(`text:${fixedContent}`),
-    updatedAt: Date.now(),
+    updatedAt,
     favorite: true,
     favoriteFormat,
     fieldDelimiter: delimiter,
     fieldDelimiterOverride: Boolean(delimiter),
+    favoriteGroupId,
+    favoriteGroupManual: requestedFavoriteGroupManual && Boolean(favoriteGroupId),
+    favoriteOrder,
+    favoriteUpdatedAt: updatedAt,
   }
   try {
     await updateClipContent(next)
@@ -305,6 +476,91 @@ export async function updateFavoriteFromInput(
   }
   bumpClipDataVersion()
   return next
+}
+
+export async function getFavoriteGroupDefinitions(): Promise<FavoriteGroup[]> {
+  return listFavoriteGroupDefinitions()
+}
+
+export async function createFavoriteGroup(
+  title: string,
+  ruleType: FavoriteGroupRuleType,
+  pattern: string,
+  ignoreCase: boolean,
+): Promise<{ group: FavoriteGroup; matchedCount: number }> {
+  const normalizedTitle = normalizeText(title)
+  if (!normalizedTitle) throw new Error("分组名称不能为空")
+  if (await favoriteGroupTitleExists(normalizedTitle)) throw new Error("已存在同名分组")
+  const normalizedPattern = ruleType === "regex" ? pattern : pattern.trim()
+  if (!normalizedPattern.trim()) throw new Error("匹配内容不能为空")
+  if (ruleType === "regex") makeRegex(normalizedPattern)
+  const now = Date.now()
+  const group: FavoriteGroup = {
+    id: makeId("favorite-group"),
+    title: normalizedTitle,
+    ruleType: ruleType === "regex" ? "regex" : "keyword",
+    pattern: normalizedPattern,
+    ignoreCase: ruleType === "keyword" && ignoreCase,
+    sortOrder: await nextFavoriteGroupSortOrder(),
+    createdAt: now,
+    updatedAt: now,
+  }
+  try {
+    await insertFavoriteGroup(group)
+  } catch (error: any) {
+    if (String(error?.message ?? error).includes("favorite_groups.title")) {
+      throw new Error("已存在同名分组")
+    }
+    throw error
+  }
+  const matchedCount = await reclassifyAutomaticFavorites(group.id)
+  bumpClipDataVersion()
+  return { group, matchedCount }
+}
+
+export async function saveFavoriteGroup(
+  current: FavoriteGroup,
+  title: string,
+  ruleType: FavoriteGroupRuleType,
+  pattern: string,
+  ignoreCase: boolean,
+): Promise<{ group: FavoriteGroup; matchedCount: number }> {
+  const normalizedTitle = normalizeText(title)
+  if (!normalizedTitle) throw new Error("分组名称不能为空")
+  if (await favoriteGroupTitleExists(normalizedTitle, current.id)) throw new Error("已存在同名分组")
+  const normalizedPattern = ruleType === "regex" ? pattern : pattern.trim()
+  if (!normalizedPattern.trim()) throw new Error("匹配内容不能为空")
+  if (ruleType === "regex") makeRegex(normalizedPattern)
+  const group: FavoriteGroup = {
+    ...current,
+    title: normalizedTitle,
+    ruleType: ruleType === "regex" ? "regex" : "keyword",
+    pattern: normalizedPattern,
+    ignoreCase: ruleType === "keyword" && ignoreCase,
+    updatedAt: Date.now(),
+  }
+  try {
+    await updateFavoriteGroupRow(group)
+  } catch (error: any) {
+    if (String(error?.message ?? error).includes("favorite_groups.title")) {
+      throw new Error("已存在同名分组")
+    }
+    throw error
+  }
+  const matchedCount = await reclassifyAutomaticFavorites(group.id)
+  bumpClipDataVersion()
+  return { group, matchedCount }
+}
+
+export async function removeFavoriteGroup(group: FavoriteGroup): Promise<void> {
+  await deleteFavoriteGroupRow(group.id)
+  await reclassifyAutomaticFavorites()
+  bumpClipDataVersion()
+}
+
+export async function reorderFavoriteGroups(ids: string[]): Promise<void> {
+  await reorderFavoriteGroupRows(ids)
+  bumpClipDataVersion()
 }
 
 export { getFullClipContent }

@@ -18,7 +18,7 @@ import {
 } from "scripting"
 import type { VirtualNode } from "scripting"
 
-import type { FavoriteFormat } from "../types"
+import type { FavoriteFormat, FavoriteGroup } from "../types"
 import {
   normalizeFavoriteDelimiter,
   parseFavoriteFields,
@@ -30,6 +30,8 @@ export type FavoriteDraft = {
   content: string
   format: FavoriteFormat
   fieldDelimiter?: string
+  favoriteGroupId?: string
+  favoriteGroupManual?: boolean
 }
 
 function presentCopyToast(
@@ -69,6 +71,8 @@ function FavoriteFieldContent(props: { field: FavoriteField }) {
 
 export function FavoriteEditorView(props: {
   initial?: FavoriteDraft
+  preferredFormat?: FavoriteFormat
+  favoriteGroups: FavoriteGroup[]
   defaultDelimiter: string
   onPreviewCopy: (field: FavoriteField) => Promise<string | void> | string | void
   onEditContentInEditor?: (content: string) => Promise<string | null>
@@ -89,7 +93,9 @@ export function FavoriteEditorView(props: {
   const copyToastPresented = useObservable(false)
   const [title, setTitle] = useState(props.initial?.title ?? "")
   const [content, setContent] = useState(props.initial?.content ?? "")
-  const [format, setFormat] = useState<FavoriteFormat>(props.initial?.format ?? "plain")
+  const [format, setFormat] = useState<FavoriteFormat>(props.initial?.format ?? props.preferredFormat ?? "plain")
+  const [favoriteGroupId, setFavoriteGroupId] = useState(props.initial?.favoriteGroupId ?? "")
+  const [favoriteGroupSelectionChanged, setFavoriteGroupSelectionChanged] = useState(false)
   const [copyToastMessage, setCopyToastMessage] = useState("")
   const [customDelimiterEnabled, setCustomDelimiterEnabled] = useState(Boolean(props.initial?.fieldDelimiter))
   const [customDelimiter, setCustomDelimiter] = useState(
@@ -145,6 +151,10 @@ export function FavoriteEditorView(props: {
       content,
       format,
       fieldDelimiter: format === "fields" && customDelimiterEnabled ? delimiter : undefined,
+      favoriteGroupId: favoriteGroupId || undefined,
+      favoriteGroupManual: favoriteGroupSelectionChanged
+        ? Boolean(favoriteGroupId)
+        : props.initial?.favoriteGroupManual ?? Boolean(favoriteGroupId),
     } satisfies FavoriteDraft
     if (props.onSave) {
       props.onSave(draft)
@@ -269,6 +279,26 @@ export function FavoriteEditorView(props: {
             contentShape="rect"
             onChanged={setContent}
           />
+        </Section>
+
+        <Section
+          header={<Text>收藏分组</Text>}
+          footer={<Text>选择“自动匹配”时，将按照已有分组规则自动归类。</Text>}
+        >
+          <Picker
+            title="选择分组"
+            pickerStyle="menu"
+            value={favoriteGroupId}
+            onChanged={(value: string) => {
+              setFavoriteGroupId(value)
+              setFavoriteGroupSelectionChanged(true)
+            }}
+          >
+            <Text tag="">自动匹配</Text>
+            {props.favoriteGroups.map((group) => (
+              <Text key={group.id} tag={group.id}>{group.title}</Text>
+            ))}
+          </Picker>
         </Section>
 
         {format === "fields" ? (
