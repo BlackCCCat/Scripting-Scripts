@@ -1162,23 +1162,40 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
 
   async function copyItem(
     item: ClipItem,
-    options: { notify?: boolean; refresh?: boolean; updateRecency?: boolean } = {},
+    options: { notify?: boolean; refresh?: boolean; updateRecency?: boolean; syncFavoriteClipboard?: boolean } = {},
   ): Promise<string | void> {
+    let clipboardWritten = false
     try {
-      const { notify = true, refresh: refreshNow = true, updateRecency = true } = options
+      const { notify = true, refresh: refreshNow = true, updateRecency = true, syncFavoriteClipboard = false } = options
       const fullContent = renderClipOutput(item, await getFullClipContent(item.id))
       await writeClipToPasteboard(item, fullContent)
+      clipboardWritten = true
       const copiedAt = updateRecency ? Date.now() : 0
       if (updateRecency && refreshNow) moveCopiedItemToTop(item, copiedAt)
       if (notify) showToast("已复制")
-      if (notify && updateRecency && typeof (globalThis as any).setTimeout === "function") {
+      if (notify && (updateRecency || syncFavoriteClipboard) && typeof (globalThis as any).setTimeout === "function") {
         await new Promise<void>((resolve) => (globalThis as any).setTimeout(resolve, 0))
+      }
+      if (syncFavoriteClipboard) {
+        if (item.manualFavorite) {
+          await addClipFromPayload(
+            { kind: "text", text: fullContent },
+            { ...settingsRef.current, captureText: true, duplicatePolicy: "bump" },
+            copyChangeSource,
+          )
+        } else {
+          await markCopied(item, copyChangeSource, Date.now())
+        }
+        await refresh()
+        return "已复制"
       }
       if (updateRecency) await markCopied(item, copyChangeSource, copiedAt)
       if (refreshNow && !updateRecency) await refresh()
       return "已复制"
     } catch (error: any) {
-      await Dialog.alert({ message: String(error?.message ?? error ?? "复制失败") })
+      await Dialog.alert({ message: clipboardWritten && options.syncFavoriteClipboard
+        ? `已复制，但更新剪贴板记录失败：${String(error?.message ?? error)}`
+        : String(error?.message ?? error ?? "复制失败") })
     }
   }
 
@@ -1970,6 +1987,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             void copyItem(item, {
               refresh: !onFavoritesPage,
               updateRecency: !onFavoritesPage,
+              syncFavoriteClipboard: onFavoritesPage,
             })
           }
         })}

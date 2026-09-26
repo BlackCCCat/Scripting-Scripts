@@ -108,6 +108,7 @@ async function resolveDuplicate(
   existing: ClipItem,
   textMatches: ClipItem[],
   settings: CaisSettings,
+  changeSource?: unknown,
 ): Promise<CaptureResult> {
   let changed = false
   for (const duplicate of textMatches.filter((match) => match.id !== existing.id)) {
@@ -115,17 +116,17 @@ async function resolveDuplicate(
     changed = true
   }
   if (settings.duplicatePolicy === "skip") {
-    if (changed) bumpClipDataVersion()
+    if (changed) bumpClipDataVersion(changeSource)
     return { status: "skipped", reason: "重复内容已存在" }
   }
   const updatedAt = Date.now()
   await updateClipState(existing.id, { updatedAt })
   await trimActiveClips(settings.maxItems)
-  bumpClipDataVersion()
+  bumpClipDataVersion(changeSource)
   return { status: "updated", item: { ...existing, updatedAt } }
 }
 
-export async function addClipFromPayload(payload: ClipPayload, settings: CaisSettings): Promise<CaptureResult> {
+export async function addClipFromPayload(payload: ClipPayload, settings: CaisSettings, changeSource?: unknown): Promise<CaptureResult> {
   const content = payloadContent(payload)
   if (!content.trim()) return { status: "skipped", reason: "剪贴板为空" }
   const kind = payload.kind === "text" && isLikelyURL(content) ? "url" : payload.kind
@@ -148,7 +149,7 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
     ? await findClipByHash(contentHash, kind)
     : textMatches[0] ?? null
   if (existing) {
-    return resolveDuplicate(existing, textMatches, settings)
+    return resolveDuplicate(existing, textMatches, settings, changeSource)
   }
 
   const now = Date.now()
@@ -183,10 +184,10 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
       : concurrentMatches[0] ?? null
     if (!concurrent) throw error
     await removeImage(imagePath)
-    return resolveDuplicate(concurrent, concurrentMatches, settings)
+    return resolveDuplicate(concurrent, concurrentMatches, settings, changeSource)
   }
   await trimActiveClips(settings.maxItems)
-  bumpClipDataVersion()
+  bumpClipDataVersion(changeSource)
   return { status: "created", item }
 }
 
