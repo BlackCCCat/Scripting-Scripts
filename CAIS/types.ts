@@ -55,7 +55,10 @@ export type ClipKindCounts = {
   image: number
 }
 
-export type ClipKindCountsByScope = Record<ClipListScope, ClipKindCounts>
+export type ClipKindCountsByScope = {
+  clipboard: ClipKindCounts
+  favorites: ClipKindCounts & { plain: number; fields: number }
+}
 
 export type ClipboardClearRange = "recent" | "threeDays" | "sevenDays" | "older"
 

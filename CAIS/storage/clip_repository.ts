@@ -17,6 +17,7 @@ import { favoriteDelimiterForItem, normalizeFavoriteDelimiter, parseFavoriteFiel
 import { makeRegex } from "../utils/custom_action"
 import {
   countClipKindsByScope,
+  countFavoriteGroupItems,
   countClipsByScope,
   deleteClipboardClipsByRange,
   deleteClip,
@@ -193,8 +194,8 @@ export async function getClips(search = "", limit = 120, scope?: ClipListScope):
   return listClips({ search, limit, scope })
 }
 
-export async function getClipGroups(scope: ClipListScope, search = "", limit = 120, offset = 0, kind?: ClipKind): Promise<ClipGroup[]> {
-  return listClipGroups({ scope, search, limit, offset, kind })
+export async function getClipGroups(scope: ClipListScope, search = "", limit = 120, offset = 0, kind?: ClipKind, favoriteFormat?: FavoriteFormat): Promise<ClipGroup[]> {
+  return listClipGroups({ scope, search, limit, offset, kind, favoriteFormat })
 }
 
 export async function getClipCounts(): Promise<Record<ClipListScope, number>> {
@@ -203,6 +204,10 @@ export async function getClipCounts(): Promise<Record<ClipListScope, number>> {
 
 export async function getClipKindCounts(): Promise<ClipKindCountsByScope> {
   return countClipKindsByScope()
+}
+
+export async function getFavoriteGroupItemCounts(): Promise<Record<string, number>> {
+  return countFavoriteGroupItems()
 }
 
 export async function getClipById(id: string): Promise<ClipItem | null> {

@@ -5,7 +5,6 @@ import {
   DragGesture,
   EmptyView,
   Editor,
-  ForEach,
   Group,
   GeometryReader,
   HStack,
@@ -16,6 +15,7 @@ import {
   Picker,
   Section,
   Script,
+  Spacer,
   Tab,
   TabView,
   Text,
@@ -32,7 +32,7 @@ import {
   type VirtualNode,
 } from "scripting"
 
-import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, FavoriteGroup, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
+import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, FavoriteFormat, FavoriteGroup, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
@@ -42,6 +42,7 @@ import {
   editClipContent,
   getClipGroups,
   getClipKindCounts,
+  getFavoriteGroupItemCounts,
   getFullClipContent,
   markCopied,
   softDeleteClip,
@@ -115,7 +116,6 @@ const APP_SCROLL_CONTENT_MARGINS = {
 type ClearScope = "favorites" | ClipboardClearRange
 let intentionalMinimize = false
 let appMonitorStopper: (() => void) | null = null
-let appRefreshGeneration = 0
 type AppRootMode = "app" | "home"
 type ClipKindFilter = ClipKind | null
 type HomeRoute =
@@ -123,12 +123,12 @@ type HomeRoute =
   | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number }
   | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[] }
   | { kind: "favoriteGroupEditor" }
-  | { kind: "favoriteGroupManager"; groups: FavoriteGroup[] }
+  | { kind: "favoriteGroupManager"; groups: FavoriteGroup[]; counts: Record<string, number> }
   | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
   | { kind: "image"; item: ClipItem }
   | { kind: "tokens"; tokens: CaisToken[] }
 const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
-  favorites: { total: 0, text: 0, url: 0, image: 0 },
+  favorites: { total: 0, text: 0, url: 0, image: 0, plain: 0, fields: 0 },
   clipboard: { total: 0, text: 0, url: 0, image: 0 },
 }
 
@@ -143,13 +143,11 @@ function removingClipFromGroups(groups: ClipGroup[], id: string): ClipGroup[] {
   return next
 }
 
-type FavoriteDisplayGroup = ClipGroup & { id: string }
-
-function visibleFavoriteGroups(groups: ClipGroup[]): FavoriteDisplayGroup[] {
-  return groups.filter((group): group is FavoriteDisplayGroup => Boolean(group.id) && group.items.length > 0)
+function visibleFavoriteGroups(groups: ClipGroup[]): ClipGroup[] {
+  return groups.filter((group) => group.items.length > 0)
 }
 
-function orderFavoriteGroupsForDisplay(groups: FavoriteDisplayGroup[], ids: string[] | null): FavoriteDisplayGroup[] {
+function orderFavoriteGroupsForDisplay(groups: ClipGroup[], ids: string[] | null): ClipGroup[] {
   if (!ids) return groups
   const positions = new Map(ids.map((id, index) => [`favorite-group:${id}`, index]))
   const rank = (group: ClipGroup) => {
@@ -583,17 +581,21 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const favoriteGroupDisplayOrder = useRef<string[] | null>(null)
   const [settings, setSettings] = useState<CaisSettings>(() => loadSettings())
   const [showLaunchSplash, setShowLaunchSplash] = useState(() => settings.launchAnimationEnabled)
-  const favoriteGroups = useObservable<FavoriteDisplayGroup[]>([])
+  const favoriteGroups = useObservable<ClipGroup[]>([])
   const [clipboardGroups, setClipboardGroups] = useState<ClipGroup[]>([])
   const [clipKindCounts, setClipKindCounts] = useState<ClipKindCountsByScope>(EMPTY_CLIP_KIND_COUNTS)
+  const [favoriteGroupItemCounts, setFavoriteGroupItemCounts] = useState<Record<string, number>>({})
   const [clipKindFilters, setClipKindFilters] = useState<Record<ClipListScope, ClipKindFilter>>({ favorites: null, clipboard: null })
+  const [favoriteFormatFilter, setFavoriteFormatFilter] = useState<FavoriteFormat | null>(null)
   const [initialDataReady, setInitialDataReady] = useState(false)
+  const [initialDataError, setInitialDataError] = useState(false)
   const [homeRoute, setHomeRoute] = useState<HomeRoute | null>(null)
   const [homeRoutePresented, setHomeRoutePresented] = useState(false)
   const [query, setQuery] = useState("")
   const settingsRef = useRef(settings)
   const queryRef = useRef(query)
   const clipKindFiltersRef = useRef(clipKindFilters)
+  const favoriteFormatFilterRef = useRef(favoriteFormatFilter)
   const homeRouteRef = useRef<HomeRoute | null>(null)
   const copyChangeSource = useRef({}).current
   const listRefreshBlocked = useRef(false)
@@ -601,6 +603,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   const favoriteGroupOrderWrites = useRef<Promise<void>>(Promise.resolve())
   const favoriteGroupOrderWritesPending = useRef(0)
   const favoriteGroupOrderRevision = useRef(0)
+  const appRefreshGeneration = useRef(0)
   const lastObservedPasteboardChangeCount = useRef<number | null>(null)
   const blankEditorOpening = useRef(false)
   const toastHideTimer = useRef<any>(null)
@@ -643,6 +646,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       Script.exit()
     })
     return () => {
+      appRefreshGeneration.current++
       if (previousResumeHandler) {
         ;(globalThis as any)[CAIS_APP_RESUME_HANDLER] = previousResumeHandler
       } else {
@@ -879,12 +883,21 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   async function boot() {
     setLoading(true)
     try {
-      await initializeDatabase()
-      await captureClipboardAndRefresh(settingsRef.current, true)
+      if (homeScreenMode) {
+        await refresh(settingsRef.current)
+        if (await captureClipboardIfChanged(settingsRef.current, true)) {
+          await refresh(settingsRef.current)
+        }
+      } else {
+        await initializeDatabase()
+        await captureClipboardAndRefresh(settingsRef.current, true)
+      }
       if (Script.queryParameters?.pip === "1") {
         await activatePipFromApp()
       }
-    } catch {
+    } catch (error) {
+      console.error("[CAIS] Initial data load failed", error)
+      setInitialDataError(true)
     } finally {
       setLoading(false)
     }
@@ -907,8 +920,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     try {
       const changeCount = await currentChangeCount()
       if (!force && lastObservedPasteboardChangeCount.current === changeCount) return false
-      lastObservedPasteboardChangeCount.current = changeCount
       const result = await captureCurrentClipboard(currentSettings)
+      lastObservedPasteboardChangeCount.current = changeCount
       return result.status === "created" || result.status === "updated"
     } catch {
       return false
@@ -932,18 +945,24 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   async function refresh(currentSettings = settingsRef.current) {
-    const generation = ++appRefreshGeneration
+    const generation = ++appRefreshGeneration.current
     const orderRevision = favoriteGroupOrderRevision.current
     const canUseDatabaseOrder = favoriteGroupOrderWritesPending.current === 0
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
     const search = queryRef.current.trim()
     const filters = clipKindFiltersRef.current
-    const [nextFavoriteGroups, nextClipboardGroups, nextClipKindCounts] = await Promise.all([
-      getClipGroups("favorites", search, groupLimit, 0, filters.favorites ?? undefined),
-      getClipGroups("clipboard", search, groupLimit, 0, filters.clipboard ?? undefined),
-      getClipKindCounts(),
-    ])
-    if (generation !== appRefreshGeneration) return
+    let nextFavoriteGroups: ClipGroup[]
+    let nextClipboardGroups: ClipGroup[]
+    try {
+      [nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
+        getClipGroups("favorites", search, groupLimit, 0, filters.favorites ?? undefined, favoriteFormatFilterRef.current ?? undefined),
+        getClipGroups("clipboard", search, groupLimit, 0, filters.clipboard ?? undefined),
+      ])
+    } catch (error) {
+      if (generation === appRefreshGeneration.current) setInitialDataError(true)
+      throw error
+    }
+    if (generation !== appRefreshGeneration.current) return
     const displayOrder = favoriteGroupDisplayOrder.current
     if (
       canUseDatabaseOrder &&
@@ -962,8 +981,15 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       favoriteGroupDisplayOrder.current,
     ))
     setClipboardGroups(nextClipboardGroups)
-    setClipKindCounts(nextClipKindCounts)
     setInitialDataReady(true)
+    setInitialDataError(false)
+    void (async () => {
+      const counts = await getClipKindCounts()
+      const groupCounts = await getFavoriteGroupItemCounts()
+      if (generation !== appRefreshGeneration.current) return
+      setClipKindCounts(counts)
+      setFavoriteGroupItemCounts(groupCounts)
+    })().catch((error) => console.warn("[CAIS] Clip counts unavailable", error))
   }
 
   async function updateSettings(nextSettings: CaisSettings) {
@@ -1529,14 +1555,17 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   async function presentFavoriteGroupManager() {
     try {
       const groups = await getFavoriteGroupDefinitions()
+      const counts = await getFavoriteGroupItemCounts()
       if (embeddedHomeNavigation) {
-        presentHomeRoute({ kind: "favoriteGroupManager", groups })
+        presentHomeRoute({ kind: "favoriteGroupManager", groups, counts })
         return
       }
       await Navigation.present({
         element: (
           <FavoriteGroupManagerView
             initialGroups={groups}
+            initialCounts={counts}
+            reloadCounts={getFavoriteGroupItemCounts}
             onCreateGroup={persistFavoriteGroupDraft}
             onSaveGroup={saveManagedFavoriteGroup}
             onDeleteGroup={deleteManagedFavoriteGroup}
@@ -2029,8 +2058,20 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     )
   }
 
+  function renderInitialDataError() {
+    if (!initialDataError) return null
+    return (
+      <Section
+        listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
+        listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
+      >
+        <EmptyState title="数据加载失败" message="请重新加载后再试。" systemImage="exclamationmark.triangle" />
+      </Section>
+    )
+  }
+
   function renderGroupedClipList(groups: ClipGroup[], emptyMessage: string, options: { allowDelete?: (item: ClipItem) => boolean } = {}) {
-    if (!initialDataReady) return null
+    if (!initialDataReady) return renderInitialDataError()
     if (!groups.some((group) => group.items.length)) {
       return (
         <Section
@@ -2059,7 +2100,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   }
 
   function renderFavoriteList() {
-    if (!initialDataReady) return null
+    if (!initialDataReady) return renderInitialDataError()
     if (!favoriteGroups.value.length) {
       return (
         <Section
@@ -2075,19 +2116,24 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       )
     }
     return (
-      <ForEach
-        data={favoriteGroups}
-        builder={(group) => (
+      <Group>
+        {favoriteGroups.value.map((group) => (
           <Section
-            key={group.id}
-            header={<Text>{group.title}</Text>}
+            key={group.id ?? group.title}
+            header={
+              <HStack frame={{ maxWidth: "infinity" }}>
+                <Text>{group.title}</Text>
+                <Spacer />
+                <Text foregroundStyle="secondaryLabel" monospacedDigit>{favoriteGroupItemCounts[group.id ?? ""] ?? 0}</Text>
+              </HStack>
+            }
             listSectionSeparator={{ visibility: "hidden", edges: "all" as any }}
             listSectionSeparatorTint={{ color: "clear", edges: "all" as any }}
           >
             {group.items.map((item) => renderClipRow(item, { favoriteView: true }))}
           </Section>
-        )}
-      />
+        ))}
+      </Group>
     )
   }
 
@@ -2212,22 +2258,45 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       ? { top: 2, bottom: 4, leading: 16, trailing: 16 }
       : { top: 10, bottom: 6, leading: 16, trailing: 16 }
     const counts = clipKindCounts[scope]
-    const metrics = [
+    const metrics = scope === "favorites" ? [
+      { systemName: "list.number", value: counts.total, format: null },
+      { systemName: "star", value: clipKindCounts.favorites.plain, format: "plain" as const },
+      { systemName: "list.bullet.rectangle", value: clipKindCounts.favorites.fields, format: "fields" as const },
+    ] : [
       { systemName: "list.number", value: counts.total, kind: null },
-      { systemName: "doc.text", value: counts.text, kind: "text" },
-      { systemName: "link", value: counts.url, kind: "url" },
-      { systemName: "photo", value: counts.image, kind: "image" },
+      { systemName: "doc.text", value: counts.text, kind: "text" as const },
+      { systemName: "link", value: counts.url, kind: "url" as const },
+      { systemName: "photo", value: counts.image, kind: "image" as const },
     ]
-    const filterOptions: Array<{ title: string; systemName: string; kind: ClipKindFilter }> = [
+    const kindOptions: Array<{ title: string; systemName: string; kind: ClipKindFilter }> = [
       { title: "所有", systemName: "list.number", kind: null },
       { title: "文本", systemName: "doc.text", kind: "text" },
       { title: "链接", systemName: "link", kind: "url" },
       { title: "图片", systemName: "photo", kind: "image" },
     ]
+    const formatOptions: Array<{ title: string; systemName: string; format: FavoriteFormat | null }> = [
+      { title: "所有收藏", systemName: "list.number", format: null },
+      { title: "普通收藏", systemName: "star", format: "plain" },
+      { title: "字段收藏", systemName: "list.bullet.rectangle", format: "fields" },
+    ]
 
     function selectKindFilter(kind: ClipKindFilter) {
-      if (clipKindFiltersRef.current[scope] === kind) return
+      if (clipKindFiltersRef.current[scope] === kind && (scope !== "favorites" || favoriteFormatFilterRef.current === null)) return
       const next = { ...clipKindFiltersRef.current, [scope]: kind }
+      clipKindFiltersRef.current = next
+      setClipKindFilters(next)
+      if (scope === "favorites") {
+        favoriteFormatFilterRef.current = null
+        setFavoriteFormatFilter(null)
+      }
+      void refresh(settingsRef.current)
+    }
+
+    function selectFormatFilter(format: FavoriteFormat | null) {
+      if (favoriteFormatFilterRef.current === format && clipKindFiltersRef.current.favorites === null) return
+      favoriteFormatFilterRef.current = format
+      setFavoriteFormatFilter(format)
+      const next = { ...clipKindFiltersRef.current, favorites: null }
       clipKindFiltersRef.current = next
       setClipKindFilters(next)
       void refresh(settingsRef.current)
@@ -2259,7 +2328,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
                       <HStack
                         key={metric.systemName}
                         spacing={2}
-                        foregroundStyle={clipKindFilters[scope] === metric.kind ? "systemBlue" : "secondaryLabel"}
+                        foregroundStyle={scope === "favorites"
+                          ? clipKindFilters.favorites === null && favoriteFormatFilter === ("format" in metric ? metric.format : null) ? "systemBlue" : "secondaryLabel"
+                          : clipKindFilters.clipboard === ("kind" in metric ? metric.kind : null) ? "systemBlue" : "secondaryLabel"}
                       >
                         <Image systemName={metric.systemName} font="caption2" />
                         <Text font="caption2" monospacedDigit>{metric.value}</Text>
@@ -2268,12 +2339,36 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
                   </HStack>
                 }
               >
-                {filterOptions.map((option) => (
+                {scope === "favorites" ? (
+                  <>
+                    {formatOptions.map((option) => (
+                      <Button
+                        key={option.title}
+                        title={option.title}
+                        systemImage={option.systemName}
+                        foregroundStyle={favoriteFormatFilter === option.format && clipKindFilters.favorites === null ? "systemBlue" : undefined}
+                        action={withHaptic(() => selectFormatFilter(option.format))}
+                      />
+                    ))}
+                    <Divider />
+                    <Menu title="按内容类型" systemImage="line.3.horizontal.decrease">
+                      {kindOptions.map((option) => (
+                        <Button
+                          key={option.title}
+                          title={option.title}
+                          systemImage={option.systemName}
+                          foregroundStyle={clipKindFilters.favorites === option.kind && favoriteFormatFilter === null ? "systemBlue" : undefined}
+                          action={withHaptic(() => selectKindFilter(option.kind))}
+                        />
+                      ))}
+                    </Menu>
+                  </>
+                ) : kindOptions.map((option) => (
                   <Button
                     key={option.title}
                     title={option.title}
                     systemImage={option.systemName}
-                    foregroundStyle={clipKindFilters[scope] === option.kind ? "systemBlue" : undefined}
+                    foregroundStyle={clipKindFilters.clipboard === option.kind ? "systemBlue" : undefined}
                     action={withHaptic(() => selectKindFilter(option.kind))}
                   />
                 ))}
@@ -2466,6 +2561,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       return (
         <FavoriteGroupManagerView
           initialGroups={homeRoute.groups}
+          initialCounts={homeRoute.counts}
+          reloadCounts={getFavoriteGroupItemCounts}
           embedded
           onCreateGroup={persistFavoriteGroupDraft}
           onSaveGroup={saveManagedFavoriteGroup}

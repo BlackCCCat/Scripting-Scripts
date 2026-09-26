@@ -5,6 +5,7 @@ import type {
   ClipKind,
   ClipKindCountsByScope,
   ClipListScope,
+  FavoriteFormat,
   FavoriteGroup,
 } from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
@@ -20,6 +21,7 @@ type DB = {
 
 let cachedDb: DB | null = null
 let initialized = false
+const SCHEMA_VERSION = 1
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at"
 const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
@@ -131,12 +133,25 @@ async function ensureUniqueActiveTextIndex(db: DB): Promise<void> {
   `)
 }
 
+async function addColumnIfMissing(db: DB, table: string, column: string, definition: string): Promise<boolean> {
+  const hasColumn = async () => (await db.fetchAll(`PRAGMA table_info(${table})`))
+    .some((row) => String(row.name ?? "") === column)
+  if (await hasColumn()) return false
+  try {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
+    return true
+  } catch (error) {
+    if (await hasColumn()) return false
+    throw error
+  }
+}
+
 export async function openCaisDatabase(): Promise<DB> {
   if (cachedDb) return cachedDb
   await ensureAppDirectories()
   const sqlite = (globalThis as any).SQLite
   if (!sqlite?.open) throw new Error("SQLite.open 不可用")
-  cachedDb = (await sqlite.open(databasePath())) as DB
+  cachedDb = (await sqlite.open(databasePath(), { busyMode: 5 })) as DB
   return cachedDb
 }
 
@@ -178,39 +193,16 @@ async function ensureSchema(db: DB): Promise<void> {
       deleted_at INTEGER
     )
   `)
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN manual_favorite INTEGER NOT NULL DEFAULT 0")
-  } catch {
-  }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN favorite_format TEXT NOT NULL DEFAULT 'plain'")
-  } catch {
-  }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN field_delimiter TEXT")
-  } catch {
-  }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN field_delimiter_override INTEGER NOT NULL DEFAULT 0")
-  } catch {
-  }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN favorite_group_id TEXT")
-  } catch {
-  }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN favorite_group_manual INTEGER NOT NULL DEFAULT 0")
+  await addColumnIfMissing(db, "clips", "manual_favorite", "manual_favorite INTEGER NOT NULL DEFAULT 0")
+  await addColumnIfMissing(db, "clips", "favorite_format", "favorite_format TEXT NOT NULL DEFAULT 'plain'")
+  await addColumnIfMissing(db, "clips", "field_delimiter", "field_delimiter TEXT")
+  await addColumnIfMissing(db, "clips", "field_delimiter_override", "field_delimiter_override INTEGER NOT NULL DEFAULT 0")
+  await addColumnIfMissing(db, "clips", "favorite_group_id", "favorite_group_id TEXT")
+  if (await addColumnIfMissing(db, "clips", "favorite_group_manual", "favorite_group_manual INTEGER NOT NULL DEFAULT 0")) {
     await db.execute("UPDATE clips SET favorite_group_manual = 1 WHERE favorite_group_id IS NOT NULL")
-  } catch {
   }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN favorite_order INTEGER")
-  } catch {
-  }
-  try {
-    await db.execute("ALTER TABLE clips ADD COLUMN favorite_updated_at INTEGER")
-  } catch {
-  }
+  await addColumnIfMissing(db, "clips", "favorite_order", "favorite_order INTEGER")
+  await addColumnIfMissing(db, "clips", "favorite_updated_at", "favorite_updated_at INTEGER")
   await db.execute(`
     CREATE TABLE IF NOT EXISTS favorite_groups (
       id TEXT PRIMARY KEY,
@@ -223,10 +215,7 @@ async function ensureSchema(db: DB): Promise<void> {
       updated_at INTEGER NOT NULL
     )
   `)
-  try {
-    await db.execute("ALTER TABLE favorite_groups ADD COLUMN ignore_case INTEGER NOT NULL DEFAULT 1")
-  } catch {
-  }
+  await addColumnIfMissing(db, "favorite_groups", "ignore_case", "ignore_case INTEGER NOT NULL DEFAULT 1")
   await db.execute("UPDATE clips SET favorite_order = -updated_at WHERE favorite = 1 AND favorite_order IS NULL")
   await db.execute("UPDATE clips SET favorite_updated_at = updated_at WHERE favorite = 1 AND favorite_updated_at IS NULL")
   await db.execute("CREATE INDEX IF NOT EXISTS idx_clips_active ON clips(deleted_at, pinned, updated_at)")
@@ -243,7 +232,12 @@ async function ensureSchema(db: DB): Promise<void> {
 export async function initializeDatabase(): Promise<DB> {
   const db = await openCaisDatabase()
   if (initialized) return db
-  await ensureSchema(db)
+  const rows = await db.fetchAll("PRAGMA user_version")
+  const version = Number(rows[0]?.user_version ?? Object.values(rows[0] ?? {})[0] ?? 0) || 0
+  if (version < SCHEMA_VERSION) {
+    await ensureSchema(db)
+    await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+  }
   initialized = true
   return db
 }
@@ -333,8 +327,7 @@ export async function listClips(options: {
     rows = await fetchClipRows(db, options)
   } catch (error) {
     if (initialized) throw error
-    await ensureSchema(db)
-    initialized = true
+    await initializeDatabase()
     rows = await fetchClipRows(db, options)
   }
   return rows.map(rowToClip)
@@ -410,6 +403,7 @@ async function fetchClipGroupRows(db: DB, options: {
 async function fetchFavoriteClipGroups(db: DB, options: {
   search?: string
   kind?: ClipKind
+  favoriteFormat?: FavoriteFormat
   limit?: number
   offset?: number
 }): Promise<ClipGroup[]> {
@@ -429,6 +423,9 @@ async function fetchFavoriteClipGroups(db: DB, options: {
   if (options.kind) {
     clauses.push("kind = ?")
     params.push(options.kind)
+  }
+  if (options.favoriteFormat) {
+    clauses.push(options.favoriteFormat === "fields" ? "favorite_format = 'fields'" : "(favorite_format IS NULL OR favorite_format != 'fields')")
   }
   const search = String(options.search ?? "").trim()
   if (search) {
@@ -476,6 +473,7 @@ async function fetchClipGroups(db: DB, options: {
   scope: ClipListScope
   search?: string
   kind?: ClipKind
+  favoriteFormat?: FavoriteFormat
   limit?: number
   offset?: number
 }): Promise<ClipGroup[]> {
@@ -494,6 +492,7 @@ export async function listClipGroups(options: {
   scope: ClipListScope
   search?: string
   kind?: ClipKind
+  favoriteFormat?: FavoriteFormat
   limit?: number
   offset?: number
 }): Promise<ClipGroup[]> {
@@ -502,8 +501,7 @@ export async function listClipGroups(options: {
     return await fetchClipGroups(db, options)
   } catch (error) {
     if (initialized) throw error
-    await ensureSchema(db)
-    initialized = true
+    await initializeDatabase()
     return fetchClipGroups(db, options)
   }
 }
@@ -518,7 +516,8 @@ async function fetchClipKindCounts(db: DB): Promise<ClipKindCountsByScope> {
       COUNT(CASE WHEN favorite = 1 THEN 1 END) AS favorite_count,
       COUNT(CASE WHEN favorite = 1 AND kind = 'text' THEN 1 END) AS favorite_text_count,
       COUNT(CASE WHEN favorite = 1 AND kind = 'url' THEN 1 END) AS favorite_url_count,
-      COUNT(CASE WHEN favorite = 1 AND kind = 'image' THEN 1 END) AS favorite_image_count
+      COUNT(CASE WHEN favorite = 1 AND kind = 'image' THEN 1 END) AS favorite_image_count,
+      COUNT(CASE WHEN favorite = 1 AND favorite_format = 'fields' THEN 1 END) AS favorite_fields_count
     FROM clips
     WHERE deleted_at IS NULL
   `)
@@ -535,8 +534,25 @@ async function fetchClipKindCounts(db: DB): Promise<ClipKindCountsByScope> {
       text: Number(row.favorite_text_count ?? 0),
       url: Number(row.favorite_url_count ?? 0),
       image: Number(row.favorite_image_count ?? 0),
+      plain: Number(row.favorite_count ?? 0) - Number(row.favorite_fields_count ?? 0),
+      fields: Number(row.favorite_fields_count ?? 0),
     },
   }
+}
+
+export async function countFavoriteGroupItems(): Promise<Record<string, number>> {
+  const db = await openCaisDatabase()
+  const rows = await db.fetchAll(`
+    SELECT CASE
+      WHEN favorite_group_id IS NOT NULL THEN 'favorite-group:' || favorite_group_id
+      WHEN favorite_format = 'fields' THEN 'favorite:fields'
+      ELSE 'favorite:plain'
+    END AS section_id, COUNT(*) AS item_count
+    FROM clips
+    WHERE deleted_at IS NULL AND favorite = 1
+    GROUP BY section_id
+  `)
+  return Object.fromEntries(rows.map((row) => [String(row.section_id), Number(row.item_count)]))
 }
 
 export async function countClipKindsByScope(): Promise<ClipKindCountsByScope> {
@@ -545,8 +561,7 @@ export async function countClipKindsByScope(): Promise<ClipKindCountsByScope> {
     return await fetchClipKindCounts(db)
   } catch (error) {
     if (initialized) throw error
-    await ensureSchema(db)
-    initialized = true
+    await initializeDatabase()
     return fetchClipKindCounts(db)
   }
 }

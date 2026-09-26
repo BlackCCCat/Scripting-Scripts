@@ -21,6 +21,8 @@ const EditModeAPI = (globalThis as any).EditMode
 
 export function FavoriteGroupManagerView(props: {
   initialGroups: FavoriteGroup[]
+  initialCounts: Record<string, number>
+  reloadCounts: () => Promise<Record<string, number>>
   embedded?: boolean
   onCreateGroup: (draft: FavoriteGroupDraft) => Promise<FavoriteGroup>
   onSaveGroup: (group: FavoriteGroup, draft: FavoriteGroupDraft) => Promise<FavoriteGroup>
@@ -30,6 +32,7 @@ export function FavoriteGroupManagerView(props: {
   const dismiss = Navigation.useDismiss()
   const editMode = useObservable(() => EditModeAPI.inactive())
   const [groups, setGroups] = useState(props.initialGroups)
+  const [counts, setCounts] = useState(props.initialCounts)
   const [editingGroup, setEditingGroup] = useState<FavoriteGroup | null>(null)
   const [editorPresented, setEditorPresented] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -60,6 +63,7 @@ export function FavoriteGroupManagerView(props: {
         : [...current, nextGroup]
       )
       setEditorPresented(false)
+      void props.reloadCounts().then(setCounts).catch((error) => console.warn("[CAIS] Favorite group counts unavailable", error))
     } finally {
       setSaving(false)
     }
@@ -90,6 +94,7 @@ export function FavoriteGroupManagerView(props: {
       if (!confirmed) return
       setGroups((current) => current.filter((item) => item.id !== group.id))
       await props.onDeleteGroup(group)
+      void props.reloadCounts().then(setCounts).catch((error) => console.warn("[CAIS] Favorite group counts unavailable", error))
     } catch (error: any) {
       setGroups(previousGroups)
       await Dialog.alert({ message: String(error?.message ?? error ?? "分组删除失败") })
@@ -185,6 +190,7 @@ export function FavoriteGroupManagerView(props: {
                     </Text>
                   </VStack>
                   <Spacer />
+                  <Text foregroundStyle="secondaryLabel" monospacedDigit>{counts[`favorite-group:${group.id}`] ?? 0}</Text>
                   <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
                 </HStack>
               )
