@@ -161,7 +161,6 @@ function orderFavoriteGroupsForDisplay(groups: ClipGroup[], ids: string[] | null
 function InteractiveClipRow(props: {
   item: ClipItem
   allowDelete: boolean
-  onTap: () => void
   onConfirmDelete: (item: ClipItem) => Promise<void>
   contextMenuItems: VirtualNode
   leadingActions: VirtualNode[]
@@ -189,7 +188,6 @@ function InteractiveClipRow(props: {
         kind: "contextMenuPreview",
         shape: { type: "rect", cornerRadius: 18 },
       } as any}
-      onTapGesture={props.onTap}
       contextMenu={{ menuItems: props.contextMenuItems }}
       leadingSwipeActions={{ allowsFullSwipe: false, actions: props.leadingActions }}
       trailingSwipeActions={{ allowsFullSwipe: false, actions: trailingActions }}
@@ -1957,6 +1955,18 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     options: { allowDelete?: boolean; favoriteView?: boolean } = {},
   ) {
     const allowDelete = options.allowDelete ?? true
+    const onRowTap = withHaptic(() => {
+      if (isFieldFavorite(item)) {
+        void openFavoriteFields(item)
+      } else {
+        const onFavoritesPage = activeTab.value === TAB_FAVORITES
+        void copyItem(item, {
+          refresh: !onFavoritesPage,
+          updateRecency: !onFavoritesPage,
+          syncFavoriteClipboard: onFavoritesPage,
+        })
+      }
+    })
     const primaryTrailingAction = (
       <Button
         title=""
@@ -1979,18 +1989,6 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         allowDelete={allowDelete}
         onConfirmDelete={confirmDeleteItem}
         primaryTrailingAction={primaryTrailingAction}
-        onTap={withHaptic(() => {
-          if (isFieldFavorite(item)) {
-            void openFavoriteFields(item)
-          } else {
-            const onFavoritesPage = activeTab.value === TAB_FAVORITES
-            void copyItem(item, {
-              refresh: !onFavoritesPage,
-              updateRecency: !onFavoritesPage,
-              syncFavoriteClipboard: onFavoritesPage,
-            })
-          }
-        })}
         contextMenuItems={(
           <Group>
             <ControlGroup controlSize="large">
@@ -2054,21 +2052,25 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           ]),
           <Button
             title=""
-            systemImage={item.pinned ? "pin.slash" : "pin"}
+            systemImage={(options.favoriteView ? item.favoritePinned : item.pinned) ? "pin.slash" : "pin"}
             tint="systemOrange"
-            action={() => void togglePinned(item).then(() => refresh())}
+            action={() => void togglePinned(item, options.favoriteView ? "favorites" : "clipboard").then(() => refresh())}
           />,
         ]}
         content={settings.appClipRowGlassEffect ? (
           <ClipRow
             item={item}
             contentLineLimit={settings.appContentLineLimit}
+            favoriteView={options.favoriteView}
+            onTap={onRowTap}
             displayTimestamp={options.favoriteView ? item.favoriteUpdatedAt ?? item.updatedAt : undefined}
           />
         ) : (
           <NonGlassClipRow
             item={item}
             contentLineLimit={settings.appContentLineLimit}
+            favoriteView={options.favoriteView}
+            onTap={onRowTap}
             displayTimestamp={options.favoriteView ? item.favoriteUpdatedAt ?? item.updatedAt : undefined}
           />
         )}

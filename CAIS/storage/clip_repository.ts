@@ -220,10 +220,16 @@ export async function markCopied(item: ClipItem, changeSource?: unknown, copiedA
   bumpClipDataVersion(changeSource)
 }
 
-export async function togglePinned(item: ClipItem): Promise<void> {
-  await updateClipState(item.id, item.favorite
-    ? { pinned: !item.pinned }
-    : { pinned: !item.pinned, updatedAt: Date.now() })
+export async function togglePinned(item: ClipItem, scope: ClipListScope = "clipboard"): Promise<void> {
+  if (scope === "favorites" && item.favorite) {
+    await updateClipState(item.id, item.favoritePinned
+      ? { favoritePinned: false }
+      : { favoritePinned: true, favoriteOrder: await nextFavoriteItemOrder(item.favoriteGroupId) })
+  } else {
+    await updateClipState(item.id, item.favorite
+      ? { pinned: !item.pinned }
+      : { pinned: !item.pinned, updatedAt: Date.now() })
+  }
   bumpClipDataVersion()
 }
 
@@ -231,6 +237,7 @@ export async function toggleFavorite(item: ClipItem): Promise<void> {
   if (item.favorite) {
     await updateClipState(item.id, {
       favorite: false,
+      favoritePinned: false,
       favoriteGroupId: null,
       favoriteGroupManual: false,
       favoriteOrder: null,

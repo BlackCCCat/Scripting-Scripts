@@ -34,6 +34,7 @@ export type ClipItem = {
   updatedAt: number
   lastCopiedAt?: number
   pinned: boolean
+  favoritePinned?: boolean
   favorite: boolean
   manualFavorite?: boolean
   favoriteFormat?: FavoriteFormat

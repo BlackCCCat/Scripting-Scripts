@@ -16,7 +16,6 @@ import {
   VStack,
   type Font,
   useEffect,
-  useMemo,
   useObservable,
   useRef,
   useState,
@@ -74,6 +73,7 @@ const CLIP_SCROLL_SIDE_PADDING = 8
 const CLIP_GRID_SPACING = 10
 const KEYBOARD_TILE_PREVIEW_LIMIT = 1200
 const KEYBOARD_LAYOUT_KEY = "cais_keyboard_row_count_v1"
+const KEYBOARD_TAB_KEY = "cais_keyboard_active_tab_v1"
 const RIME_KEYBOARD_SCRIPT_NAME = "Scripting Rime Keyboard"
 const KEYBOARD_EXIT_FEEDBACK_DELAY_MS = 90
 const LEGACY_SHARED_STORAGE_OPTIONS = { shared: true }
@@ -123,6 +123,22 @@ function rimeKeyboardScript(): any {
 
 function storage(): any {
   return (globalThis as any).Storage
+}
+
+function readKeyboardTab(): number {
+  try {
+    const saved = storage()?.get?.(KEYBOARD_TAB_KEY)
+    return saved != null && Number(saved) === TAB_FAVORITE ? TAB_FAVORITE : TAB_CLIPS
+  } catch {
+    return TAB_CLIPS
+  }
+}
+
+function writeKeyboardTab(tab: number) {
+  try {
+    storage()?.set?.(KEYBOARD_TAB_KEY, tab)
+  } catch {
+  }
 }
 
 function readKeyboardLayout(): KeyboardLayoutMode {
@@ -364,6 +380,7 @@ function clipListKey(items: ClipItem[]): string {
     item.updatedAt,
     item.favorite ? "f" : "",
     item.pinned ? "p" : "",
+    item.favoritePinned ? "fp" : "",
     item.manualFavorite ? "m" : "",
     item.favoriteFormat ?? "plain",
     item.fieldDelimiter ?? "",
@@ -453,7 +470,7 @@ function rememberKeyboardItems(scope: ClipListScope, items: ClipItem[], version 
 
 export async function preloadKeyboardInitialState(): Promise<KeyboardInitialState> {
   const settings = loadSettings()
-  const scope: ClipListScope = "clipboard"
+  const scope = keyboardScopeForTab(readKeyboardTab())
   const items = await getClips("", queryLimitForKeyboard(settings), scope)
   rememberKeyboardItems(scope, items)
   return { items, settings, loaded: true, scope }
@@ -461,6 +478,7 @@ export async function preloadKeyboardInitialState(): Promise<KeyboardInitialStat
 
 function ClipTile(props: {
   item: ClipItem
+  scope: ClipListScope
   settings: CaisSettings
   tileWidth: number
   tileHeight: number
@@ -487,6 +505,7 @@ function ClipTile(props: {
         menuItems: (
           <ClipTileMenu
             item={item}
+            scope={props.scope}
             settings={props.settings}
             onRefresh={props.onRefresh}
             onStatus={props.onStatus}
@@ -566,13 +585,13 @@ function ClipTile(props: {
               </>
             )}
           </VStack>
-          {item.pinned || item.favorite ? (
+          {(props.scope === "favorites" ? item.favoritePinned : item.pinned) || item.favorite ? (
             <HStack
               spacing={4}
               frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
               padding={{ bottom: metrics.padding, trailing: metrics.padding }}
             >
-              {item.pinned ? <Image systemName="pin.fill" font={metrics.iconFont} foregroundStyle="systemOrange" /> : null}
+              {(props.scope === "favorites" ? item.favoritePinned : item.pinned) ? <Image systemName="pin.fill" font={metrics.iconFont} foregroundStyle="systemOrange" /> : null}
               {item.favorite ? <Image systemName="star.fill" font={metrics.iconFont} foregroundStyle="systemYellow" /> : null}
             </HStack>
           ) : null}
@@ -584,6 +603,7 @@ function ClipTile(props: {
 
 function ClipTileMenu(props: {
   item: ClipItem
+  scope: ClipListScope
   settings: CaisSettings
   onStatus: (message: string) => void
   onRefresh: () => void | Promise<void>
@@ -723,9 +743,9 @@ function ClipTileMenu(props: {
   }
 
   async function toggleItemPinned() {
-    await togglePinned(item)
+    await togglePinned(item, props.scope)
     await props.onRefresh()
-    props.onStatus(item.pinned ? "已取消置顶" : "已置顶")
+    props.onStatus((props.scope === "favorites" ? item.favoritePinned : item.pinned) ? "已取消置顶" : "已置顶")
   }
 
   async function toggleItemFavorite() {
@@ -792,8 +812,8 @@ function ClipTileMenu(props: {
     <Group>
       <Button title="复制" systemImage="doc.on.doc" action={() => void copyItem()} />
       <Button
-        title={item.pinned ? "取消置顶" : "置顶"}
-        systemImage={item.pinned ? "pin.slash" : "pin"}
+        title={(props.scope === "favorites" ? item.favoritePinned : item.pinned) ? "取消置顶" : "置顶"}
+        systemImage={(props.scope === "favorites" ? item.favoritePinned : item.pinned) ? "pin.slash" : "pin"}
         action={() => void toggleItemPinned()}
       />
       {!item.manualFavorite ? (
@@ -827,13 +847,17 @@ function ClipTileMenu(props: {
 export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}) {
   const traits = keyboard()?.useTraits?.()
   const pipPresented = useObservable(false)
-  const initialItems = props.initialState?.loaded && props.initialState.scope === "clipboard"
+  const initialTab = props.initialState?.loaded
+    ? props.initialState.scope === "favorites" ? TAB_FAVORITE : TAB_CLIPS
+    : readKeyboardTab()
+  const initialScope = keyboardScopeForTab(initialTab)
+  const initialItems = props.initialState?.loaded
     ? props.initialState.items
-    : cachedKeyboardItems("clipboard")
+    : cachedKeyboardItems(initialScope)
   const initialLoaded = Boolean(props.initialState?.loaded || initialItems.length)
-  const [activeTab, setActiveTab] = useState(TAB_CLIPS)
+  const [activeTab, setActiveTab] = useState(initialTab)
   activeKeyboardScope = keyboardScopeForTab(activeTab)
-  const [items, setItems] = useState<ClipItem[]>(() => initialItems)
+  const items = useObservable<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const [keyboardLayout, setKeyboardLayout] = useState<KeyboardLayoutMode>(() => readKeyboardLayout())
   const [layoutRevision, setLayoutRevision] = useState(0)
@@ -849,9 +873,13 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   const [loading, setLoading] = useState(() => !initialLoaded)
   currentFeedbackSettings = settings
   currentKeyboardNativeGlassEffect = settings.keyboardNativeGlassEffect !== false
-  const visibleItems = useMemo(() => {
-    return items.slice(0, settings.keyboardMaxItems)
-  }, [items, settings.keyboardMaxItems])
+
+  function selectKeyboardTab(tab: number) {
+    const next = tab === TAB_FAVORITE ? TAB_FAVORITE : TAB_CLIPS
+    if (next === activeTab) return
+    setActiveTab(next)
+    writeKeyboardTab(next)
+  }
 
   useEffect(() => {
     currentFeedbackSettings = settings
@@ -920,10 +948,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     activeKeyboardScope = scope
     const cached = cachedKeyboardItems(scope)
     if (cached.length) {
-      setItems(cached)
+      items.setValue(cached)
       setLoading(false)
     } else {
-      setItems([])
+      items.setValue([])
       setLoading(true)
     }
     void refresh(true, lifecycle, scope).finally(() => {
@@ -974,11 +1002,11 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     if (!force && key === lastKeyboardItemsKeyByScope[scope]) return
     rememberKeyboardItems(scope, next)
     if (scope !== activeKeyboardScope) return
-    setItems(next)
+    items.setValue(next)
   }
 
   function pasteLastContent() {
-    const fallback = items.find((item) => item.kind !== "image")?.content ?? ""
+    const fallback = items.value.find((item) => item.kind !== "image")?.content ?? ""
     const text = lastPastedText || fallback
     if (!text) {
       return
@@ -1351,7 +1379,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                 title=""
                 pickerStyle="segmented"
                 value={activeTab}
-                onChanged={(index: number) => setActiveTab(index)}
+                onChanged={selectKeyboardTab}
                 frame={{ maxWidth: "infinity", height: 36 }}
               >
                 <Text tag={TAB_FAVORITE}>Favorite</Text>
@@ -1363,7 +1391,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
               title=""
               pickerStyle="segmented"
               value={activeTab}
-              onChanged={(index: number) => setActiveTab(index)}
+              onChanged={selectKeyboardTab}
               frame={{ minWidth: showRimeKeyboardSwitch ? 96 : 112, maxWidth: "infinity", height: 36 }}
             >
               <Text tag={TAB_FAVORITE}>Favorite</Text>
@@ -1454,31 +1482,29 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                 frame={{ width: proxy.size.width, height: gridHeight }}
                 padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
               >
-                {visibleItems.length ? (
+                {items.value.length ? (
                   <LazyHGrid
                     rows={clipRows}
                     spacing={CLIP_GRID_SPACING}
                     frame={{ height: gridHeight }}
                   >
                     <ForEach
-                      count={visibleItems.length}
-                      itemBuilder={(index) => {
-                        const item = visibleItems[index]
-                        return item ? (
-                          <ClipTile
-                            key={item.id}
-                            item={item}
-                            settings={settings}
-                            tileWidth={tileWidth}
-                            tileHeight={tileHeight}
-                            hideTitle={hideTitle}
-                            onInsert={insertClip}
-                            onTokenize={openTokenPage}
-                            onRefresh={refresh}
-                            onStatus={() => {}}
-                          />
-                        ) : (null as any)
-                      }}
+                      data={items}
+                      builder={(item) => (
+                        <ClipTile
+                          key={item.id}
+                          item={item}
+                          scope={activeTab === TAB_FAVORITE ? "favorites" : "clipboard"}
+                          settings={settings}
+                          tileWidth={tileWidth}
+                          tileHeight={tileHeight}
+                          hideTitle={hideTitle}
+                          onInsert={insertClip}
+                          onTokenize={openTokenPage}
+                          onRefresh={refresh}
+                          onStatus={() => {}}
+                        />
+                      )}
                     />
                   </LazyHGrid>
                 ) : loading ? (

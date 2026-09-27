@@ -24,8 +24,10 @@ function ClipRowContent(props: {
   lineLimit: number
   previewPath?: string
   displayTimestamp?: number
+  favoriteView?: boolean
 }) {
   const item = props.item
+  const pinned = props.favoriteView ? item.favoritePinned : item.pinned
   const displayedAt = props.displayTimestamp ?? item.updatedAt
   const timestampText = useMemo(() => formatDateTime(displayedAt), [displayedAt])
   return (
@@ -33,7 +35,7 @@ function ClipRowContent(props: {
       <Image
         systemName={iconName(item)}
         frame={{ width: 28, maxHeight: "infinity", alignment: "center" as any }}
-        foregroundStyle={item.pinned ? "systemOrange" : "systemBlue"}
+        foregroundStyle={pinned ? "systemOrange" : "systemBlue"}
       />
       <VStack
         frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
@@ -45,7 +47,7 @@ function ClipRowContent(props: {
           </Text>
           <Spacer />
           {item.favorite ? <Image systemName="star.fill" foregroundStyle="systemYellow" /> : null}
-          {item.pinned ? <Image systemName="pin.fill" foregroundStyle="systemOrange" /> : null}
+          {pinned ? <Image systemName="pin.fill" foregroundStyle="systemOrange" /> : null}
         </HStack>
         {props.previewPath ? (
           <Image
@@ -82,6 +84,8 @@ export function NonGlassClipRow(props: {
   item: ClipItem
   contentLineLimit: number
   displayTimestamp?: number
+  favoriteView?: boolean
+  onTap?: () => void
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
@@ -94,6 +98,8 @@ export function NonGlassClipRow(props: {
       spacing={12}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
+      contentShape={{ kind: "interaction", shape: { type: "rect", cornerRadius: 18 } } as any}
+      onTapGesture={props.onTap}
       background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
       shadow={{
         color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
@@ -101,7 +107,7 @@ export function NonGlassClipRow(props: {
         y: 4,
       }}
     >
-      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} />
+      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} favoriteView={props.favoriteView} />
     </HStack>
   )
 }
@@ -110,6 +116,8 @@ export function ClipRow(props: {
   item: ClipItem
   contentLineLimit: number
   displayTimestamp?: number
+  favoriteView?: boolean
+  onTap?: () => void
 }) {
   const item = props.item
   const lineLimit = Math.max(1, props.contentLineLimit)
@@ -119,9 +127,11 @@ export function ClipRow(props: {
       spacing={12}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
+      contentShape={{ kind: "interaction", shape: { type: "rect", cornerRadius: 18 } } as any}
+      onTapGesture={props.onTap}
       glassEffect={{ type: "rect", cornerRadius: 18 } as any}
     >
-      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} />
+      <ClipRowContent item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} favoriteView={props.favoriteView} />
     </HStack>
   )
 }

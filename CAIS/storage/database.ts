@@ -20,10 +20,13 @@ type DB = {
 }
 
 let cachedDb: DB | null = null
+let openingDb: Promise<DB> | null = null
+let initializingDb: Promise<DB> | null = null
+let connectionGeneration = 0
 let initialized = false
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at"
+const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite_pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at"
 const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
 
 function rowToClip(row: any): ClipItem {
@@ -39,6 +42,7 @@ function rowToClip(row: any): ClipItem {
     updatedAt: Number(row.updated_at ?? Date.now()),
     lastCopiedAt: row.last_copied_at == null ? undefined : Number(row.last_copied_at),
     pinned: Number(row.pinned ?? 0) === 1,
+    favoritePinned: Number(row.favorite_pinned ?? 0) === 1,
     favorite: Number(row.favorite ?? 0) === 1,
     manualFavorite: Number(row.manual_favorite ?? 0) === 1,
     favoriteFormat: row.favorite_format === "fields" ? "fields" : "plain",
@@ -65,6 +69,7 @@ function clipParams(item: ClipItem): any[] {
     item.updatedAt,
     item.lastCopiedAt ?? null,
     item.pinned ? 1 : 0,
+    item.favoritePinned ? 1 : 0,
     item.favorite ? 1 : 0,
     item.manualFavorite ? 1 : 0,
     item.favoriteFormat === "fields" ? "fields" : "plain",
@@ -148,15 +153,29 @@ async function addColumnIfMissing(db: DB, table: string, column: string, definit
 
 export async function openCaisDatabase(): Promise<DB> {
   if (cachedDb) return cachedDb
-  await ensureAppDirectories()
-  const sqlite = (globalThis as any).SQLite
-  if (!sqlite?.open) throw new Error("SQLite.open 不可用")
-  cachedDb = (await sqlite.open(databasePath(), { busyMode: 5 })) as DB
-  return cachedDb
+  if (openingDb) return openingDb
+  const generation = connectionGeneration
+  const opening = (async () => {
+    await ensureAppDirectories()
+    const sqlite = (globalThis as any).SQLite
+    if (!sqlite?.open) throw new Error("SQLite.open 不可用")
+    const db = (await sqlite.open(databasePath(), { busyMode: 5 })) as DB
+    if (generation === connectionGeneration) cachedDb = db
+    return db
+  })()
+  openingDb = opening
+  try {
+    return await opening
+  } finally {
+    if (openingDb === opening) openingDb = null
+  }
 }
 
 export function resetDatabaseConnection() {
+  connectionGeneration += 1
   cachedDb = null
+  openingDb = null
+  initializingDb = null
   initialized = false
 }
 
@@ -181,6 +200,7 @@ async function ensureSchema(db: DB): Promise<void> {
       updated_at INTEGER NOT NULL,
       last_copied_at INTEGER,
       pinned INTEGER NOT NULL DEFAULT 0,
+      favorite_pinned INTEGER NOT NULL DEFAULT 0,
       favorite INTEGER NOT NULL DEFAULT 0,
       manual_favorite INTEGER NOT NULL DEFAULT 0,
       favorite_format TEXT NOT NULL DEFAULT 'plain',
@@ -230,16 +250,28 @@ async function ensureSchema(db: DB): Promise<void> {
 }
 
 export async function initializeDatabase(): Promise<DB> {
-  const db = await openCaisDatabase()
-  if (initialized) return db
-  const rows = await db.fetchAll("PRAGMA user_version")
-  const version = Number(rows[0]?.user_version ?? Object.values(rows[0] ?? {})[0] ?? 0) || 0
-  if (version < SCHEMA_VERSION) {
-    await ensureSchema(db)
-    await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+  if (initializingDb) return initializingDb
+  const generation = connectionGeneration
+  const initializing = (async () => {
+    const db = await openCaisDatabase()
+    if (initialized) return db
+    const rows = await db.fetchAll("PRAGMA user_version")
+    const version = Number(rows[0]?.user_version ?? Object.values(rows[0] ?? {})[0] ?? 0) || 0
+    if (version < 1) await ensureSchema(db)
+    if (version < 2) {
+      await addColumnIfMissing(db, "clips", "favorite_pinned", "favorite_pinned INTEGER NOT NULL DEFAULT 0")
+      await db.execute("UPDATE clips SET favorite_pinned = pinned WHERE favorite = 1 AND pinned = 1")
+    }
+    if (version < SCHEMA_VERSION) await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+    if (generation === connectionGeneration) initialized = true
+    return db
+  })()
+  initializingDb = initializing
+  try {
+    return await initializing
+  } finally {
+    if (initializingDb === initializing) initializingDb = null
   }
-  initialized = true
-  return db
 }
 
 export async function insertClip(item: ClipItem): Promise<void> {
@@ -247,10 +279,10 @@ export async function insertClip(item: ClipItem): Promise<void> {
   await db.execute(`
     INSERT INTO clips (
       id, kind, title, content, content_hash, image_path, source_change_count,
-      created_at, updated_at, last_copied_at, pinned, favorite, manual_favorite,
+      created_at, updated_at, last_copied_at, pinned, favorite_pinned, favorite, manual_favorite,
       favorite_format, field_delimiter, field_delimiter_override, favorite_group_id,
       favorite_group_manual, favorite_order, favorite_updated_at, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, clipParams(item))
 }
 
@@ -306,6 +338,7 @@ async function fetchClipRows(db: DB, options: {
        END ASC,
        (SELECT sort_order FROM favorite_groups WHERE id = clips.favorite_group_id) ASC,
        (SELECT created_at FROM favorite_groups WHERE id = clips.favorite_group_id) ASC,
+       favorite_pinned DESC,
        COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC,
        favorite_updated_at DESC`
     : "pinned DESC, updated_at DESC"
@@ -450,7 +483,7 @@ async function fetchFavoriteClipGroups(db: DB, options: {
             WHEN favorite_format = 'fields' THEN 'favorite:fields'
             ELSE 'favorite:plain'
           END
-          ORDER BY COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC, favorite_updated_at DESC
+          ORDER BY favorite_pinned DESC, COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC, favorite_updated_at DESC
         ) AS section_rank
       FROM clips
       WHERE ${clauses.join(" AND ")}
@@ -577,6 +610,7 @@ export async function countClipsByScope(): Promise<Record<ClipListScope, number>
 export async function updateClipState(
   id: string,
   updates: Partial<Pick<ClipItem, "updatedAt" | "lastCopiedAt" | "pinned" | "favorite">> & {
+    favoritePinned?: boolean
     favoriteGroupId?: string | null
     favoriteGroupManual?: boolean
     favoriteOrder?: number | null
@@ -597,6 +631,10 @@ export async function updateClipState(
   if (updates.pinned != null) {
     sets.push("pinned = ?")
     params.push(updates.pinned ? 1 : 0)
+  }
+  if (updates.favoritePinned != null) {
+    sets.push("favorite_pinned = ?")
+    params.push(updates.favoritePinned ? 1 : 0)
   }
   if (updates.favorite != null) {
     sets.push("favorite = ?")
