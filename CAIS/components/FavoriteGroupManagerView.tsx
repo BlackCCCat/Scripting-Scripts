@@ -15,6 +15,7 @@ import {
 } from "scripting"
 
 import type { FavoriteGroup } from "../types"
+import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom"
 import { FavoriteGroupEditorView, type FavoriteGroupDraft } from "./FavoriteGroupEditorView"
 
 const EditModeAPI = (globalThis as any).EditMode
@@ -24,6 +25,8 @@ export function FavoriteGroupManagerView(props: {
   initialCounts: Record<string, number>
   reloadCounts: () => Promise<Record<string, number>>
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
+  zoomNamespace?: NavigationZoomNamespace
   onCreateGroup: (draft: FavoriteGroupDraft) => Promise<FavoriteGroup>
   onSaveGroup: (group: FavoriteGroup, draft: FavoriteGroupDraft) => Promise<FavoriteGroup>
   onDeleteGroup: (group: FavoriteGroup) => Promise<void>
@@ -103,6 +106,7 @@ export function FavoriteGroupManagerView(props: {
 
   const form = (
     <Form
+      navigationTransition={props.navigationTransition}
       navigationTitle="分组管理"
       navigationBarTitleDisplayMode="inline"
       tabBarVisibility={props.embedded ? "visible" : undefined}
@@ -135,6 +139,11 @@ export function FavoriteGroupManagerView(props: {
             key={editingGroup?.id ?? "new-favorite-group"}
             initial={editingGroup ?? undefined}
             embedded
+            navigationTransition={editingGroup && props.zoomNamespace ? {
+              type: "zoom",
+              sourceID: `favorite-group:${editingGroup.id}`,
+              namespace: props.zoomNamespace,
+            } : undefined}
             onCancel={() => setEditorPresented(false)}
             onSave={save}
           />
@@ -154,6 +163,10 @@ export function FavoriteGroupManagerView(props: {
               return (
                 <HStack
                   key={group.id}
+                  matchedTransitionSource={props.zoomNamespace ? {
+                    id: `favorite-group:${group.id}`,
+                    namespace: props.zoomNamespace,
+                  } : undefined}
                   spacing={12}
                   frame={{ maxWidth: "infinity", alignment: "center" as any }}
                   background="rgba(0,0,0,0.001)"

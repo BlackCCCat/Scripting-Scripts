@@ -12,6 +12,7 @@ import {
 } from "scripting"
 
 import type { FavoriteGroup, FavoriteGroupRuleType } from "../types"
+import type { NavigationZoomTransition } from "../utils/navigation_zoom"
 import { validateRegexPattern } from "../utils/custom_action"
 
 export type FavoriteGroupDraft = {
@@ -24,6 +25,7 @@ export type FavoriteGroupDraft = {
 export function FavoriteGroupEditorView(props: {
   initial?: FavoriteGroup
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
   onCancel?: () => void
   onSave?: (draft: FavoriteGroupDraft) => Promise<void> | void
 }) {
@@ -75,6 +77,7 @@ export function FavoriteGroupEditorView(props: {
 
   const form = (
     <Form
+      navigationTransition={props.navigationTransition}
       navigationTitle={props.initial ? "编辑收藏分组" : "添加收藏分组"}
       navigationBarTitleDisplayMode="inline"
       tabBarVisibility={props.embedded ? "visible" : undefined}

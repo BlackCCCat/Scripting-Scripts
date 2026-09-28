@@ -89,6 +89,7 @@ export type CaisSettings = {
   appContentLineLimit: number
   appClipRowGlassEffect: boolean
   homeScreenEmbeddedNavigation: boolean
+  homeScreenNavigationAnimation: boolean
   keyboardShowTitle: boolean
   keyboardNativeGlassEffect: boolean
   showRimeKeyboardSwitch: boolean
@@ -155,6 +156,7 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   appContentLineLimit: 3,
   appClipRowGlassEffect: true,
   homeScreenEmbeddedNavigation: true,
+  homeScreenNavigationAnimation: true,
   keyboardShowTitle: true,
   keyboardNativeGlassEffect: true,
   showRimeKeyboardSwitch: false,

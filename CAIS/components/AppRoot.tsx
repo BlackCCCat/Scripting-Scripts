@@ -33,6 +33,7 @@ import {
 } from "scripting"
 
 import type { CaisSettings, ClipboardClearRange, ClipGroup, ClipItem, ClipKind, ClipKindCountsByScope, ClipListScope, FavoriteFormat, FavoriteGroup, KeyboardCustomAction, KeyboardMenuBuiltinAction, MonitorStatus } from "../types"
+import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom"
 import { captureCurrentClipboard, startClipboardMonitor, stopClipboardMonitor } from "../services/clipboard_capture"
 import { currentChangeCount, writeClipToPasteboard, writeImageToPasteboard, writeTextToPasteboard } from "../services/pasteboard_adapter"
 import {
@@ -120,8 +121,8 @@ type AppRootMode = "app" | "home"
 type ClipKindFilter = ClipKind | null
 type HomeRoute =
   | { kind: "addContent" }
-  | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number }
-  | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[] }
+  | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number; zoomSourceID?: string }
+  | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[]; zoomSourceID?: string }
   | { kind: "favoriteGroupEditor" }
   | { kind: "favoriteGroupManager"; groups: FavoriteGroup[]; counts: Record<string, number> }
   | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
@@ -160,6 +161,7 @@ function orderFavoriteGroupsForDisplay(groups: ClipGroup[], ids: string[] | null
 
 function InteractiveClipRow(props: {
   item: ClipItem
+  zoomSource?: { id: string; namespace: NavigationZoomNamespace }
   allowDelete: boolean
   onConfirmDelete: (item: ClipItem) => Promise<void>
   contextMenuItems: VirtualNode
@@ -182,6 +184,7 @@ function InteractiveClipRow(props: {
 
   return (
     <HStack
+      matchedTransitionSource={props.zoomSource}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       background="rgba(0,0,0,0.001)"
       contentShape={{
@@ -306,6 +309,7 @@ function ClipContentEditorView(props: {
   navigationTitle?: string
   iconOnlyToolbar?: boolean
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
   onCancel?: () => void
   onSave?: (content: string) => void
 }) {
@@ -340,6 +344,7 @@ function ClipContentEditorView(props: {
 
   const page = (
     <VStack
+        navigationTransition={props.navigationTransition}
         navigationTitle={props.navigationTitle ?? "编辑内容"}
         navigationBarTitleDisplayMode="inline"
         tabBarVisibility={props.embedded ? "visible" : undefined}
@@ -563,7 +568,7 @@ function ImageViewerView(props: {
   return props.embedded ? page : <NavigationStack>{page}</NavigationStack>
 }
 
-export function AppRoot(props: { mode?: AppRootMode } = {}) {
+export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZoomNamespace } = {}) {
   const mode = props.mode ?? "app"
   const homeScreenMode = mode === "home"
   const releaseNotesSheet = useReleaseNotesSheet({
@@ -617,8 +622,15 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
   })
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
   const embeddedHomeNavigation = homeScreenMode && settings.homeScreenEmbeddedNavigation
+  const homeZoomNamespace = embeddedHomeNavigation && settings.homeScreenNavigationAnimation
+    ? props.zoomNamespace
+    : undefined
   const orderedMenuBuiltins = getOrderedMenuBuiltins(settings)
   const enabledCustomActions = settings.keyboardMenu.customActions.filter((action) => action.enabled)
+
+  function homeZoomTransition(sourceID: string): NavigationZoomTransition | undefined {
+    return homeZoomNamespace ? { type: "zoom", sourceID, namespace: homeZoomNamespace } : undefined
+  }
 
   useEffect(() => {
     settingsRef.current = settings
@@ -1425,9 +1437,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
-  async function editItem(item: ClipItem) {
+  async function editItem(item: ClipItem, zoomSourceID?: string) {
     if (isFieldFavorite(item)) {
-      await presentFavoriteEditor(item)
+      await presentFavoriteEditor(item, undefined, zoomSourceID)
       return
     }
     if (item.kind === "image") {
@@ -1442,6 +1454,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         item,
         content: fullContent,
         initialChangeCount,
+        zoomSourceID,
       })
       return
     }
@@ -1456,7 +1469,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     }
   }
 
-  async function presentFavoriteEditor(item?: ClipItem, preferredFormat?: "plain" | "fields") {
+  async function presentFavoriteEditor(item?: ClipItem, preferredFormat?: "plain" | "fields", zoomSourceID?: string) {
     try {
       const sessionId = makeId("favorite-editor")
       const favoriteGroups = await getFavoriteGroupDefinitions()
@@ -1469,7 +1482,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         favoriteGroupManual: item.favoriteGroupManual,
       } : undefined
       if (embeddedHomeNavigation) {
-        presentHomeRoute({ kind: "favoriteEditor", sessionId, item, initial, preferredFormat, favoriteGroups })
+        presentHomeRoute({ kind: "favoriteEditor", sessionId, item, initial, preferredFormat, favoriteGroups, zoomSourceID })
         return
       }
       const result = await Navigation.present<FavoriteDraft | null>({
@@ -1955,6 +1968,9 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     options: { allowDelete?: boolean; favoriteView?: boolean } = {},
   ) {
     const allowDelete = options.allowDelete ?? true
+    const rowZoomSourceID = item.kind === "image"
+      ? undefined
+      : isFieldFavorite(item) ? `favorite-field:${item.id}` : `clip-edit:${item.id}`
     const onRowTap = withHaptic(() => {
       if (isFieldFavorite(item)) {
         void openFavoriteFields(item)
@@ -1976,7 +1992,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           if (item.kind === "image") {
             void viewImageItem(item)
           } else {
-            void editItem(item)
+            void editItem(item, homeZoomNamespace ? rowZoomSourceID : undefined)
           }
         })}
       />
@@ -1986,6 +2002,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       <InteractiveClipRow
         key={item.id}
         item={item}
+        zoomSource={homeZoomNamespace && rowZoomSourceID ? {
+          id: rowZoomSourceID,
+          namespace: homeZoomNamespace,
+        } : undefined}
         allowDelete={allowDelete}
         onConfirmDelete={confirmDeleteItem}
         primaryTrailingAction={primaryTrailingAction}
@@ -2228,7 +2248,14 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
     return (
       <Menu
         menuIndicator="hidden"
-        label={<Image systemName="plus" accessibilityLabel="添加收藏" />}
+        label={<Image
+          systemName="plus"
+          accessibilityLabel="添加收藏"
+          matchedTransitionSource={homeZoomNamespace ? {
+            id: "favorite-add",
+            namespace: homeZoomNamespace,
+          } : undefined}
+        />}
       >
         <Button
           title="添加收藏分组"
@@ -2523,6 +2550,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         <ClipContentEditorView
           content={route.content}
           embedded
+          navigationTransition={route.zoomSourceID ? homeZoomTransition(route.zoomSourceID) : undefined}
           onCancel={() => void closeHomeRoute()}
           onSave={(content) => {
             takeHomeRoute()
@@ -2539,6 +2567,10 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         <FavoriteEditorView
           key={route.sessionId}
           initial={route.initial}
+          navigationTransition={route.zoomSourceID
+            ? homeZoomTransition(route.zoomSourceID)
+            : !route.item ? homeZoomTransition("favorite-add") : undefined}
+          zoomNamespace={homeZoomNamespace}
           preferredFormat={route.preferredFormat}
           favoriteGroups={route.favoriteGroups}
           defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
@@ -2556,6 +2588,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
               content={content}
               navigationTitle="编辑收藏内容"
               embedded
+              navigationTransition={homeZoomTransition("favorite-content-expand")}
               onCancel={onCancel}
               onSave={onSave}
             />
@@ -2568,6 +2601,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
       return (
         <FavoriteGroupEditorView
           embedded
+          navigationTransition={homeZoomTransition("favorite-add")}
           onCancel={() => void closeHomeRoute()}
           onSave={async (draft) => {
             await persistFavoriteGroupDraft(draft)
@@ -2584,6 +2618,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           initialCounts={homeRoute.counts}
           reloadCounts={getFavoriteGroupItemCounts}
           embedded
+          navigationTransition={homeZoomTransition("favorite-add")}
+          zoomNamespace={homeZoomNamespace}
           onCreateGroup={persistFavoriteGroupDraft}
           onSaveGroup={saveManagedFavoriteGroup}
           onDeleteGroup={deleteManagedFavoriteGroup}
@@ -2599,6 +2635,7 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
           title={route.item.title}
           fields={route.fields}
           embedded
+          navigationTransition={homeZoomTransition(`favorite-field:${route.item.id}`)}
           onCopy={copyFavoriteField}
           renderFieldContextMenu={renderFavoriteFieldContextMenu}
           onCopyAll={() => {
@@ -2656,6 +2693,8 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
             lanShareStatus={lanShareStatus}
             onRotateLanShareToken={() => void rotateLanShareToken()}
             embeddedNavigation={embeddedHomeNavigation}
+            keepHomeNavigationDestination
+            zoomNamespace={homeZoomNamespace}
           />
         </VStack>
       )
@@ -2688,11 +2727,11 @@ export function AppRoot(props: { mode?: AppRootMode } = {}) {
         tabBarVisibility="visible"
         toolbarTitleDisplayMode="inline"
         toolbar={homePageToolbar()}
-        navigationDestination={embeddedHomeNavigation ? {
-          isPresented: homeRoutePresented,
+        navigationDestination={{
+          isPresented: embeddedHomeNavigation && homeRoutePresented,
           onChanged: homeRoutePresentationChanged,
           content: renderHomeDestination(),
-        } : undefined}
+        }}
         {...rootPresentationProps()}
       >
         {renderHomeCurrentPage()}

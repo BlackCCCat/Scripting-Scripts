@@ -19,6 +19,7 @@ import {
 import type { VirtualNode } from "scripting"
 
 import type { FavoriteFormat, FavoriteGroup } from "../types"
+import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom"
 import {
   normalizeFavoriteDelimiter,
   parseFavoriteFields,
@@ -82,6 +83,8 @@ export function FavoriteEditorView(props: {
     onCancel: () => void,
   ) => VirtualNode
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
+  zoomNamespace?: NavigationZoomNamespace
   onCancel?: () => void
   onSave?: (draft: FavoriteDraft) => void
   renderFieldContextMenu?: (
@@ -165,6 +168,7 @@ export function FavoriteEditorView(props: {
 
   const form = (
     <Form
+        navigationTransition={props.navigationTransition}
         navigationTitle={props.initial ? "编辑收藏" : "添加收藏"}
         navigationBarTitleDisplayMode="inline"
         tabBarVisibility={props.embedded ? "visible" : undefined}
@@ -259,6 +263,10 @@ export function FavoriteEditorView(props: {
                 accessibilityLabel="展开编辑"
                 foregroundStyle="systemBlue"
                 buttonStyle="plain"
+                matchedTransitionSource={props.zoomNamespace ? {
+                  id: "favorite-content-expand",
+                  namespace: props.zoomNamespace,
+                } : undefined}
                 action={() => void editContentInEditor()}
               />
             </HStack>
@@ -347,6 +355,7 @@ export function FavoriteFieldsDetailView(props: {
   onCopy: (field: FavoriteField) => Promise<string | void> | string | void
   onCopyAll: () => Promise<string | void> | string | void
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
   renderFieldContextMenu?: (
     field: FavoriteField,
     copy: () => void,
@@ -370,6 +379,7 @@ export function FavoriteFieldsDetailView(props: {
 
   const form = (
     <Form
+      navigationTransition={props.navigationTransition}
       navigationTitle={props.title}
       navigationBarTitleDisplayMode="inline"
       tabBarVisibility={props.embedded ? "visible" : undefined}

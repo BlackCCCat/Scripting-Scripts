@@ -35,6 +35,7 @@ import {
   validateRuntimeTemplate,
 } from "../utils/custom_action";
 import type { LanShareRuntimeStatus } from "../services/lan_share_server";
+import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom";
 import { LanShareSettingsView } from "./LanShareSettingsView";
 
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
@@ -115,6 +116,7 @@ function customActionModeFromIndex(index: number): KeyboardCustomActionMode {
 function CustomActionEditorView(props: {
   action?: KeyboardCustomAction;
   embedded?: boolean;
+  navigationTransition?: NavigationZoomTransition;
   onCancel?: () => void;
   onSave?: (action: KeyboardCustomAction) => void;
 }) {
@@ -230,6 +232,7 @@ function CustomActionEditorView(props: {
 
   const form = (
     <Form
+        navigationTransition={props.navigationTransition}
         navigationTitle={props.action ? "编辑功能" : "添加功能"}
         navigationBarTitleDisplayMode="inline"
         tabBarVisibility={props.embedded ? "visible" : undefined}
@@ -394,6 +397,8 @@ export function SettingsView(props: {
   leadingToolbar?: any;
   trailingToolbar?: any;
   embeddedNavigation?: boolean;
+  keepHomeNavigationDestination?: boolean;
+  zoomNamespace?: NavigationZoomNamespace;
 }) {
   const settings = props.value;
   const [embeddedCustomAction, setEmbeddedCustomAction] = useState<KeyboardCustomAction | null | undefined>(undefined);
@@ -546,8 +551,8 @@ export function SettingsView(props: {
     <Form
       formStyle="grouped"
       toolbar={renderToolbar()}
-      navigationDestination={props.embeddedNavigation ? {
-        isPresented: embeddedCustomActionPresented,
+      navigationDestination={props.keepHomeNavigationDestination || props.embeddedNavigation ? {
+        isPresented: Boolean(props.embeddedNavigation && embeddedCustomActionPresented),
         onChanged: (isPresented: boolean) => {
           setEmbeddedCustomActionPresented(isPresented);
           if (!isPresented) setEmbeddedCustomAction(undefined);
@@ -556,6 +561,11 @@ export function SettingsView(props: {
           <CustomActionEditorView
             action={embeddedCustomAction ?? undefined}
             embedded
+            navigationTransition={embeddedCustomAction === null && props.zoomNamespace ? {
+              type: "zoom",
+              sourceID: "custom-action-add",
+              namespace: props.zoomNamespace,
+            } : undefined}
             onCancel={() => setEmbeddedCustomActionPresented(false)}
             onSave={(action) => {
               saveCustomAction(action);
@@ -766,6 +776,15 @@ export function SettingsView(props: {
         >
           <Text>首页使用内嵌导航</Text>
         </Toggle>
+        {settings.homeScreenEmbeddedNavigation ? (
+          <Toggle
+            value={settings.homeScreenNavigationAnimation}
+            onChanged={(homeScreenNavigationAnimation: boolean) => update({ homeScreenNavigationAnimation })}
+            toggleStyle="switch"
+          >
+            <Text>导航动画</Text>
+          </Toggle>
+        ) : null}
         <Toggle
           value={settings.keyboardShowTitle}
           onChanged={(keyboardShowTitle: boolean) => update({ keyboardShowTitle })}
@@ -902,6 +921,10 @@ export function SettingsView(props: {
         <Button
           title="添加自定义功能"
           systemImage="plus"
+          matchedTransitionSource={props.zoomNamespace ? {
+            id: "custom-action-add",
+            namespace: props.zoomNamespace,
+          } : undefined}
           action={() => void presentCustomActionEditor()}
         />
       </Section>

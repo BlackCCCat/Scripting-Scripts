@@ -103,6 +103,9 @@ function sanitizeSettings(raw: any): CaisSettings {
     homeScreenEmbeddedNavigation: Boolean(
       raw?.homeScreenEmbeddedNavigation ?? DEFAULT_CAIS_SETTINGS.homeScreenEmbeddedNavigation,
     ),
+    homeScreenNavigationAnimation: Boolean(
+      raw?.homeScreenNavigationAnimation ?? DEFAULT_CAIS_SETTINGS.homeScreenNavigationAnimation,
+    ),
     keyboardShowTitle: Boolean(raw?.keyboardShowTitle ?? DEFAULT_CAIS_SETTINGS.keyboardShowTitle),
     keyboardNativeGlassEffect: Boolean(raw?.keyboardNativeGlassEffect ?? defaultNativeGlassEffect()),
     showRimeKeyboardSwitch: Boolean(raw?.showRimeKeyboardSwitch ?? DEFAULT_CAIS_SETTINGS.showRimeKeyboardSwitch),
