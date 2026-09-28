@@ -1,5 +1,6 @@
 import {
   Button,
+  Device,
   HStack,
   Navigation,
   Script,
@@ -13,7 +14,6 @@ import {
 } from "scripting"
 
 import {
-  GlassPanel,
   ResultView,
   hapticLight,
   hapticSuccess,
@@ -36,50 +36,55 @@ function SearchInputPanel(props: {
   onClear: () => void
   onQuery: () => void
 }) {
+  const supportsGlass = Number.parseInt(Device.systemVersion, 10) >= 26
   return (
-    <GlassPanel padding={10}>
-      <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-        <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-          <ZStack
+    <VStack
+      spacing={8}
+      padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      background={supportsGlass ? "clear" : { style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 34 } }}
+      glassEffect={supportsGlass ? { type: "rect", cornerRadius: 34 } : undefined}
+    >
+      <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
+        <ZStack
+          frame={{ maxWidth: "infinity", height: 40, alignment: "leading" as any }}
+          background={{ style: supportsGlass ? "secondarySystemBackground" : "systemBackground", shape: { type: "rect", cornerRadius: 10 } } as any}
+          clipShape={{ type: "rect", cornerRadius: 10 } as any}
+        >
+          <TextField
+            title=""
+            value={props.value}
+            prompt="输入汉字、词语或成语"
+            onChanged={props.onChanged}
+            submitLabel="search"
+            onSubmit={() => {
+              if (!props.canQuery || props.loading) return
+              props.onQuery()
+            }}
+            padding={{ leading: 12, trailing: 12 }}
             frame={{ maxWidth: "infinity", height: 40, alignment: "leading" as any }}
-            background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 10 } } as any}
-            glassEffect={{ type: "rect", cornerRadius: 10 } as any}
-            clipShape={{ type: "rect", cornerRadius: 10 } as any}
-          >
-            <TextField
-              title=""
-              value={props.value}
-              prompt="输入汉字、词语或成语"
-              onChanged={props.onChanged}
-              submitLabel="search"
-              onSubmit={() => {
-                if (!props.canQuery || props.loading) return
-                props.onQuery()
-              }}
-              padding={{ leading: 12, trailing: 12 }}
-              frame={{ maxWidth: "infinity", height: 40, alignment: "leading" as any }}
-            />
-          </ZStack>
-          <Button
-            title="清空"
-            systemImage="xmark.circle"
-            disabled={!props.value && !props.hasResult && !props.hasError}
-            action={props.onClear}
           />
-          <Button
-            title="查询"
-            systemImage="magnifyingglass"
-            disabled={!props.canQuery || props.loading}
-            action={props.onQuery}
-          />
-        </HStack>
-        {!props.canQuery && normalizeQuery(props.value) ? (
-          <Text font="caption" foregroundStyle="secondaryLabel">
-            仅支持查询中文汉字、词语或成语。
-          </Text>
-        ) : null}
-      </VStack>
-    </GlassPanel>
+        </ZStack>
+        <Button
+          title="清空"
+          systemImage="xmark.circle"
+          disabled={!props.value && !props.hasResult && !props.hasError}
+          action={props.onClear}
+        />
+        <Button
+          title="查询"
+          systemImage="magnifyingglass"
+          buttonStyle="borderedProminent"
+          disabled={!props.canQuery || props.loading}
+          action={props.onQuery}
+        />
+      </HStack>
+      {!props.canQuery && normalizeQuery(props.value) ? (
+        <Text font="caption" foregroundStyle="secondaryLabel">
+          仅支持查询中文汉字、词语或成语。
+        </Text>
+      ) : null}
+    </VStack>
   )
 }
 
@@ -191,7 +196,27 @@ function ZDictScriptView() {
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
       sheet={releaseNotesSheet}
     >
-      <ScrollView axes="vertical" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      <ScrollView
+        axes="vertical"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        safeAreaInset={{
+          bottom: {
+            spacing: 14,
+            content: (
+              <SearchInputPanel
+                value={inputText}
+                canQuery={canQuery}
+                loading={loading}
+                hasResult={Boolean(result)}
+                hasError={Boolean(errorText)}
+                onChanged={setInputText}
+                onClear={clearQuery}
+                onQuery={submitQuery}
+              />
+            ),
+          },
+        }}
+      >
         <ResultView
           result={result}
           loading={loading}
@@ -200,16 +225,6 @@ function ZDictScriptView() {
           onQuery={queryLinkedText}
         />
       </ScrollView>
-      <SearchInputPanel
-        value={inputText}
-        canQuery={canQuery}
-        loading={loading}
-        hasResult={Boolean(result)}
-        hasError={Boolean(errorText)}
-        onChanged={setInputText}
-        onClear={clearQuery}
-        onQuery={submitQuery}
-      />
     </VStack>
   )
 }

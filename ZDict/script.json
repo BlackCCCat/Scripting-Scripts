@@ -16,7 +16,7 @@
     "zh": "汉典",
     "pt": ""
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "entry": "index.tsx",
   "iconImage": "",
   "runInApp": false,
