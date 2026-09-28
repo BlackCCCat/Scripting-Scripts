@@ -15,6 +15,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CommonViewProps,
 } from "scripting"
 
 // 通知频率的预设选项
@@ -29,7 +30,13 @@ function newTaskId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
-export function TaskEditView(props: { title: string; initial?: Task }) {
+export function TaskEditView(props: {
+  title: string
+  initial?: Task
+  embeddedInNavigation?: boolean
+  navigationTransition?: CommonViewProps["navigationTransition"]
+  onSaveTask?: (task: Task) => Promise<boolean>
+}) {
   const dismiss = Navigation.useDismiss()
   // 基础字段
   const [name, setName] = useState(props.initial?.name ?? "")
@@ -176,12 +183,16 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
         ? syncMindfulMinutes
         : Boolean(props.initial?.syncMindfulMinutes ?? false),
     }
-    dismiss(task)
+    if (props.onSaveTask) {
+      await props.onSaveTask(task)
+    } else {
+      dismiss(task)
+    }
   }
 
-  return (
-    <NavigationStack>
+  const content = (
       <VStack
+        navigationTransition={props.navigationTransition}
         navigationTitle={props.title}
         navigationBarTitleDisplayMode="inline"
         toolbar={{
@@ -281,6 +292,6 @@ export function TaskEditView(props: { title: string; initial?: Task }) {
           </Section>
         </Form>
       </VStack>
-    </NavigationStack>
   )
+  return props.embeddedInNavigation ? content : <NavigationStack>{content}</NavigationStack>
 }

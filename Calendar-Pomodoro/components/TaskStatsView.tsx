@@ -22,6 +22,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type CommonViewProps,
 } from "scripting";
 
 // 任务结构
@@ -240,7 +241,7 @@ export async function loadCalendarEventsByChunks(task: Task): Promise<CalendarEv
   return [...results.values()];
 }
 
-export function TaskStatsView(props: { task: Task }) {
+export function TaskStatsView(props: { task: Task; embeddedInNavigation?: boolean; navigationTransition?: CommonViewProps["navigationTransition"] }) {
   const dismiss = Navigation.useDismiss();
   const [records, setRecords] = useState<TaskRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -481,14 +482,14 @@ export function TaskStatsView(props: { task: Task }) {
     };
   }, [summary]);
 
-  return (
-    <NavigationStack>
+  const content = (
       <List
+        navigationTransition={props.navigationTransition}
         navigationTitle={`${props.task.name} 统计`}
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={{
-          cancellationAction: (
+          cancellationAction: props.embeddedInNavigation ? undefined : (
             <Button title="完成" action={() => dismiss()} />
           ),
         }}
@@ -690,6 +691,6 @@ export function TaskStatsView(props: { task: Task }) {
           )}
         </Section>
       </List>
-    </NavigationStack>
   );
+  return props.embeddedInNavigation ? content : <NavigationStack>{content}</NavigationStack>;
 }

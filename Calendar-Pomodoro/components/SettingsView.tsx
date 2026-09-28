@@ -16,6 +16,7 @@ import {
   VStack,
   useEffect,
   useState,
+  type CommonViewProps,
 } from "scripting"
 
 // 全局设置持久化
@@ -26,7 +27,7 @@ import {
   type AppSettings,
 } from "../utils/settings"
 
-export function SettingsView() {
+export function SettingsView(props: { embeddedInNavigation?: boolean; navigationTransition?: CommonViewProps["navigationTransition"]; onDone?: () => void } = {}) {
   const dismiss = Navigation.useDismiss()
   const [settings, setSettings] = useState<AppSettings>({
     selectedCalendarSourceIds: [],
@@ -102,14 +103,14 @@ export function SettingsView() {
     await persist({ ...settings, linkAppleHealth })
   }
 
-  return (
-    <NavigationStack>
+  const content = (
       <VStack
+        navigationTransition={props.navigationTransition}
         navigationTitle="设置"
         navigationBarTitleDisplayMode="inline"
         toolbar={{
           topBarTrailing: (
-            <Button title="完成" action={() => dismiss(settings)} />
+            <Button title="完成" action={() => props.onDone ? props.onDone() : dismiss(settings)} />
           ),
         }}
       >
@@ -182,6 +183,6 @@ export function SettingsView() {
           </Section>
         </Form>
       </VStack>
-    </NavigationStack>
   )
+  return props.embeddedInNavigation ? content : <NavigationStack>{content}</NavigationStack>
 }

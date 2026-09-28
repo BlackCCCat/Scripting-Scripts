@@ -6,6 +6,7 @@ import { BASE_DIR_NAME } from "../constants"
 // 全局设置结构
 export type AppSettings = {
   selectedCalendarSourceIds: string[]
+  selectedTaskId?: string
   themeColor: string
   useEditorForNotes: boolean
   linkAppleHealth: boolean
@@ -106,8 +107,10 @@ export async function loadSettings(): Promise<AppSettings> {
       typeof data?.linkAppleHealth === "boolean"
         ? data.linkAppleHealth
         : DEFAULT_SETTINGS.linkAppleHealth
+    const selectedTaskId = typeof data?.selectedTaskId === "string" ? data.selectedTaskId : undefined
     return {
       selectedCalendarSourceIds,
+      selectedTaskId,
       themeColor,
       useEditorForNotes,
       linkAppleHealth,

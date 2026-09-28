@@ -61,6 +61,7 @@ import {
 import {
   DEFAULT_THEME_COLOR,
   loadSettings,
+  saveSettings,
   type AppSettings,
 } from "../utils/settings";
 // 时间格式化工具
@@ -358,6 +359,7 @@ function TaskRowCard(props: {
   previewWidth?: number;
   onTap?: () => void;
   contextMenu?: any;
+  zoomSource?: { id: string; namespace: NamespaceID };
 }) {
   const rowFrame = props.previewWidth
     ? ({ width: props.previewWidth, alignment: "leading" as any })
@@ -367,6 +369,7 @@ function TaskRowCard(props: {
 
   return (
     <VStack
+      matchedTransitionSource={props.zoomSource}
       spacing={8}
       padding={{ top: 8, bottom: 8, leading: 10, trailing: 10 }}
       frame={rowFrame}
@@ -579,6 +582,7 @@ function FocusTimerPage(props: {
   paused: boolean;
   saving: boolean;
   embeddedInNavigation?: boolean;
+  navigationTransition?: { type: "zoom"; sourceID: string; namespace: NamespaceID };
   onHome: () => void;
   onCancel: () => void;
   onPause: () => void;
@@ -587,6 +591,7 @@ function FocusTimerPage(props: {
 }) {
   const content = (
       <VStack
+        navigationTransition={props.navigationTransition}
         navigationTitle="专注中"
         navigationBarTitleDisplayMode="inline"
         toolbar={{
@@ -671,7 +676,11 @@ function OverallReportSheet(props: { tasks: Task[] }) {
   return <OverallReportView tasks={props.tasks} onExit={() => dismiss()} />;
 }
 
-export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
+type HomeRoute =
+  | { kind: "report" | "settings" | "add" }
+  | { kind: "edit" | "stats"; task: Task };
+
+export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespace?: NamespaceID } = {}) {
   const releaseNotesSheet = useReleaseNotesSheet({
     markdownFile: "changelog.md",
     title: "更新说明",
@@ -679,6 +688,12 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
   // 任务列表与当前选中任务
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [homeRoute, setHomeRoute] = useState<HomeRoute | null>(null);
+  const homeZoomNamespace = props.homeScreenMode && Number.parseInt(Device.systemVersion, 10) >= 18
+    ? props.zoomNamespace : undefined;
+  const homeZoom = (sourceID: string) => homeZoomNamespace
+    ? { type: "zoom" as const, sourceID, namespace: homeZoomNamespace }
+    : undefined;
   const [currentTimelineMinutes, setCurrentTimelineMinutes] = useState(() =>
     floorToTimelineStep(currentMinuteOfDay()),
   );
@@ -814,12 +829,6 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
     }
     return activeTask ?? tasks[0] ?? null;
   }, [activeTask, paused, running, selectedTaskId, tasks]);
-
-  useEffect(() => {
-    if (!selectedTaskId && tasks[0]) {
-      setSelectedTaskId(tasks[0].id);
-    }
-  }, [tasks]);
 
   // 当前任务的计时模式
   const effectiveCountdownSeconds =
@@ -1057,12 +1066,19 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
     // 读取已保存的任务列表
     try {
       const list = await loadTasks();
+      const savedTaskId = await loadSettings()
+        .then((settings) => settings.selectedTaskId)
+        .catch(() => undefined);
       const cachedDurations = await loadTaskDurationsCache();
       const visibleDurations: TaskDurationMap = {};
       for (const task of list) {
         visibleDurations[task.id] = cachedDurations[task.id] ?? 0;
       }
       setTasks(list);
+      setSelectedTaskId((current) => {
+        const preferred = current && list.some((task) => task.id === current) ? current : savedTaskId;
+        return list.find((task) => task.id === preferred)?.id ?? list[0]?.id ?? null;
+      });
       setTaskDurations(visibleDurations);
       tasksLoadedRef.current = true;
       const durationRefresh = refreshTaskDurations(list, visibleDurations);
@@ -1073,6 +1089,16 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
       }
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) });
+    }
+  }
+
+  async function selectTask(taskId: string) {
+    setSelectedTaskId(taskId);
+    try {
+      const settings = await loadSettings();
+      await saveSettings({ ...settings, selectedTaskId: taskId });
+    } catch (error) {
+      console.warn("[Calendar Pomodoro] failed to save selected task", error);
     }
   }
 
@@ -1290,19 +1316,24 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
   }
 
   async function addTask() {
+    if (props.homeScreenMode) {
+      setHomeRoute({ kind: "add" });
+      return;
+    }
     // 进入新增任务页
     const task = await Navigation.present<Task>({
       element: <TaskEditView title="添加任务" />,
     });
-    if (!task) return;
+    if (task) await saveNewTask(task);
+  }
 
-    // 任务名去重
+  async function saveNewTask(task: Task): Promise<boolean> {
     if (tasks.some((t) => t.name === task.name)) {
       await Dialog.alert({ message: "任务名称已存在" });
-      return;
+      return false;
     }
-
     await persistTasks([...tasks, task]);
+    return true;
   }
 
   async function editTask(task: Task) {
@@ -1311,21 +1342,33 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
       await Dialog.alert({ message: "请先结束当前任务再编辑" });
       return;
     }
+    if (props.homeScreenMode) {
+      setHomeRoute({ kind: "edit", task });
+      return;
+    }
     // 进入编辑任务页
     const updated = await Navigation.present<Task>({
       element: <TaskEditView title="编辑任务" initial={task} />,
     });
-    if (!updated) return;
+    if (updated) await saveEditedTask(task, updated);
+  }
+
+  async function saveEditedTask(task: Task, updated: Task): Promise<boolean> {
     if (tasks.some((t) => t.id !== task.id && t.name === updated.name)) {
       await Dialog.alert({ message: "任务名称已存在" });
-      return;
+      return false;
     }
     const next = tasks.map((t) => (t.id === task.id ? updated : t));
     await persistTasks(next);
+    return true;
   }
 
   async function openTaskStats(task: Task) {
     // 点击任务行时进入统计页；这里不改变当前计时状态。
+    if (props.homeScreenMode) {
+      setHomeRoute({ kind: "stats", task });
+      return;
+    }
     await Navigation.present({
       element: <TaskStatsView task={task} />,
     });
@@ -1941,12 +1984,16 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
     runtimeCountdownSecondsRef.current =
       countdownSeconds > 0 ? countdownSeconds : null;
     setFocusModeText(countdownSeconds > 0 ? "倒计时" : "正计时");
-    setSelectedTaskId(selectedTask.id);
+    void selectTask(selectedTask.id);
     await startTask(taskForSession, { initialElapsedMs });
     setShowFocusPage(true);
   }
 
   function openOverallReport() {
+    if (props.homeScreenMode) {
+      setHomeRoute({ kind: "report" });
+      return;
+    }
     void Navigation.present({
       element: <OverallReportSheet tasks={tasks} />,
     });
@@ -1962,6 +2009,10 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
   }
 
   async function openSettings() {
+    if (props.homeScreenMode) {
+      setHomeRoute({ kind: "settings" });
+      return;
+    }
     const next = await Navigation.present<AppSettings>({
       element: <SettingsView />,
     });
@@ -2110,6 +2161,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
       paused={paused}
       saving={saving}
       embeddedInNavigation={props.homeScreenMode}
+      navigationTransition={homeZoom("home-start")}
       onHome={withButtonHaptic(returnToHomeFromFocusPage)}
       onCancel={withButtonHaptic(cancelFromFocusPage)}
       onPause={withButtonHaptic(togglePauseFromFocusPage)}
@@ -2120,6 +2172,29 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
     <Text> </Text>
   );
 
+  const homeRouteContent = homeRoute?.kind === "report" ? (
+    <OverallReportView tasks={tasks} onExit={() => setHomeRoute(null)} embeddedInNavigation navigationTransition={homeZoom("home-menu")} />
+  ) : homeRoute?.kind === "settings" ? (
+    <SettingsView embeddedInNavigation navigationTransition={homeZoom("home-menu")} onDone={() => {
+      setHomeRoute(null);
+      void refreshSettings();
+    }} />
+  ) : homeRoute?.kind === "add" ? (
+    <TaskEditView title="添加任务" embeddedInNavigation navigationTransition={homeZoom("home-add")} onSaveTask={async (task) => {
+      const saved = await saveNewTask(task);
+      if (saved) setHomeRoute(null);
+      return saved;
+    }} />
+  ) : homeRoute?.kind === "edit" ? (
+    <TaskEditView title="编辑任务" initial={homeRoute.task} embeddedInNavigation navigationTransition={homeZoom(`task-${homeRoute.task.id}`)} onSaveTask={async (task) => {
+      const saved = await saveEditedTask(homeRoute.task, task);
+      if (saved) setHomeRoute(null);
+      return saved;
+    }} />
+  ) : homeRoute?.kind === "stats" ? (
+    <TaskStatsView task={homeRoute.task} embeddedInNavigation navigationTransition={homeZoom(`task-${homeRoute.task.id}`)} />
+  ) : <Text> </Text>;
+
   const content = (
       <ZStack
         alignment="bottom"
@@ -2128,7 +2203,12 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
         navigationBarTitleDisplayMode="inline"
         toolbar={{
           topBarLeading: props.homeScreenMode ? (
-            <Menu title="" systemImage="ellipsis.circle">
+            <Menu menuIndicator="hidden" label={
+              <Image
+                systemName="ellipsis.circle"
+                matchedTransitionSource={homeZoomNamespace ? { id: "home-menu", namespace: homeZoomNamespace } : undefined}
+              />
+            }>
               <Button
                 title="刷新实时活动"
                 action={withButtonHaptic(refreshLiveActivityManually)}
@@ -2165,6 +2245,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
             <Button
               title=""
               systemImage="plus.circle"
+              matchedTransitionSource={homeZoomNamespace ? { id: "home-add", namespace: homeZoomNamespace } : undefined}
               action={withButtonHaptic(addTask)}
             />
           ) : (
@@ -2194,9 +2275,14 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
         navigationDestination={
           props.homeScreenMode
             ? {
-                isPresented: showFocusPage && Boolean(activeTask),
-                onChanged: (value: boolean) => setShowFocusPage(value),
-                content: focusPage,
+                isPresented: Boolean(homeRoute) || (showFocusPage && Boolean(activeTask)),
+                onChanged: (value: boolean) => {
+                  if (value) return;
+                  if (homeRoute?.kind === "settings") void refreshSettings();
+                  setHomeRoute(null);
+                  setShowFocusPage(false);
+                },
+                content: showFocusPage && activeTask ? focusPage : homeRouteContent,
               }
             : undefined
         }
@@ -2232,10 +2318,10 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
                       ratio={ratio}
                       active={isActive}
                       themeColor={themeColor}
+                      zoomSource={homeZoomNamespace ? { id: `task-${task.id}`, namespace: homeZoomNamespace } : undefined}
                       onTap={() => {
                         if (saving) return;
                         HapticFeedback.mediumImpact();
-                        setSelectedTaskId(task.id);
                         void openTaskStats(task);
                       }}
                       contextMenu={{
@@ -2297,7 +2383,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
                   <Button
                     key={task.id}
                     title={task.name}
-                    action={withButtonHaptic(() => setSelectedTaskId(task.id))}
+                    action={withButtonHaptic(() => selectTask(task.id))}
                   />
                 ))}
               </Menu>
@@ -2306,6 +2392,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean } = {}) {
                 title={startButtonTitle}
                 buttonStyle="borderedProminent"
                 tint={running || paused ? "systemRed" : themeColor as any}
+                matchedTransitionSource={homeZoomNamespace ? { id: "home-start", namespace: homeZoomNamespace } : undefined}
                 disabled={!selectedTask || saving}
                 action={withButtonHaptic(toggleSelectedTimer)}
               />

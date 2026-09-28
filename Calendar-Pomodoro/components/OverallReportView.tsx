@@ -18,6 +18,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type CommonViewProps,
 } from "scripting";
 
 import type { Task } from "../types";
@@ -366,6 +367,8 @@ function heatColor(minutes: number): string {
 export function OverallReportView(props: {
   tasks: Task[];
   onExit: () => void;
+  embeddedInNavigation?: boolean;
+  navigationTransition?: CommonViewProps["navigationTransition"];
 }) {
   const [range, setRange] = useState<ReportRange>("week");
   const [records, setRecords] = useState<AggregateRecord[]>([]);
@@ -442,14 +445,14 @@ export function OverallReportView(props: {
   const monthAxisLabels = useMemo(() => buildMonthAxisLabels(), []);
   const weekdayAxisLabels = useMemo(() => buildWeekdayAxisLabels(), []);
 
-  return (
-    <NavigationStack>
+  const content = (
       <List
+        navigationTransition={props.navigationTransition}
         navigationTitle="报告"
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={{
-          topBarLeading: (
+          topBarLeading: props.embeddedInNavigation ? undefined : (
             <Button
               title=""
               systemImage="xmark.circle"
@@ -633,6 +636,6 @@ export function OverallReportView(props: {
           )}
         </Section>
       </List>
-    </NavigationStack>
   );
+  return props.embeddedInNavigation ? content : <NavigationStack>{content}</NavigationStack>;
 }
