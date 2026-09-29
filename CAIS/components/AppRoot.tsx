@@ -426,6 +426,7 @@ function AppTokenResultView(props: {
 function ImageViewerView(props: {
   item: ClipItem
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
   onClose?: () => void
 }) {
   const dismiss = Navigation.useDismiss()
@@ -489,6 +490,7 @@ function ImageViewerView(props: {
 
   const page = (
     <VStack
+        navigationTransition={props.navigationTransition}
         navigationTitle={props.item.title || "图片"}
         navigationBarTitleDisplayMode="inline"
         tabBarVisibility={props.embedded ? "visible" : undefined}
@@ -1969,7 +1971,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   ) {
     const allowDelete = options.allowDelete ?? true
     const rowZoomSourceID = item.kind === "image"
-      ? undefined
+      ? `image-view:${item.id}`
       : isFieldFavorite(item) ? `favorite-field:${item.id}` : `clip-edit:${item.id}`
     const onRowTap = withHaptic(() => {
       if (isFieldFavorite(item)) {
@@ -2647,7 +2649,12 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
 
     if (homeRoute.kind === "image") {
-      return <ImageViewerView item={homeRoute.item} embedded onClose={() => void closeHomeRoute()} />
+      return <ImageViewerView
+        item={homeRoute.item}
+        embedded
+        navigationTransition={homeZoomTransition(`image-view:${homeRoute.item.id}`)}
+        onClose={() => void closeHomeRoute()}
+      />
     }
 
     return (
