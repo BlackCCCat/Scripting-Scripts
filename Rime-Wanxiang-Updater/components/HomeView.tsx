@@ -2557,7 +2557,7 @@ export function HomeView() {
                     spacing={0}
                   >
                     <ScrollView
-                      frame={{ height: 280, maxWidth: "infinity" as any }}
+                      frame={{ height: busy && showProgress ? 240 : 280, maxWidth: "infinity" as any }}
                       padding={{ top: 0, bottom: 0, leading: 0, trailing: 0 }}
                     >
                       <VStack
@@ -2599,7 +2599,7 @@ export function HomeView() {
             </ScrollViewReader>
 
             {busy && showProgress ? (
-              <VStack spacing={8} padding={{ top: 8 }}>
+              <VStack spacing={6} frame={{ maxWidth: "infinity", height: 40 }}>
                 <Divider />
                 <HStack alignment="center" spacing={8}>
                   <Text frame={{ alignment: "leading" as any }}>
