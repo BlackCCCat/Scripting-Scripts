@@ -5,17 +5,18 @@ export type ReleaseSource = "cnb" | "github"
 export type SchemeEdition = "base" | "pro" | "pure" | "lite"
 export type ProSchemeKey = "moqi" | "flypy" | "zrm" | "tiger" | "wubi" | "hanxin" | "shouyou" | "shyplus" | "wx"
 export type InputMethod = "hamster" | "hamster3" | "scripting"
-export type HomeSectionKey = "local" | "remote" | "status"
+export type HomeSectionKey = "local" | "remote" | "status" | "actions"
 
 export const BUILTIN_SCRIPTING_BOOKMARK = "__builtin_scripting_rime__"
 export const BUILTIN_SCRIPTING_LABEL = "Scripting Rime"
 
 export const PRO_KEYS: ProSchemeKey[] = ["moqi", "flypy", "zrm", "tiger", "wubi", "hanxin", "shouyou", "shyplus", "wx"]
-export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "remote", "status"]
+export const HOME_SECTION_KEYS: HomeSectionKey[] = ["local", "status", "actions", "remote"]
 export const HOME_SECTION_LABELS: Record<HomeSectionKey, string> = {
   local: "本地信息",
-  remote: "远程信息",
   status: "状态",
+  actions: "操作",
+  remote: "远程信息",
 }
 
 export type AppConfig = {
@@ -73,7 +74,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   syncUpdateToScriptingRimeByBookmark: {},
   autoCheckOnLaunch: false,
   showVerboseLog: true,
-  homeSectionOrder: ["local", "status", "remote"],
+  homeSectionOrder: ["local", "status", "actions", "remote"],
 }
 
 export function normalizeHomeSectionOrder(input: unknown): HomeSectionKey[] {
@@ -84,8 +85,12 @@ export function normalizeHomeSectionOrder(input: unknown): HomeSectionKey[] {
       uniq.add(String(item) as HomeSectionKey)
     }
   }
-  for (const key of HOME_SECTION_KEYS) uniq.add(key)
-  return Array.from(uniq)
+  const order = Array.from(uniq)
+  for (const key of HOME_SECTION_KEYS) {
+    if (key !== "actions" && !uniq.has(key)) order.push(key)
+  }
+  if (!uniq.has("actions")) order.splice(order.indexOf("status") + 1, 0, "actions")
+  return order
 }
 
 export function bookmarkConfigScopeKey(cfg: Pick<AppConfig, "hamsterBookmarkName" | "hamsterRootPath">): string {

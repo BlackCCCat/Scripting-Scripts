@@ -1,7 +1,9 @@
 // File: components/HomeView.tsx
 import {
   Button,
+  Device,
   Editor,
+  GeometryReader,
   Image,
   List,
   Menu,
@@ -17,7 +19,6 @@ import {
   Text,
   HStack,
   VStack,
-  ZStack,
   ScrollView,
   ScrollViewReader,
   ProgressView,
@@ -27,6 +28,7 @@ import {
   useRef,
   useState,
   Path,
+  type ShapeStyle,
 } from "scripting";
 
 import {
@@ -146,93 +148,43 @@ function normalizeMetaScheme(
   };
 }
 
-function FloatingActionButton(props: {
+function ActionButton(props: {
   icon: string;
-  title?: string;
-  color?: string;
+  title: string;
+  color?: ShapeStyle;
   disabled?: boolean;
-  size?: number;
-  iconSize?: string;
+  size: number;
+  useGlass: boolean;
   onPress: () => void;
 }) {
-  const size = props.size ?? 58;
-  const tintColor: any = props.disabled
-    ? "secondaryLabel"
-    : (props.color ?? "systemBlue");
-
-  function triggerPress() {
-    try {
-      (globalThis as any).HapticFeedback?.mediumImpact?.();
-    } catch {}
-    props.onPress();
-  }
+  const tintColor: ShapeStyle = props.disabled ? "secondaryLabel" : (props.color ?? "systemBlue");
 
   return (
     <Button
-      action={triggerPress}
+      action={() => {
+        try { (globalThis as any).HapticFeedback?.mediumImpact?.(); } catch {}
+        props.onPress();
+      }}
       disabled={props.disabled}
-      buttonStyle="glass"
-      buttonBorderShape="circle"
-      controlSize="regular"
-      tint={tintColor}
-      frame={{ width: size, height: size }}
+      buttonStyle="plain"
+      accessibilityLabel={props.title}
+      frame={{ width: props.size, height: props.size }}
     >
       <VStack
-        frame={{ width: size, height: size, alignment: "center" as any }}
+        frame={{ width: props.size, height: props.size, alignment: "center" as any }}
+        glassEffect={props.useGlass ? { type: "rect", cornerRadius: 12 } : undefined}
+        background={props.useGlass ? undefined : {
+          style: "tertiarySystemFill",
+          shape: { type: "rect", cornerRadius: 12 },
+        }}
       >
         <Image
           systemName={props.icon}
-          font={(props.iconSize ?? "title3") as any}
+          font="title2"
           foregroundStyle={tintColor}
         />
       </VStack>
     </Button>
-  );
-}
-
-type ActionClusterItem = {
-  icon: string;
-  title: string;
-  color?: string;
-  disabled?: boolean;
-  onPress: () => void;
-};
-
-function FloatingActionGroup(props: {
-  icon: string;
-  color?: string;
-  expanded: boolean;
-  disabled?: boolean;
-  items: ActionClusterItem[];
-  onToggle: () => void;
-}) {
-  return (
-    <HStack spacing={18} frame={{ maxWidth: "infinity", alignment: "trailing" as any }}>
-      {props.expanded ? (
-        <HStack spacing={18}>
-          {props.items.map((item) => (
-            <FloatingActionButton
-              key={item.title}
-              icon={item.icon}
-              title={item.title}
-              color={item.color}
-              disabled={item.disabled}
-              size={50}
-              iconSize="title3"
-              onPress={item.onPress}
-            />
-          ))}
-        </HStack>
-      ) : null}
-      <FloatingActionButton
-        icon={props.expanded ? "xmark" : props.icon}
-        color={props.color}
-        disabled={props.disabled}
-        size={56}
-        iconSize="title2"
-        onPress={props.onToggle}
-      />
-    </HStack>
   );
 }
 
@@ -812,9 +764,9 @@ function UsageGuideView() {
         >
           <VStack spacing={16} frame={{ maxWidth: "infinity" }}>
             <UsageGuideSection
-              icon="r.square.fill"
-              title="Rime 更新"
-              detail="点击右下角上方按钮，向左展开方案、词库，以及开启下载模型时的模型入口。"
+              icon="square.grid.3x2"
+              title="操作区块"
+              detail="六个按钮从左到右依次是方案、词库、模型、部署、检查和自动。可在设置中调整区块位置。"
               color="systemBlue"
             >
               <UsageGuideRow
@@ -832,17 +784,9 @@ function UsageGuideView() {
               <UsageGuideRow
                 icon="shippingbox"
                 title="模型"
-                detail="开启“下载模型”后，重新下载并写入语法模型文件。"
+                detail="开启“下载模型”后可点击，重新下载并写入语法模型文件。"
                 color="systemBlue"
               />
-            </UsageGuideSection>
-
-            <UsageGuideSection
-              icon="bolt.fill"
-              title="更新与部署"
-              detail="点击右下角下方按钮，向左展开部署、检查更新、自动更新三个入口。"
-              color="systemBlue"
-            >
               <UsageGuideRow
                 icon="paperplane"
                 title="部署"
@@ -869,7 +813,7 @@ function UsageGuideView() {
               frame={{ maxWidth: "infinity", alignment: "leading" as any }}
               multilineTextAlignment="leading"
             >
-              提示：本地信息中显示为绿色的项目，表示当前检查结果中该项目有可用更新。
+              提示：有可用更新时，操作区块中的对应按钮和本地信息会显示为绿色。
             </Text>
           </VStack>
         </ScrollView>
@@ -1391,7 +1335,6 @@ export function HomeView() {
   const [editorRootPath, setEditorRootPath] = useState(() =>
     String(loadConfig().hamsterRootPath ?? "").trim(),
   );
-  const [activeActionGroup, setActiveActionGroup] = useState<"rime" | "update" | null>(null);
 
   // 本地信息
   const [localSelectedScheme, setLocalSelectedScheme] = useState("暂无法获取");
@@ -1792,10 +1735,6 @@ export function HomeView() {
     lastCheckKey,
     logs,
   ]);
-
-  useEffect(() => {
-    if (busy) setActiveActionGroup(null);
-  }, [busy]);
 
   useEffect(() => {
     if (!cfg.showVerboseLog) return;
@@ -2471,73 +2410,48 @@ export function HomeView() {
     );
   }
 
-  function renderFloatingActions() {
+  function renderActionSection() {
     const currentCheckReady = lastCheckKey === checkKey(cfg) && !!lastCheckDecision;
     const modelEnabled = cfg.downloadModel;
     const hasModelUpdate = modelEnabled && !!lastCheckDecision?.model;
     const autoUpdateReady =
       currentCheckReady &&
       !!(lastCheckDecision?.scheme || lastCheckDecision?.dict || hasModelUpdate);
-    const schemeColor = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue";
-    const dictColor = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : "systemBlue";
-    const modelColor = currentCheckReady && hasModelUpdate ? "systemGreen" : "systemBlue";
-    const rimeGroupColor =
-      currentCheckReady && (lastCheckDecision?.scheme || lastCheckDecision?.dict || hasModelUpdate)
-        ? "systemGreen"
-        : "systemBlue";
-    const autoUpdateColor = autoUpdateReady ? "systemGreen" : "systemBlue";
+    const schemeColor: ShapeStyle = currentCheckReady && lastCheckDecision?.scheme ? "systemGreen" : "systemBlue";
+    const dictColor: ShapeStyle = currentCheckReady && lastCheckDecision?.dict ? "systemGreen" : "systemBlue";
+    const modelColor: ShapeStyle = currentCheckReady && hasModelUpdate ? "systemGreen" : "systemBlue";
+    const autoUpdateColor: ShapeStyle = autoUpdateReady ? "systemGreen" : "systemBlue";
     const disabled = busy || !pathUsable;
-
-    const toggleGroup = (group: "rime" | "update") => {
-      try {
-        (globalThis as any).HapticFeedback?.mediumImpact?.();
-      } catch {}
-      setActiveActionGroup((current) => (current === group ? null : group));
-    };
-    const runAction = (action: () => void) => {
-      setActiveActionGroup(null);
-      action();
-    };
+    const useGlass = Number.parseInt(Device.systemVersion, 10) >= 26;
 
     return (
-      <VStack
-        spacing={18}
-        padding={{ trailing: 18, bottom: 48, leading: 18 }}
-        frame={{
-          maxWidth: "infinity",
-          maxHeight: "infinity",
-          alignment: "bottomTrailing" as any,
-        }}
-      >
-        <FloatingActionGroup
-          icon="r.square.fill"
-          color={rimeGroupColor}
-          expanded={activeActionGroup === "rime"}
-          disabled={disabled}
-          items={[
-            { icon: "doc.text", title: "方案", color: schemeColor, disabled, onPress: () => runAction(onUpdateScheme) },
-            { icon: "books.vertical", title: "词库", color: dictColor, disabled, onPress: () => runAction(onUpdateDict) },
-            ...(modelEnabled ? [{ icon: "shippingbox", title: "模型", color: modelColor, disabled, onPress: () => runAction(onUpdateModel) }] : []),
-          ]}
-          onToggle={() => toggleGroup("rime")}
-        />
-        <FloatingActionGroup
-          icon="bolt.fill"
-          color={autoUpdateColor}
-          expanded={activeActionGroup === "update"}
-          disabled={disabled}
-          items={[
-            { icon: "paperplane", title: "部署", disabled, onPress: () => runAction(onDeploy) },
-            { icon: "arrow.triangle.2.circlepath", title: "检查", disabled, onPress: () => runAction(onCheckUpdate) },
-            { icon: "bolt.fill", title: "自动", color: autoUpdateColor, disabled, onPress: () => runAction(onAutoUpdate) },
-          ]}
-          onToggle={() => toggleGroup("update")}
-        />
-      </VStack>
+      <Section key="actions" header={<Text>操作</Text>}>
+        <HStack
+          frame={{ maxWidth: "infinity", height: 68 }}
+          listRowInsets={{ top: 4, bottom: 4, leading: 4, trailing: 4 }}
+        >
+          <GeometryReader frame={{ maxWidth: "infinity", height: 68 }}>
+            {(proxy) => {
+              const size = Math.min(56, (proxy.size.width - 15) / 6);
+              return (
+                <HStack spacing={3} frame={{ width: proxy.size.width, height: 68, alignment: "center" as any }}>
+                  <ActionButton icon="doc.text" title="方案" color={schemeColor} disabled={disabled} size={size} useGlass={useGlass} onPress={onUpdateScheme} />
+                  <ActionButton icon="books.vertical" title="词库" color={dictColor} disabled={disabled} size={size} useGlass={useGlass} onPress={onUpdateDict} />
+                  <ActionButton icon="shippingbox" title="模型" color={modelColor} disabled={disabled || !modelEnabled} size={size} useGlass={useGlass} onPress={onUpdateModel} />
+                  <ActionButton icon="paperplane" title="部署" disabled={disabled} size={size} useGlass={useGlass} onPress={onDeploy} />
+                  <ActionButton icon="arrow.triangle.2.circlepath" title="检查" disabled={disabled} size={size} useGlass={useGlass} onPress={onCheckUpdate} />
+                  <ActionButton icon="bolt.fill" title="自动" color={autoUpdateColor} disabled={disabled} size={size} useGlass={useGlass} onPress={onAutoUpdate} />
+                </HStack>
+              );
+            }}
+          </GeometryReader>
+        </HStack>
+      </Section>
     );
   }
 
   function renderSection(key: HomeSectionKey) {
+    if (key === "actions") return renderActionSection();
     const remoteSchemeDetail = remoteSchemeDetailMark(cfg, lastCheck?.scheme);
     const remoteDictDetail = remoteDetailMark(lastCheck?.dict);
     const remoteModelDetail = remoteDetailMark(lastCheck?.model);
@@ -2759,22 +2673,19 @@ export function HomeView() {
         selection={activeTab as any}
         editor={renderEditorTab()}
         main={
-          <ZStack>
-            <NavigationStack>
-              <List
-                navigationTitle={"万象工具"}
-                navigationBarTitleDisplayMode={"inline"}
-                listStyle={"insetGroup"}
-                toolbar={{
-                  topBarLeading: renderLeadingToolbar(),
-                  topBarTrailing: renderMainTrailingToolbar(),
-                }}
-              >
-                {cfg.homeSectionOrder.map(renderSection)}
-              </List>
-            </NavigationStack>
-            {renderFloatingActions()}
-          </ZStack>
+          <NavigationStack>
+            <List
+              navigationTitle={"万象工具"}
+              navigationBarTitleDisplayMode={"inline"}
+              listStyle={"insetGroup"}
+              toolbar={{
+                topBarLeading: renderLeadingToolbar(),
+                topBarTrailing: renderMainTrailingToolbar(),
+              }}
+            >
+              {cfg.homeSectionOrder.map(renderSection)}
+            </List>
+          </NavigationStack>
         }
         settings={
           <NavigationStack>
