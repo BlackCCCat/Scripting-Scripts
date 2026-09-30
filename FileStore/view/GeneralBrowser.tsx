@@ -331,10 +331,11 @@ function FileRowLink({
   const folderDropActive = isDropTargeted && file.isDirectory;
 
   return (
-    <Button
-      buttonStyle="plain"
+    <VStack
+      spacing={0}
       tag={file.path}
-      action={async () => {
+      accessibilityAddTraits="isButton"
+      onTapGesture={async () => {
         if (navPath) {
           if (isDir) {
             navPath.setValue([...navPath.value, "browser:" + file.path]);
@@ -382,11 +383,13 @@ function FileRowLink({
       listRowSeparator={isGrid ? { visibility: "hidden", edges: "all" } : hideTopSeparator ? { visibility: "hidden", edges: "top" } : undefined}
       listRowBackground={isGrid ? <Rectangle fill="clear" /> : folderDropActive ? <Rectangle fill="systemBlue" opacity={0.18} /> : isHighlighted ? <Rectangle fill="systemGray" opacity={0.15} /> : undefined}
       trailingSwipeActions={isGrid ? undefined : {
+        allowsFullSwipe: false,
         // 不设 destructive role：该角色会让 SwiftUI 将滑动动作按“立即删除”处理，
         // 即使随后弹出确认框，取消后再次滑动也会触发原生状态崩溃。
         actions: [<Button title="删除" action={handleSwipeDelete} />, <Button title="简介" action={handleShowInfo} />],
       }}
       leadingSwipeActions={isGrid ? undefined : {
+        allowsFullSwipe: false,
         actions: [<Button title="重命名" action={handleRename} />],
       }}
       contextMenu={{
@@ -477,7 +480,7 @@ function FileRowLink({
           <FileRowContent file={file} folderCountStore={folderCountStore} />
         </HStack>
       )}
-    </Button>
+    </VStack>
   );
 }
 

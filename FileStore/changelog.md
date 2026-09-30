@@ -1,6 +1,9 @@
 ## 说明
 该脚本为二次修改，原版为：[Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scripting/FileStore)
 
+## v3.0.3
+- 同步上游 3c09e92：修复文件行滑动操作与点击冲突，关闭全幅滑动自动执行操作
+
 ## v3.0.2
 - 设置页UI调整，使用列表容器包裹
 - 设置页增加文件、文件夹名称滚动，默认开启，单行并滚动显示较长的文件或文件夹名称
