@@ -1,5 +1,6 @@
 import {
   Button,
+  Device,
   FlowLayout,
   Group,
   HStack,
@@ -36,6 +37,9 @@ const PREEDIT_TAIL_SCROLL_KEY = "preedit-tail-anchor";
 const TOOLBAR_BUTTON_WIDTH = 42;
 const CANDIDATE_RIGHT_BUTTON_WIDTH = 42;
 const EXPANDED_PAGER_WIDTH = 42;
+const hideCandidateScrollEffects = Number(
+  String(Device.systemVersion ?? "").match(/\d+/)?.[0] ?? 0,
+) >= 26;
 
 export type ExpandedCandidateItem = {
   candidate: Rime.Candidate;
@@ -358,6 +362,10 @@ export function CandidateHeader(props: {
 
   return (
     <ZStack
+      scrollContentBackground={hideCandidateScrollEffects
+        ? "hidden"
+        : undefined}
+      scrollEdgeEffectHidden={hideCandidateScrollEffects ? true : undefined}
       frame={{
         width: props.metrics.width,
         height,
