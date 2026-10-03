@@ -14,6 +14,17 @@ import { bumpClipDataVersion, readClipDataVersion, subscribeClipDataChanges } fr
 import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
 import { imagePreviewPath } from "../storage/image_store"
 import { loadSettings } from "../storage/settings_store"
+import {
+  displayFavoriteFieldValue,
+  displayFavoriteFieldsContent,
+  displayFavoriteItemTitle,
+  favoriteDelimiterForItem,
+  isFieldFavorite,
+  parseFavoriteFields,
+  privateFieldKeywords,
+  privateRulesForItem,
+  type PrivateFieldRule,
+} from "../utils/favorite_fields"
 import { getLanShareAccessToken } from "./lan_share_credentials"
 import { imageFromUploadRequest, MAX_LAN_IMAGE_UPLOAD_BYTES } from "./lan_share_image_upload"
 
@@ -192,12 +203,20 @@ function validItemId(id: string): boolean {
   return /^[A-Za-z0-9_-]{1,160}$/.test(id)
 }
 
-function webItem(item: ClipItem) {
+function webItem(item: ClipItem, settings: CaisSettings, globalRules?: PrivateFieldRule[]) {
+  const fieldFavorite = isFieldFavorite(item)
+  const delimiter = favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter)
+  const rules = fieldFavorite
+    ? privateRulesForItem(item, globalRules ?? privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled))
+    : []
   return {
     id: item.id,
     kind: item.kind,
-    title: item.title,
-    content: item.kind === "image" ? "" : item.content,
+    title: fieldFavorite ? displayFavoriteItemTitle(item, delimiter, rules) : item.title,
+    content: item.kind === "image" ? "" : fieldFavorite
+      ? displayFavoriteFieldsContent(item.content, delimiter, rules)
+      : item.content,
+    favoriteFormat: fieldFavorite ? "fields" : "plain",
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     pinned: item.pinned,
@@ -207,10 +226,11 @@ function webItem(item: ClipItem) {
   }
 }
 
-function webGroups(groups: ClipGroup[]) {
+function webGroups(groups: ClipGroup[], settings: CaisSettings) {
+  const globalRules = privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled)
   return groups.map((group) => ({
     title: group.title,
-    items: group.items.map(webItem),
+    items: group.items.map((item) => webItem(item, settings, globalRules)),
   }))
 }
 
@@ -368,13 +388,14 @@ function registerRoutes(nextServer: HttpServer): void {
       const offset = Math.max(0, Number(queryValue(request, "offset")) || 0)
       const groups = await getClipGroups(scope, search, limit, offset)
       const counts = await getClipCounts()
+      const settings = loadSettings()
       return jsonResponse({
-        groups: webGroups(groups),
+        groups: webGroups(groups, settings),
         counts,
         limit,
         offset,
         hasMore: groups.some((group) => group.items.length >= limit),
-        capabilities: { imageUpload: loadSettings().captureImages },
+        capabilities: { imageUpload: settings.captureImages },
         version: readClipDataVersion(),
       })
     }
@@ -396,7 +417,7 @@ function registerRoutes(nextServer: HttpServer): void {
         if (result.status === "skipped") throw new Error(result.reason)
         return title.trim() ? updateClipTitle(result.item, title) : result.item
       })
-      return jsonResponse({ item: webItem(item) }, 201, "Created")
+      return jsonResponse({ item: webItem(item, loadSettings()) }, 201, "Created")
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "保存失败")
       return errorResponse(message.includes("重复") ? 409 : 400, message)
@@ -409,7 +430,7 @@ function registerRoutes(nextServer: HttpServer): void {
     if (request.method.toUpperCase() === "GET") {
       const item = await getClipById(id)
       if (!item) return errorResponse(404, "条目不存在")
-      return jsonResponse({ item: webItem(item), content: await getFullClipContent(id) })
+      return jsonResponse({ item: webItem(item, loadSettings()), content: await getFullClipContent(id) })
     }
     if (request.method.toUpperCase() !== "PATCH") return errorResponse(405, "请使用 GET 或 PATCH 请求")
     try {
@@ -423,11 +444,36 @@ function registerRoutes(nextServer: HttpServer): void {
         if (current.kind === "image") throw new Error("图片条目只能修改标题")
         return editClipContent(current, content, loadSettings().favoriteFieldDelimiter)
       })
-      return jsonResponse({ item: webItem(item) })
+      return jsonResponse({ item: webItem(item, loadSettings()) })
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "修改失败")
       return errorResponse(message === "条目不存在" ? 404 : 400, message)
     }
+  })
+
+  nextServer.registerAsyncHandler("/api/items/:id/fields", async (request) => {
+    const invalid = requireMethod(request, "GET")
+    if (invalid) return invalid
+    const id = String(request.params.id ?? "")
+    if (!validItemId(id)) return errorResponse(400, "条目标识无效")
+    const item = await getClipById(id)
+    if (!item || !isFieldFavorite(item)) return errorResponse(404, "字段收藏不存在")
+    const settings = loadSettings()
+    const content = await getFullClipContent(id)
+    const delimiter = favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter)
+    const rules = privateRulesForItem(item, privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled))
+    const parsed = parseFavoriteFields(content, delimiter)
+    return jsonResponse({
+      title: displayFavoriteItemTitle({ ...item, content }, delimiter, rules),
+      content,
+      fields: parsed.fields.map((field) => ({
+        id: field.id,
+        name: field.name,
+        value: field.value,
+        displayValue: displayFavoriteFieldValue(field, rules),
+      })),
+      errors: parsed.errors,
+    })
   })
 
   nextServer.registerAsyncHandler("/api/items/:id/title", async (request) => {
@@ -444,7 +490,7 @@ function registerRoutes(nextServer: HttpServer): void {
         if (!current) throw new Error("条目不存在")
         return updateClipTitle(current, title)
       })
-      return jsonResponse({ item: webItem(item) })
+      return jsonResponse({ item: webItem(item, loadSettings()) })
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "标题保存失败")
       return errorResponse(message === "条目不存在" ? 404 : 400, message)
@@ -470,7 +516,7 @@ function registerRoutes(nextServer: HttpServer): void {
       const image = imageFromUploadRequest(request)
       const result = await enqueueWrite(() => addClipFromPayload({ kind: "image", image }, settings))
       if (result.status === "skipped") throw new Error(result.reason)
-      return jsonResponse({ item: webItem(result.item) }, 201, "Created")
+      return jsonResponse({ item: webItem(result.item, settings) }, 201, "Created")
     } catch (error: any) {
       const message = String(error?.message ?? error ?? "图片保存失败")
       return errorResponse(message.includes("重复") ? 409 : 400, message)
@@ -550,6 +596,9 @@ async function applyDesiredState(settings: CaisSettings): Promise<LanShareRuntim
   let nextServer: HttpServer
   let error: string | null
   try {
+    if (!assetData("lan_share.html") || !assetData("lan_share.css") || !assetData("lan_share.js")) {
+      return setRuntimeStatus(statusFor("error", port, "启动失败：局域网页面文件不完整"))
+    }
     await initializeDatabase()
     nextServer = new ServerClass() as HttpServer
     registerRoutes(nextServer)

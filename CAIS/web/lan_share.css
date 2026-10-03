@@ -45,6 +45,7 @@ button { color: inherit; }
 .nav-item b { min-width: 25px; padding: 1px 7px; border-radius: 10px; background: var(--surface-2); color: var(--muted); text-align: center; font-size: 11px; }
 .server-state { margin-top: auto; padding: 12px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .server-state i { width: 8px; height: 8px; border-radius: 50%; background: #30b46c; box-shadow: 0 0 0 4px rgba(48, 180, 108, 0.12); }
+.server-state.disconnected i { background: #e29527; box-shadow: 0 0 0 4px rgba(226, 149, 39, 0.12); }
 
 main { min-width: 0; }
 .topbar { height: 72px; position: sticky; top: 0; z-index: 5; padding: 14px clamp(18px, 4vw, 48px); display: flex; align-items: center; gap: 12px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(20px); border-bottom: 1px solid var(--line); }
@@ -106,6 +107,17 @@ dialog::backdrop { background: rgba(11, 13, 18, 0.46); backdrop-filter: blur(3px
 .dialog-body input, .dialog-body textarea, .dialog-body select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; outline: none; color: var(--text); background: var(--surface-2); }
 .dialog-body textarea { resize: vertical; min-height: 160px; white-space: pre-wrap; }
 .dialog-body input:focus, .dialog-body textarea:focus, .dialog-body select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fields-dialog-body { max-height: min(65vh, 580px); padding: 16px 17px; overflow: auto; }
+.fields-message { margin: 0; color: var(--muted); }
+.field-list { display: grid; gap: 9px; }
+.field-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); text-align: left; }
+.field-row:hover, .field-row:focus-visible { border-color: var(--accent); outline: none; }
+.field-name, .field-value { display: block; overflow-wrap: anywhere; }
+.field-name { font-weight: 650; }
+.field-value { margin-top: 4px; color: var(--muted); white-space: pre-wrap; }
+.field-copy { color: var(--accent); font-size: 20px; }
+.item-card.field-favorite { cursor: pointer; }
+.item-card.field-favorite:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .image-preview-dialog { width: min(1100px, calc(100vw - 28px)); }
 .image-preview-stage { min-height: min(68vh, 680px); padding: 18px; display: grid; place-items: center; overflow: auto; background: #0b0c0f; color: #a8abb3; }
 .image-preview-stage img { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(100vh - 190px); object-fit: contain; }

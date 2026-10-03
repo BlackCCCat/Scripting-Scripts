@@ -28,7 +28,7 @@
         <button class="nav-item active" data-scope="clipboard"><span>▣</span>剪贴板<b id="clipboardCount">0</b></button>
         <button class="nav-item" data-scope="favorites"><span>☆</span>收藏<b id="favoriteCount">0</b></button>
       </nav>
-      <div class="server-state"><i></i><span>已连接到 CAIS</span></div>
+      <div id="serverState" class="server-state disconnected"><i></i><span id="serverStateText">正在连接</span></div>
     </aside>
 
     <main>
@@ -73,6 +73,21 @@
       </div>
       <div class="dialog-actions"><button value="cancel" class="secondary-button">取消</button><button id="saveButton" value="default" class="primary-button">保存并同步</button></div>
     </form>
+  </dialog>
+
+  <dialog id="fieldsDialog" class="fields-dialog">
+    <div class="dialog-head">
+      <div><h2 id="fieldsDialogTitle">字段收藏</h2><p>点击子字段可复制对应的值</p></div>
+      <button id="closeFieldsDialog" class="icon-button" type="button" aria-label="关闭">×</button>
+    </div>
+    <div class="fields-dialog-body">
+      <p id="fieldsDialogLoading" class="fields-message">正在读取子字段</p>
+      <div id="fieldsDialogList" class="field-list"></div>
+      <p id="fieldsDialogError" class="fields-message hidden"></p>
+    </div>
+    <div class="dialog-actions">
+      <button id="copyAllFieldsButton" class="primary-button" type="button">复制全部</button>
+    </div>
   </dialog>
 
   <dialog id="imagePreviewDialog" class="image-preview-dialog">
