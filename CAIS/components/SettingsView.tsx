@@ -583,7 +583,6 @@ export function SettingsView(props: {
               sourceID: "privacy-rules-global",
               namespace: props.zoomNamespace,
             } : undefined}
-            onCancel={() => setPrivacyRulesPresented(false)}
             onSave={(value) => {
               update({ favoriteFieldPrivateKeywords: value });
               setPrivacyRulesPresented(false);

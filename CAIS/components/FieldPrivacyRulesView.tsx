@@ -6,7 +6,6 @@ export function FieldPrivacyRulesView(props: {
   initial: string
   embedded?: boolean
   navigationTransition?: NavigationZoomTransition
-  onCancel?: () => void
   onSave?: (value: string) => void
 }) {
   const dismiss = Navigation.useDismiss()
@@ -30,10 +29,7 @@ export function FieldPrivacyRulesView(props: {
     tabBarVisibility={props.embedded ? "visible" : undefined}
     formStyle="grouped"
     toolbar={{
-      topBarLeading: props.embedded ? undefined : <Button title="取消" role="cancel" action={() => {
-        if (props.onCancel) props.onCancel()
-        else dismiss(null)
-      }} />,
+      topBarLeading: props.embedded ? undefined : <Button title="取消" role="cancel" action={() => dismiss(null)} />,
       topBarTrailing: <Button title="保存" action={() => void save()} />,
     }}
   >

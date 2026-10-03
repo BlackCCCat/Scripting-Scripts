@@ -235,7 +235,6 @@ export function FavoriteEditorView(props: {
               sourceID: "favorite-privacy-rules",
               namespace: props.zoomNamespace,
             } : undefined}
-            onCancel={() => setPrivacyRulesPresented(false)}
             onSave={(value) => {
               setCustomPrivacyPatterns(value)
               setPrivacyRulesPresented(false)
