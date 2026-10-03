@@ -4,10 +4,9 @@ import {
   HStack,
   Navigation,
   NavigationStack,
-  Picker,
   Section,
+  Spacer,
   Text,
-  TextField,
   useState,
   Image
 } from "scripting"
@@ -44,11 +43,37 @@ export function AssistantEngineEditorView(props: {
   const [customProvider, setCustomProvider] = useState(String(props.initial?.assistantCustomProvider ?? ""))
   const [modelId, setModelId] = useState(String(props.initial?.assistantModelId ?? ""))
 
+  async function chooseProviderAndModel() {
+    try {
+      const selected = await Assistant.presentModelPicker({
+        ...(providerId === "custom"
+          ? (customProvider.trim() ? { provider: { custom: customProvider.trim() } } : {})
+          : { provider: providerId }),
+        ...(modelId.trim() ? { modelId: modelId.trim() } : {}),
+      })
+      if (!selected) return
+
+      if (typeof selected.provider === "string") {
+        setProviderId(selected.provider)
+        setCustomProvider("")
+      } else {
+        setProviderId("custom")
+        setCustomProvider(selected.provider.custom)
+      }
+      setModelId(selected.modelId)
+    } catch (error) {
+      void Dialog.alert({
+        title: "无法选择服务商和模型",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   function save() {
     if (providerId === "custom" && !customProvider.trim()) {
       void Dialog.alert({
         title: "无法保存",
-        message: "使用 Custom Provider 时，请先填写 Provider。",
+        message: "请先通过服务商和模型选择器选择一个 Custom Provider。",
       })
       return
     }
@@ -60,7 +85,9 @@ export function AssistantEngineEditorView(props: {
     } satisfies TranslationEngineConfig)
   }
 
-  const providerIndex = Math.max(0, ASSISTANT_PROVIDER_OPTIONS.findIndex((item) => item.id === providerId))
+  const providerLabel = providerId === "custom"
+    ? customProvider.trim() || "Custom"
+    : ASSISTANT_PROVIDER_OPTIONS.find((item) => item.id === providerId)?.label ?? providerId
 
   return (
     <NavigationStack>
@@ -85,48 +112,20 @@ export function AssistantEngineEditorView(props: {
         }}
       >
         <Section header={<Text>Assistant 配置</Text>}>
-          <Picker
-            title="Provider"
-            pickerStyle="menu"
-            value={providerIndex}
-            onChanged={(index: number) => {
-              setProviderId(ASSISTANT_PROVIDER_OPTIONS[index]?.id ?? "openai")
-            }}
-          >
-            {ASSISTANT_PROVIDER_OPTIONS.map((option, index) => (
-              <Text key={option.id} tag={index}>
-                {option.label}
-              </Text>
-            ))}
-          </Picker>
-          {providerId === "custom" ? (
-            <HStack spacing={10} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
-              <Text frame={{ width: 110, alignment: "leading" as any }}>
-                Provider 名称
-              </Text>
-              <TextField
-                title=""
-                value={customProvider}
-                onChanged={setCustomProvider}
-                prompt="只填写 custom 后面的字符串"
-                multilineTextAlignment="trailing"
-                frame={{ maxWidth: "infinity" as any, alignment: "trailing" as any }}
-              />
-            </HStack>
-          ) : null}
-          <HStack spacing={10} frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}>
-            <Text frame={{ width: 110, alignment: "leading" as any }}>
-              模型 ID
-            </Text>
-            <TextField
-              title=""
-              value={modelId}
-              onChanged={setModelId}
-              prompt="留空则使用 Provider 默认模型"
-              multilineTextAlignment="trailing"
-              frame={{ maxWidth: "infinity" as any, alignment: "trailing" as any }}
-            />
+          <HStack frame={{ maxWidth: "infinity" as any }}>
+            <Text>服务商</Text>
+            <Spacer />
+            <Text>{providerLabel}</Text>
           </HStack>
+          <HStack frame={{ maxWidth: "infinity" as any }}>
+            <Text>模型 ID</Text>
+            <Spacer />
+            <Text>{modelId.trim() || "使用默认模型"}</Text>
+          </HStack>
+          <Button
+            title="选择服务商和模型"
+            action={() => { void chooseProviderAndModel() }}
+          />
         </Section>
       </Form>
     </NavigationStack>

@@ -1,3 +1,6 @@
+## v3.0.3
+- improve: 翻译引擎Scripting Assistant的模型选择使用新的API（需Scripting tf>=3.3.0(19)）
+
 ## v3.0.2
 - fix: 部分自定义AI引擎SSE 流无法解析导致翻译结果异常
 
