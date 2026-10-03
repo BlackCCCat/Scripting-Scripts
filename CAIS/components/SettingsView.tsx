@@ -405,6 +405,7 @@ export function SettingsView(props: {
   const [embeddedCustomAction, setEmbeddedCustomAction] = useState<KeyboardCustomAction | null | undefined>(undefined);
   const [embeddedCustomActionPresented, setEmbeddedCustomActionPresented] = useState(false);
   const [privacyRulesPresented, setPrivacyRulesPresented] = useState(false);
+  const [privacyRulesSessionId, setPrivacyRulesSessionId] = useState("");
 
   function update(next: Partial<CaisSettings>) {
     props.onChanged({ ...settings, ...next });
@@ -551,11 +552,15 @@ export function SettingsView(props: {
 
   async function presentPrivacyRulesEditor() {
     if (props.embeddedNavigation) {
+      setPrivacyRulesSessionId(makeId("privacy-rules"));
       setPrivacyRulesPresented(true);
       return;
     }
     const value = await Navigation.present<string | null>({
-      element: <FieldPrivacyRulesView initial={settings.favoriteFieldPrivateKeywords} />,
+      element: <FieldPrivacyRulesView
+        key={makeId("privacy-rules")}
+        initial={settings.favoriteFieldPrivateKeywords}
+      />,
       modalPresentationStyle: "pageSheet",
     });
     if (value != null) update({ favoriteFieldPrivateKeywords: value });
@@ -576,6 +581,7 @@ export function SettingsView(props: {
         },
         content: privacyRulesPresented ? (
           <FieldPrivacyRulesView
+            key={privacyRulesSessionId}
             initial={settings.favoriteFieldPrivateKeywords}
             embedded
             navigationTransition={props.zoomNamespace ? {

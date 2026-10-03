@@ -20,6 +20,7 @@ import type { VirtualNode } from "scripting"
 
 import type { FavoriteFormat, FavoriteGroup } from "../types"
 import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom"
+import { makeId } from "../utils/common"
 import {
   normalizeFavoriteDelimiter,
   parseFavoriteFields,
@@ -117,6 +118,7 @@ export function FavoriteEditorView(props: {
     props.initial?.fieldPrivateKeywords ?? props.defaultPrivacyPatterns,
   )
   const [privacyRulesPresented, setPrivacyRulesPresented] = useState(false)
+  const [privacyRulesSessionId, setPrivacyRulesSessionId] = useState("")
   const [expandedEditorContent, setExpandedEditorContent] = useState<string | undefined>(undefined)
   const [expandedEditorPresented, setExpandedEditorPresented] = useState(false)
   const globalDelimiter = normalizeFavoriteDelimiter(props.defaultDelimiter)
@@ -147,11 +149,15 @@ export function FavoriteEditorView(props: {
 
   async function editPrivacyRules() {
     if (props.embedded) {
+      setPrivacyRulesSessionId(makeId("privacy-rules"))
       setPrivacyRulesPresented(true)
       return
     }
     const value = await Navigation.present<string | null>({
-      element: <FieldPrivacyRulesView initial={customPrivacyPatterns} />,
+      element: <FieldPrivacyRulesView
+        key={makeId("privacy-rules")}
+        initial={customPrivacyPatterns}
+      />,
       modalPresentationStyle: "pageSheet",
     })
     if (value != null) setCustomPrivacyPatterns(value)
@@ -228,6 +234,7 @@ export function FavoriteEditorView(props: {
             }
           },
           content: privacyRulesPresented ? <FieldPrivacyRulesView
+            key={privacyRulesSessionId}
             initial={customPrivacyPatterns}
             embedded
             navigationTransition={props.zoomNamespace ? {
