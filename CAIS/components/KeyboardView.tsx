@@ -16,6 +16,7 @@ import {
   VStack,
   type Font,
   useEffect,
+  useMemo,
   useObservable,
   useRef,
   useState,
@@ -44,7 +45,7 @@ import { readClipDataVersion } from "../storage/change_signal"
 import { readDatabaseDataVersion } from "../storage/database"
 import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
-import { isLikelyURL, summarizeContent } from "../utils/common"
+import { clipTitle, isLikelyURL, summarizeContent } from "../utils/common"
 import { disposeCaisFeedback, playCaisFeedback, prepareCaisFeedback } from "../utils/feedback"
 import { renderRuntimeTemplate } from "../utils/template"
 import { PipStatusView } from "./PipStatusView"
@@ -53,7 +54,7 @@ import { readPipControlState, requestPipStart, requestPipStop } from "../service
 import { selectedTokenText, tokenizeWords, type CaisToken } from "../utils/tokenize"
 import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
 import { recognizeTextFromImagePath } from "../services/image_text_recognition"
-import { favoriteDelimiterForItem, isFieldFavorite, parseFavoriteFields, type FavoriteField } from "../utils/favorite_fields"
+import { displayFavoriteFieldsContent, displayFavoriteItemTitle, favoriteDelimiterForItem, isFieldFavorite, parseFavoriteFields, privateFieldKeywords, privateRulesForItem, type FavoriteField, type PrivateFieldRule } from "../utils/favorite_fields"
 import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
@@ -106,6 +107,7 @@ type KeyboardTokenPage = {
 type KeyboardFavoriteFieldsPage = {
   title: string
   fields: FavoriteField[]
+  privateRules: PrivateFieldRule[]
 }
 
 function keyboard(): any {
@@ -385,7 +387,10 @@ function clipListKey(items: ClipItem[]): string {
     item.favoriteFormat ?? "plain",
     item.fieldDelimiter ?? "",
     item.fieldDelimiterOverride ? "d" : "",
+    item.fieldPrivacyOverride ? "private" : "",
+    item.fieldPrivateKeywords ?? "",
     item.contentHash,
+    item.linkPreview?.fetchedAt ?? "",
     item.imagePath ?? "",
   ].join(":")).join("|")
 }
@@ -480,6 +485,7 @@ function ClipTile(props: {
   item: ClipItem
   scope: ClipListScope
   settings: CaisSettings
+  privateKeywords: PrivateFieldRule[]
   tileWidth: number
   tileHeight: number
   hideTitle?: boolean
@@ -495,6 +501,13 @@ function ClipTile(props: {
   const metrics = clipTileMetrics(props.tileHeight, props.settings.keyboardShowTitle && !props.hideTitle)
   const showTitle = metrics.showTitle
   const nativeGlass = useNativeKeyboardGlassEffect()
+  const fieldDelimiter = favoriteDelimiterForItem(item, props.settings.favoriteFieldDelimiter)
+  const privateRules = privateRulesForItem(item, props.privateKeywords)
+  const displayContent = isFieldFavorite(item)
+    ? displayFavoriteFieldsContent(item.content, fieldDelimiter, privateRules)
+    : item.kind === "url" && item.linkPreview?.summary
+      ? `${item.content}\n${item.linkPreview.summary}`
+      : item.content
   return (
     <ZStack
       alignment="center"
@@ -570,7 +583,9 @@ function ClipTile(props: {
                     frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                     multilineTextAlignment="leading"
                   >
-                    {item.title}
+                    {item.kind === "url" && item.title === clipTitle("url", item.content) && item.linkPreview?.title
+                      ? item.linkPreview.title
+                      : displayFavoriteItemTitle(item, fieldDelimiter, privateRules)}
                   </Text>
                 ) : null}
                 <Text
@@ -580,7 +595,7 @@ function ClipTile(props: {
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                   multilineTextAlignment="leading"
                 >
-                  {summarizeContent(item.content, KEYBOARD_TILE_PREVIEW_LIMIT)}
+                  {summarizeContent(displayContent, KEYBOARD_TILE_PREVIEW_LIMIT)}
                 </Text>
               </>
             )}
@@ -859,6 +874,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   activeKeyboardScope = keyboardScopeForTab(activeTab)
   const items = useObservable<ClipItem[]>(() => initialItems)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
+  const privateKeywords = useMemo(
+    () => privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled),
+    [settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled],
+  )
   const [keyboardLayout, setKeyboardLayout] = useState<KeyboardLayoutMode>(() => readKeyboardLayout())
   const [layoutRevision, setLayoutRevision] = useState(0)
   const [tokenPage, setTokenPage] = useState<KeyboardTokenPage | null>(null)
@@ -1060,7 +1079,11 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     const parsed = parseFavoriteFields(content, favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter))
     if (!parsed.fields.length || parsed.errors.length) return
     setTokenPage(null)
-    setFavoriteFieldsPage({ title: item.title, fields: parsed.fields })
+    setFavoriteFieldsPage({
+      title: displayFavoriteItemTitle(item, favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter), privateRulesForItem(item, privateKeywords)),
+      fields: parsed.fields,
+      privateRules: privateRulesForItem(item, privateKeywords),
+    })
   }
 
   function insertFavoriteField(field: FavoriteField) {
@@ -1451,6 +1474,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
         >
           <FavoriteFieldsPanel
             fields={favoriteFieldsPage.fields}
+            privateKeywords={favoriteFieldsPage.privateRules}
             nativeGlassEffect={useNativeGlassEffect}
             onSelect={insertFavoriteField}
             renderContextMenu={(field) => (
@@ -1496,6 +1520,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                           item={item}
                           scope={activeTab === TAB_FAVORITE ? "favorites" : "clipboard"}
                           settings={settings}
+                          privateKeywords={privateKeywords}
                           tileWidth={tileWidth}
                           tileHeight={tileHeight}
                           hideTitle={hideTitle}

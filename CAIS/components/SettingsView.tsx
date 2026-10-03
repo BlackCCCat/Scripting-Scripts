@@ -36,6 +36,7 @@ import {
 } from "../utils/custom_action";
 import type { LanShareRuntimeStatus } from "../services/lan_share_server";
 import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom";
+import { FieldPrivacyRulesView } from "./FieldPrivacyRulesView";
 import { LanShareSettingsView } from "./LanShareSettingsView";
 
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
@@ -403,6 +404,7 @@ export function SettingsView(props: {
   const settings = props.value;
   const [embeddedCustomAction, setEmbeddedCustomAction] = useState<KeyboardCustomAction | null | undefined>(undefined);
   const [embeddedCustomActionPresented, setEmbeddedCustomActionPresented] = useState(false);
+  const [privacyRulesPresented, setPrivacyRulesPresented] = useState(false);
 
   function update(next: Partial<CaisSettings>) {
     props.onChanged({ ...settings, ...next });
@@ -547,17 +549,47 @@ export function SettingsView(props: {
     if (next) saveCustomAction(next);
   }
 
+  async function presentPrivacyRulesEditor() {
+    if (props.embeddedNavigation) {
+      setPrivacyRulesPresented(true);
+      return;
+    }
+    const value = await Navigation.present<string | null>({
+      element: <FieldPrivacyRulesView initial={settings.favoriteFieldPrivateKeywords} />,
+      modalPresentationStyle: "pageSheet",
+    });
+    if (value != null) update({ favoriteFieldPrivateKeywords: value });
+  }
+
   return (
     <Form
       formStyle="grouped"
       toolbar={renderToolbar()}
       navigationDestination={props.keepHomeNavigationDestination || props.embeddedNavigation ? {
-        isPresented: Boolean(props.embeddedNavigation && embeddedCustomActionPresented),
+        isPresented: Boolean(props.embeddedNavigation && (embeddedCustomActionPresented || privacyRulesPresented)),
         onChanged: (isPresented: boolean) => {
-          setEmbeddedCustomActionPresented(isPresented);
-          if (!isPresented) setEmbeddedCustomAction(undefined);
+          if (!isPresented) {
+            setEmbeddedCustomActionPresented(false);
+            setEmbeddedCustomAction(undefined);
+            setPrivacyRulesPresented(false);
+          }
         },
-        content: embeddedCustomAction !== undefined ? (
+        content: privacyRulesPresented ? (
+          <FieldPrivacyRulesView
+            initial={settings.favoriteFieldPrivateKeywords}
+            embedded
+            navigationTransition={props.zoomNamespace ? {
+              type: "zoom",
+              sourceID: "privacy-rules-global",
+              namespace: props.zoomNamespace,
+            } : undefined}
+            onCancel={() => setPrivacyRulesPresented(false)}
+            onSave={(value) => {
+              update({ favoriteFieldPrivateKeywords: value });
+              setPrivacyRulesPresented(false);
+            }}
+          />
+        ) : embeddedCustomAction !== undefined ? (
           <CustomActionEditorView
             action={embeddedCustomAction ?? undefined}
             embedded
@@ -647,7 +679,7 @@ export function SettingsView(props: {
 
       <Section
         header={<Text>收藏设置</Text>}
-        footer={<Text>字段收藏默认使用此分隔符；可在编辑单个字段收藏时开启独立分隔符进行覆盖。</Text>}
+        footer={<Text>分隔符与隐私规则均可在单个字段收藏中覆盖。隐私规则仅遮挡显示，复制和数据库仍保留原值。</Text>}
       >
         <TextField
           title="默认分隔符"
@@ -657,6 +689,32 @@ export function SettingsView(props: {
             favoriteFieldDelimiter: value.replace(/[\r\n]/g, "").slice(0, 8),
           })}
         />
+        <Toggle
+          value={settings.favoriteFieldPrivacyEnabled}
+          onChanged={(favoriteFieldPrivacyEnabled: boolean) => update({ favoriteFieldPrivacyEnabled })}
+          toggleStyle="switch"
+        >
+          <Text>字段值隐私显示</Text>
+        </Toggle>
+        {settings.favoriteFieldPrivacyEnabled ? (
+          <Button
+            buttonStyle="plain"
+            matchedTransitionSource={props.zoomNamespace ? {
+              id: "privacy-rules-global",
+              namespace: props.zoomNamespace,
+            } : undefined}
+            action={() => void presentPrivacyRulesEditor()}
+          >
+            <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              <Text>子字段名规则</Text>
+              <Spacer />
+              <Text foregroundStyle="secondaryLabel" lineLimit={1}>
+                {settings.favoriteFieldPrivateKeywords.trim().replace(/\s+/g, " ").slice(0, 26) || "未设置"}
+              </Text>
+              <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
+            </HStack>
+          </Button>
+        ) : null}
       </Section>
 
       <Section header={<Text>采集类型</Text>}>

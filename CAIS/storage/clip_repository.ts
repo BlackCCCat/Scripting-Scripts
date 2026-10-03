@@ -35,17 +35,20 @@ import {
   listFavoriteGroupDefinitions,
   listAutomaticFavoriteItems,
   listImagePaths,
+  listImageFingerprintCandidates,
   nextFavoriteGroupSortOrder,
   nextFavoriteItemOrder,
   reorderFavoriteGroups as reorderFavoriteGroupRows,
   replaceAutomaticFavoriteGroupAssignments,
+  saveImageFingerprint,
   trimActiveClips,
   updateClipContent,
   updateClipState,
   updateClipTitle as updateClipTitleRow,
   updateFavoriteGroup as updateFavoriteGroupRow,
 } from "./database"
-import { imageContentHash, removeImage, saveImageForClip } from "./image_store"
+import { imageContentHash, imageVisualFingerprint, imageVisualFingerprintMatches, removeImage, saveImageForClip } from "./image_store"
+import { thumbnailPathForImagePath } from "./paths"
 import { bumpClipDataVersion } from "./change_signal"
 
 function payloadContent(payload: ClipPayload): string {
@@ -126,6 +129,21 @@ async function resolveDuplicate(
   return { status: "updated", item: { ...existing, updatedAt } }
 }
 
+async function findVisuallyDuplicateImage(fingerprint: string): Promise<ClipItem | null> {
+  const candidates = await listImageFingerprintCandidates()
+  const matched = candidates.find((candidate) => candidate.fingerprint && imageVisualFingerprintMatches(fingerprint, candidate.fingerprint))
+  if (matched) return findClipById(matched.id)
+  for (const candidate of candidates.filter((row) => !row.fingerprint).slice(0, 40)) {
+    const oldImage = UIImage.fromFile(thumbnailPathForImagePath(candidate.imagePath) ?? candidate.imagePath)
+      ?? UIImage.fromFile(candidate.imagePath)
+    const oldFingerprint = oldImage ? imageVisualFingerprint(oldImage) : undefined
+    if (!oldFingerprint || !imageVisualFingerprintMatches(fingerprint, oldFingerprint)) continue
+    try { await saveImageFingerprint(candidate.id, oldFingerprint) } catch {}
+    return findClipById(candidate.id)
+  }
+  return null
+}
+
 export async function addClipFromPayload(payload: ClipPayload, settings: CaisSettings, changeSource?: unknown): Promise<CaptureResult> {
   const content = payloadContent(payload)
   if (!content.trim()) return { status: "skipped", reason: "剪贴板为空" }
@@ -134,19 +152,21 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
     return { status: "skipped", reason: "当前类型未开启采集" }
   }
   let imageHash: string | undefined
+  let imageFingerprint: string | undefined
   let image: UIImage | undefined
   if (kind === "image") {
     image = payload.image
     if (!image) return { status: "skipped", reason: "图片内容不可读取" }
     imageHash = payload.imageContentHash || imageContentHash(image)
     if (!imageHash) return { status: "skipped", reason: "图片内容不可读取" }
+    try { imageFingerprint = imageVisualFingerprint(image) } catch {}
   }
   const contentHash = kind === "image"
     ? hashString(`${kind}:${imageHash}`)
     : hashString(`text:${content}`)
   const textMatches = kind === "image" ? [] : await findTextClipsByContent(content)
   const existing = kind === "image"
-    ? await findClipByHash(contentHash, kind)
+    ? await findClipByHash(contentHash, kind) ?? (imageFingerprint ? await findVisuallyDuplicateImage(imageFingerprint) : null)
     : textMatches[0] ?? null
   if (existing) {
     return resolveDuplicate(existing, textMatches, settings, changeSource)
@@ -167,6 +187,7 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
     content,
     contentHash,
     imagePath,
+    imageFingerprint,
     sourceChangeCount: payload.sourceChangeCount,
     createdAt: now,
     updatedAt: now,
@@ -180,7 +201,7 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   } catch (error) {
     const concurrentMatches = kind === "image" ? [] : await findTextClipsByContent(content)
     const concurrent = kind === "image"
-      ? await findClipByHash(contentHash, kind)
+      ? await findClipByHash(contentHash, kind) ?? (imageFingerprint ? await findVisuallyDuplicateImage(imageFingerprint) : null)
       : concurrentMatches[0] ?? null
     if (!concurrent) throw error
     await removeImage(imagePath)
@@ -368,7 +389,7 @@ export async function updateClipTitle(item: ClipItem, value: string): Promise<Cl
 export async function addFavoriteFromInput(
   title: string,
   content: string,
-  options: { format?: FavoriteFormat; fieldDelimiter?: string; defaultFieldDelimiter?: string; favoriteGroupId?: string } = {},
+  options: { format?: FavoriteFormat; fieldDelimiter?: string; defaultFieldDelimiter?: string; favoriteGroupId?: string; fieldPrivacyOverride?: boolean; fieldPrivateKeywords?: string } = {},
 ): Promise<ClipItem> {
   const fixedContent = normalizeClipContent(content)
   if (!fixedContent.trim()) throw new Error("内容不能为空")
@@ -408,6 +429,8 @@ export async function addFavoriteFromInput(
     favoriteFormat,
     fieldDelimiter,
     fieldDelimiterOverride: Boolean(fieldDelimiter),
+    fieldPrivacyOverride: favoriteFormat === "fields" && Boolean(options.fieldPrivacyOverride),
+    fieldPrivateKeywords: favoriteFormat === "fields" && options.fieldPrivacyOverride ? options.fieldPrivateKeywords : undefined,
     favoriteGroupId,
     favoriteGroupManual: Boolean(options.favoriteGroupId),
     favoriteOrder,
@@ -428,6 +451,8 @@ export async function updateFavoriteFromInput(
   defaultFieldDelimiter?: string,
   requestedFavoriteGroupId?: string,
   requestedFavoriteGroupManual = false,
+  fieldPrivacyOverride = false,
+  fieldPrivateKeywords?: string,
 ): Promise<ClipItem> {
   const fixedContent = normalizeClipContent(content)
   if (!fixedContent.trim()) throw new Error("内容不能为空")
@@ -471,6 +496,8 @@ export async function updateFavoriteFromInput(
     favoriteFormat,
     fieldDelimiter: delimiter,
     fieldDelimiterOverride: Boolean(delimiter),
+    fieldPrivacyOverride: favoriteFormat === "fields" && fieldPrivacyOverride,
+    fieldPrivateKeywords: favoriteFormat === "fields" && fieldPrivacyOverride ? fieldPrivateKeywords : undefined,
     favoriteGroupId,
     favoriteGroupManual: requestedFavoriteGroupManual && Boolean(favoriteGroupId),
     favoriteOrder,

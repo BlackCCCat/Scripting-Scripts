@@ -118,6 +118,8 @@ function sanitizeSettings(raw: any): CaisSettings {
       raw?.favoriteFieldDelimiter,
       DEFAULT_CAIS_SETTINGS.favoriteFieldDelimiter,
     ),
+    favoriteFieldPrivacyEnabled: Boolean(raw?.favoriteFieldPrivacyEnabled ?? DEFAULT_CAIS_SETTINGS.favoriteFieldPrivacyEnabled),
+    favoriteFieldPrivateKeywords: String(raw?.favoriteFieldPrivateKeywords ?? "").slice(0, 2000),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
       builtins,

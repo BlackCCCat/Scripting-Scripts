@@ -9,10 +9,12 @@ import {
 } from "scripting"
 import type { VirtualNode } from "scripting"
 
-import type { FavoriteField } from "../utils/favorite_fields"
+import type { FavoriteField, PrivateFieldRule } from "../utils/favorite_fields"
+import { displayFavoriteFieldValue } from "../utils/favorite_fields"
 
 export function FavoriteFieldsPanel(props: {
   fields: FavoriteField[]
+  privateKeywords: PrivateFieldRule[]
   nativeGlassEffect: boolean
   onSelect: (field: FavoriteField) => void
   renderContextMenu?: (field: FavoriteField) => VirtualNode
@@ -64,7 +66,7 @@ export function FavoriteFieldsPanel(props: {
                       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                       multilineTextAlignment="leading"
                     >
-                      {field.value}
+                      {displayFavoriteFieldValue(field, props.privateKeywords)}
                     </Text>
                   </VStack>
                   <Image systemName="text.cursor" foregroundStyle="systemBlue" />

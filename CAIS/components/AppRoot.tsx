@@ -23,6 +23,7 @@ import {
   VStack,
   ZStack,
   useEffect,
+  useMemo,
   useObservable,
   useRef,
   useState,
@@ -92,7 +93,7 @@ import {
 import { rotateLanShareAccessToken } from "../services/lan_share_credentials"
 import { recognizeTextFromImagePath } from "../services/image_text_recognition"
 import { playCaisHaptic } from "../utils/feedback"
-import { favoriteDelimiterForItem, isFieldFavorite, parseFavoriteFields, type FavoriteField } from "../utils/favorite_fields"
+import { displayFavoriteItemTitle, favoriteDelimiterForItem, isFieldFavorite, parseFavoriteFields, privateFieldKeywords, privateRulesForItem, type FavoriteField } from "../utils/favorite_fields"
 import {
   FavoriteEditorView,
   FavoriteFieldsDetailView,
@@ -629,6 +630,10 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     : undefined
   const orderedMenuBuiltins = getOrderedMenuBuiltins(settings)
   const enabledCustomActions = settings.keyboardMenu.customActions.filter((action) => action.enabled)
+  const privateKeywords = useMemo(
+    () => privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled),
+    [settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled],
+  )
 
   function homeZoomTransition(sourceID: string): NavigationZoomTransition | undefined {
     return homeZoomNamespace ? { type: "zoom", sourceID, namespace: homeZoomNamespace } : undefined
@@ -1256,8 +1261,9 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       await Navigation.present({
         element: (
           <FavoriteFieldsDetailView
-            title={item.title}
+            title={displayFavoriteItemTitle(item, favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter), privateRulesForItem(item, privateKeywords))}
             fields={parsed.fields}
+            privateKeywords={privateRulesForItem(item, privateKeywords)}
             onCopy={copyFavoriteField}
             renderFieldContextMenu={renderFavoriteFieldContextMenu}
             onCopyAll={() => {
@@ -1381,6 +1387,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           settingsRef.current.favoriteFieldDelimiter,
           result.favoriteGroupId,
           result.favoriteGroupManual,
+          result.fieldPrivacyOverride,
+          result.fieldPrivateKeywords,
         )
       } else {
         await addFavoriteFromInput(result.title, result.content, {
@@ -1388,6 +1396,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           fieldDelimiter: result.fieldDelimiter,
           defaultFieldDelimiter: settingsRef.current.favoriteFieldDelimiter,
           favoriteGroupId: result.favoriteGroupId,
+          fieldPrivacyOverride: result.fieldPrivacyOverride,
+          fieldPrivateKeywords: result.fieldPrivateKeywords,
         })
       }
     })
@@ -1480,6 +1490,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         content: await getFullClipContent(item.id),
         format: preferredFormat ?? (item.favoriteFormat === "fields" ? "fields" : "plain"),
         fieldDelimiter: item.fieldDelimiterOverride ? item.fieldDelimiter : undefined,
+        fieldPrivacyOverride: item.fieldPrivacyOverride,
+        fieldPrivateKeywords: item.fieldPrivateKeywords,
         favoriteGroupId: item.favoriteGroupId,
         favoriteGroupManual: item.favoriteGroupManual,
       } : undefined
@@ -1495,6 +1507,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
             preferredFormat={preferredFormat}
             favoriteGroups={favoriteGroups}
             defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
+            privateKeywords={privateKeywords}
+            defaultPrivacyPatterns={settingsRef.current.favoriteFieldPrivateKeywords}
             onPreviewCopy={copyFavoriteField}
             renderFieldContextMenu={renderFavoriteFieldContextMenu}
             onEditContentInEditor={(value) => Navigation.present<string | null>({
@@ -2082,6 +2096,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         content={settings.appClipRowGlassEffect ? (
           <ClipRow
             item={item}
+            privateKeywords={privateKeywords}
+            favoriteFieldDelimiter={settings.favoriteFieldDelimiter}
             contentLineLimit={settings.appContentLineLimit}
             favoriteView={options.favoriteView}
             onTap={onRowTap}
@@ -2090,6 +2106,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         ) : (
           <NonGlassClipRow
             item={item}
+            privateKeywords={privateKeywords}
+            favoriteFieldDelimiter={settings.favoriteFieldDelimiter}
             contentLineLimit={settings.appContentLineLimit}
             favoriteView={options.favoriteView}
             onTap={onRowTap}
@@ -2576,6 +2594,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           preferredFormat={route.preferredFormat}
           favoriteGroups={route.favoriteGroups}
           defaultDelimiter={settingsRef.current.favoriteFieldDelimiter}
+          privateKeywords={privateKeywords}
+          defaultPrivacyPatterns={settingsRef.current.favoriteFieldPrivateKeywords}
           onPreviewCopy={copyFavoriteField}
           renderFieldContextMenu={renderFavoriteFieldContextMenu}
           embedded
@@ -2634,8 +2654,9 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       const route = homeRoute
       return (
         <FavoriteFieldsDetailView
-          title={route.item.title}
+          title={displayFavoriteItemTitle(route.item, favoriteDelimiterForItem(route.item, settings.favoriteFieldDelimiter), privateRulesForItem(route.item, privateKeywords))}
           fields={route.fields}
+          privateKeywords={privateRulesForItem(route.item, privateKeywords)}
           embedded
           navigationTransition={homeZoomTransition(`favorite-field:${route.item.id}`)}
           onCopy={copyFavoriteField}

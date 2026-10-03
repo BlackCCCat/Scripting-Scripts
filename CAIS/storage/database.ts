@@ -7,6 +7,7 @@ import type {
   ClipListScope,
   FavoriteFormat,
   FavoriteGroup,
+  LinkPreview,
 } from "../types"
 import { databasePath, ensureAppDirectories } from "./paths"
 
@@ -24,9 +25,9 @@ let openingDb: Promise<DB> | null = null
 let initializingDb: Promise<DB> | null = null
 let connectionGeneration = 0
 let initialized = false
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 4
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite_pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at"
+const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, image_fingerprint, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite_pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, field_privacy_override, field_private_keywords, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at, CASE WHEN kind = 'url' THEN (SELECT title FROM link_previews WHERE url = clips.content) END AS link_title, CASE WHEN kind = 'url' THEN (SELECT summary FROM link_previews WHERE url = clips.content) END AS link_summary, CASE WHEN kind = 'url' THEN (SELECT icon_url FROM link_previews WHERE url = clips.content) END AS link_icon_url, CASE WHEN kind = 'url' THEN (SELECT fetched_at FROM link_previews WHERE url = clips.content) END AS link_fetched_at"
 const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
 
 function rowToClip(row: any): ClipItem {
@@ -37,6 +38,13 @@ function rowToClip(row: any): ClipItem {
     content: String(row.content ?? ""),
     contentHash: String(row.content_hash ?? ""),
     imagePath: row.image_path ? String(row.image_path) : undefined,
+    imageFingerprint: row.image_fingerprint ? String(row.image_fingerprint) : undefined,
+    linkPreview: row.link_fetched_at == null ? undefined : {
+      title: String(row.link_title ?? ""),
+      summary: String(row.link_summary ?? ""),
+      fetchedAt: Number(row.link_fetched_at),
+      iconUrl: row.link_icon_url ? String(row.link_icon_url) : undefined,
+    },
     sourceChangeCount: row.source_change_count == null ? undefined : Number(row.source_change_count),
     createdAt: Number(row.created_at ?? Date.now()),
     updatedAt: Number(row.updated_at ?? Date.now()),
@@ -48,6 +56,8 @@ function rowToClip(row: any): ClipItem {
     favoriteFormat: row.favorite_format === "fields" ? "fields" : "plain",
     fieldDelimiter: row.field_delimiter ? String(row.field_delimiter) : undefined,
     fieldDelimiterOverride: Number(row.field_delimiter_override ?? 0) === 1,
+    fieldPrivacyOverride: Number(row.field_privacy_override ?? 0) === 1,
+    fieldPrivateKeywords: row.field_private_keywords == null ? undefined : String(row.field_private_keywords),
     favoriteGroupId: row.favorite_group_id ? String(row.favorite_group_id) : undefined,
     favoriteGroupManual: Number(row.favorite_group_manual ?? 0) === 1,
     favoriteOrder: row.favorite_order == null ? undefined : Number(row.favorite_order),
@@ -64,6 +74,7 @@ function clipParams(item: ClipItem): any[] {
     item.content,
     item.contentHash,
     item.imagePath ?? null,
+    item.imageFingerprint ?? null,
     item.sourceChangeCount ?? null,
     item.createdAt,
     item.updatedAt,
@@ -75,6 +86,8 @@ function clipParams(item: ClipItem): any[] {
     item.favoriteFormat === "fields" ? "fields" : "plain",
     item.fieldDelimiter ?? null,
     item.fieldDelimiterOverride ? 1 : 0,
+    item.fieldPrivacyOverride ? 1 : 0,
+    item.fieldPrivateKeywords ?? null,
     item.favoriteGroupId ?? null,
     item.favoriteGroupManual ? 1 : 0,
     item.favoriteOrder ?? null,
@@ -195,6 +208,7 @@ async function ensureSchema(db: DB): Promise<void> {
       content TEXT NOT NULL,
       content_hash TEXT NOT NULL,
       image_path TEXT,
+      image_fingerprint TEXT,
       source_change_count INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
@@ -206,6 +220,8 @@ async function ensureSchema(db: DB): Promise<void> {
       favorite_format TEXT NOT NULL DEFAULT 'plain',
       field_delimiter TEXT,
       field_delimiter_override INTEGER NOT NULL DEFAULT 0,
+      field_privacy_override INTEGER NOT NULL DEFAULT 0,
+      field_private_keywords TEXT,
       favorite_group_id TEXT,
       favorite_group_manual INTEGER NOT NULL DEFAULT 0,
       favorite_order INTEGER,
@@ -262,6 +278,23 @@ export async function initializeDatabase(): Promise<DB> {
       await addColumnIfMissing(db, "clips", "favorite_pinned", "favorite_pinned INTEGER NOT NULL DEFAULT 0")
       await db.execute("UPDATE clips SET favorite_pinned = pinned WHERE favorite = 1 AND pinned = 1")
     }
+    if (version < 3) {
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS link_previews (
+          url TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          icon_url TEXT,
+          fetched_at INTEGER NOT NULL
+        )
+      `)
+    }
+    if (version < 4) {
+      await addColumnIfMissing(db, "clips", "image_fingerprint", "image_fingerprint TEXT")
+      await addColumnIfMissing(db, "clips", "field_privacy_override", "field_privacy_override INTEGER NOT NULL DEFAULT 0")
+      await addColumnIfMissing(db, "clips", "field_private_keywords", "field_private_keywords TEXT")
+      await addColumnIfMissing(db, "link_previews", "icon_url", "icon_url TEXT")
+    }
     if (version < SCHEMA_VERSION) await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     if (generation === connectionGeneration) initialized = true
     return db
@@ -274,15 +307,47 @@ export async function initializeDatabase(): Promise<DB> {
   }
 }
 
+export async function readLinkPreview(url: string): Promise<LinkPreview | null> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll("SELECT title, summary, icon_url, fetched_at FROM link_previews WHERE url = ? LIMIT 1", [url])
+  const row = rows[0]
+  return row ? { title: String(row.title), summary: String(row.summary), iconUrl: row.icon_url ? String(row.icon_url) : undefined, fetchedAt: Number(row.fetched_at) } : null
+}
+
+export async function writeLinkPreview(url: string, preview: LinkPreview): Promise<void> {
+  const db = await initializeDatabase()
+  await db.execute(
+    "INSERT OR REPLACE INTO link_previews (url, title, summary, icon_url, fetched_at) VALUES (?, ?, ?, ?, ?)",
+    [url, preview.title, preview.summary, preview.iconUrl ?? null, preview.fetchedAt],
+  )
+}
+
+export async function listImageFingerprintCandidates(): Promise<Array<{ id: string; imagePath: string; fingerprint?: string }>> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT id, image_path, image_fingerprint FROM clips WHERE deleted_at IS NULL AND kind = 'image' AND image_path IS NOT NULL ORDER BY updated_at DESC LIMIT 800",
+  )
+  return rows.map((row) => ({
+    id: String(row.id),
+    imagePath: String(row.image_path),
+    fingerprint: row.image_fingerprint ? String(row.image_fingerprint) : undefined,
+  }))
+}
+
+export async function saveImageFingerprint(id: string, fingerprint: string): Promise<void> {
+  const db = await initializeDatabase()
+  await db.execute("UPDATE clips SET image_fingerprint = ? WHERE id = ?", [fingerprint, id])
+}
+
 export async function insertClip(item: ClipItem): Promise<void> {
   const db = await initializeDatabase()
   await db.execute(`
     INSERT INTO clips (
-      id, kind, title, content, content_hash, image_path, source_change_count,
+      id, kind, title, content, content_hash, image_path, image_fingerprint, source_change_count,
       created_at, updated_at, last_copied_at, pinned, favorite_pinned, favorite, manual_favorite,
-      favorite_format, field_delimiter, field_delimiter_override, favorite_group_id,
+      favorite_format, field_delimiter, field_delimiter_override, field_privacy_override, field_private_keywords, favorite_group_id,
       favorite_group_manual, favorite_order, favorite_updated_at, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, clipParams(item))
 }
 
@@ -698,10 +763,10 @@ export async function listImagePaths(options: { favoritesOnly?: boolean; clipboa
   return rows.map((row) => String(row.image_path ?? "")).filter(Boolean)
 }
 
-export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "title" | "content" | "contentHash" | "updatedAt" | "favoriteFormat" | "fieldDelimiter" | "fieldDelimiterOverride" | "favoriteGroupId" | "favoriteGroupManual" | "favoriteOrder" | "favoriteUpdatedAt">): Promise<void> {
+export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "title" | "content" | "contentHash" | "updatedAt" | "favoriteFormat" | "fieldDelimiter" | "fieldDelimiterOverride" | "fieldPrivacyOverride" | "fieldPrivateKeywords" | "favoriteGroupId" | "favoriteGroupManual" | "favoriteOrder" | "favoriteUpdatedAt">): Promise<void> {
   const db = await initializeDatabase()
   await db.execute(
-    "UPDATE clips SET kind = ?, title = ?, content = ?, content_hash = ?, updated_at = ?, favorite_format = ?, field_delimiter = ?, field_delimiter_override = ?, favorite_group_id = ?, favorite_group_manual = ?, favorite_order = ?, favorite_updated_at = ? WHERE id = ?",
+    "UPDATE clips SET kind = ?, title = ?, content = ?, content_hash = ?, updated_at = ?, favorite_format = ?, field_delimiter = ?, field_delimiter_override = ?, field_privacy_override = ?, field_private_keywords = ?, favorite_group_id = ?, favorite_group_manual = ?, favorite_order = ?, favorite_updated_at = ? WHERE id = ?",
     [
       row.kind,
       row.title,
@@ -711,6 +776,8 @@ export async function updateClipContent(row: Pick<ClipItem, "id" | "kind" | "tit
       row.favoriteFormat === "fields" ? "fields" : "plain",
       row.fieldDelimiter ?? null,
       row.fieldDelimiterOverride ? 1 : 0,
+      row.fieldPrivacyOverride ? 1 : 0,
+      row.fieldPrivateKeywords ?? null,
       row.favoriteGroupId ?? null,
       row.favoriteGroupManual ? 1 : 0,
       row.favoriteOrder ?? null,

@@ -23,14 +23,20 @@ import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils
 import {
   normalizeFavoriteDelimiter,
   parseFavoriteFields,
+  displayFavoriteFieldValue,
+  privateRulesForItem,
   type FavoriteField,
+  type PrivateFieldRule,
 } from "../utils/favorite_fields"
+import { FieldPrivacyRulesView } from "./FieldPrivacyRulesView"
 
 export type FavoriteDraft = {
   title: string
   content: string
   format: FavoriteFormat
   fieldDelimiter?: string
+  fieldPrivacyOverride?: boolean
+  fieldPrivateKeywords?: string
   favoriteGroupId?: string
   favoriteGroupManual?: boolean
 }
@@ -45,7 +51,7 @@ function presentCopyToast(
   ;(globalThis as any).setTimeout?.(() => presented.setValue(true), 0)
 }
 
-function FavoriteFieldContent(props: { field: FavoriteField }) {
+function FavoriteFieldContent(props: { field: FavoriteField; privateKeywords: PrivateFieldRule[] }) {
   return (
     <VStack spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
       <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
@@ -64,7 +70,7 @@ function FavoriteFieldContent(props: { field: FavoriteField }) {
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         multilineTextAlignment="leading"
       >
-        {props.field.value}
+        {displayFavoriteFieldValue(props.field, props.privateKeywords)}
       </Text>
     </VStack>
   )
@@ -75,6 +81,8 @@ export function FavoriteEditorView(props: {
   preferredFormat?: FavoriteFormat
   favoriteGroups: FavoriteGroup[]
   defaultDelimiter: string
+  privateKeywords: PrivateFieldRule[]
+  defaultPrivacyPatterns: string
   onPreviewCopy: (field: FavoriteField) => Promise<string | void> | string | void
   onEditContentInEditor?: (content: string) => Promise<string | null>
   renderEmbeddedContentEditor?: (
@@ -104,6 +112,11 @@ export function FavoriteEditorView(props: {
   const [customDelimiter, setCustomDelimiter] = useState(
     props.initial?.fieldDelimiter ?? normalizeFavoriteDelimiter(props.defaultDelimiter),
   )
+  const [customPrivacyEnabled, setCustomPrivacyEnabled] = useState(Boolean(props.initial?.fieldPrivacyOverride))
+  const [customPrivacyPatterns, setCustomPrivacyPatterns] = useState(
+    props.initial?.fieldPrivateKeywords ?? props.defaultPrivacyPatterns,
+  )
+  const [privacyRulesPresented, setPrivacyRulesPresented] = useState(false)
   const [expandedEditorContent, setExpandedEditorContent] = useState<string | undefined>(undefined)
   const [expandedEditorPresented, setExpandedEditorPresented] = useState(false)
   const globalDelimiter = normalizeFavoriteDelimiter(props.defaultDelimiter)
@@ -111,6 +124,10 @@ export function FavoriteEditorView(props: {
   const parsed = format === "fields" && delimiter
     ? parseFavoriteFields(content, delimiter)
     : null
+  const effectivePrivateRules = privateRulesForItem(
+    { fieldPrivacyOverride: customPrivacyEnabled, fieldPrivateKeywords: customPrivacyPatterns },
+    props.privateKeywords,
+  )
 
   async function copyPreviewField(field: FavoriteField) {
     const message = await props.onPreviewCopy(field)
@@ -126,6 +143,18 @@ export function FavoriteEditorView(props: {
     }
     const next = await props.onEditContentInEditor?.(content)
     if (next != null) setContent(next)
+  }
+
+  async function editPrivacyRules() {
+    if (props.embedded) {
+      setPrivacyRulesPresented(true)
+      return
+    }
+    const value = await Navigation.present<string | null>({
+      element: <FieldPrivacyRulesView initial={customPrivacyPatterns} />,
+      modalPresentationStyle: "pageSheet",
+    })
+    if (value != null) setCustomPrivacyPatterns(value)
   }
 
   function cancel() {
@@ -154,6 +183,8 @@ export function FavoriteEditorView(props: {
       content,
       format,
       fieldDelimiter: format === "fields" && customDelimiterEnabled ? delimiter : undefined,
+      fieldPrivacyOverride: format === "fields" && customPrivacyEnabled,
+      fieldPrivateKeywords: format === "fields" && customPrivacyEnabled ? customPrivacyPatterns : undefined,
       favoriteGroupId: favoriteGroupId || undefined,
       favoriteGroupManual: favoriteGroupSelectionChanged
         ? Boolean(favoriteGroupId)
@@ -187,13 +218,29 @@ export function FavoriteEditorView(props: {
             : <Button title="取消" role="cancel" action={cancel} />,
           topBarTrailing: <Button title="保存" disabled={!content.trim()} action={() => void save()} />,
         }}
-        navigationDestination={props.renderEmbeddedContentEditor ? {
-          isPresented: expandedEditorPresented,
+        navigationDestination={props.embedded ? {
+          isPresented: expandedEditorPresented || privacyRulesPresented,
           onChanged: (isPresented: boolean) => {
-            setExpandedEditorPresented(isPresented)
-            if (!isPresented) setExpandedEditorContent(undefined)
+            if (!isPresented) {
+              setExpandedEditorPresented(false)
+              setExpandedEditorContent(undefined)
+              setPrivacyRulesPresented(false)
+            }
           },
-          content: expandedEditorContent !== undefined
+          content: privacyRulesPresented ? <FieldPrivacyRulesView
+            initial={customPrivacyPatterns}
+            embedded
+            navigationTransition={props.zoomNamespace ? {
+              type: "zoom",
+              sourceID: "favorite-privacy-rules",
+              namespace: props.zoomNamespace,
+            } : undefined}
+            onCancel={() => setPrivacyRulesPresented(false)}
+            onSave={(value) => {
+              setCustomPrivacyPatterns(value)
+              setPrivacyRulesPresented(false)
+            }}
+          /> : expandedEditorContent !== undefined && props.renderEmbeddedContentEditor
             ? props.renderEmbeddedContentEditor(
                 expandedEditorContent,
                 (nextContent) => {
@@ -244,6 +291,33 @@ export function FavoriteEditorView(props: {
                   value.replace(/[\r\n]/g, "").slice(0, 8),
                 )}
               />
+            ) : null}
+          </Section>
+        ) : null}
+
+        {format === "fields" ? (
+          <Section header={<Text>隐私显示</Text>} footer={<Text>独立规则仅用于当前收藏，覆盖全局字段隐私规则。</Text>}>
+            <Toggle value={customPrivacyEnabled} onChanged={setCustomPrivacyEnabled} toggleStyle="switch">
+              <Text>使用独立隐私规则</Text>
+            </Toggle>
+            {customPrivacyEnabled ? (
+              <Button
+                buttonStyle="plain"
+                matchedTransitionSource={props.zoomNamespace ? {
+                  id: "favorite-privacy-rules",
+                  namespace: props.zoomNamespace,
+                } : undefined}
+                action={() => void editPrivacyRules()}
+              >
+                <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                  <Text>子字段名规则</Text>
+                  <Spacer />
+                  <Text foregroundStyle="secondaryLabel" lineLimit={1}>
+                    {customPrivacyPatterns.trim().replace(/\s+/g, " ").slice(0, 26) || "不遮挡"}
+                  </Text>
+                  <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
+                </HStack>
+              </Button>
             ) : null}
           </Section>
         ) : null}
@@ -333,7 +407,7 @@ export function FavoriteEditorView(props: {
                   menuItems: props.renderFieldContextMenu(field, () => void copyPreviewField(field)),
                 } : undefined}
               >
-                <FavoriteFieldContent field={field} />
+                <FavoriteFieldContent field={field} privateKeywords={effectivePrivateRules} />
               </HStack>
             )) : (
               <Text foregroundStyle="secondaryLabel">输入内容后将在这里显示解析结果</Text>
@@ -352,6 +426,7 @@ export function FavoriteEditorView(props: {
 export function FavoriteFieldsDetailView(props: {
   title: string
   fields: FavoriteField[]
+  privateKeywords: PrivateFieldRule[]
   onCopy: (field: FavoriteField) => Promise<string | void> | string | void
   onCopyAll: () => Promise<string | void> | string | void
   embedded?: boolean
@@ -422,7 +497,7 @@ export function FavoriteFieldsDetailView(props: {
               menuItems: props.renderFieldContextMenu(field, () => void copyField(field)),
             } : undefined}
           >
-            <FavoriteFieldContent field={field} />
+            <FavoriteFieldContent field={field} privateKeywords={props.privateKeywords} />
           </HStack>
         ))}
       </Section>

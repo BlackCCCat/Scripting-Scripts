@@ -22,6 +22,13 @@ export type ClipPayload = {
   sourceChangeCount?: number
 }
 
+export type LinkPreview = {
+  title: string
+  summary: string
+  fetchedAt: number
+  iconUrl?: string
+}
+
 export type ClipItem = {
   id: string
   kind: ClipKind
@@ -29,6 +36,8 @@ export type ClipItem = {
   content: string
   contentHash: string
   imagePath?: string
+  imageFingerprint?: string
+  linkPreview?: LinkPreview
   sourceChangeCount?: number
   createdAt: number
   updatedAt: number
@@ -40,6 +49,8 @@ export type ClipItem = {
   favoriteFormat?: FavoriteFormat
   fieldDelimiter?: string
   fieldDelimiterOverride?: boolean
+  fieldPrivacyOverride?: boolean
+  fieldPrivateKeywords?: string
   favoriteGroupId?: string
   favoriteGroupManual?: boolean
   favoriteOrder?: number
@@ -97,6 +108,8 @@ export type CaisSettings = {
   hapticEngineClicks: boolean
   launchAnimationEnabled: boolean
   favoriteFieldDelimiter: string
+  favoriteFieldPrivacyEnabled: boolean
+  favoriteFieldPrivateKeywords: string
   keyboardMaxItems: number
   keyboardMenu: KeyboardMenuSettings
 }
@@ -164,6 +177,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   hapticEngineClicks: true,
   launchAnimationEnabled: true,
   favoriteFieldDelimiter: ":",
+  favoriteFieldPrivacyEnabled: false,
+  favoriteFieldPrivateKeywords: "",
   keyboardMaxItems: 30,
   keyboardMenu: {
     builtins: {

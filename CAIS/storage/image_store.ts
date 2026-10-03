@@ -74,6 +74,55 @@ export function imageContentHash(image: UIImage): string | undefined {
   }
 }
 
+export function imageVisualFingerprint(image: UIImage): string | undefined {
+  if (!image || image.width <= 0 || image.height <= 0 || typeof image.renderedIn !== "function") return undefined
+  const small = image.renderedIn({ width: 17, height: 16 })
+  const pixels = typeof small?.getPixelData === "function" ? small.getPixelData() : null
+  if (!pixels || pixels.width < 17 || pixels.height < 16) return undefined
+  const bytes = pixels.data.toUint8Array()
+  if (!bytes || bytes.length < pixels.width * pixels.height * 4) return undefined
+  const gray: number[] = []
+  let red = 0, green = 0, blue = 0
+  for (let y = 0; y < 16; y++) {
+    const sourceY = Math.min(pixels.height - 1, Math.floor((y + 0.5) * pixels.height / 16))
+    for (let x = 0; x < 17; x++) {
+      const sourceX = Math.min(pixels.width - 1, Math.floor((x + 0.5) * pixels.width / 17))
+      const offset = (sourceY * pixels.width + sourceX) * 4
+      const alpha = bytes[offset + 3] / 255
+      const r = bytes[offset] * alpha + 255 * (1 - alpha)
+      const g = bytes[offset + 1] * alpha + 255 * (1 - alpha)
+      const b = bytes[offset + 2] * alpha + 255 * (1 - alpha)
+      red += r; green += g; blue += b
+      gray.push(0.299 * r + 0.587 * g + 0.114 * b)
+    }
+  }
+  let bits = ""
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      bits += gray[y * 17 + x] > gray[y * 17 + x + 1] ? "1" : "0"
+    }
+  }
+  let hex = ""
+  for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16)
+  const count = 17 * 16
+  return `${image.width / image.height}:${Math.round(red / count)}:${Math.round(green / count)}:${Math.round(blue / count)}:${hex}`
+}
+
+export function imageVisualFingerprintMatches(a: string, b: string): boolean {
+  const left = a.split(":")
+  const right = b.split(":")
+  if (left.length !== 5 || right.length !== 5 || left[4].length !== 64 || right[4].length !== 64) return false
+  if (Math.abs(Number(left[0]) - Number(right[0])) > 0.01) return false
+  if ([1, 2, 3].some((index) => Math.abs(Number(left[index]) - Number(right[index])) > 8)) return false
+  let different = 0
+  for (let i = 0; i < 64; i++) {
+    let xor = parseInt(left[4][i], 16) ^ parseInt(right[4][i], 16)
+    while (xor) { different += xor & 1; xor >>= 1 }
+    if (different > 6) return false
+  }
+  return true
+}
+
 export async function saveImageForClip(id: string, image: UIImage): Promise<string | undefined> {
   const fm = (globalThis as any).FileManager
   if (!fm || !image) return undefined
