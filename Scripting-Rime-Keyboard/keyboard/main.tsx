@@ -732,14 +732,19 @@ function KeyboardContent(props: {
           await Rime.deploy({ fullCheck: false });
         }
         const list = await Rime.listSchemas();
-        const session = new Rime.Session();
+        const session = list.length > 0 ? new Rime.Session() : null;
         return { list, session };
       });
-      if (disposedRef.current) return;
+      if (disposedRef.current) {
+        result.session?.close();
+        return;
+      }
       schemasRef.current = result.list;
       const s = result.session;
-      if (disposedRef.current) {
-        s.close();
+      if (!s) {
+        applyRimeMetadata({ ascii: true });
+        if (settings.keyboardType === "t9") setKeyboardTypeOverride("qwerty");
+        rimeReadyRef.current = true;
         return;
       }
       sessionRef.current = s;
@@ -752,7 +757,10 @@ function KeyboardContent(props: {
       installRimeNotificationHandler();
       rimeReadyRef.current = true;
     } catch (e) {
-      rimeReadyRef.current = false;
+      if (disposedRef.current) return;
+      applyRimeMetadata({ ascii: true });
+      if (settings.keyboardType === "t9") setKeyboardTypeOverride("qwerty");
+      rimeReadyRef.current = true;
       setError((e as Error).message ?? String(e));
     }
   }
@@ -1910,6 +1918,7 @@ function KeyboardContent(props: {
   }
 
   function switchEnglishQwertyToT9() {
+    if (!sessionRef.current && rimeReadyRef.current) return;
     setKeyboardTypeOverride(null);
     setSymbolLayer(false);
     const s = sessionRef.current;
