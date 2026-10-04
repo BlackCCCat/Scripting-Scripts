@@ -125,8 +125,17 @@ export type KeyboardMenuBuiltinAction =
   | "splitLines"
   | "uppercase"
   | "lowercase"
+  | "textBold"
+  | "textItalic"
+  | "textBoldItalic"
+  | "textMonospaced"
+  | "monospacedDigits"
+  | "textUnderline"
+  | "textStrikethrough"
+  | "extractLinks"
   | "chineseAmount"
   | "openUrl"
+  | "openUrlInApp"
 
 export type KeyboardCustomActionMode = "template" | "regexExtract" | "regexRemove" | "javascript" | "networkRequest"
 
@@ -143,6 +152,8 @@ export type KeyboardCustomAction = {
 }
 
 export type KeyboardMenuSettings = {
+  grouped: boolean
+  ungroupedBuiltins: KeyboardMenuBuiltinAction[]
   builtins: Record<KeyboardMenuBuiltinAction, boolean>
   builtinOrder?: KeyboardMenuBuiltinAction[]
   customActions: KeyboardCustomAction[]
@@ -181,6 +192,8 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
   favoriteFieldPrivateKeywords: "",
   keyboardMaxItems: 30,
   keyboardMenu: {
+    grouped: true,
+    ungroupedBuiltins: ["tokenize"],
     builtins: {
       pin: true,
       favorite: true,
@@ -192,8 +205,17 @@ export const DEFAULT_CAIS_SETTINGS: CaisSettings = {
       splitLines: true,
       uppercase: true,
       lowercase: true,
+      textBold: true,
+      textItalic: true,
+      textBoldItalic: true,
+      textMonospaced: true,
+      monospacedDigits: true,
+      textUnderline: true,
+      textStrikethrough: true,
+      extractLinks: true,
       chineseAmount: false,
       openUrl: true,
+      openUrlInApp: true,
     },
     customActions: [],
   },

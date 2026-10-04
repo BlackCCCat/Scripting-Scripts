@@ -5,6 +5,7 @@ import {
   Form,
   HStack,
   Image,
+  List,
   Navigation,
   NavigationLink,
   NavigationStack,
@@ -15,7 +16,9 @@ import {
   Text,
   TextField,
   Toggle,
+  VStack,
   useState,
+  useRef,
 } from "scripting";
 
 import type {
@@ -24,6 +27,7 @@ import type {
   KeyboardCustomAction,
   KeyboardCustomActionMode,
   KeyboardMenuBuiltinAction,
+  KeyboardMenuSettings,
 } from "../types";
 import { makeId } from "../utils/common";
 import {
@@ -38,6 +42,12 @@ import type { LanShareRuntimeStatus } from "../services/lan_share_server";
 import type { NavigationZoomNamespace, NavigationZoomTransition } from "../utils/navigation_zoom";
 import { FieldPrivacyRulesView } from "./FieldPrivacyRulesView";
 import { LanShareSettingsView } from "./LanShareSettingsView";
+import {
+  groupMenuBuiltins,
+  getOrderedMenuBuiltins,
+  menuBuiltinSystemImage,
+  menuBuiltinTitle,
+} from "../utils/menu_actions";
 
 const INTERVAL_OPTIONS = [100, 200, 300, 400, 500];
 const MAX_ITEM_OPTIONS = [200, 500, 800];
@@ -68,30 +78,297 @@ const NETWORK_REQUEST_HELP = [
   "返回内容为空时不会写入剪贴板，也不会保存新记录。",
 ].join("\n");
 
-const BUILTIN_ACTIONS: Array<{
-  key: KeyboardMenuBuiltinAction;
+function MenuBuiltinGroupView(props: {
   title: string;
-}> = [
-  { key: "pin", title: "置顶" },
-  { key: "favorite", title: "收藏" },
-  { key: "tokenize", title: "分词" },
-  { key: "base64Encode", title: "Base64 编码" },
-  { key: "base64Decode", title: "Base64 解码" },
-  { key: "cleanWhitespace", title: "移除空格" },
-  { key: "removeBlankLines", title: "移除空行" },
-  { key: "splitLines", title: "按行拆分" },
-  { key: "uppercase", title: "转为大写" },
-  { key: "lowercase", title: "转为​小写" },
-  { key: "chineseAmount", title: "中文大写金额" },
-  { key: "openUrl", title: "打开链接" },
-];
-const FIXED_BUILTIN_ACTION_KEYS: KeyboardMenuBuiltinAction[] = [
-  "pin",
-  "favorite",
-];
-const CONFIGURABLE_BUILTIN_ACTIONS = BUILTIN_ACTIONS.filter(
-  (action) => !FIXED_BUILTIN_ACTION_KEYS.includes(action.key),
-);
+  actions: KeyboardMenuBuiltinAction[];
+  settings: CaisSettings;
+  ungrouped: KeyboardMenuBuiltinAction[];
+  navigationTransition?: NavigationZoomTransition;
+  onChanged: (key: KeyboardMenuBuiltinAction, value: boolean) => void;
+  onPlacementChanged: (key: KeyboardMenuBuiltinAction, ungrouped: boolean) => void;
+  onMove: (actions: KeyboardMenuBuiltinAction[], indices: number[], newOffset: number) => void;
+}) {
+  const [actions, setActions] = useState(props.actions);
+  const [builtins, setBuiltins] = useState(props.settings.keyboardMenu.builtins);
+  const [ungrouped, setUngrouped] = useState(props.ungrouped);
+
+  function move(indices: number[], newOffset: number) {
+    const moving = indices.map((index) => actions[index]).filter(Boolean);
+    const rest = actions.filter((_, index) => !indices.includes(index));
+    rest.splice(newOffset, 0, ...moving);
+    setActions(rest);
+    props.onMove(actions, indices, newOffset);
+  }
+
+  return (
+    <List
+      navigationTitle={props.title}
+      navigationBarTitleDisplayMode="inline"
+      navigationTransition={props.navigationTransition}
+    >
+      <Section>
+        <ForEach
+          count={actions.length}
+          itemBuilder={(index) => {
+            const action = actions[index];
+            return action ? (
+              <VStack key={action}>
+                <Toggle
+                  value={builtins[action]}
+                  onChanged={(value: boolean) => {
+                    setBuiltins({ ...builtins, [action]: value });
+                    props.onChanged(action, value);
+                  }}
+                  toggleStyle="switch"
+                >
+                  <HStack>
+                    <Image systemName={menuBuiltinSystemImage(action)} />
+                    <Text>{menuBuiltinTitle(action)}</Text>
+                  </HStack>
+                </Toggle>
+                <Picker
+                  title="菜单位置"
+                  pickerStyle="menu"
+                  value={ungrouped.includes(action) ? 1 : 0}
+                  onChanged={(index: number) => {
+                    const next = new Set(ungrouped);
+                    if (index === 1) next.add(action);
+                    else next.delete(action);
+                    setUngrouped([...next]);
+                    props.onPlacementChanged(action, index === 1);
+                  }}
+                >
+                  <Text tag={0}>分组</Text>
+                  <Text tag={1}>外层</Text>
+                </Picker>
+              </VStack>
+            ) : <EmptyView />;
+          }}
+          onMove={move}
+        />
+      </Section>
+    </List>
+  );
+}
+
+function CustomMenuActionsView(props: {
+  actions: KeyboardCustomAction[];
+  zoomNamespace?: NavigationZoomNamespace;
+  navigationTransition?: NavigationZoomTransition;
+  onEdit: (action?: KeyboardCustomAction) => void;
+  onUpdate: (id: string, patch: Partial<KeyboardCustomAction>) => void;
+  onRemove: (id: string) => void;
+  onMove: (indices: number[], newOffset: number) => void;
+}) {
+  return (
+    <List
+      navigationTitle="自定义功能"
+      navigationBarTitleDisplayMode="inline"
+      navigationTransition={props.navigationTransition}
+    >
+      <Section>
+        {props.actions.length ? (
+          <ForEach
+            count={props.actions.length}
+            itemBuilder={(index) => {
+              const action = props.actions[index];
+              return action ? (
+                <HStack
+                  key={action.id}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                  trailingSwipeActions={{
+                    allowsFullSwipe: false,
+                    actions: [
+                      <Button title="" systemImage="square.and.pencil" tint="systemOrange" action={() => props.onEdit(action)} />,
+                      <Button title="" systemImage="trash" role="destructive" tint="systemRed" action={() => props.onRemove(action.id)} />,
+                    ],
+                  }}
+                >
+                  <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>{action.title}</Text>
+                  <Spacer />
+                  <Toggle
+                    title=""
+                    value={action.enabled}
+                    onChanged={(enabled: boolean) => props.onUpdate(action.id, { enabled })}
+                    toggleStyle="switch"
+                  />
+                </HStack>
+              ) : <EmptyView />;
+            }}
+            onMove={props.onMove}
+          />
+        ) : (
+          <Text foregroundStyle="secondaryLabel">暂无自定义功能</Text>
+        )}
+        <Button
+          title="添加自定义功能"
+          systemImage="plus"
+          matchedTransitionSource={props.zoomNamespace ? {
+            id: "custom-action-add",
+            namespace: props.zoomNamespace,
+          } : undefined}
+          action={() => props.onEdit()}
+        />
+      </Section>
+    </List>
+  );
+}
+
+function KeyboardMenuSettingsPage(props: {
+  settings: CaisSettings;
+  navigationTransition?: NavigationZoomTransition;
+  zoomNamespace?: NavigationZoomNamespace;
+  onMenuSettingsChanged: (settings: KeyboardMenuSettings) => void;
+  onCustomEdit: (action: KeyboardCustomAction | undefined, onSaved: (action: KeyboardCustomAction) => void) => void;
+}) {
+  const [menuSettings, setMenuSettings] = useState(props.settings.keyboardMenu);
+  const pageSettings = { ...props.settings, keyboardMenu: menuSettings };
+  const actionGroups = groupMenuBuiltins(
+    getOrderedMenuBuiltins(pageSettings).filter((key) => key !== "pin" && key !== "favorite"),
+  );
+
+  function commit(next: KeyboardMenuSettings) {
+    setMenuSettings(next);
+    props.onMenuSettingsChanged(next);
+  }
+
+  function updateBuiltin(key: KeyboardMenuBuiltinAction, value: boolean) {
+    commit({ ...menuSettings, builtins: { ...menuSettings.builtins, [key]: value } });
+  }
+
+  function updatePlacement(key: KeyboardMenuBuiltinAction, ungrouped: boolean) {
+    const next = new Set(menuSettings.ungroupedBuiltins);
+    if (ungrouped) next.add(key);
+    else next.delete(key);
+    commit({ ...menuSettings, ungroupedBuiltins: [...next] });
+  }
+
+  function moveBuiltins(groupActions: KeyboardMenuBuiltinAction[], indices: number[], newOffset: number) {
+    const ordered = getOrderedMenuBuiltins(pageSettings);
+    const groupSet = new Set(groupActions);
+    const groupOrder = ordered.filter((key) => groupSet.has(key));
+    const moving = indices.map((index) => groupOrder[index]).filter(Boolean);
+    const rest = groupOrder.filter((_, index) => !indices.includes(index));
+    rest.splice(newOffset, 0, ...moving);
+    let groupIndex = 0;
+    const nextOrder = ordered.map((key) => groupSet.has(key) ? rest[groupIndex++] : key);
+    commit({ ...menuSettings, builtinOrder: nextOrder });
+  }
+
+  function updateCustom(id: string, patch: Partial<KeyboardCustomAction>) {
+    commit({ ...menuSettings, customActions: menuSettings.customActions.map((item) => item.id === id ? { ...item, ...patch } : item) });
+  }
+
+  function removeCustom(id: string) {
+    commit({ ...menuSettings, customActions: menuSettings.customActions.filter((item) => item.id !== id) });
+  }
+
+  function moveCustom(indices: number[], newOffset: number) {
+    const moving = indices.map((index) => menuSettings.customActions[index]).filter(Boolean);
+    const rest = menuSettings.customActions.filter((_, index) => !indices.includes(index));
+    rest.splice(newOffset, 0, ...moving);
+    commit({ ...menuSettings, customActions: rest });
+  }
+
+  function editCustom(action?: KeyboardCustomAction) {
+    props.onCustomEdit(action, (saved) => {
+      const exists = menuSettings.customActions.some((item) => item.id === saved.id);
+      const customActions = exists
+        ? menuSettings.customActions.map((item) => item.id === saved.id ? saved : item)
+        : [...menuSettings.customActions, saved].slice(0, 12);
+      commit({ ...menuSettings, customActions });
+    });
+  }
+  return (
+    <List
+      navigationTitle="长按菜单"
+      navigationBarTitleDisplayMode="inline"
+      navigationTransition={props.navigationTransition}
+    >
+      <Section footer={<Text>关闭后，已启用的内置和自定义功能会平铺显示。</Text>}>
+        <Toggle
+          value={menuSettings.grouped}
+          onChanged={(grouped) => commit({ ...menuSettings, grouped })}
+          toggleStyle="switch"
+        >
+          <Text>按类别分组</Text>
+        </Toggle>
+      </Section>
+      <Section header={<Text>内置功能</Text>}>
+        {actionGroups.map((group) => (
+          <NavigationLink
+            key={group.id}
+            destination={
+              <MenuBuiltinGroupView
+                title={group.title}
+                actions={group.actions}
+                settings={pageSettings}
+                ungrouped={menuSettings.ungroupedBuiltins}
+                navigationTransition={props.zoomNamespace ? {
+                  type: "zoom",
+                  sourceID: `long-press-builtin:${group.id}`,
+                  namespace: props.zoomNamespace,
+                } : undefined}
+                onChanged={updateBuiltin}
+                onPlacementChanged={updatePlacement}
+                onMove={(actions, indices, newOffset) => moveBuiltins(actions, indices, newOffset)}
+              />
+            }
+          >
+            <HStack
+              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              background="rgba(0,0,0,0.001)"
+              contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+              matchedTransitionSource={props.zoomNamespace ? {
+                id: `long-press-builtin:${group.id}`,
+                namespace: props.zoomNamespace,
+              } : undefined}
+            >
+              <Image systemName={group.systemImage} />
+              <Text>{group.title}</Text>
+              <Spacer />
+              <Text foregroundStyle="secondaryLabel">{group.actions.length}</Text>
+            </HStack>
+          </NavigationLink>
+        ))}
+      </Section>
+      <Section header={<Text>自定义功能</Text>}>
+        <NavigationLink
+          destination={
+            <CustomMenuActionsView
+              actions={menuSettings.customActions}
+              zoomNamespace={props.zoomNamespace}
+              navigationTransition={props.zoomNamespace ? {
+                type: "zoom",
+                sourceID: "long-press-custom-actions",
+                namespace: props.zoomNamespace,
+              } : undefined}
+              onEdit={editCustom}
+              onUpdate={updateCustom}
+              onRemove={removeCustom}
+              onMove={moveCustom}
+            />
+          }
+        >
+          <HStack
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            background="rgba(0,0,0,0.001)"
+            contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+            matchedTransitionSource={props.zoomNamespace ? {
+              id: "long-press-custom-actions",
+              namespace: props.zoomNamespace,
+            } : undefined}
+          >
+            <Image systemName="wand.and.stars" />
+            <Text>自定义功能</Text>
+            <Spacer />
+            <Text foregroundStyle="secondaryLabel">{menuSettings.customActions.length}</Text>
+          </HStack>
+        </NavigationLink>
+      </Section>
+    </List>
+  );
+}
 
 function optionIndex(options: number[], value: number): number {
   const index = options.findIndex((item) => item === value);
@@ -402,13 +679,17 @@ export function SettingsView(props: {
   zoomNamespace?: NavigationZoomNamespace;
 }) {
   const settings = props.value;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [embeddedCustomAction, setEmbeddedCustomAction] = useState<KeyboardCustomAction | null | undefined>(undefined);
   const [embeddedCustomActionPresented, setEmbeddedCustomActionPresented] = useState(false);
+  const [keyboardMenuPresented, setKeyboardMenuPresented] = useState(false);
   const [privacyRulesPresented, setPrivacyRulesPresented] = useState(false);
   const [privacyRulesSessionId, setPrivacyRulesSessionId] = useState("");
+  const embeddedCustomActionSavedRef = useRef<((action: KeyboardCustomAction) => void) | null>(null);
 
   function update(next: Partial<CaisSettings>) {
-    props.onChanged({ ...settings, ...next });
+    props.onChanged({ ...settingsRef.current, ...next });
   }
 
   function renderToolbar() {
@@ -419,126 +700,29 @@ export function SettingsView(props: {
     };
   }
 
-  function getOrderedBuiltinActions() {
-    const order = settings.keyboardMenu.builtinOrder?.filter(
-      (key) => !FIXED_BUILTIN_ACTION_KEYS.includes(key),
-    );
-    if (!order || !order.length) return CONFIGURABLE_BUILTIN_ACTIONS;
-    const sorted = order
-      .map((key) => CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === key))
-      .filter(Boolean) as typeof BUILTIN_ACTIONS;
-    const tokenize = CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === "tokenize");
-    if (tokenize) {
-      const index = sorted.findIndex((item) => item.key === "tokenize");
-      if (index >= 0) sorted.splice(index, 1);
-      sorted.unshift(tokenize);
-    }
-    const insertAfter = (
-      anchor: KeyboardMenuBuiltinAction,
-      action: typeof CONFIGURABLE_BUILTIN_ACTIONS[number],
-    ) => {
-      if (sorted.some((item) => item.key === action.key)) return;
-      const index = sorted.findIndex((item) => item.key === anchor);
-      if (index >= 0) {
-        sorted.splice(index + 1, 0, action);
-      } else {
-        sorted.push(action);
-      }
-    };
-    const removeBlankLines = CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === "removeBlankLines");
-    const splitLines = CONFIGURABLE_BUILTIN_ACTIONS.find((a) => a.key === "splitLines");
-    if (removeBlankLines) insertAfter("cleanWhitespace", removeBlankLines);
-    if (splitLines) insertAfter("removeBlankLines", splitLines);
-    for (const action of CONFIGURABLE_BUILTIN_ACTIONS) {
-      if (!sorted.some((item) => item.key === action.key)) sorted.push(action);
-    }
-    return sorted;
-  }
-
-  function reorderBuiltins(indices: number[], newOffset: number) {
-    const ordered = getOrderedBuiltinActions();
-    const moving = indices.map((i) => ordered[i]);
-    const rest = ordered.filter((_, i) => !indices.includes(i));
-    rest.splice(newOffset, 0, ...moving);
-    update({
-      keyboardMenu: {
-        ...settings.keyboardMenu,
-        builtinOrder: [
-          "tokenize",
-          ...rest.map((a) => a.key).filter((key) => key !== "tokenize"),
-        ],
-      },
-    });
-  }
-
-  function reorderCustomActions(indices: number[], newOffset: number) {
-    const arr = [...settings.keyboardMenu.customActions];
-    const moving = indices.map((i) => arr[i]);
-    const rest = arr.filter((_, i) => !indices.includes(i));
-    rest.splice(newOffset, 0, ...moving);
-    update({
-      keyboardMenu: {
-        ...settings.keyboardMenu,
-        customActions: rest,
-      },
-    });
-  }
-
-  function updateBuiltin(key: KeyboardMenuBuiltinAction, value: boolean) {
-    update({
-      keyboardMenu: {
-        ...settings.keyboardMenu,
-        builtins: {
-          ...settings.keyboardMenu.builtins,
-          [key]: value,
-        },
-      },
-    });
-  }
-
-  function updateCustomAction(
-    id: string,
-    patch: Partial<KeyboardCustomAction>,
-  ) {
-    update({
-      keyboardMenu: {
-        ...settings.keyboardMenu,
-        customActions: settings.keyboardMenu.customActions.map((item) =>
-          item.id === id ? { ...item, ...patch } : item,
-        ),
-      },
-    });
-  }
-
   function saveCustomAction(action: KeyboardCustomAction) {
-    const exists = settings.keyboardMenu.customActions.some(
+    const current = settingsRef.current;
+    const exists = current.keyboardMenu.customActions.some(
       (item) => item.id === action.id,
     );
     update({
       keyboardMenu: {
-        ...settings.keyboardMenu,
+        ...current.keyboardMenu,
         customActions: exists
-          ? settings.keyboardMenu.customActions.map((item) =>
+          ? current.keyboardMenu.customActions.map((item) =>
               item.id === action.id ? action : item,
             )
-          : [...settings.keyboardMenu.customActions, action].slice(0, 12),
+          : [...current.keyboardMenu.customActions, action].slice(0, 12),
       },
     });
   }
 
-  function removeCustomAction(id: string) {
-    update({
-      keyboardMenu: {
-        ...settings.keyboardMenu,
-        customActions: settings.keyboardMenu.customActions.filter(
-          (item) => item.id !== id,
-        ),
-      },
-    });
-  }
-
-  async function presentCustomActionEditor(action?: KeyboardCustomAction) {
+  async function presentCustomActionEditor(
+    action?: KeyboardCustomAction,
+    onSaved?: (action: KeyboardCustomAction) => void,
+  ) {
     if (props.embeddedNavigation) {
+      embeddedCustomActionSavedRef.current = onSaved ?? null;
       setEmbeddedCustomAction(action ?? null);
       setEmbeddedCustomActionPresented(true);
       return;
@@ -547,7 +731,29 @@ export function SettingsView(props: {
       element: <CustomActionEditorView action={action} />,
       modalPresentationStyle: "pageSheet",
     });
-    if (next) saveCustomAction(next);
+    if (next) {
+      saveCustomAction(next);
+      onSaved?.(next);
+    }
+  }
+
+  async function presentKeyboardMenuSettings() {
+    if (props.embeddedNavigation) {
+      setKeyboardMenuPresented(true);
+      return;
+    }
+    await Navigation.present({
+      element: (
+        <NavigationStack>
+          <KeyboardMenuSettingsPage
+            settings={settings}
+            onMenuSettingsChanged={(keyboardMenu) => update({ keyboardMenu })}
+            onCustomEdit={(action, onSaved) => void presentCustomActionEditor(action, onSaved)}
+          />
+        </NavigationStack>
+      ),
+      modalPresentationStyle: "pageSheet",
+    });
   }
 
   async function presentPrivacyRulesEditor() {
@@ -571,12 +777,14 @@ export function SettingsView(props: {
       formStyle="grouped"
       toolbar={renderToolbar()}
       navigationDestination={props.keepHomeNavigationDestination || props.embeddedNavigation ? {
-        isPresented: Boolean(props.embeddedNavigation && (embeddedCustomActionPresented || privacyRulesPresented)),
+        isPresented: Boolean(props.embeddedNavigation && (embeddedCustomActionPresented || privacyRulesPresented || keyboardMenuPresented)),
         onChanged: (isPresented: boolean) => {
           if (!isPresented) {
             setEmbeddedCustomActionPresented(false);
             setEmbeddedCustomAction(undefined);
+            embeddedCustomActionSavedRef.current = null;
             setPrivacyRulesPresented(false);
+            setKeyboardMenuPresented(false);
           }
         },
         content: privacyRulesPresented ? (
@@ -606,8 +814,22 @@ export function SettingsView(props: {
             onCancel={() => setEmbeddedCustomActionPresented(false)}
             onSave={(action) => {
               saveCustomAction(action);
+              embeddedCustomActionSavedRef.current?.(action);
+              embeddedCustomActionSavedRef.current = null;
               setEmbeddedCustomActionPresented(false);
             }}
+          />
+        ) : keyboardMenuPresented ? (
+          <KeyboardMenuSettingsPage
+            settings={settings}
+            zoomNamespace={props.zoomNamespace}
+            navigationTransition={props.zoomNamespace ? {
+              type: "zoom",
+              sourceID: "keyboard-menu-settings",
+              namespace: props.zoomNamespace,
+            } : undefined}
+            onMenuSettingsChanged={(keyboardMenu) => update({ keyboardMenu })}
+            onCustomEdit={(action, onSaved) => void presentCustomActionEditor(action, onSaved)}
           />
         ) : <EmptyView />,
       } : undefined}
@@ -904,92 +1126,27 @@ export function SettingsView(props: {
       </Section>
 
       <Section header={<Text>长按菜单</Text>}>
-        <ForEach
-          count={getOrderedBuiltinActions().length}
-          itemBuilder={(index) => {
-            const action = getOrderedBuiltinActions()[index];
-            return action ? (
-              <Toggle
-                key={action.key}
-                value={settings.keyboardMenu.builtins[action.key]}
-                onChanged={(value: boolean) => updateBuiltin(action.key, value)}
-                toggleStyle="switch"
-              >
-                <Text>{action.title}</Text>
-              </Toggle>
-            ) : (
-              (null as any)
-            );
-          }}
-          onMove={reorderBuiltins}
-        />
-      </Section>
-
-      <Section header={<Text>自定义长按功能</Text>}>
-        {settings.keyboardMenu.customActions.length ? (
-          <ForEach
-            count={settings.keyboardMenu.customActions.length}
-            itemBuilder={(index) => {
-              const action = settings.keyboardMenu.customActions[index];
-              return action ? (
-                <HStack
-                  key={action.id}
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                  trailingSwipeActions={{
-                    allowsFullSwipe: false,
-                    actions: [
-                      <Button
-                        title=""
-                        systemImage="square.and.pencil"
-                        tint="systemOrange"
-                        action={() => void presentCustomActionEditor(action)}
-                      />,
-                      <Button
-                        title=""
-                        systemImage="trash"
-                        role="destructive"
-                        tint="systemRed"
-                        action={() => removeCustomAction(action.id)}
-                      />,
-                    ],
-                  }}
-                >
-                  <Text
-                    frame={{
-                      maxWidth: "infinity",
-                      alignment: "leading" as any,
-                    }}
-                  >
-                    {action.title}
-                  </Text>
-                  <Spacer />
-                  <Toggle
-                    title=""
-                    value={action.enabled}
-                    onChanged={(enabled: boolean) =>
-                      updateCustomAction(action.id, { enabled })
-                    }
-                    toggleStyle="switch"
-                  />
-                </HStack>
-              ) : (
-                (null as any)
-              );
-            }}
-            onMove={reorderCustomActions}
-          />
-        ) : (
-          <Text foregroundStyle="secondaryLabel">暂无自定义功能</Text>
-        )}
         <Button
-          title="添加自定义功能"
-          systemImage="plus"
-          matchedTransitionSource={props.zoomNamespace ? {
-            id: "custom-action-add",
+          buttonStyle="plain"
+          matchedTransitionSource={props.embeddedNavigation && props.zoomNamespace ? {
+            id: "keyboard-menu-settings",
             namespace: props.zoomNamespace,
           } : undefined}
-          action={() => void presentCustomActionEditor()}
-        />
+          action={() => void presentKeyboardMenuSettings()}
+        >
+          <HStack
+            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+            background="rgba(0,0,0,0.001)"
+            contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+          >
+            <Image systemName="text.badge.star" />
+            <Text>长按菜单</Text>
+            <Spacer />
+            <Text foregroundStyle="secondaryLabel">
+              {settings.keyboardMenu.grouped ? "按类别分组" : "不分组"}
+            </Text>
+          </HStack>
+        </Button>
       </Section>
     </Form>
   );

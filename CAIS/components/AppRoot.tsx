@@ -78,9 +78,11 @@ import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
   customActionSystemImage,
+  groupMenuBuiltins,
   getOrderedMenuBuiltins,
   menuBuiltinSystemImage,
   menuBuiltinTitle,
+  presentInAppBrowser,
   type MenuActionResult,
 } from "../utils/menu_actions"
 import { clearCurrentClipboardIfMatchesDeletedItem } from "../services/clipboard_cleanup"
@@ -630,6 +632,51 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     : undefined
   const orderedMenuBuiltins = getOrderedMenuBuiltins(settings)
   const enabledCustomActions = settings.keyboardMenu.customActions.filter((action) => action.enabled)
+
+  function contextBuiltinActions(item: ClipItem) {
+    const available = orderedMenuBuiltins.filter((action) => {
+      if (!settings.keyboardMenu.builtins[action]) return false
+      if (action === "tokenize") return item.kind !== "image"
+      if (action === "base64Encode") return true
+      if (action === "openUrl" || action === "openUrlInApp") return item.kind === "url"
+      return item.kind !== "image"
+    })
+    const button = (action: KeyboardMenuBuiltinAction) => (
+      <Button
+        key={action}
+        title={menuBuiltinTitle(action)}
+        systemImage={menuBuiltinSystemImage(action)}
+        action={() => action === "tokenize"
+          ? void openTokenResultForItem(item)
+          : void runBuiltinActionForItem(item, action)}
+      />
+    )
+    if (!settings.keyboardMenu.grouped) return available.map(button)
+    const topLevel = new Set(settings.keyboardMenu.ungroupedBuiltins)
+    return [
+      ...available.filter((action) => topLevel.has(action)).map(button),
+      ...groupMenuBuiltins(available, settings.keyboardMenu.ungroupedBuiltins).map((group) => (
+        <Menu key={group.id} title={group.title} systemImage={group.systemImage}>
+          {group.actions.map(button)}
+        </Menu>
+      )),
+    ]
+  }
+
+  function contextCustomActions(item: ClipItem) {
+    if (item.kind === "image" || !enabledCustomActions.length) return null
+    const buttons = enabledCustomActions.map((action) => (
+      <Button
+        key={action.id}
+        title={action.title}
+        systemImage={customActionSystemImage(action)}
+        action={() => void runCustomActionForItem(item, action)}
+      />
+    ))
+    return settings.keyboardMenu.grouped
+      ? <Menu title="自定义功能" systemImage="wand.and.stars">{buttons}</Menu>
+      : buttons
+  }
   const privateKeywords = useMemo(
     () => privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled),
     [settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled],
@@ -1766,7 +1813,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
 
   async function copyMenuResult(result: MenuActionResult, source: string) {
     if (result.kind === "openUrl") {
-      await Safari.openURL(result.url)
+      if (result.inApp) await presentInAppBrowser(result.url)
+      else await Safari.openURL(result.url)
       return
     }
     if (result.kind === "none") {
@@ -2047,34 +2095,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
             {item.kind === "image" ? (
               <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractTextFromImage(item)} />
             ) : null}
-            {item.kind !== "image" && settings.keyboardMenu.builtins.tokenize ? (
-              <Button title="分词" systemImage="text.magnifyingglass" action={() => void openTokenResultForItem(item)} />
-            ) : null}
-            {orderedMenuBuiltins.map((action) => {
-              const enabled = settings.keyboardMenu.builtins[action]
-              const supported = action !== "tokenize" && (
-                action === "base64Encode" ||
-                (action === "openUrl" ? item.kind === "url" : item.kind !== "image")
-              )
-              return enabled && supported ? (
-                <Button
-                  key={action}
-                  title={menuBuiltinTitle(action)}
-                  systemImage={menuBuiltinSystemImage(action)}
-                  action={() => void runBuiltinActionForItem(item, action)}
-                />
-              ) : null
-            })}
-            {item.kind !== "image" ? (
-              enabledCustomActions.map((action) => (
-                <Button
-                  key={action.id}
-                  title={action.title}
-                  systemImage={customActionSystemImage(action)}
-                  action={() => void runCustomActionForItem(item, action)}
-                />
-              ))
-            ) : null}
+            {contextBuiltinActions(item)}
+            {contextCustomActions(item)}
           </Group>
         )}
         leadingActions={[

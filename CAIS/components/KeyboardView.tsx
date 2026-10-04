@@ -8,6 +8,7 @@ import {
   Image,
   LazyHGrid,
   LazyHStack,
+  Menu,
   Picker,
   ProgressView,
   Script,
@@ -59,9 +60,11 @@ import {
   applyBuiltinMenuAction,
   applyCustomMenuAction,
   customActionSystemImage,
+  groupMenuBuiltins,
   getOrderedMenuBuiltins,
   menuBuiltinSystemImage,
   menuBuiltinTitle,
+  presentInAppBrowser,
   type MenuActionResult,
 } from "../utils/menu_actions"
 import { FavoriteFieldsPanel } from "./FavoriteFieldsPanel"
@@ -683,7 +686,8 @@ function ClipTileMenu(props: {
       return
     }
     if (result.kind === "openUrl") {
-      await Safari.openURL(result.url)
+      if (result.inApp) await presentInAppBrowser(result.url)
+      else await Safari.openURL(result.url)
       return
     }
     if (result.kind === "none") {
@@ -810,6 +814,16 @@ function ClipTileMenu(props: {
         return !isImage && builtins.lowercase ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
+      case "textBold":
+      case "textItalic":
+      case "textBoldItalic":
+      case "textMonospaced":
+      case "monospacedDigits":
+      case "textUnderline":
+      case "textStrikethrough":
+        return !isImage && builtins[action] ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
+        ) : null
       case "chineseAmount":
         return !isImage && builtins.chineseAmount ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
@@ -818,10 +832,34 @@ function ClipTileMenu(props: {
         return builtins.openUrl && item.kind === "url" ? (
           <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
         ) : null
+      case "openUrlInApp":
+        return builtins.openUrlInApp && item.kind === "url" ? (
+          <Button key={action} title={menuBuiltinTitle(action)} systemImage={menuBuiltinSystemImage(action)} action={() => void runBuiltinAction(action)} />
+        ) : null
       default:
         return null
     }
   }
+
+  const availableBuiltinActions = getOrderedMenuBuiltins(props.settings).filter((action) => {
+    if (!builtins[action]) return false
+    if (action === "tokenize") return !isImage
+    if (action === "base64Encode") return true
+    if (action === "openUrl" || action === "openUrlInApp") return item.kind === "url"
+    return !isImage
+  })
+  const customActionButtons = !isImage
+    ? props.settings.keyboardMenu.customActions
+      .filter((action) => action.enabled)
+      .map((action) => (
+        <Button
+          key={action.id}
+          title={action.title}
+          systemImage={customActionSystemImage(action)}
+          action={() => runCustomAction(action)}
+        />
+      ))
+    : []
 
   return (
     <Group>
@@ -841,19 +879,23 @@ function ClipTileMenu(props: {
       {isImage ? (
         <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractText()} />
       ) : null}
-      {getOrderedMenuBuiltins(props.settings).map((action) => renderBuiltinAction(action))}
-      {!isImage ? (
-        props.settings.keyboardMenu.customActions
-          .filter((action) => action.enabled)
-          .map((action) => (
-            <Button
-              key={action.id}
-              title={action.title}
-              systemImage={customActionSystemImage(action)}
-              action={() => runCustomAction(action)}
-            />
-          ))
-      ) : null}
+      {props.settings.keyboardMenu.grouped
+        ? [
+            ...availableBuiltinActions
+              .filter((action) => props.settings.keyboardMenu.ungroupedBuiltins.includes(action))
+              .map((action) => renderBuiltinAction(action)),
+            ...groupMenuBuiltins(availableBuiltinActions, props.settings.keyboardMenu.ungroupedBuiltins).map((group) => (
+              <Menu key={group.id} title={group.title} systemImage={group.systemImage}>
+                {group.actions.map((action) => renderBuiltinAction(action))}
+              </Menu>
+            )),
+          ]
+        : availableBuiltinActions.map((action) => renderBuiltinAction(action))}
+      {customActionButtons.length
+        ? props.settings.keyboardMenu.grouped
+          ? <Menu title="自定义功能" systemImage="wand.and.stars">{customActionButtons}</Menu>
+          : customActionButtons
+        : null}
       <Button title="删除" systemImage="trash" role="destructive" action={() => void deleteItem()} />
     </Group>
   )
@@ -1142,7 +1184,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   async function handleFavoriteFieldMenuResult(result: MenuActionResult | null, source: string) {
     if (!result || result.kind === "none") return
     if (result.kind === "openUrl") {
-      await Safari.openURL(result.url)
+      if (result.inApp) await presentInAppBrowser(result.url)
+      else await Safari.openURL(result.url)
       return
     }
     if (result.kind === "text") {

@@ -66,6 +66,9 @@ function sanitizeSettings(raw: any): CaisSettings {
       .filter((key: any) => builtinKeys.includes(key))
       .map((key: any) => key as KeyboardMenuBuiltinAction)
     : undefined
+  const ungroupedBuiltins = Array.isArray(raw?.keyboardMenu?.ungroupedBuiltins)
+    ? raw.keyboardMenu.ungroupedBuiltins.filter((key: any) => builtinKeys.includes(key))
+    : DEFAULT_CAIS_SETTINGS.keyboardMenu.ungroupedBuiltins
   const customActions = Array.isArray(raw?.keyboardMenu?.customActions)
     ? raw.keyboardMenu.customActions
       .map((item: any): KeyboardCustomAction => ({
@@ -122,6 +125,8 @@ function sanitizeSettings(raw: any): CaisSettings {
     favoriteFieldPrivateKeywords: String(raw?.favoriteFieldPrivateKeywords ?? "").slice(0, 2000),
     keyboardMaxItems: [10, 20, 30, 40, 50].includes(keyboardMaxItems) ? keyboardMaxItems : DEFAULT_CAIS_SETTINGS.keyboardMaxItems,
     keyboardMenu: {
+      grouped: Boolean(raw?.keyboardMenu?.grouped ?? DEFAULT_CAIS_SETTINGS.keyboardMenu.grouped),
+      ungroupedBuiltins,
       builtins,
       builtinOrder,
       customActions,
