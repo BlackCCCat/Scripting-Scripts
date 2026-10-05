@@ -16,12 +16,19 @@ export function FavoriteFieldsPanel(props: {
   fields: FavoriteField[]
   privateKeywords: PrivateFieldRule[]
   nativeGlassEffect: boolean
+  hideScrollEffects?: boolean
   onSelect: (field: FavoriteField) => void
   renderContextMenu?: (field: FavoriteField) => VirtualNode
 }) {
   const cornerRadius = 10
   return (
-    <ScrollView axes="vertical" scrollIndicator="hidden" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    <ScrollView
+      axes="vertical"
+      scrollIndicator="hidden"
+      scrollContentBackground={props.hideScrollEffects ? "hidden" : undefined}
+      scrollEdgeEffectHidden={props.hideScrollEffects ? true : undefined}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+    >
       <LazyVStack spacing={7} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
         <ForEach
           count={props.fields.length}

@@ -80,6 +80,9 @@ const KEYBOARD_LAYOUT_KEY = "cais_keyboard_row_count_v1"
 const KEYBOARD_TAB_KEY = "cais_keyboard_active_tab_v1"
 const RIME_KEYBOARD_SCRIPT_NAME = "Scripting Rime Keyboard"
 const KEYBOARD_EXIT_FEEDBACK_DELAY_MS = 90
+const hideKeyboardScrollEffects = Number(
+  String(Device.systemVersion ?? "").match(/\d+/)?.[0] ?? 0,
+) >= 26
 const LEGACY_SHARED_STORAGE_OPTIONS = { shared: true }
 let deleteRepeatTimer: any = null
 let lastPastedText = ""
@@ -1475,6 +1478,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
         <ScrollView
           axes="horizontal"
           scrollIndicator="hidden"
+          scrollContentBackground={hideKeyboardScrollEffects ? "hidden" : undefined}
+          scrollEdgeEffectHidden={hideKeyboardScrollEffects ? true : undefined}
           scrollTargetBehavior="viewAlignedLimitAlwaysByOne"
           frame={{ width: 154, height: 36 }}
         >
@@ -1506,6 +1511,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
             selectedIds={tokenPage.selectedIds}
             selectedText={tokenSelectedText}
             compact
+            hideScrollEffects={hideKeyboardScrollEffects}
             nativeGlassEffect={useNativeGlassEffect}
             onToggle={toggleToken}
           />
@@ -1518,6 +1524,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
           <FavoriteFieldsPanel
             fields={favoriteFieldsPage.fields}
             privateKeywords={favoriteFieldsPage.privateRules}
+            hideScrollEffects={hideKeyboardScrollEffects}
             nativeGlassEffect={useNativeGlassEffect}
             onSelect={insertFavoriteField}
             renderContextMenu={(field) => (
@@ -1546,6 +1553,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                 key={`clip-scroll-${keyboardLayout}-${layoutRevision}-${activeTab}`}
                 axes="horizontal"
                 scrollIndicator="hidden"
+                scrollContentBackground={hideKeyboardScrollEffects ? "hidden" : undefined}
+                scrollEdgeEffectHidden={hideKeyboardScrollEffects ? true : undefined}
                 frame={{ width: proxy.size.width, height: gridHeight }}
                 padding={{ leading: CLIP_SCROLL_SIDE_PADDING, trailing: CLIP_SCROLL_SIDE_PADDING }}
               >

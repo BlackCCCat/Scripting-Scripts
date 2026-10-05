@@ -108,6 +108,7 @@ export function TokenSelectionPanel(props: {
   compact?: boolean
   minHeight?: number
   nativeGlassEffect?: boolean
+  hideScrollEffects?: boolean
   onToggle: (token: CaisToken) => void
 }) {
   const colorScheme = useColorScheme()
@@ -178,7 +179,13 @@ export function TokenSelectionPanel(props: {
                 }, 120)
               })
             return (
-              <ScrollView axes="vertical" scrollIndicator="hidden" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+            <ScrollView
+              axes="vertical"
+              scrollIndicator="hidden"
+              scrollContentBackground={props.hideScrollEffects ? "hidden" : undefined}
+              scrollEdgeEffectHidden={props.hideScrollEffects ? true : undefined}
+              frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+            >
                 {props.tokens.length ? (
                   <LazyVStack
                     alignment="leading"
