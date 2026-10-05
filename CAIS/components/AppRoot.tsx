@@ -606,6 +606,11 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   const favoriteFormatFilterRef = useRef(favoriteFormatFilter)
   const homeRouteRef = useRef<HomeRoute | null>(null)
   const copyChangeSource = useRef({}).current
+  const deleteChangeSource = useRef({}).current
+  const appListRefreshInFlight = useRef(false)
+  const deleteInProgress = useRef(false)
+  const deleteNeedsListRefresh = useRef(false)
+  const deleteRefreshScheduled = useRef(false)
   const listRefreshBlocked = useRef(false)
   const listRefreshDeferred = useRef(false)
   const favoriteGroupOrderWrites = useRef<Promise<void>>(Promise.resolve())
@@ -784,6 +789,11 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       if (version <= lastSeenClipDataVersion) return
       lastSeenClipDataVersion = version
       if (source === copyChangeSource) return
+      if (source === deleteChangeSource) {
+        if (!deleteNeedsListRefresh.current) return
+        deleteNeedsListRefresh.current = false
+        deleteRefreshScheduled.current = true
+      }
       scheduleRefresh()
     }
 
@@ -1008,8 +1018,17 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     void captureClipboardChangeAndRefresh()
   }
 
+  async function refreshClipCounts(generation = appRefreshGeneration.current) {
+    const counts = await getClipKindCounts()
+    const groupCounts = await getFavoriteGroupItemCounts()
+    if (generation !== appRefreshGeneration.current) return
+    setClipKindCounts(counts)
+    setFavoriteGroupItemCounts(groupCounts)
+  }
+
   async function refresh(currentSettings = settingsRef.current) {
     const generation = ++appRefreshGeneration.current
+    if (deleteInProgress.current) deleteNeedsListRefresh.current = true
     const orderRevision = favoriteGroupOrderRevision.current
     const canUseDatabaseOrder = favoriteGroupOrderWritesPending.current === 0
     const groupLimit = Math.min(currentSettings.maxItems, APP_GROUP_PAGE_SIZE)
@@ -1018,13 +1037,16 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     let nextFavoriteGroups: ClipGroup[]
     let nextClipboardGroups: ClipGroup[]
     try {
-      [nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
+      appListRefreshInFlight.current = true
+      ;[nextFavoriteGroups, nextClipboardGroups] = await Promise.all([
         getClipGroups("favorites", search, groupLimit, 0, filters.favorites ?? undefined, favoriteFormatFilterRef.current ?? undefined),
         getClipGroups("clipboard", search, groupLimit, 0, filters.clipboard ?? undefined),
       ])
     } catch (error) {
       if (generation === appRefreshGeneration.current) setInitialDataError(true)
       throw error
+    } finally {
+      if (generation === appRefreshGeneration.current) appListRefreshInFlight.current = false
     }
     if (generation !== appRefreshGeneration.current) return
     const displayOrder = favoriteGroupDisplayOrder.current
@@ -1047,13 +1069,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     setClipboardGroups(nextClipboardGroups)
     setInitialDataReady(true)
     setInitialDataError(false)
-    void (async () => {
-      const counts = await getClipKindCounts()
-      const groupCounts = await getFavoriteGroupItemCounts()
-      if (generation !== appRefreshGeneration.current) return
-      setClipKindCounts(counts)
-      setFavoriteGroupItemCounts(groupCounts)
-    })().catch((error) => console.warn("[CAIS] Clip counts unavailable", error))
+    void refreshClipCounts(generation).catch((error) => console.warn("[CAIS] Clip counts unavailable", error))
   }
 
   async function updateSettings(nextSettings: CaisSettings) {
@@ -1327,6 +1343,13 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   }
 
   async function confirmDeleteItem(item: ClipItem) {
+    const needsFollowUpListRefresh = appListRefreshInFlight.current
+    deleteInProgress.current = true
+    deleteRefreshScheduled.current = false
+    if (needsFollowUpListRefresh) {
+      deleteNeedsListRefresh.current = true
+      appRefreshGeneration.current += 1
+    }
     setClipboardGroups((groups) => removingClipFromGroups(groups, item.id))
     favoriteGroups.setValue(visibleFavoriteGroups(removingClipFromGroups(favoriteGroups.value, item.id)))
     if (typeof (globalThis as any).setTimeout === "function") {
@@ -1334,8 +1357,16 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
     try {
       await clearCurrentClipboardIfMatchesDeletedItem(item)
-      await softDeleteClip(item)
+      await softDeleteClip(item, deleteChangeSource)
+      deleteInProgress.current = false
+      if (!deleteRefreshScheduled.current) {
+        void refreshClipCounts().catch((error) => console.warn("[CAIS] Clip counts unavailable", error))
+      }
+      deleteRefreshScheduled.current = false
     } catch (error: any) {
+      deleteInProgress.current = false
+      deleteNeedsListRefresh.current = false
+      deleteRefreshScheduled.current = false
       await refresh()
       await Dialog.alert({ message: String(error?.message ?? error ?? "删除失败") })
     }
