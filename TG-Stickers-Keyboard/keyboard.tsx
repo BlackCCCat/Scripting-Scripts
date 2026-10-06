@@ -1,5 +1,6 @@
 import {
   Button,
+  Device,
   DragGesture,
   HStack,
   Image,
@@ -35,6 +36,7 @@ const STICKER_CORNER = { type: "rect", cornerRadius: 6 } as any
 const CONTROL_BUTTON_SIZE = 56
 const CONTROL_ICON_SIZE = 48
 const KEYBOARD_EXIT_FEEDBACK_DELAY_MS = 70
+const HIDE_SCROLL_EDGE_EFFECT = Number(String(Device.systemVersion ?? "").match(/\d+/)?.[0] ?? 0) >= 26
 
 function run() {
   const keyboard = (globalThis as any).CustomKeyboard
@@ -200,7 +202,13 @@ function KeyboardView() {
         </Text>
       </HStack>
 
-      <ScrollView axes="horizontal" scrollIndicator="hidden" frame={{ maxWidth: "infinity" }}>
+      <ScrollView
+        axes="horizontal"
+        scrollIndicator="hidden"
+        scrollContentBackground="hidden"
+        scrollEdgeEffectHidden={HIDE_SCROLL_EDGE_EFFECT ? true : undefined}
+        frame={{ maxWidth: "infinity" }}
+      >
         <HStack spacing={6}>
           {displayPacks.map((pack) => (
             <PackButton
@@ -216,6 +224,8 @@ function KeyboardView() {
 
       <ScrollView
         axes="vertical"
+        scrollContentBackground="hidden"
+        scrollEdgeEffectHidden={HIDE_SCROLL_EDGE_EFFECT ? true : undefined}
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         background={"rgba(0,0,0,0.001)" as any}
         contentShape="rect"
