@@ -755,7 +755,7 @@ export async function extractFromWebView(
 ): Promise<ExtractedInfo> {
   const log = options?.onLog
   const report = options?.onProgress
-  const webView = new WebViewController({ ephemeral: true })
+  const webView = new WebViewController()
 
   try {
     log?.("正在创建 WebView 并设置移动端 UA…")

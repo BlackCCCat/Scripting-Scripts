@@ -224,12 +224,18 @@ function serializeCookiesForYtDlp(cookies: Cookie[]): string {
   return `${lines.join("\n")}\n`
 }
 
+export async function getDownloadSiteCookies(webView: WebViewController, url: string): Promise<Cookie[]> {
+  if (!isDouyinURL(url)) return webView.getCookies(url)
+  return (await webView.getAllCookies()).filter((cookie) =>
+    hostMatches(cookie.domain.toLowerCase().replace(/^\./, ""), ["douyin.com"]))
+}
+
 async function writeYtDlpCookieFileForURL(url: string, log?: DownloadLogFn): Promise<string | undefined> {
   try {
     await ensureTempDirectory()
     const webView = new WebViewController()
     try {
-      const cookies = await webView.getCookies(url)
+      const cookies = await getDownloadSiteCookies(webView, url)
       if (!cookies.length) {
         log?.("未找到可用于当前站点的 WebView Cookie。")
         await removeIfExists(YTDLP_COOKIE_PATH)

@@ -34,7 +34,7 @@ import {
   type DownloadProgress,
   type DownloadSuccess,
 } from "./services/douyin"
-import { cleanupCurrentDownloadFiles, clearDownloadCancelFlag, downloadMedia, getYtDlpVersion, installOrUpdateYtDlp, requestDownloadCancel } from "./services/media"
+import { cleanupCurrentDownloadFiles, clearDownloadCancelFlag, downloadMedia, getDownloadSiteCookies, getYtDlpVersion, installOrUpdateYtDlp, requestDownloadCancel } from "./services/media"
 import {
   clearHistoryRecords,
   initDatabase,
@@ -734,7 +734,7 @@ function View() {
         navigationTitle: t.loginCookies,
         fullscreen: true,
       })
-      const cookies = await webView.getCookies(loginURL)
+      const cookies = await getDownloadSiteCookies(webView, loginURL)
       const message = `${t.cookieLoginSaved}：${cookies.length}`
       setStatus(message)
       showToast(message)
