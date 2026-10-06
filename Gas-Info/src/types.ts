@@ -47,6 +47,8 @@ export interface ProvincePrice {
   prices: Record<FuelCode, number>
   /** 更新日期，如 "2026-05-31" */
   updatedAt: string
+  /** 当前来源提供的已执行调价说明，含日期与涨跌金额。 */
+  adjustmentText?: string
 }
 
 /** 单日历史油价点 */
@@ -76,6 +78,8 @@ export interface PriceForecast {
   perLiterRange: string | null
   /** 来源页面里的预测说明 */
   sourceText: string
+  /** 全国统一调价日历中最近一次已执行的调整金额。 */
+  adjustmentText?: string
 }
 
 /** 全量油价数据结构（接口返回的整体结构） */

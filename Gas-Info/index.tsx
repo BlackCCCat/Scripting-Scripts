@@ -25,6 +25,7 @@ import { NearbyPage } from "./src/NearbyPage"
 import { SettingsPage } from "./src/SettingsPage"
 import { useMarkdownReleaseNotesSheet } from "./src/ReleaseNotesSheet"
 import { Theme } from "./src/theme"
+import { invalidateOilPriceCache } from "./src/service"
 
 /** 给页面套上导航标题的容器 */
 function Page({
@@ -69,7 +70,11 @@ function App() {
   }
 
   function changeOilPriceSource(source: OilPriceSource) {
+    if (source === oilPriceSource) {
+      return
+    }
     setOilPriceSource(source)
+    invalidateOilPriceCache()
     setOilPriceSourceState(source)
     Widget.reloadAll()
   }

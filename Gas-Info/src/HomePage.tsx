@@ -12,6 +12,7 @@ import {
   Navigation,
   useState,
   useEffect,
+  useRef,
   TextField,
   Widget,
   gradient,
@@ -70,6 +71,7 @@ function HeaderCard({
   const bigPrice = province.prices[preferred]
   // 头部小卡片展示除高亮油品外的另外 3 个油品
   const others = FUELS.filter(f => f.code !== preferred)
+  const adjustmentText = province.adjustmentText ?? forecast.adjustmentText
 
   return (
     <VStack
@@ -172,6 +174,16 @@ function HeaderCard({
         >
           {forecast.sourceText}
         </Text>
+        {adjustmentText ? (
+          <Text
+            font={12}
+            foregroundStyle="rgba(255,255,255,0.85)"
+            multilineTextAlignment="center"
+            frame={{ maxWidth: "infinity" }}
+          >
+            {adjustmentText}
+          </Text>
+        ) : null}
       </VStack>
     </VStack>
   )
@@ -769,6 +781,8 @@ export function HomePage({
     string | null
   >(getManualProvinceName())
   const [sortMode, setSortMode] = useState<ProvinceSortMode>("default")
+  const previousSource = useRef(oilPriceSource)
+  const requestId = useRef(0)
 
   async function requestCurrentProvinceName(forceRefresh: boolean) {
     try {
@@ -787,7 +801,8 @@ export function HomePage({
     }
   }
 
-  async function load(forceRefresh = false) {
+  async function load(forceRefresh = false, refreshLocation = forceRefresh) {
+    const currentRequest = ++requestId.current
     if (forceRefresh) {
       setRefreshing(true)
     } else {
@@ -796,11 +811,14 @@ export function HomePage({
     setResolvingProvince(true)
     setError(null)
     try {
-      const provinceNamePromise = requestCurrentProvinceName(forceRefresh)
+      const provinceNamePromise = requestCurrentProvinceName(refreshLocation)
       const result = await fetchOilPrices({
         forceRefresh,
         preferredSource: oilPriceSource,
       })
+      if (currentRequest !== requestId.current) {
+        return
+      }
       setData(result)
       const cachedAutoProvince = matchProvince(
         result.provinces,
@@ -812,6 +830,9 @@ export function HomePage({
       }
 
       const provinceName = await provinceNamePromise
+      if (currentRequest !== requestId.current) {
+        return
+      }
       const matched = matchProvince(result.provinces, provinceName)
       const displayProvince = matched ?? cachedAutoProvince ?? result.provinces[0]
       if (matched) {
@@ -823,16 +844,30 @@ export function HomePage({
         Widget.reloadAll()
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "油价数据加载失败")
+      if (currentRequest === requestId.current) {
+        setError(e instanceof Error ? e.message : "油价数据加载失败")
+      }
     } finally {
-      setLoading(false)
-      setResolvingProvince(false)
-      setRefreshing(false)
+      if (currentRequest === requestId.current) {
+        setLoading(false)
+        setResolvingProvince(false)
+        setRefreshing(false)
+      }
     }
   }
 
   useEffect(() => {
-    load()
+    const sourceChanged = previousSource.current !== oilPriceSource
+    previousSource.current = oilPriceSource
+    if (sourceChanged) {
+      setData(null)
+      setAutoProvince(null)
+      setLoading(true)
+    }
+    load(sourceChanged, false)
+    return () => {
+      requestId.current += 1
+    }
   }, [oilPriceSource])
 
   const manualProvince = data

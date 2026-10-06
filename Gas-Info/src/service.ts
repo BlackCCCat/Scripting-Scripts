@@ -1,5 +1,6 @@
 import { fetch, type RequestInit, type Response } from "scripting"
 import {
+  FUELS,
   FuelCode,
   OilPriceData,
   OilPriceTrendData,
@@ -48,7 +49,7 @@ const SOYOUJIA_HOST = "https://www.soyoujia.cn"
 const SINOPEC_INIT_URL = "https://cx.sinopecsales.com/yjkqiantai/core/initCpb"
 const SINOPEC_PROVINCE_URL =
   "https://cx.sinopecsales.com/yjkqiantai/data/switchProvince"
-const CACHE_KEY = "oilPriceDataCache.v6"
+const CACHE_KEY = "oilPriceDataCache.v7"
 const HISTORY_CACHE_KEY_PREFIX = "oilPriceHistoryCache.v1."
 const REQUEST_GUARD_KEY = "oilPriceRequestGuard.v1"
 const PRIVATE_STORAGE = { shared: false }
@@ -137,6 +138,13 @@ const SINOPEC_FUEL_FIELDS: Record<FuelCode, string[]> = {
   "98": ["GAS_98", "E98", "AIPAO_GAS_98", "AIPAO_GAS_E98"],
   "0": ["CHECHAI_0", "CHAI_0"],
 }
+let oilPriceRequestId = 0
+
+/** 切换首选源时丢弃当日回退缓存，重新尝试新来源。 */
+export function invalidateOilPriceCache(): void {
+  oilPriceRequestId += 1
+  Storage.remove(CACHE_KEY, PRIVATE_STORAGE)
+}
 
 /** 油价数据服务层：按首选源抓取，超时或缺数据时自动回退补全。 */
 export async function fetchOilPrices(options?: {
@@ -148,18 +156,22 @@ export async function fetchOilPrices(options?: {
   if (!options?.forceRefresh && cached) {
     return cached.data
   }
+  const currentRequest = ++oilPriceRequestId
 
   try {
     const data = await fetchCombinedOilPrices(preferredSource)
-    Storage.set<OilPriceCache>(
-      CACHE_KEY,
-      {
-        savedDate: todayKey(),
-        preferredSource,
-        data,
-      },
-      PRIVATE_STORAGE
-    )
+    // 切源期间，旧请求仍可能完成，不能覆盖当前来源的缓存。
+    if (currentRequest === oilPriceRequestId && getOilPriceSource() === preferredSource) {
+      Storage.set<OilPriceCache>(
+        CACHE_KEY,
+        {
+          savedDate: todayKey(),
+          preferredSource,
+          data,
+        },
+        PRIVATE_STORAGE
+      )
+    }
 
     return data
   } catch (e) {
@@ -172,6 +184,7 @@ export async function fetchOilPrices(options?: {
 }
 
 function readOilPriceCache(preferredSource: OilPriceSource): OilPriceCache | null {
+  Storage.remove("oilPriceDataCache.v6", PRIVATE_STORAGE)
   const cached = Storage.get<OilPriceCache>(CACHE_KEY, PRIVATE_STORAGE)
   if (
     isUsableOilData(cached?.data) &&
@@ -302,7 +315,7 @@ function hasIncompleteProvincePrices(data: OilPriceData): boolean {
 }
 
 function hasConcreteForecast(forecast: PriceForecast): boolean {
-  return forecast.perTon !== null && forecast.perLiterRange !== null
+  return forecast.perTon !== null && Number.isFinite(forecast.perTon)
 }
 
 async function fetchSourceWithTimeout(
@@ -462,29 +475,48 @@ async function resolveForecast(
   const qiyoujiage = fetched.find(item => {
     return item.sourceId === "qiyoujiage" && hasConcreteForecast(item.forecast)
   })
-  if (qiyoujiage) {
-    return qiyoujiage.forecast
-  }
-
-  const sourceForecast = fetched.find(item =>
-    hasForecastDate(item.forecast)
+  const sourceForecast = (
+    fetched.find(item => hasConcreteForecast(item.forecast)) ??
+    fetched.find(item => hasForecastDate(item.forecast))
   )?.forecast
 
-  try {
-    const forecast = await withTimeout(
-      fetchQiyoujiageForecast,
-      SUPPLEMENT_TIMEOUT_MS,
-      "调价预测"
-    )
-    return hasForecastDate(forecast)
-      ? forecast
-      : sourceForecast ?? forecast
-  } catch {
-    return (
-      sourceForecast ??
-      defaultForecast("下次调价信息以数据来源页面公布为准。")
-    )
+  const [supplement, adjustmentText] = await Promise.all([
+    qiyoujiage
+      ? Promise.resolve(qiyoujiage.forecast)
+      : withTimeout(
+          fetchQiyoujiageForecast,
+          SUPPLEMENT_TIMEOUT_MS,
+          "调价预测"
+        ).catch(() => null),
+    fetched.some(item => item.sourceId === "soyoujia")
+      ? withTimeout(
+          fetchSoyoujiaAdjustmentText,
+          SUPPLEMENT_TIMEOUT_MS,
+          "搜油价实际调价"
+        ).catch(() => undefined)
+      : Promise.resolve(undefined),
+  ])
+  let forecast = sourceForecast ?? defaultForecast("下次调价信息以数据来源页面公布为准。")
+  if (
+    supplement &&
+    (hasConcreteForecast(supplement) ||
+      (!hasConcreteForecast(forecast) && hasForecastDate(supplement)))
+  ) {
+    forecast = supplement
   }
+  return {
+    ...forecast,
+    adjustmentText: adjustmentText ?? forecast.adjustmentText ?? sourceForecast?.adjustmentText,
+  }
+}
+
+async function fetchSoyoujiaAdjustmentText(): Promise<string | undefined> {
+  const response = await fetchSoyoujia(
+    `${SOYOUJIA_HOST}/tiaojia`,
+    "搜油价实际调价",
+    SUPPLEMENT_TIMEOUT_MS
+  )
+  return response.ok ? parseSoyoujiaAdjustmentText(await response.text()) : undefined
 }
 
 async function fetchQiyoujiageForecast(): Promise<PriceForecast> {
@@ -512,11 +544,15 @@ function qiyoujiageRequestInit(
   }
 }
 
-async function fetchSoyoujia(url: string, debugLabel: string): Promise<Response> {
+async function fetchSoyoujia(
+  url: string,
+  debugLabel: string,
+  timeoutMs = SOURCE_TIMEOUT_MS
+): Promise<Response> {
   await waitForSoyoujiaBudget()
   const response = await fetch(url, {
     headers: soyoujiaHeaders(),
-    timeout: SOURCE_TIMEOUT_MS / 1000,
+    timeout: timeoutMs / 1000,
     debugLabel,
   })
   recordSoyoujiaResponse(response.status)
@@ -827,7 +863,33 @@ function normalizeSinopecProvince(
     province: spec.name,
     prices,
     updatedAt: pickSinopecUpdatedAt(records) ?? todayKey(),
+    adjustmentText: sinopecAdjustmentText(records),
   }
+}
+
+function sinopecAdjustmentText(records: Record<string, any>[]): string | undefined {
+  const changes: string[] = []
+  for (const { code } of FUELS) {
+    // 涨跌必须来自实际用于展示该油品价格的同一个字段和记录。
+    for (const field of SINOPEC_FUEL_FIELDS[code]) {
+      const record = records.find(item => isValidFuelPrice(Number(item[field])))
+      if (!record) {
+        continue
+      }
+      const raw = record[`${field}_STATUS`]
+      const value = Number(raw)
+      if (raw !== undefined && raw !== null && raw !== "" && Number.isFinite(value)) {
+        const label = code === "0" ? "0号柴油" : `${code}号`
+        changes.push(`${label} ${value > 0 ? "+" : ""}${value.toFixed(2)}`)
+      }
+      break
+    }
+  }
+  if (!changes.length) {
+    return undefined
+  }
+  const date = pickSinopecUpdatedAt(records)
+  return `上次实际调价${date ? `（${adjustmentDateText(date)}）` : ""}：${changes.join(" · ")} 元/升`
 }
 
 function extractSinopecPriceRecords(json: any): Record<string, any>[] {
@@ -961,6 +1023,7 @@ function mergeProvince(
         : fallback.prices["0"],
     },
     updatedAt: latestDate(primary.updatedAt, fallback.updatedAt),
+    adjustmentText: primary.adjustmentText,
   }
 }
 
@@ -1103,19 +1166,18 @@ function parseUpdatedAt(html: string): string {
 
 function parseForecast(html: string): OilPriceData["forecast"] {
   const text = htmlText(html)
-  const match = text.match(
-    /油价(\d{1,2})月(\d{1,2})日24时调整.*?预计(上调|下调)(\d+)元\/吨\(([0-9.]+元\/升-[0-9.]+元\/升)\)/
+  const date = text.match(/油价(\d{1,2})月(\d{1,2})日24(?:时|:00)调整/)
+  const amount = text.match(
+    /预计(上调|下调)(?:油价)?(\d+(?:\.\d+)?)元\/吨(?:[（(]([0-9.]+元\/升[-～~][0-9.]+元\/升)[）)])?/
   )
-
-  if (!match) {
+  if (!date) {
     return defaultForecast("下次调价信息以数据来源页面公布为准。")
   }
-
-  const month = Number(match[1])
-  const day = Number(match[2])
-  const direction = match[3] as "上调" | "下调"
-  const perTon = Number(match[4])
-  const perLiterRange = match[5]
+  const month = Number(date[1])
+  const day = Number(date[2])
+  const direction = amount ? amount[1] as "上调" | "下调" : "调整"
+  const perTon = amount ? Number(amount[2]) : null
+  const perLiterRange = amount?.[3] ?? null
 
   return {
     nextAdjustText: `${String(month).padStart(2, "0")}月${String(day).padStart(
@@ -1124,10 +1186,36 @@ function parseForecast(html: string): OilPriceData["forecast"] {
     )}日 24:00`,
     remainingDays: daysUntil(month, day),
     direction,
-    perTon: Number.isFinite(perTon) ? perTon : null,
+    perTon,
     perLiterRange,
-    sourceText: `目前预计${direction}${perTon}元/吨（${perLiterRange}）`,
+    sourceText: perTon !== null
+      ? `目前预计${direction}${perTon}元/吨${perLiterRange ? `（${perLiterRange}）` : ""}`
+      : "下次调价金额暂未公布。",
   }
+}
+
+function parseSoyoujiaAdjustmentText(html: string): string | undefined {
+  const rows = Array.from(
+    htmlText(html).matchAll(/(\d{4}-\d{2}-\d{2})([\s\S]*?)(?=\d{4}-\d{2}-\d{2}|$)/g)
+  ).filter(row => row[1] < todayKey()).sort((a, b) => b[1].localeCompare(a[1]))
+  for (const row of rows) {
+    const amount = row[2].match(
+      /汽油每吨(上涨|下跌)(\d+(?:\.\d+)?)元[,，]?柴油每吨(上涨|下跌)(\d+(?:\.\d+)?)元/
+    )
+    if (amount) {
+      const gasoline = `${amount[1] === "上涨" ? "+" : "-"}${amount[2]}`
+      const diesel = `${amount[3] === "上涨" ? "+" : "-"}${amount[4]}`
+      return `上次实际调价（${adjustmentDateText(row[1])}）：汽油${gasoline} · 柴油${diesel} 元/吨`
+    }
+    if (row[2].includes("不作调整")) {
+      return `上次实际调价（${adjustmentDateText(row[1])}）：不作调整`
+    }
+  }
+  return undefined
+}
+
+function adjustmentDateText(date: string): string {
+  return `${date.slice(5, 7)}月${date.slice(8, 10)}日`
 }
 
 function parseSoyoujiaForecast(html: string): PriceForecast {
