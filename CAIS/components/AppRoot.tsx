@@ -123,7 +123,7 @@ let appMonitorStopper: (() => void) | null = null
 type AppRootMode = "app" | "home"
 type ClipKindFilter = ClipKind | null
 type HomeRoute =
-  | { kind: "addContent" }
+  | { kind: "addContent"; zoomSourceID?: string }
   | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number; zoomSourceID?: string }
   | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[]; zoomSourceID?: string }
   | { kind: "favoriteGroupEditor" }
@@ -1177,7 +1177,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   async function openBlankEditor() {
     if (blankEditorOpening.current) return
     if (embeddedHomeNavigation) {
-      presentHomeRoute({ kind: "addContent" })
+      presentHomeRoute({ kind: "addContent", zoomSourceID: homeZoomNamespace ? "home-add-content" : undefined })
       return
     }
     blankEditorOpening.current = true
@@ -2579,6 +2579,10 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           <Button
             title="采集剪贴板"
             systemImage="doc.badge.plus"
+            matchedTransitionSource={homeZoomNamespace ? {
+              id: "home-add-content",
+              namespace: homeZoomNamespace,
+            } : undefined}
             disabled={loading}
             action={withHaptic(openBlankEditor)}
           />
@@ -2605,6 +2609,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           navigationTitle="添加内容"
           iconOnlyToolbar
           embedded
+          navigationTransition={homeRoute.zoomSourceID ? homeZoomTransition(homeRoute.zoomSourceID) : undefined}
           onCancel={() => void closeHomeRoute()}
           onSave={(content) => {
             takeHomeRoute()
