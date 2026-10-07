@@ -731,11 +731,11 @@ export async function deleteClip(id: string): Promise<void> {
   await db.execute("DELETE FROM clips WHERE id = ?", [id])
 }
 
-export async function deleteClipboardClipsByRange(range: ClipboardClearRange): Promise<void> {
+export async function deleteClipboardClipsByRange(range: ClipboardClearRange, now = Date.now()): Promise<void> {
   const db = await initializeDatabase()
-  const filter = clipboardRangeClause(range)
+  const filter = clipboardRangeClause(range, now)
   await db.execute(
-    `DELETE FROM clips WHERE manual_favorite = 0 AND ${filter.clause}`,
+    `DELETE FROM clips WHERE manual_favorite = 0 AND favorite = 0 AND ${filter.clause}`,
     filter.params
   )
 }
@@ -745,7 +745,7 @@ export async function deleteFavoriteClips(): Promise<void> {
   await db.execute("DELETE FROM clips WHERE favorite = 1")
 }
 
-export async function listImagePaths(options: { favoritesOnly?: boolean; clipboardRange?: ClipboardClearRange } = {}): Promise<string[]> {
+export async function listImagePaths(options: { favoritesOnly?: boolean; clipboardRange?: ClipboardClearRange; now?: number } = {}): Promise<string[]> {
   const db = await initializeDatabase()
   const clauses = ["image_path IS NOT NULL"]
   const params: any[] = []
@@ -755,7 +755,8 @@ export async function listImagePaths(options: { favoritesOnly?: boolean; clipboa
     clauses.push("manual_favorite = 0")
   }
   if (options.clipboardRange) {
-    const filter = clipboardRangeClause(options.clipboardRange)
+    clauses.push("favorite = 0")
+    const filter = clipboardRangeClause(options.clipboardRange, options.now)
     clauses.push(filter.clause)
     params.push(...filter.params)
   }

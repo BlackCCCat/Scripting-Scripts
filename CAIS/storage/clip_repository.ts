@@ -295,8 +295,9 @@ export async function clearFavoriteClips(): Promise<void> {
 }
 
 export async function clearClipboardClipsByRange(range: ClipboardClearRange): Promise<void> {
-  const imagePaths = await listImagePaths({ clipboardRange: range })
-  await deleteClipboardClipsByRange(range)
+  const now = Date.now()
+  const imagePaths = await listImagePaths({ clipboardRange: range, now })
+  await deleteClipboardClipsByRange(range, now)
   for (const path of imagePaths) await removeImage(path)
   bumpClipDataVersion()
 }

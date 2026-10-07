@@ -175,14 +175,13 @@ function InteractiveClipRow(props: {
   const deleteDialogPresenter = useRef<() => void>()
   const trailingActions = [
     props.primaryTrailingAction,
-    ...(props.allowDelete ? [
-      <Button
-        title=""
-        systemImage="trash"
-        tint="systemRed"
-        action={withHaptic(() => deleteDialogPresenter.current?.())}
-      />,
-    ] : []),
+    <Button
+      title=""
+      systemImage="trash"
+      tint={props.allowDelete ? "systemRed" : "systemGray"}
+      disabled={!props.allowDelete}
+      action={withHaptic(() => deleteDialogPresenter.current?.())}
+    />,
   ]
 
   return (
@@ -2802,7 +2801,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         {renderGroupedClipList(
           clipboardGroups,
           query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-          { allowDelete: (item) => !item.manualFavorite }
+          { allowDelete: (item) => !item.favorite && !item.manualFavorite }
         )}
       </Form>
     )
@@ -2867,7 +2866,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
             {renderGroupedClipList(
               clipboardGroups,
               query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-              { allowDelete: (item) => !item.manualFavorite }
+              { allowDelete: (item) => !item.favorite && !item.manualFavorite }
             )}
           </Form>
         </NavigationStack>
