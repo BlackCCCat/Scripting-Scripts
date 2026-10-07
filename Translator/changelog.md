@@ -1,3 +1,7 @@
+## v3.0.4
+- improve:脚本运行界面输入框三个按钮视觉优化
+- improve:输入框任意位置均可唤起键盘进行输入
+
 ## v3.0.3
 - improve: 翻译引擎Scripting Assistant的模型选择使用新的API（需Scripting tf>=3.3.0(19)）
 

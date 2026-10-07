@@ -780,33 +780,41 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                 }}
                 prompt="输入要翻译的文本"
                 axis="vertical"
+                lineLimit={{ min: 5, max: 12 }}
                 submitLabel="done"
                 onSubmit={runTranslation}
-                frame={{ minHeight: 96, maxWidth: "infinity" as any, alignment: "topLeading" as any }}
+                contentShape="rect"
+                frame={{ maxWidth: "infinity" as any, alignment: "topLeading" as any }}
               />
-              <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "trailing" as any }}>
+              <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
                 <Button
-                  title="清空"
-                  systemImage="xmark.circle"
                   buttonStyle="bordered"
                   controlSize="regular"
                   disabled={!hasInput}
                   action={clearSourceText}
-                />
+                >
+                  <HStack spacing={6} frame={{ maxWidth: "infinity", minHeight: 22, alignment: "center" as any }}>
+                    <Image systemName="xmark.circle" />
+                    <Text>清空</Text>
+                  </HStack>
+                </Button>
                 <Button
-                  title="粘贴"
-                  systemImage="doc.on.clipboard"
                   buttonStyle="bordered"
                   controlSize="regular"
                   action={pasteFromPasteboard}
-                />
+                >
+                  <HStack spacing={6} frame={{ maxWidth: "infinity", minHeight: 22, alignment: "center" as any }}>
+                    <Image systemName="doc.on.clipboard" />
+                    <Text>粘贴</Text>
+                  </HStack>
+                </Button>
                 <Button
                   buttonStyle="borderedProminent"
                   controlSize="regular"
                   disabled={!hasInput}
                   action={runTranslation}
                 >
-                  <HStack spacing={6}>
+                  <HStack spacing={6} frame={{ maxWidth: "infinity", minHeight: 22, alignment: "center" as any }}>
                     <Image
                       systemName="arrow.triangle.2.circlepath"
                       foregroundStyle="white"

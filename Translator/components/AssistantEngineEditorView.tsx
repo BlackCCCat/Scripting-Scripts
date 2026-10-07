@@ -19,6 +19,7 @@ const ASSISTANT_PROVIDER_OPTIONS = [
   { id: "anthropic", label: "Anthropic" },
   { id: "deepseek", label: "DeepSeek" },
   { id: "openrouter", label: "OpenRouter" },
+  { id: "grok", label: "Grok" },
   { id: "custom", label: "Custom" },
 ] as const
 
