@@ -777,6 +777,7 @@ function ClipTileMenu(props: {
   }
 
   async function deleteItem() {
+    if (props.scope === "clipboard" && item.favorite) return
     await clearCurrentClipboardIfMatchesDeletedItem(item)
     await softDeleteClip(item)
     await props.onRefresh()
@@ -899,7 +900,14 @@ function ClipTileMenu(props: {
           ? <Menu title="自定义功能" systemImage="wand.and.stars">{customActionButtons}</Menu>
           : customActionButtons
         : null}
-      <Button title="删除" systemImage="trash" role="destructive" action={() => void deleteItem()} />
+      <Button
+        title="删除"
+        systemImage="trash"
+        role={props.scope === "clipboard" && item.favorite ? undefined : "destructive"}
+        tint={props.scope === "clipboard" && item.favorite ? "systemGray" : "systemRed"}
+        disabled={props.scope === "clipboard" && item.favorite}
+        action={() => void deleteItem()}
+      />
     </Group>
   )
 }
