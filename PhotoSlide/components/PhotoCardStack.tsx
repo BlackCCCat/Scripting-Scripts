@@ -7,11 +7,12 @@ import {
   useEffect,
   useState,
 } from "scripting"
-import { CARD_CORNER_RADIUS, cardHeight, cardWidth } from "../constants"
+import { CARD_CORNER_RADIUS, cardWidth } from "../constants"
 import type { CardMotionController, PointOffset } from "../types"
 import { nextCardOffsetY, nextCardOpacity, nextCardScale } from "../utils"
 
 type PhotoCardStackProps = {
+  height: number
   currentImage: UIImage | null
   nextImage: UIImage | null
   motionController: CardMotionController
@@ -26,6 +27,7 @@ function PhotoImageCard({
   opacity,
   shadowOpacity,
   zIndex,
+  height,
 }: {
   image: UIImage | null
   scaleEffect: number
@@ -33,10 +35,11 @@ function PhotoImageCard({
   opacity: number
   shadowOpacity: number
   zIndex: number
+  height: number
 }) {
   return (
     <ZStack
-      frame={{ width: cardWidth, height: cardHeight }}
+      frame={{ width: cardWidth, height }}
       background="black"
       clipShape={{ type: "rect", cornerRadius: CARD_CORNER_RADIUS, style: "continuous" }}
       shadow={{ color: `rgba(0,0,0,${shadowOpacity})`, radius: 10, y: 4 }}
@@ -51,7 +54,7 @@ function PhotoImageCard({
           image={image}
           resizable
           scaleToFit
-          frame={{ width: cardWidth, height: cardHeight }}
+          frame={{ width: cardWidth, height }}
           clipShape={{ type: "rect", cornerRadius: CARD_CORNER_RADIUS, style: "continuous" }}
           allowsHitTesting={false}
         />
@@ -70,13 +73,15 @@ function PhotoImageCard({
 function FixedGestureLayer({
   onDragChanged,
   onDragEnded,
+  height,
 }: {
   onDragChanged: (value: any) => void
   onDragEnded: (value: any) => void
+  height: number
 }) {
   return (
     <ZStack
-      frame={{ width: cardWidth, height: cardHeight }}
+      frame={{ width: cardWidth, height }}
       background="clear"
       contentShape={{ type: "rect", cornerRadius: CARD_CORNER_RADIUS, style: "continuous" }}
       onDragGesture={{
@@ -91,6 +96,7 @@ function FixedGestureLayer({
 }
 
 export function PhotoCardStack({
+  height,
   currentImage,
   nextImage,
   motionController,
@@ -109,8 +115,9 @@ export function PhotoCardStack({
   const { offset: dragOffset, scale: cardScale, opacity: cardOpacity } = motion
 
   return (
-    <ZStack frame={{ width: cardWidth, height: cardHeight }}>
+    <ZStack frame={{ width: cardWidth, height }}>
       <PhotoImageCard
+        height={height}
         image={nextImage}
         scaleEffect={nextCardScale(dragOffset)}
         offset={{ x: 0, y: nextCardOffsetY(dragOffset) }}
@@ -120,6 +127,7 @@ export function PhotoCardStack({
       />
 
       <PhotoImageCard
+        height={height}
         image={currentImage}
         scaleEffect={cardScale}
         offset={dragOffset}
@@ -129,6 +137,7 @@ export function PhotoCardStack({
       />
 
       <FixedGestureLayer
+        height={height}
         onDragChanged={onDragChanged}
         onDragEnded={onDragEnded}
       />

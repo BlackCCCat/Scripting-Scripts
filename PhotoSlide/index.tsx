@@ -13,10 +13,12 @@ import {
   Menu,
   DatePicker,
   ProgressView,
+  ReorderableForEach,
   Toolbar,
   ToolbarItem,
   useEffect,
   useMemo,
+  useObservable,
   useRef,
   useState,
   ScrollView,
@@ -113,6 +115,7 @@ function App() {
   const [message, setMessage] = useState("")
   const [showToast, setShowToast] = useState(false)
   const [showManagementSheet, setShowManagementSheet] = useState(false)
+  const [showAlbumPicker, setShowAlbumPicker] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
   const [showSkippedOnly, setShowSkippedOnly] = useState(false)
   const [skippedPhotoIds, setSkippedPhotoIds] = useState<string[]>(() => {
@@ -124,6 +127,7 @@ function App() {
   const [hiddenAlbumIds, setHiddenAlbumIds] = useState<string[]>(() => {
     return Storage.get<string[]>("hiddenAlbumIds") ?? []
   })
+  const activeReorderAlbum = useObservable<AlbumOption | null>(null)
 
   function toggleAlbumVisibility(albumId: string) {
     setHiddenAlbumIds(prev => {
@@ -235,6 +239,10 @@ function App() {
       ? selectedAlbum?.title ?? "相簿"
       : "全部照片"
   const targetAlbums = useMemo(() => albums.filter(album => album.collection.type === "album"), [albums])
+  const visibleTargetAlbums = useMemo(
+    () => targetAlbums.filter(album => !hiddenAlbumIds.includes(album.id)),
+    [targetAlbums, hiddenAlbumIds]
+  )
   const sourceIds = useMemo(() => allSourceAssetsRef.current.map(asset => asset.localIdentifier), [allSourceAssetsRef.current])
   const { skippedCount, remainingCount } = useMemo(() => {
     let skipped = 0
@@ -375,6 +383,7 @@ function App() {
 
     try {
       const collections = await Photos.fetchAlbums()
+      const savedOrder = Storage.get<string[]>("photoSlideAlbumOrder") ?? []
       const options = collections
         .filter(collection => collection.title || collection.estimatedAssetCount > 0)
         .map<AlbumOption>(collection => ({
@@ -388,6 +397,11 @@ function App() {
           if (left.collection.type !== right.collection.type) {
             return left.collection.type === "album" ? -1 : 1
           }
+          const leftIndex = savedOrder.indexOf(left.id)
+          const rightIndex = savedOrder.indexOf(right.id)
+          if (leftIndex >= 0 && rightIndex >= 0) return leftIndex - rightIndex
+          if (leftIndex >= 0) return -1
+          if (rightIndex >= 0) return 1
           return left.title.localeCompare(right.title)
         })
 
@@ -1016,6 +1030,10 @@ function App() {
 
       const ok = await Photos.deleteAlbums([album.collection])
       if (ok) {
+        const savedOrder = Storage.get<string[]>("photoSlideAlbumOrder") ?? []
+        if (savedOrder.includes(album.id)) {
+          Storage.set("photoSlideAlbumOrder", savedOrder.map(id => id === album.id ? newCollection.localIdentifier : id))
+        }
         toast(`相簿已重命名为「${newTitle}」。`)
         await loadAlbums()
       } else {
@@ -1043,6 +1061,10 @@ function App() {
     try {
       const ok = await Photos.deleteAlbums([album.collection])
       if (ok) {
+        const savedOrder = Storage.get<string[]>("photoSlideAlbumOrder") ?? []
+        if (savedOrder.includes(album.id)) {
+          Storage.set("photoSlideAlbumOrder", savedOrder.filter(id => id !== album.id))
+        }
         toast(`相簿「${album.title}」已删除。`)
         await loadAlbums()
       } else {
@@ -1133,6 +1155,7 @@ function App() {
     foregroundStyle = "systemBlue",
     contextMenu,
     size = 44,
+    accessibilityLabel,
   }: {
     systemImage: string
     action: () => void
@@ -1140,6 +1163,7 @@ function App() {
     foregroundStyle?: any
     contextMenu?: any
     size?: number
+    accessibilityLabel?: string
   }) {
     return (
       <Button
@@ -1148,6 +1172,7 @@ function App() {
         buttonStyle="plain"
         frame={{ width: size, height: size }}
         contextMenu={contextMenu}
+        accessibilityLabel={accessibilityLabel}
       >
         <Image
           systemName={systemImage}
@@ -1187,34 +1212,40 @@ function App() {
     )
   }
 
-  function renderAlbumMenuItems() {
-    const visibleAlbums = targetAlbums.filter(album => !hiddenAlbumIds.includes(album.id))
+  function moveAlbumRows(indices: number[], newOffset: number) {
+    const moved = indices.map(index => targetAlbums[index]).filter((album): album is AlbumOption => Boolean(album))
+    if (moved.length === 0) return
+    const reordered = targetAlbums.filter((_, index) => !indices.includes(index))
+    reordered.splice(newOffset, 0, ...moved)
+    Storage.set("photoSlideAlbumOrder", reordered.map(album => album.id))
+    setAlbums([...reordered, ...albums.filter(album => album.collection.type !== "album")])
+  }
 
+  function renderAlbumPicker() {
     return (
-      <Group>
-        {visibleAlbums.map(album => (
-          <Button
-            key={album.id}
-            title={album.title}
-            systemImage="rectangle.stack"
-            action={() => void moveCurrentToAlbum(album)}
-          />
-        ))}
-
-        {visibleAlbums.length === 0 ? (
-          <Button
-            title="暂无快捷相簿"
-            systemImage="folder.badge.minus"
-            action={() => toast("请在下方「管理相簿」中启用相簿。")}
-          />
-        ) : null}
-
-        <Button
-          title="管理相簿..."
-          systemImage="gearshape"
-          action={() => setShowManagementSheet(true)}
-        />
-      </Group>
+      <ScrollView axes="horizontal" scrollIndicator="hidden" frame={{ width: cardWidth, height: 48 }}>
+        <HStack spacing={8} frame={{ height: 48 }}>
+          {renderIconButton({
+            systemImage: "gearshape",
+            action: () => setShowManagementSheet(true),
+            accessibilityLabel: "管理相簿",
+          })}
+          {visibleTargetAlbums.map(album => (
+            <Button
+              key={album.id}
+              action={() => void moveCurrentToAlbum(album)}
+              disabled={!currentItem || isBusy}
+              buttonStyle="bordered"
+              frame={{ maxWidth: 150, height: 44 }}
+            >
+              <HStack spacing={5}>
+                <Image systemName="rectangle.stack" font={14} />
+                <Text font={14} lineLimit={1}>{album.title}</Text>
+              </HStack>
+            </Button>
+          ))}
+        </HStack>
+      </ScrollView>
     )
   }
 
@@ -1256,66 +1287,64 @@ function App() {
           ) : (
             <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
               <VStack spacing={12} frame={{ maxWidth: "infinity" }}>
-                {targetAlbums.map(album => {
-                  const isHidden = hiddenAlbumIds.includes(album.id)
-                  return (
-                    <HStack
-                      key={album.id}
-                      spacing={12}
-                      padding={12}
-                      background="secondarySystemGroupedBackground"
-                      clipShape={{ type: "rect", cornerRadius: 14 }}
-                      frame={{ maxWidth: "infinity" }}
-                    >
-                      <Image
-                        systemName={isHidden ? "eye.slash" : "rectangle.stack"}
-                        font={16}
-                        foregroundStyle={isHidden ? "secondaryLabel" : "systemBlue"}
-                      />
-                      
-                      <Text font={16} fontWeight="semibold" foregroundStyle={isHidden ? "secondaryLabel" : "label"} lineLimit={1}>
-                        {album.title}
-                      </Text>
-                      
-                      <Spacer />
-                      
-                      <HStack spacing={16}>
-                        <Button
-                          action={() => toggleAlbumVisibility(album.id)}
-                          buttonStyle="plain"
-                        >
-                          <Image
-                            systemName={isHidden ? "eye.slash.fill" : "eye.fill"}
-                            font={18}
-                            foregroundStyle={isHidden ? "secondaryLabel" : "systemBlue"}
-                          />
-                        </Button>
-                        
-                        <Button
-                          action={() => void handleRenameAlbum(album)}
-                          buttonStyle="plain"
-                        >
-                          <Image
-                            systemName="pencil"
-                            font={18}
-                            foregroundStyle="systemOrange"
-                          />
-                        </Button>
-                        
-                        <Button
-                          action={() => void handleDeleteAlbum(album)}
-                          buttonStyle="plain"
-                        >
-                          <Image
-                            systemName="trash"
-                            font={18}
-                            foregroundStyle="systemRed"
-                          />
-                        </Button>
+                <ReorderableForEach
+                  active={activeReorderAlbum}
+                  data={targetAlbums}
+                  onMove={moveAlbumRows}
+                  builder={album => {
+                    const isHidden = hiddenAlbumIds.includes(album.id)
+                    return (
+                      <HStack
+                        key={album.id}
+                        spacing={12}
+                        padding={12}
+                        background="secondarySystemGroupedBackground"
+                        clipShape={{ type: "rect", cornerRadius: 14 }}
+                        frame={{ maxWidth: "infinity" }}
+                      >
+                        <Image systemName="line.3.horizontal" font={16} foregroundStyle="tertiaryLabel" />
+                        <Image
+                          systemName={isHidden ? "eye.slash" : "rectangle.stack"}
+                          font={16}
+                          foregroundStyle={isHidden ? "secondaryLabel" : "systemBlue"}
+                        />
+
+                        <Text font={16} fontWeight="semibold" foregroundStyle={isHidden ? "secondaryLabel" : "label"} lineLimit={1}>
+                          {album.title}
+                        </Text>
+
+                        <Spacer />
+
+                        <HStack spacing={16}>
+                          <Button
+                            action={() => toggleAlbumVisibility(album.id)}
+                            buttonStyle="plain"
+                          >
+                            <Image
+                              systemName={isHidden ? "eye.slash.fill" : "eye.fill"}
+                              font={18}
+                              foregroundStyle={isHidden ? "secondaryLabel" : "systemBlue"}
+                            />
+                          </Button>
+
+                          <Button
+                            action={() => void handleRenameAlbum(album)}
+                            buttonStyle="plain"
+                          >
+                            <Image systemName="pencil" font={18} foregroundStyle="systemOrange" />
+                          </Button>
+
+                          <Button
+                            action={() => void handleDeleteAlbum(album)}
+                            buttonStyle="plain"
+                          >
+                            <Image systemName="trash" font={18} foregroundStyle="systemRed" />
+                          </Button>
+                        </HStack>
                       </HStack>
-                    </HStack>
-                  )
-                })}
+                    )
+                  }}
+                />
               </VStack>
             </ScrollView>
           )}
@@ -1355,20 +1384,12 @@ function App() {
 
   function renderAlbumContextButton() {
     return (
-      <Menu
-        label={
-          <Image
-            systemName="rectangle.stack.badge.plus"
-            font={22}
-            foregroundStyle={!currentItem || isBusy ? "tertiaryLabel" : "systemBlue"}
-          />
-        }
-        buttonStyle="plain"
-        frame={{ width: 44, height: 44 }}
-        disabled={!currentItem || isBusy}
-      >
-        {renderAlbumMenuItems()}
-      </Menu>
+      renderIconButton({
+        systemImage: "rectangle.stack.badge.plus",
+        action: () => setShowAlbumPicker(visible => !visible),
+        disabled: !currentItem || isBusy,
+        accessibilityLabel: "选择相簿",
+      })
     )
   }
 
@@ -1692,14 +1713,16 @@ function App() {
                 })}
               </VStack>
             ) : currentItem ? (
-              <VStack spacing={12} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+              <VStack spacing={showAlbumPicker ? 6 : 12} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
                 <PhotoCardStack
+                  height={showAlbumPicker ? Math.max(240, cardHeight - 56) : cardHeight}
                   currentImage={imageCache.get(currentItem.id)}
                   nextImage={imageCache.get(nextItem?.id)}
                   motionController={motionController}
                   onDragChanged={handleDragChanged}
                   onDragEnded={handleDragEnded}
                 />
+                {showAlbumPicker ? renderAlbumPicker() : null}
                 {renderActionBar()}
                 <Spacer />
               </VStack>
