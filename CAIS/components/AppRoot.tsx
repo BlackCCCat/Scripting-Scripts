@@ -130,7 +130,7 @@ type HomeRoute =
   | { kind: "favoriteGroupManager"; groups: FavoriteGroup[]; counts: Record<string, number> }
   | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
   | { kind: "image"; item: ClipItem }
-  | { kind: "tokens"; tokens: CaisToken[] }
+  | { kind: "tokens"; tokens: CaisToken[]; zoomSourceID?: string }
 const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
   favorites: { total: 0, text: 0, url: 0, image: 0, plain: 0, fields: 0 },
   clipboard: { total: 0, text: 0, url: 0, image: 0 },
@@ -381,6 +381,7 @@ function ClipContentEditorView(props: {
 function AppTokenResultView(props: {
   tokens: CaisToken[]
   embedded?: boolean
+  navigationTransition?: NavigationZoomTransition
   onCopySelection?: (content: string) => void
 }) {
   const dismiss = Navigation.useDismiss()
@@ -403,6 +404,7 @@ function AppTokenResultView(props: {
 
   const page = (
     <VStack
+        navigationTransition={props.navigationTransition}
         navigationTitle="分词结果"
         navigationBarTitleDisplayMode="inline"
         tabBarVisibility={props.embedded ? "visible" : undefined}
@@ -638,7 +640,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   const orderedMenuBuiltins = getOrderedMenuBuiltins(settings)
   const enabledCustomActions = settings.keyboardMenu.customActions.filter((action) => action.enabled)
 
-  function contextBuiltinActions(item: ClipItem) {
+  function contextBuiltinActions(item: ClipItem, zoomSourceID?: string) {
     const available = orderedMenuBuiltins.filter((action) => {
       if (!settings.keyboardMenu.builtins[action]) return false
       if (action === "tokenize") return item.kind !== "image"
@@ -652,7 +654,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         title={menuBuiltinTitle(action)}
         systemImage={menuBuiltinSystemImage(action)}
         action={() => action === "tokenize"
-          ? void openTokenResultForItem(item)
+          ? void openTokenResultForItem(item, zoomSourceID)
           : void runBuiltinActionForItem(item, action)}
       />
     )
@@ -1701,7 +1703,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
   }
 
-  async function toggleFavoriteWithType(item: ClipItem) {
+  async function toggleFavoriteWithType(item: ClipItem, zoomSourceID?: string) {
     try {
       if (item.favorite || item.kind === "image") {
         await toggleFavorite(item)
@@ -1717,7 +1719,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       })
       if (selected == null) return
       if (selected === 1) {
-        await presentFavoriteEditor(item, "fields")
+        await presentFavoriteEditor(item, "fields", zoomSourceID)
         return
       }
       const content = await getFullClipContent(item.id)
@@ -1785,7 +1787,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     return renderClipOutput(item, await getFullClipContent(item.id))
   }
 
-  async function openTokenResultForText(source: string) {
+  async function openTokenResultForText(source: string, zoomSourceID?: string) {
     try {
       const tokens = tokenizeWords(source)
       if (!tokens.length) {
@@ -1793,7 +1795,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         return
       }
       if (embeddedHomeNavigation) {
-        presentHomeRoute({ kind: "tokens", tokens })
+        presentHomeRoute({ kind: "tokens", tokens, zoomSourceID })
         return
       }
       const result = await Navigation.present<string | null>({
@@ -1807,12 +1809,12 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
   }
 
-  async function openTokenResultForItem(item: ClipItem) {
+  async function openTokenResultForItem(item: ClipItem, zoomSourceID?: string) {
     if (item.kind === "image") {
       showToast("图片条目不支持分词")
       return
     }
-    await openTokenResultForText(await itemSource(item))
+    await openTokenResultForText(await itemSource(item), zoomSourceID)
   }
 
   async function saveTransformedResult(result: MenuActionResult, source: string): Promise<number> {
@@ -2111,7 +2113,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
               {item.kind === "image" ? (
                 <Button title="查看" systemImage="photo" action={() => void viewImageItem(item)} />
               ) : (
-                <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item)} />
+                <Button title="编辑" systemImage="square.and.pencil" action={() => void editItem(item, homeZoomNamespace ? rowZoomSourceID : undefined)} />
               )}
               <Button title="分享" systemImage="square.and.arrow.up" action={() => void shareItem(item)} />
             </ControlGroup>
@@ -2120,13 +2122,13 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
               <Button
                 title="转换为字段收藏"
                 systemImage="list.bullet.rectangle"
-                action={() => void presentFavoriteEditor(item, "fields")}
+                action={() => void presentFavoriteEditor(item, "fields", homeZoomNamespace ? rowZoomSourceID : undefined)}
               />
             ) : null}
             {item.kind === "image" ? (
               <Button title="提取文字" systemImage="text.viewfinder" action={() => void extractTextFromImage(item)} />
             ) : null}
-            {contextBuiltinActions(item)}
+            {contextBuiltinActions(item, homeZoomNamespace ? rowZoomSourceID : undefined)}
             {contextCustomActions(item)}
           </Group>
         )}
@@ -2136,7 +2138,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
               title=""
               systemImage={item.favorite ? "star.slash" : "star"}
               tint="systemYellow"
-              action={() => void toggleFavoriteWithType(item)}
+              action={() => void toggleFavoriteWithType(item, homeZoomNamespace ? rowZoomSourceID : undefined)}
             />,
           ]),
           <Button
@@ -2740,6 +2742,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       <AppTokenResultView
         tokens={homeRoute.tokens}
         embedded
+        navigationTransition={homeRoute.zoomSourceID ? homeZoomTransition(homeRoute.zoomSourceID) : undefined}
         onCopySelection={(content) => {
           takeHomeRoute()
           void persistTokenResult(content)

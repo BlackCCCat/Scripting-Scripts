@@ -118,7 +118,16 @@ export function FavoriteGroupManagerView(props: {
           : <Button title="" systemImage="xmark" accessibilityLabel="关闭" action={() => dismiss()} />,
         topBarTrailing: (
           <HStack spacing={12}>
-            <Button title="" systemImage="plus" accessibilityLabel="添加分组" action={add} />
+            <Button
+              title=""
+              systemImage="plus"
+              accessibilityLabel="添加分组"
+              matchedTransitionSource={props.zoomNamespace ? {
+                id: "favorite-group-add",
+                namespace: props.zoomNamespace,
+              } : undefined}
+              action={add}
+            />
             <Button
               title=""
               systemImage={editMode.value.isEditing ? "checkmark" : "arrow.up.arrow.down"}
@@ -139,9 +148,9 @@ export function FavoriteGroupManagerView(props: {
             key={editingGroup?.id ?? "new-favorite-group"}
             initial={editingGroup ?? undefined}
             embedded
-            navigationTransition={editingGroup && props.zoomNamespace ? {
+            navigationTransition={props.zoomNamespace ? {
               type: "zoom",
-              sourceID: `favorite-group:${editingGroup.id}`,
+              sourceID: editingGroup ? `favorite-group:${editingGroup.id}` : "favorite-group-add",
               namespace: props.zoomNamespace,
             } : undefined}
             onCancel={() => setEditorPresented(false)}

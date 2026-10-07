@@ -13,11 +13,13 @@ import {
 } from "scripting"
 import type { CaisSettings } from "../types"
 import type { LanShareRuntimeStatus } from "../services/lan_share_server"
+import type { NavigationZoomTransition } from "../utils/navigation_zoom"
 import { writeTextToPasteboard } from "../services/pasteboard_adapter"
 
 export function LanShareSettingsView(props: {
   value: CaisSettings
   status?: LanShareRuntimeStatus
+  navigationTransition?: NavigationZoomTransition
   onChanged: (settings: CaisSettings) => void
   onRotateToken?: () => void
 }) {
@@ -59,6 +61,7 @@ export function LanShareSettingsView(props: {
   return (
     <Form
       formStyle="grouped"
+      navigationTransition={props.navigationTransition}
       navigationTitle="局域网共享"
       navigationBarTitleDisplayMode="inline"
       toast={{

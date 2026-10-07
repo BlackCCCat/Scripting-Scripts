@@ -175,6 +175,10 @@ function CustomMenuActionsView(props: {
               return action ? (
                 <HStack
                   key={action.id}
+                  matchedTransitionSource={props.zoomNamespace ? {
+                    id: `custom-action:${action.id}`,
+                    namespace: props.zoomNamespace,
+                  } : undefined}
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                   trailingSwipeActions={{
                     allowsFullSwipe: false,
@@ -772,6 +776,36 @@ export function SettingsView(props: {
     if (value != null) update({ favoriteFieldPrivateKeywords: value });
   }
 
+  const lanSharePage = <LanShareSettingsView
+    value={settings}
+    status={props.lanShareStatus}
+    onChanged={props.onChanged}
+    onRotateToken={props.onRotateLanShareToken}
+    navigationTransition={props.zoomNamespace ? {
+      type: "zoom",
+      sourceID: "lan-share-settings",
+      namespace: props.zoomNamespace,
+    } : undefined}
+  />;
+  const lanShareRow = (
+    <HStack
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      background="rgba(0,0,0,0.001)"
+      contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
+      matchedTransitionSource={props.zoomNamespace ? {
+        id: "lan-share-settings",
+        namespace: props.zoomNamespace,
+      } : undefined}
+    >
+      <Image systemName="network" foregroundStyle="systemIndigo" />
+      <Text>局域网共享</Text>
+      <Spacer />
+      <Text foregroundStyle="secondaryLabel">
+        {settings.lanSharingEnabled ? "已开启" : "已关闭"}
+      </Text>
+    </HStack>
+  );
+
   return (
     <Form
       formStyle="grouped"
@@ -806,9 +840,9 @@ export function SettingsView(props: {
           <CustomActionEditorView
             action={embeddedCustomAction ?? undefined}
             embedded
-            navigationTransition={embeddedCustomAction === null && props.zoomNamespace ? {
+            navigationTransition={props.zoomNamespace ? {
               type: "zoom",
-              sourceID: "custom-action-add",
+              sourceID: embeddedCustomAction === null ? "custom-action-add" : `custom-action:${embeddedCustomAction.id}`,
               namespace: props.zoomNamespace,
             } : undefined}
             onCancel={() => setEmbeddedCustomActionPresented(false)}
@@ -857,25 +891,22 @@ export function SettingsView(props: {
             </HStack>
           </Toggle>
         ) : null}
-        <NavigationLink
-          destination={
-            <LanShareSettingsView
-              value={settings}
-              status={props.lanShareStatus}
-              onChanged={props.onChanged}
-              onRotateToken={props.onRotateLanShareToken}
-            />
-          }
-        >
-          <HStack>
-            <Image systemName="network" foregroundStyle="systemIndigo" />
-            <Text>局域网共享</Text>
-            <Spacer />
-            <Text foregroundStyle="secondaryLabel">
-              {settings.lanSharingEnabled ? "已开启" : "已关闭"}
-            </Text>
-          </HStack>
-        </NavigationLink>
+        {props.keepHomeNavigationDestination && !props.embeddedNavigation ? (
+          <Button
+            buttonStyle="plain"
+            action={() => void Navigation.present({
+              element: <NavigationStack>{lanSharePage}</NavigationStack>,
+              modalPresentationStyle: "pageSheet",
+            })}
+          >
+            <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              {lanShareRow}
+              <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
+            </HStack>
+          </Button>
+        ) : (
+          <NavigationLink destination={lanSharePage}>{lanShareRow}</NavigationLink>
+        )}
         <Button
           title="清空收藏数据"
           systemImage="star.slash"
