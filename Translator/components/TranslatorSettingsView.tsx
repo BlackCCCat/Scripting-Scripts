@@ -440,7 +440,7 @@ export function TranslatorSettingsView(props: {
                         <Button
                           title="删除"
                           systemImage="trash"
-                          role="destructive"
+                          tint="systemRed"
                           action={() => {
                             void deleteEngine(engine)
                           }}
