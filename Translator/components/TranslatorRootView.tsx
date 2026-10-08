@@ -1,4 +1,4 @@
-import { Tab, TabView, useObservable, useState } from "scripting"
+import { Tab, TabView, useColorScheme, useObservable, useState } from "scripting"
 
 import { ScriptTranslationView } from "./ScriptTranslationView"
 import { TranslatorSettingsView } from "./TranslatorSettingsView"
@@ -8,6 +8,7 @@ const TRANSLATE_TAB = 0
 const SETTINGS_TAB = 1
 
 export function TranslatorRootView() {
+  const colorScheme = useColorScheme()
   const selection = useObservable<number>(() => TRANSLATE_TAB)
   const [settingsRefreshKey, setSettingsRefreshKey] = useState(0)
   const releaseNotesSheet = useTranslatorReleaseNotesSheet({
@@ -17,6 +18,7 @@ export function TranslatorRootView() {
   return (
     <TabView
       selection={selection}
+      preferredColorScheme={colorScheme}
       tint="systemBlue"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
