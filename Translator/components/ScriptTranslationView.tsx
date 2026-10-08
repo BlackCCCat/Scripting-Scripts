@@ -27,6 +27,7 @@ import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
   EngineTranslationState,
   LanguageOption,
+  TranslatorEngineEntry,
 } from "../types"
 import {
   createAssistantTranslationEngine,
@@ -49,6 +50,7 @@ import {
   getExecutableEngines,
   loadTranslatorSettings,
 } from "../utils/translator_settings"
+import { EngineIcon } from "./EngineIcon"
 
 type ScriptTranslationViewProps = {
   settingsRefreshKey?: number
@@ -245,12 +247,15 @@ function CopyableTextRow(props: {
 }
 
 function CardHeader(props: {
-  systemImage: string
+  systemImage?: string
+  engine?: TranslatorEngineEntry
   title: string
 }) {
   return (
     <HStack spacing={8}>
-      <Image systemName={props.systemImage} font="subheadline" foregroundStyle="accentColor" />
+      {props.engine
+        ? <EngineIcon kind={props.engine.kind} mode={props.engine.config?.compatibilityMode} size={20} />
+        : <Image systemName={props.systemImage ?? "text.bubble"} font="subheadline" foregroundStyle="accentColor" />}
       <Text font="headline">{props.title}</Text>
     </HStack>
   )
@@ -260,6 +265,7 @@ function WanxiangCard(props: {
   children: any
   minHeight?: number
   padding?: number
+  centerContent?: boolean
 }) {
   const colorScheme = useColorScheme()
   const darkCardFill: any = "secondarySystemGroupedBackground"
@@ -283,8 +289,12 @@ function WanxiangCard(props: {
       )}
       <VStack
         spacing={12}
-        frame={{ maxWidth: "infinity", minHeight, alignment: "topLeading" as any }}
-        padding={{ top: padding, bottom: padding, leading: padding, trailing: padding }}
+        frame={{
+          maxWidth: "infinity",
+          minHeight: props.centerContent ? minHeight + padding * 2 : minHeight,
+          alignment: props.centerContent ? "center" as any : "topLeading" as any,
+        }}
+        padding={props.centerContent ? 0 : { top: padding, bottom: padding, leading: padding, trailing: padding }}
       >
         {props.children}
       </VStack>
@@ -325,7 +335,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     return visibleEngines.map((engine) => ({
       engineId: engine.id,
       engineName: engine.label,
-      systemImage: engine.systemImage,
       translatedText: "",
       errorText: "",
       isTranslating: true,
@@ -368,7 +377,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     return {
       engineId: engine.id,
       engineName: engine.label,
-      systemImage: engine.systemImage,
       translatedText: result.translatedText,
       errorText: "",
       isTranslating: false,
@@ -447,7 +455,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       setEngineResults(visibleEngines.map((engine) => ({
         engineId: engine.id,
         engineName: engine.label,
-        systemImage: engine.systemImage,
         translatedText: "",
         errorText: "源语言和目标语言不能相同。",
         isTranslating: false,
@@ -517,7 +524,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
             const failed = {
               engineId: engine.id,
               engineName: engine.label,
-              systemImage: engine.systemImage,
               translatedText: "",
               errorText: message,
               isTranslating: false,
@@ -670,6 +676,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       <List
         navigationTitle="翻译"
         navigationBarTitleDisplayMode="inline"
+        translationHost={systemTranslationHost}
         listStyle="insetGroup"
         listSectionSpacing={14}
         scrollDismissesKeyboard="interactively"
@@ -860,7 +867,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
             <Section
               key={result.engineId}
               header={
-                <CardHeader systemImage={result.systemImage} title={result.engineName} />
+                <CardHeader engine={visibleEngines.find((item) => item.id === result.engineId)} title={result.engineName} />
               }
               listRowSeparator="hidden"
               listSectionSeparator="hidden"
@@ -873,10 +880,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                   <ProgressView />
                 </VStack>
               ) : result.isTranslating ? (
-                <WanxiangCard>
-                  <VStack spacing={10} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
-                    <ProgressView />
-                  </VStack>
+                <WanxiangCard centerContent>
+                  <ProgressView />
                 </WanxiangCard>
               ) : result.translatedText ? (
                 <CopyableTextRow

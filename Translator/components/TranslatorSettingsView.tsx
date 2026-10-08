@@ -18,15 +18,18 @@ import {
 
 import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
+  AiApiCompatibilityMode,
   TranslationEngineConfig,
   TranslatorEngineEntry,
 } from "../types"
 import { isAssistantTranslationAvailable } from "../utils/assistant_translation_engine"
+import { AI_PROVIDERS } from "../utils/ai_providers"
 import { isExternalEngineConfigured } from "../utils/external_translation_engines"
 import { isLocalTranslationAvailable } from "../utils/translation_engine"
 import { isSystemTranslationAvailable } from "../utils/system_translation_engine"
 import {
   addAiApiEngine,
+  addDeepLEngine,
   addDeepLxEngine,
   loadTranslatorSettings,
   removeEngine,
@@ -39,14 +42,15 @@ import {
 } from "../utils/translator_settings"
 import { AssistantEngineEditorView } from "./AssistantEngineEditorView"
 import { EngineEditorView } from "./EngineEditorView"
-import { DeepLXEditorView } from "./DeepLXEditorView"
+import { DeepLServiceEditorView } from "./DeepLServiceEditorView"
+import { EngineIcon } from "./EngineIcon"
 
 function isEngineEditable(engine: TranslatorEngineEntry) {
-  return engine.kind === "ai_api" || engine.kind === "assistant" || engine.kind === "deeplx"
+  return engine.kind === "ai_api" || engine.kind === "assistant" || engine.kind === "deeplx" || engine.kind === "deepl"
 }
 
 function canDeleteEngine(engine: TranslatorEngineEntry) {
-  return engine.kind === "ai_api" || engine.kind === "deeplx"
+  return engine.kind === "ai_api" || engine.kind === "deeplx" || engine.kind === "deepl"
 }
 
 function isEngineAvailable(engine: TranslatorEngineEntry) {
@@ -68,7 +72,7 @@ function isEngineAvailable(engine: TranslatorEngineEntry) {
     return true
   }
 
-  if (engine.kind === "deeplx" || engine.kind === "ai_api") {
+  if (engine.kind === "deeplx" || engine.kind === "deepl" || engine.kind === "ai_api") {
     return isExternalEngineConfigured(engine)
   }
 
@@ -126,10 +130,10 @@ export function TranslatorSettingsView(props: {
     props.onSettingsChanged?.()
   }
 
-  function persistEngineLabelAndImage(
+  function persistEngineLabel(
     nextSettings: ReturnType<typeof loadTranslatorSettings>,
     engineId: string,
-    changes: Partial<Pick<TranslatorEngineEntry, "label" | "systemImage">>
+    label: string
   ) {
     persist({
       defaultTargetLanguageCode: nextSettings.defaultTargetLanguageCode,
@@ -138,55 +142,52 @@ export function TranslatorSettingsView(props: {
         item.id === engineId
           ? {
               ...item,
-              label: String(changes.label ?? item.label).trim() || item.label,
-              systemImage: String(changes.systemImage ?? item.systemImage).trim() || item.systemImage,
+              label: String(label).trim() || item.label,
             }
           : item
       )),
     })
   }
 
-  async function presentDeepLxEditor(title: string, initial: { baseUrl: string; label: string }) {
+  async function presentDeepLServiceEditor(title: string, kind: "deeplx" | "deepl", initial: { baseUrl: string; label: string; apiKey?: string }) {
     const result = await Navigation.present({
       element: (
-        <DeepLXEditorView
+        <DeepLServiceEditorView
           title={title}
+          kind={kind}
           initial={initial}
         />
       ),
     })
 
-    return result as { baseUrl: string; label?: string } | null
+    return result as { baseUrl: string; label?: string; apiKey?: string } | null
   }
 
-  function persistDeepLxResult(
+  function persistDeepLServiceResult(
     baseSettings: ReturnType<typeof loadTranslatorSettings>,
     engine: TranslatorEngineEntry,
-    result: { baseUrl: string; label?: string }
+    result: { baseUrl: string; label?: string; apiKey?: string }
   ) {
     const nextWithConfig = updateEngineConfig(
       baseSettings,
       engine.id,
-      { baseUrl: result.baseUrl } as TranslationEngineConfig
+      { baseUrl: result.baseUrl, ...(engine.kind === "deepl" ? { apiKey: result.apiKey } : {}) } as TranslationEngineConfig
     )
-    persistEngineLabelAndImage(nextWithConfig, engine.id, {
-      label: String(result.label ?? engine.label).trim() || engine.label,
-    })
+    persistEngineLabel(nextWithConfig, engine.id, String(result.label ?? engine.label))
   }
 
-  async function openCreateAiEngine() {
-    const draftSettings = addAiApiEngine(settings)
+  async function openCreateAiEngine(mode: AiApiCompatibilityMode) {
+    const draftSettings = addAiApiEngine(settings, mode)
     const draft = draftSettings.engines[draftSettings.engines.length - 1]
     if (!draft || draft.kind !== "ai_api") return
 
     const result = await Navigation.present({
       element: (
         <EngineEditorView
-          title="添加 AI 接口"
+          title={`添加 ${draft.label}`}
           initial={{
             config: draft.config,
             label: draft.label,
-            systemImage: draft.systemImage,
           }}
         />
       ),
@@ -200,10 +201,7 @@ export function TranslatorSettingsView(props: {
       result.config as TranslationEngineConfig
     )
 
-    persistEngineLabelAndImage(nextWithConfig, draft.id, {
-      label: String(result.label ?? draft.label).trim() || draft.label,
-      systemImage: String(result.systemImage ?? draft.systemImage).trim() || draft.systemImage,
-    })
+    persistEngineLabel(nextWithConfig, draft.id, String(result.label ?? draft.label))
   }
 
   async function openCreateDeepLxEngine() {
@@ -211,12 +209,24 @@ export function TranslatorSettingsView(props: {
     const draft = draftSettings.engines[draftSettings.engines.length - 1]
     if (!draft || draft.kind !== "deeplx") return
 
-    const result = await presentDeepLxEditor("添加 DeepLX", {
+    const result = await presentDeepLServiceEditor("添加 DeepLX", "deeplx", {
       baseUrl: draft.config?.baseUrl ?? "",
       label: draft.label,
     })
     if (!result) return
-    persistDeepLxResult(draftSettings, draft, result)
+    persistDeepLServiceResult(draftSettings, draft, result)
+  }
+
+  async function openCreateDeepLEngine() {
+    const draftSettings = addDeepLEngine(settings)
+    const draft = draftSettings.engines[draftSettings.engines.length - 1]
+    if (!draft || draft.kind !== "deepl") return
+    const result = await presentDeepLServiceEditor("添加 DeepL", "deepl", {
+      baseUrl: draft.config?.baseUrl ?? "",
+      apiKey: draft.config?.apiKey,
+      label: draft.label,
+    })
+    if (result) persistDeepLServiceResult(draftSettings, draft, result)
   }
 
   async function openEditEngine(
@@ -230,11 +240,13 @@ export function TranslatorSettingsView(props: {
           title={`配置 ${engine.label}`}
           initial={engine.config}
         />
-      ) : engine.kind === "deeplx" ? (
-        <DeepLXEditorView
+      ) : engine.kind === "deeplx" || engine.kind === "deepl" ? (
+        <DeepLServiceEditorView
           title={`配置 ${engine.label}`}
+          kind={engine.kind}
           initial={{
             baseUrl: engine.config?.baseUrl ?? "",
+            apiKey: engine.config?.apiKey,
             label: engine.label,
           }}
         />
@@ -244,7 +256,6 @@ export function TranslatorSettingsView(props: {
           initial={{
             config: engine.config,
             label: engine.label,
-            systemImage: engine.systemImage,
           }}
         />
       ),
@@ -252,8 +263,8 @@ export function TranslatorSettingsView(props: {
 
     if (!result) return
 
-    if (engine.kind === "deeplx") {
-      persistDeepLxResult(settings, engine, result as { baseUrl: string; label?: string })
+    if (engine.kind === "deeplx" || engine.kind === "deepl") {
+      persistDeepLServiceResult(settings, engine, result as { baseUrl: string; label?: string; apiKey?: string })
       return
     }
 
@@ -270,10 +281,7 @@ export function TranslatorSettingsView(props: {
       return
     }
 
-    persistEngineLabelAndImage(nextWithConfig, engine.id, {
-      label: String(result.label ?? engine.label).trim() || engine.label,
-      systemImage: String(result.systemImage ?? engine.systemImage).trim() || engine.systemImage,
-    })
+    persistEngineLabel(nextWithConfig, engine.id, String(result.label ?? engine.label))
   }
 
   async function deleteEngine(engine: TranslatorEngineEntry) {
@@ -410,8 +418,6 @@ export function TranslatorSettingsView(props: {
               return (
                 <Toggle
                   key={engine.id}
-                  title={engine.label}
-                  systemImage={engine.systemImage}
                   value={engine.enabled && available}
                   disabled={!available}
                   onChanged={(value: boolean) => {
@@ -442,7 +448,12 @@ export function TranslatorSettingsView(props: {
                       ] : []),
                     ],
                   } : undefined}
-                />
+                >
+                  <HStack spacing={10}>
+                    <EngineIcon kind={engine.kind} mode={engine.config?.compatibilityMode} size={22} />
+                    <Text lineLimit={1} truncationMode="tail">{engine.label}</Text>
+                  </HStack>
+                </Toggle>
               )
             }}
             editActions="move"
@@ -477,19 +488,27 @@ export function TranslatorSettingsView(props: {
             }
           >
             <Button
-              title="AI 接口"
-              systemImage="sparkles"
               action={() => {
-                void openCreateAiEngine()
+                void openCreateDeepLEngine()
               }}
-            />
+            >
+              <HStack spacing={8}><EngineIcon kind="deepl" size={18} /><Text>DeepL</Text></HStack>
+            </Button>
             <Button
-              title="DeepLX"
-              systemImage="d.circle"
               action={() => {
                 void openCreateDeepLxEngine()
               }}
-            />
+            >
+              <HStack spacing={8}><EngineIcon kind="deeplx" size={18} /><Text>DeepLX</Text></HStack>
+            </Button>
+            {AI_PROVIDERS.map((provider) => (
+              <Button key={provider.mode} action={() => { void openCreateAiEngine(provider.mode) }}>
+                <HStack spacing={8}>
+                  <EngineIcon kind="ai_api" mode={provider.mode} size={18} />
+                  <Text>{provider.label}</Text>
+                </HStack>
+              </Button>
+            ))}
           </Menu>
         </Section>
       </List>

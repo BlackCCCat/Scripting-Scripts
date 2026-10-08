@@ -8,13 +8,10 @@ import type {
   TranslatorEngineEntry,
 } from "../types"
 import { translateChunkedText } from "./translation_chunking"
+import { AI_PROVIDERS, aiProvider } from "./ai_providers"
 
 const GOOGLE_WEB_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 const DEEPLX_DEFAULT_ENDPOINT = "http://localhost:1188/translate"
-const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com"
-const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
-const SILICONFLOW_DEFAULT_BASE_URL = "https://api.siliconflow.cn"
-const QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode"
 const SUCCESSFUL_AI_ENDPOINT_CACHE = new Map<string, string>()
 const AI_TRANSLATION_TIMEOUT_SECONDS = 60
 
@@ -187,22 +184,13 @@ function mapDeepLXLanguage(code: string, isSource = false) {
 }
 
 function normalizeAiMode(mode: unknown): AiApiCompatibilityMode {
-  if (mode === "custom") return "custom"
-  if (mode === "openai") return "openai"
-  if (mode === "gemini") return "gemini"
-  if (mode === "siliconflow") return "siliconflow"
-  if (mode === "qwen") return "qwen"
-  return "custom"
+  return AI_PROVIDERS.some((item) => item.mode === mode) ? mode as AiApiCompatibilityMode : "custom"
 }
 
 function resolveAiBaseUrl(mode: AiApiCompatibilityMode, configBaseUrl?: string) {
   const normalized = normalizeBaseUrl(String(configBaseUrl ?? ""))
   if (normalized) return normalized
-  if (mode === "openai") return OPENAI_DEFAULT_BASE_URL
-  if (mode === "gemini") return GEMINI_DEFAULT_BASE_URL
-  if (mode === "siliconflow") return SILICONFLOW_DEFAULT_BASE_URL
-  if (mode === "qwen") return QWEN_DEFAULT_BASE_URL
-  return ""
+  return aiProvider(mode).baseUrl
 }
 
 function stripKnownEndpointSuffix(baseUrl: string) {
@@ -299,28 +287,39 @@ function aiEndpointCacheKey(mode: AiApiCompatibilityMode, baseUrl: string) {
 function buildAiEndpointCandidates(mode: AiApiCompatibilityMode, baseUrl: string) {
   const cacheKey = aiEndpointCacheKey(mode, baseUrl)
   const cached = SUCCESSFUL_AI_ENDPOINT_CACHE.get(cacheKey)
+  const root = stripKnownEndpointSuffix(baseUrl).replace(/\/v1$/i, "")
+
+  if (mode === "anthropic") {
+    return uniqueStrings([cached ?? "", joinBaseUrl(root, "/v1/messages")])
+  }
 
   if (mode === "gemini") {
     return uniqueStrings([
       cached ?? "",
-      joinBaseUrl(baseUrl, "/v1beta/openai/chat/completions"),
-      joinBaseUrl(baseUrl, "/openai/chat/completions"),
-      joinBaseUrl(baseUrl, "/chat/completions"),
+      joinBaseUrl(root, "/v1beta/openai/chat/completions"),
     ])
   }
 
   if (mode === "siliconflow") {
     return uniqueStrings([
       cached ?? "",
-      joinBaseUrl(baseUrl, "/v1/chat/completions"),
+      joinBaseUrl(root, "/v1/chat/completions"),
     ])
   }
 
   if (mode === "qwen") {
     return uniqueStrings([
       cached ?? "",
-      joinBaseUrl(baseUrl, "/v1/chat/completions"),
+      joinBaseUrl(root, "/v1/chat/completions"),
     ])
+  }
+
+  if (mode === "deepseek") {
+    return uniqueStrings([cached ?? "", joinBaseUrl(root, "/chat/completions"), joinBaseUrl(root, "/v1/chat/completions")])
+  }
+
+  if (mode === "minimax" || mode === "openrouter") {
+    return uniqueStrings([cached ?? "", joinBaseUrl(root, "/v1/chat/completions")])
   }
 
   if (mode === "custom" || mode === "newapi") {
@@ -347,9 +346,8 @@ function buildAiEndpointCandidates(mode: AiApiCompatibilityMode, baseUrl: string
 
   return uniqueStrings([
     cached ?? "",
-    joinBaseUrl(baseUrl, "/v1/responses"),
-    joinBaseUrl(baseUrl, "/v1/chat/completions"),
-    joinBaseUrl(baseUrl, "/chat/completions"),
+    joinBaseUrl(root, "/v1/responses"),
+    joinBaseUrl(root, "/v1/chat/completions"),
   ])
 }
 
@@ -372,6 +370,10 @@ function buildAiHeaders(mode: AiApiCompatibilityMode, apiKey: string) {
         Authorization: `Bearer ${apiKey}`,
       },
     ]
+  }
+
+  if (mode === "anthropic") {
+    return [{ ...common, "x-api-key": apiKey, "anthropic-version": "2023-06-01" }]
   }
 
   return [
@@ -417,10 +419,19 @@ function buildChatCompletionBody(
     })
   }
 
+  const thinking = mode === "deepseek" || mode === "minimax"
+    ? { thinking: { type: "disabled" } }
+    : mode === "openrouter"
+      ? { reasoning: { enabled: false } }
+      : mode === "gemini" && /^gemini-2\.5-flash/i.test(model)
+        ? { reasoning_effort: "none" }
+        : {}
+
   return JSON.stringify({
     model,
     temperature: 0.1,
     stream: true,
+    ...thinking,
     messages: [
       { role: "system", content: AI_TRANSLATION_SYSTEM_PROMPT },
       { role: "user", content: buildAiUserPrompt(request) },
@@ -431,14 +442,24 @@ function buildChatCompletionBody(
 function buildResponsesBody(model: string, request: TranslationRequest) {
   return JSON.stringify({
     model,
-    temperature: 0.1,
     stream: true,
+    ...(/^(?:gpt-5\.(?:[1-9]|\d{2,})|deepseek-)/i.test(model) ? { reasoning: { effort: "none" } } : {}),
     instructions: AI_TRANSLATION_SYSTEM_PROMPT,
     input: buildAiUserPrompt(request),
   })
 }
 
-function buildMessagesBody(model: string, request: TranslationRequest) {
+function buildMessagesBody(mode: AiApiCompatibilityMode, model: string, request: TranslationRequest) {
+  if (mode === "anthropic") {
+    return JSON.stringify({
+      model,
+      max_tokens: 8192,
+      stream: true,
+      thinking: { type: "disabled" },
+      system: AI_TRANSLATION_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: buildAiUserPrompt(request) }],
+    })
+  }
   return JSON.stringify({
     model,
     temperature: 0.1,
@@ -800,6 +821,40 @@ async function translateWithDeepLX(
   }
 }
 
+async function translateWithDeepL(
+  engine: TranslatorEngineEntry,
+  request: TranslationRequest
+): Promise<TranslationResult> {
+  const endpoint = ensureConfigured(engine.config?.baseUrl, "请先配置 DeepL 请求地址。")
+  const apiKey = ensureConfigured(engine.config?.apiKey, "请先配置 DeepL API Key。")
+  const language = (code: string) => code === "no" ? "nb" : code
+  const body = JSON.stringify({
+    text: [request.sourceText],
+    target_lang: language(request.targetLanguageCode),
+    ...(request.sourceLanguageCode === "auto" ? {} : { source_lang: language(request.sourceLanguageCode) }),
+  })
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `DeepL-Auth-Key ${apiKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body,
+    timeout: 30,
+  })
+
+  if (!response.ok) {
+    const detail = await extractResponseErrorDetail(response)
+    throw new Error(`${normalizeErrorMessage(response, "DeepL 翻译请求失败")}${detail ? `：${detail}` : ""}`)
+  }
+
+  const payload = await readJsonWithFallback(response)
+  const translatedText = String(payload?.translations?.[0]?.text ?? "").trim()
+  if (!translatedText) throw new Error("DeepL 没有返回可用译文。")
+  return { translatedText }
+}
+
 async function translateWithAiApiSingle(
   engine: TranslatorEngineEntry,
   request: TranslationRequest,
@@ -823,7 +878,7 @@ async function translateWithAiApiSingle(
     const body = endpoint.endsWith("/responses")
       ? buildResponsesBody(model, request)
       : endpoint.endsWith("/messages")
-        ? buildMessagesBody(model, request)
+        ? buildMessagesBody(mode, model, request)
         : buildChatCompletionBody(mode, model, request)
 
     for (const headers of buildAiHeaders(mode, apiKey)) {
@@ -894,6 +949,10 @@ export function isExternalEngineConfigured(engine: TranslatorEngineEntry) {
     return !!String(engine.config?.baseUrl ?? "").trim()
   }
 
+  if (engine.kind === "deepl") {
+    return !!String(engine.config?.baseUrl ?? "").trim() && !!String(engine.config?.apiKey ?? "").trim()
+  }
+
   if (engine.kind === "ai_api") {
     const mode = normalizeAiMode(engine.config?.compatibilityMode)
     return (
@@ -916,6 +975,12 @@ export async function translateWithExternalEngine(
       return await translateWithGoogleWeb(request)
     case "deeplx":
       return await translateWithDeepLX(engine, request)
+    case "deepl":
+      return await translateChunkedText(request, {
+        maxChunkLength: 5000,
+        concurrency: 2,
+        translateChunk: async (chunkRequest) => await translateWithDeepL(engine, chunkRequest),
+      }, callbacks)
     case "ai_api":
       return await translateChunkedText(
         request,

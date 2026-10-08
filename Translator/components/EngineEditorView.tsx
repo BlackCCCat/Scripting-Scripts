@@ -14,6 +14,7 @@ import {
   TextField,
   useEffect,
   useEffectEvent,
+  useRef,
   useState,
 } from "scripting"
 
@@ -22,17 +23,13 @@ import type {
   TranslationEngineConfig,
 } from "../types"
 import { fetchAiApiModels } from "../utils/ai_api_models"
+import { AI_PROVIDERS, PREVIOUS_AI_PROVIDER_LABELS, aiProvider } from "../utils/ai_providers"
 
 type EngineEditorValue = {
   config?: TranslationEngineConfig
   label?: string
-  systemImage?: string
 }
 
-const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com"
-const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
-const SILICONFLOW_DEFAULT_BASE_URL = "https://api.siliconflow.cn"
-const QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode"
 const CUSTOM_MODE_DESCRIPTION = [
   "自定义接口需要填写基础地址，填到站点根地址、/v1 或完整接口路径都可以。",
   "填写链接和 API Key 后会自动获取模型列表。",
@@ -42,26 +39,13 @@ function normalizeBaseUrl(input: string) {
   return String(input ?? "").trim().replace(/\/+$/, "")
 }
 
-function defaultBaseUrlForMode(mode: AiApiCompatibilityMode) {
-  if (mode === "openai") return OPENAI_DEFAULT_BASE_URL
-  if (mode === "gemini") return GEMINI_DEFAULT_BASE_URL
-  if (mode === "siliconflow") return SILICONFLOW_DEFAULT_BASE_URL
-  if (mode === "qwen") return QWEN_DEFAULT_BASE_URL
-  return ""
-}
-
-function modeLabel(mode: AiApiCompatibilityMode) {
-  if (mode === "openai") return "OpenAI"
-  if (mode === "gemini") return "Google Gemini"
-  if (mode === "siliconflow") return "硅基流动"
-  if (mode === "qwen") return "通义千问"
-  return "自定义"
-}
-
 function shouldSyncLabelWithMode(currentLabel: string, currentMode: AiApiCompatibilityMode) {
   const normalized = String(currentLabel ?? "").trim()
   if (!normalized) return true
-  return normalized === "AI 接口" || normalized === modeLabel(currentMode)
+  return normalized === "AI 接口"
+    || normalized === aiProvider(currentMode).label
+    || normalized === "Google Gemini"
+    || normalized in PREVIOUS_AI_PROVIDER_LABELS
 }
 
 function ModelMenu(props: {
@@ -114,27 +98,23 @@ export function EngineEditorView(props: {
 }) {
   const dismiss = Navigation.useDismiss()
   const [label, setLabel] = useState(String(props.initial?.label ?? "AI 接口"))
-  const [systemImage, setSystemImage] = useState(String(props.initial?.systemImage ?? "sparkles"))
   const [compatibilityMode, setCompatibilityMode] = useState<AiApiCompatibilityMode>(
-    props.initial?.config?.compatibilityMode === "openai"
-    || props.initial?.config?.compatibilityMode === "gemini"
-    || props.initial?.config?.compatibilityMode === "siliconflow"
-    || props.initial?.config?.compatibilityMode === "qwen"
-      ? props.initial.config.compatibilityMode
+    AI_PROVIDERS.some((item) => item.mode === props.initial?.config?.compatibilityMode)
+      ? props.initial!.config!.compatibilityMode!
       : "custom"
   )
-  const [baseUrl, setBaseUrl] = useState(String(props.initial?.config?.baseUrl ?? ""))
+  const [baseUrl, setBaseUrl] = useState(String(props.initial?.config?.baseUrl || aiProvider(compatibilityMode).baseUrl))
   const [apiKey, setApiKey] = useState(String(props.initial?.config?.apiKey ?? ""))
   const [model, setModel] = useState(String(props.initial?.config?.model ?? ""))
   const [modelIds, setModelIds] = useState<string[]>([])
   const [modelStatus, setModelStatus] = useState("填写 API Key 后会自动获取模型列表。")
   const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const modelRequestId = useRef(0)
 
   const reloadModels = useEffectEvent(async () => {
+    const requestId = ++modelRequestId.current
     const currentApiKey = apiKey.trim()
-    const currentBaseUrl = compatibilityMode === "custom"
-      ? normalizeBaseUrl(baseUrl)
-      : defaultBaseUrlForMode(compatibilityMode)
+    const currentBaseUrl = normalizeBaseUrl(baseUrl)
     if (!currentApiKey || !currentBaseUrl) {
       setModelIds([])
       setIsLoadingModels(false)
@@ -151,6 +131,7 @@ export function EngineEditorView(props: {
         baseUrl: currentBaseUrl,
         apiKey: currentApiKey,
       })
+      if (requestId !== modelRequestId.current) return
       setModelIds(result.modelIds)
       setModelStatus(result.message)
 
@@ -160,10 +141,11 @@ export function EngineEditorView(props: {
         }
       }
     } catch (error) {
+      if (requestId !== modelRequestId.current) return
       setModelIds([])
       setModelStatus(error instanceof Error ? error.message : String(error))
     } finally {
-      setIsLoadingModels(false)
+      if (requestId === modelRequestId.current) setIsLoadingModels(false)
     }
   })
 
@@ -172,12 +154,10 @@ export function EngineEditorView(props: {
   }, [apiKey, baseUrl, compatibilityMode, reloadModels])
 
   function save() {
-    const normalizedLabel = label.trim() || "AI 接口"
-    const normalizedBaseUrl = compatibilityMode === "custom"
-      ? normalizeBaseUrl(baseUrl)
-      : defaultBaseUrlForMode(compatibilityMode)
+    const normalizedLabel = label.trim() || aiProvider(compatibilityMode).label
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
 
-    if (compatibilityMode === "custom" && !normalizedBaseUrl) {
+    if (!normalizedBaseUrl) {
       void Dialog.alert({
         title: "无法保存",
         message: "请先填写链接。",
@@ -219,7 +199,6 @@ export function EngineEditorView(props: {
 
     dismiss({
       label: normalizedLabel,
-      systemImage: systemImage.trim() || "sparkles",
       config: {
         compatibilityMode,
         baseUrl: normalizedBaseUrl,
@@ -229,7 +208,7 @@ export function EngineEditorView(props: {
     } satisfies EngineEditorValue)
   }
 
-  const modeOptions: AiApiCompatibilityMode[] = ["custom", "openai", "gemini", "siliconflow", "qwen"]
+  const modeOptions: AiApiCompatibilityMode[] = AI_PROVIDERS.map((item) => item.mode)
   const modeIndex = Math.max(0, modeOptions.indexOf(compatibilityMode === "newapi" ? "custom" : compatibilityMode))
   const selectedModelIndex = Math.max(0, modelIds.indexOf(model))
 
@@ -262,12 +241,6 @@ export function EngineEditorView(props: {
             onChanged={setLabel}
             prompt="例如 OpenAI 翻译"
           />
-          <TextField
-            title="SF Symbol"
-            value={systemImage}
-            onChanged={setSystemImage}
-            prompt="默认 sparkles"
-          />
         </Section>
 
         <Section
@@ -281,34 +254,28 @@ export function EngineEditorView(props: {
             onChanged={(index: number) => {
               const nextMode = modeOptions[index] ?? "custom"
               if (shouldSyncLabelWithMode(label, compatibilityMode)) {
-                setLabel(modeLabel(nextMode))
+                setLabel(aiProvider(nextMode).label)
               }
               setCompatibilityMode(nextMode)
               setModelIds([])
               setModel("")
-              if (nextMode !== "custom") {
-                setBaseUrl(defaultBaseUrlForMode(nextMode))
-              } else if (!normalizeBaseUrl(baseUrl)) {
-                setBaseUrl("")
-              }
+              setBaseUrl(aiProvider(nextMode).baseUrl)
             }}
           >
             {modeOptions.map((item, index) => (
-              <Text key={item} tag={index}>{modeLabel(item)}</Text>
+              <Text key={item} tag={index}>{aiProvider(item).label}</Text>
             ))}
           </Picker>
-          {compatibilityMode === "custom" ? (
-            <TextField
-              title="链接"
-              value={baseUrl}
-              onChanged={(value) => {
-                setBaseUrl(value)
-                setModelIds([])
-                setModel("")
-              }}
-              prompt="https://example.com"
-            />
-          ) : null}
+          <TextField
+            title="基础地址"
+            value={baseUrl}
+            onChanged={(value) => {
+              setBaseUrl(value)
+              setModelIds([])
+              setModel("")
+            }}
+            prompt="https://example.com"
+          />
           <TextField
             title="API Key"
             value={apiKey}

@@ -16,8 +16,12 @@ export type KnownTranslationEngineKind =
 export type AiApiCompatibilityMode =
   | "custom"
   | "newapi"
+  | "anthropic"
+  | "deepseek"
   | "openai"
   | "gemini"
+  | "minimax"
+  | "openrouter"
   | "siliconflow"
   | "qwen"
 
@@ -25,6 +29,7 @@ export type TranslationEngineKind =
   | KnownTranslationEngineKind
   | "ai_api"
   | "deeplx"
+  | "deepl"
 
 export type TranslationEngineOption = {
   id: KnownTranslationEngineKind
@@ -76,7 +81,6 @@ export type TranslationProgressCallbacks = {
 export type EngineTranslationState = {
   engineId: string
   engineName: string
-  systemImage: string
   translatedText: string
   errorText: string
   isTranslating: boolean

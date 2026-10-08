@@ -7,6 +7,7 @@ import type {
   TranslatorSettings,
 } from "../types"
 import { isAssistantTranslationAvailable } from "./assistant_translation_engine"
+import { PREVIOUS_AI_PROVIDER_LABELS, aiProvider } from "./ai_providers"
 import { isLocalTranslationAvailable } from "./translation_engine"
 
 const STORAGE_KEY = "translator_settings_v2"
@@ -113,15 +114,16 @@ function normalizeEngineSystemImage(value: unknown, fallback: string) {
 
 function normalizeExternalEngineEntry(
   raw: Partial<TranslatorEngineEntry>,
-  kind: "ai_api" | "deeplx",
+  kind: "ai_api" | "deeplx" | "deepl",
   fallbackLabel: string,
   fallbackSystemImage: string,
   fallbackIdPrefix: string
 ): TranslatorEngineEntry {
+  const label = String(raw.label ?? "").trim() || fallbackLabel
   return {
     id: String(raw.id ?? "").trim() || `${fallbackIdPrefix}_${Date.now().toString(36)}`,
     kind,
-    label: String(raw.label ?? "").trim() || fallbackLabel,
+    label: kind === "ai_api" ? PREVIOUS_AI_PROVIDER_LABELS[label] ?? label : label,
     systemImage: normalizeEngineSystemImage(raw.systemImage, fallbackSystemImage),
     enabled: raw.enabled ?? false,
     isBuiltIn: false,
@@ -138,6 +140,10 @@ function normalizeEngineEntry(raw: Partial<TranslatorEngineEntry> | null | undef
 
   if (raw.kind === "deeplx") {
     return normalizeExternalEngineEntry(raw, "deeplx", "DeepLX", "d.circle", "deeplx")
+  }
+
+  if (raw.kind === "deepl") {
+    return normalizeExternalEngineEntry(raw, "deepl", "DeepL", "d.circle", "deepl")
   }
 
   if (isKnownEngineKind(raw.kind)) {
@@ -349,7 +355,8 @@ export function getExecutableEngines(settings: TranslatorSettings) {
   return settings.engines
 }
 
-export function addAiApiEngine(settings: TranslatorSettings): TranslatorSettings {
+export function addAiApiEngine(settings: TranslatorSettings, mode: TranslationEngineConfig["compatibilityMode"] = "custom"): TranslatorSettings {
+  const provider = aiProvider(mode)
   return normalizeTranslatorSettings({
     ...settings,
     engines: [
@@ -357,15 +364,36 @@ export function addAiApiEngine(settings: TranslatorSettings): TranslatorSettings
       {
         id: `ai_api_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         kind: "ai_api",
-        label: "AI 接口",
+        label: provider.label,
         systemImage: "sparkles",
         enabled: false,
         isBuiltIn: false,
         config: {
-          compatibilityMode: "custom",
-          baseUrl: "",
+          compatibilityMode: provider.mode,
+          baseUrl: provider.baseUrl,
           apiKey: "",
           model: "",
+        },
+      },
+    ],
+  })
+}
+
+export function addDeepLEngine(settings: TranslatorSettings): TranslatorSettings {
+  return normalizeTranslatorSettings({
+    ...settings,
+    engines: [
+      ...settings.engines,
+      {
+        id: `deepl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        kind: "deepl",
+        label: "DeepL",
+        systemImage: "d.circle",
+        enabled: false,
+        isBuiltIn: false,
+        config: {
+          baseUrl: "https://api-free.deepl.com/v2/translate",
+          apiKey: "",
         },
       },
     ],

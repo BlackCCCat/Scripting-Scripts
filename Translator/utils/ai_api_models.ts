@@ -1,10 +1,6 @@
 import { fetch } from "scripting"
 import type { AiApiCompatibilityMode } from "../types"
-
-const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com"
-const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
-const SILICONFLOW_DEFAULT_BASE_URL = "https://api.siliconflow.cn"
-const QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode"
+import { AI_PROVIDERS, aiProvider } from "./ai_providers"
 
 function normalizeBaseUrl(value: string) {
   return String(value ?? "").trim().replace(/\/+$/, "")
@@ -17,22 +13,13 @@ function joinBaseUrl(baseUrl: string, suffix: string) {
 }
 
 function normalizeMode(mode: unknown): AiApiCompatibilityMode {
-  if (mode === "custom") return "custom"
-  if (mode === "openai") return "openai"
-  if (mode === "gemini") return "gemini"
-  if (mode === "siliconflow") return "siliconflow"
-  if (mode === "qwen") return "qwen"
-  return "custom"
+  return AI_PROVIDERS.some((item) => item.mode === mode) ? mode as AiApiCompatibilityMode : "custom"
 }
 
 function resolveBaseUrl(mode: AiApiCompatibilityMode, input: string) {
   const normalized = normalizeBaseUrl(input)
   if (normalized) return normalized
-  if (mode === "openai") return OPENAI_DEFAULT_BASE_URL
-  if (mode === "gemini") return GEMINI_DEFAULT_BASE_URL
-  if (mode === "siliconflow") return SILICONFLOW_DEFAULT_BASE_URL
-  if (mode === "qwen") return QWEN_DEFAULT_BASE_URL
-  return ""
+  return aiProvider(mode).baseUrl
 }
 
 function uniqueStrings(values: string[]) {
@@ -58,16 +45,21 @@ function buildCustomRootCandidates(baseUrl: string) {
 }
 
 function buildModelUrls(mode: AiApiCompatibilityMode, baseUrl: string, apiKey: string) {
+  const root = stripKnownEndpointSuffix(baseUrl).replace(/\/v1$/i, "")
   if (mode === "gemini") {
     return uniqueStrings([
-      `${joinBaseUrl(baseUrl, "/v1beta/models")}?key=${encodeURIComponent(apiKey)}`,
+      `${joinBaseUrl(root, "/v1beta/models")}?key=${encodeURIComponent(apiKey)}`,
     ])
   }
 
   if (mode === "siliconflow") {
     return uniqueStrings([
-      `${joinBaseUrl(baseUrl, "/v1/models")}?type=text&sub_type=chat`,
+      `${joinBaseUrl(root, "/v1/models")}?type=text&sub_type=chat`,
     ])
+  }
+
+  if (mode === "anthropic") {
+    return [joinBaseUrl(root, "/v1/models?limit=100")]
   }
 
   if (mode === "custom" || mode === "newapi") {
@@ -81,12 +73,16 @@ function buildModelUrls(mode: AiApiCompatibilityMode, baseUrl: string, apiKey: s
   }
 
   return uniqueStrings([
-    joinBaseUrl(baseUrl, "/v1/models"),
+    joinBaseUrl(root, "/v1/models"),
   ])
 }
 
 function buildModelHeaders(mode: AiApiCompatibilityMode, apiKey: string): Array<Record<string, string>> | undefined {
   if (mode === "gemini") return undefined
+
+  if (mode === "anthropic") {
+    return [{ "x-api-key": apiKey, "anthropic-version": "2023-06-01" }]
+  }
 
   const headers: Array<Record<string, string>> = [
     {
@@ -105,7 +101,7 @@ function buildModelHeaders(mode: AiApiCompatibilityMode, apiKey: string): Array<
   return headers
 }
 
-function extractModelIds(payload: any): string[] {
+function extractModelIds(payload: any, mode: AiApiCompatibilityMode): string[] {
   const list = Array.isArray(payload)
     ? payload
     : Array.isArray(payload?.data)
@@ -115,11 +111,31 @@ function extractModelIds(payload: any): string[] {
         : []
 
   return list
+    .filter((item: any) => mode !== "openrouter" || item?.reasoning?.mandatory !== true)
+    .filter((item: any) => mode !== "anthropic" || item?.capabilities?.thinking?.types?.disabled?.supported !== false)
     .map((item: any) => String(item?.id ?? item?.name ?? item?.model ?? item).trim().replace(/^models\//, ""))
     .filter(Boolean)
 }
 
 function filterTranslationModelIds(mode: AiApiCompatibilityMode, modelIds: string[]) {
+  modelIds = modelIds.filter((item) => !/(?:embedding|rerank|image|audio|speech|tts|asr|ocr|realtime|moderation)/i.test(item))
+
+  if (mode === "gemini") {
+    return modelIds.filter((item) => /^gemini-(?:2\.5-flash|2\.0|1\.)/i.test(item))
+  }
+
+  if (mode === "minimax") {
+    return modelIds.filter((item) => /^MiniMax-M3$/i.test(item))
+  }
+
+  if (mode === "anthropic") {
+    return modelIds.filter((item) => !/^claude-(?:fable|mythos)-/i.test(item))
+  }
+
+  if (mode === "openai") {
+    return modelIds.filter((item) => !/^(?:o\d|gpt-5(?:-|$))/i.test(item) || /gpt-5\.(?:[1-9]|\d{2,})/i.test(item))
+  }
+
   if (mode === "qwen") {
     return modelIds.filter((item) => /(^|\/)qwen-mt(?:-|$)/i.test(item))
   }
@@ -152,6 +168,7 @@ export async function fetchAiApiModels(input: {
   }
 
   let lastStatus = 0
+  let sawUnfilteredModels = false
   const urls = buildModelUrls(compatibilityMode, baseUrl, apiKey)
   const headerCandidates = buildModelHeaders(compatibilityMode, apiKey) ?? [undefined]
 
@@ -169,7 +186,9 @@ export async function fetchAiApiModels(input: {
         payload = await response.json()
       } catch {}
 
-      const modelIds = filterTranslationModelIds(compatibilityMode, extractModelIds(payload))
+      const availableModels = extractModelIds(payload, compatibilityMode)
+      if (availableModels.length || payload?.data?.length || payload?.models?.length) sawUnfilteredModels = true
+      const modelIds = filterTranslationModelIds(compatibilityMode, availableModels)
       if (response.ok && modelIds.length > 0) {
         return {
           baseUrl,
@@ -187,8 +206,10 @@ export async function fetchAiApiModels(input: {
   return {
     baseUrl,
     modelIds: [],
-    message: lastStatus
-      ? `模型列表请求失败（HTTP ${lastStatus}）`
+    message: sawUnfilteredModels
+      ? "当前账号没有可用的非强制推理翻译模型。"
+      : lastStatus
+        ? `模型列表请求失败（HTTP ${lastStatus}）`
       : "接口可访问，但没有获取到可用模型。",
   }
 }

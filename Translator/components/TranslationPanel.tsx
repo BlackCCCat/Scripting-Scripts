@@ -46,6 +46,7 @@ import {
   getExecutableEngines,
   loadTranslatorSettings,
 } from "../utils/translator_settings"
+import { EngineIcon } from "./EngineIcon"
 
 type TranslationPanelProps = {
   inputText?: string | null
@@ -278,7 +279,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
     return visibleEngines.map((engine) => ({
       engineId: engine.id,
       engineName: engine.label,
-      systemImage: engine.systemImage,
       translatedText: "",
       errorText: "",
       isTranslating: true,
@@ -321,7 +321,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
     return {
       engineId: engine.id,
       engineName: engine.label,
-      systemImage: engine.systemImage,
       translatedText: result.translatedText,
       errorText: "",
       isTranslating: false,
@@ -376,7 +375,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
       setEngineResults(visibleEngines.map((engine) => ({
         engineId: engine.id,
         engineName: engine.label,
-        systemImage: engine.systemImage,
         translatedText: "",
         errorText: "源语言和目标语言不能相同。",
         isTranslating: false,
@@ -450,7 +448,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
             const failed = {
               engineId: engine.id,
               engineName: engine.label,
-              systemImage: engine.systemImage,
               translatedText: "",
               errorText: message,
               isTranslating: false,
@@ -735,10 +732,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
             key={result.engineId}
             header={
               <HStack spacing={8}>
-                <Image
-                  systemName={result.systemImage}
-                  font="caption"
-                  foregroundStyle="secondaryLabel"
+                <EngineIcon
+                  kind={visibleEngines.find((item) => item.id === result.engineId)?.kind ?? "ai_api"}
+                  mode={visibleEngines.find((item) => item.id === result.engineId)?.config?.compatibilityMode}
+                  size={16}
                 />
                 <Text
                   font="subheadline"
