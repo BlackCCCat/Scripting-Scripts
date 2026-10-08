@@ -157,6 +157,10 @@ export function loadSettings(): CaisSettings {
   return sanitizeSettings({})
 }
 
+export function defaultSettings(): CaisSettings {
+  return sanitizeSettings({})
+}
+
 export function saveSettings(settings: CaisSettings): CaisSettings {
   const fixed = sanitizeSettings(settings)
   if (writeSettingsRaw(JSON.stringify(fixed))) removeLegacySharedSettings()

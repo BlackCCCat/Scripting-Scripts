@@ -61,7 +61,7 @@ import {
 } from "../storage/clip_repository"
 import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
 import { readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
-import { loadSettings, saveSettings } from "../storage/settings_store"
+import { defaultSettings, loadSettings, saveSettings } from "../storage/settings_store"
 import { applyICloudSyncSettings } from "../storage/icloud_sync"
 import { formatDateTime, isLikelyURL, makeId, withHaptic } from "../utils/common"
 import { renderRuntimeTemplate } from "../utils/template"
@@ -1098,6 +1098,17 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         message: String(error?.message ?? error ?? "数据迁移失败"),
       })
     }
+  }
+
+  async function resetSettings() {
+    const confirmed = await Dialog.confirm({
+      title: "重置设置？",
+      message: "所有设置将恢复默认值，剪贴板和收藏记录不会删除。",
+      cancelLabel: "取消",
+      confirmLabel: "重置",
+    })
+    if (!confirmed) return
+    await updateSettings(defaultSettings())
   }
 
   function clearToastHideTimer() {
@@ -2370,7 +2381,19 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     return (
       <HStack spacing={10}>
         {pipToolbarButton()}
+        {resetSettingsButton()}
       </HStack>
+    )
+  }
+
+  function resetSettingsButton() {
+    return (
+      <Button
+        title=""
+        systemImage="arrow.counterclockwise"
+        accessibilityLabel="重置设置"
+        action={withHaptic(resetSettings)}
+      />
     )
   }
 
@@ -2576,7 +2599,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         {activeTab.value === TAB_FAVORITES ? (
           favoriteAddMenu()
         ) : null}
-        {activeTab.value !== TAB_FAVORITES ? (
+        {activeTab.value === TAB_SETTINGS ? resetSettingsButton() : activeTab.value !== TAB_FAVORITES ? (
           <Button
             title="采集剪贴板"
             systemImage="doc.badge.plus"
