@@ -8,6 +8,7 @@ import {
   TextField,
   useState,
   Image,
+  Picker,
   ProgressView,
 } from "scripting"
 import { translateWithExternalEngine } from "../utils/external_translation_engines"
@@ -16,6 +17,11 @@ type DeepLServiceEditorValue = {
   baseUrl: string
   label: string
   apiKey?: string
+}
+
+const DEEPL_ENDPOINTS = {
+  free: "https://api-free.deepl.com/v2/translate",
+  pro: "https://api.deepl.com/v2/translate",
 }
 
 export function DeepLServiceEditorView(props: {
@@ -28,6 +34,9 @@ export function DeepLServiceEditorView(props: {
   const serviceName = kind === "deepl" ? "DeepL" : "DeepLX"
   const [label, setLabel] = useState(String(props.initial?.label ?? serviceName))
   const [baseUrl, setBaseUrl] = useState(String(props.initial?.baseUrl ?? ""))
+  const [accountType, setAccountType] = useState<"free" | "pro">(
+    props.initial?.baseUrl?.startsWith("https://api.deepl.com/") ? "pro" : "free"
+  )
   const [apiKey, setApiKey] = useState(String(props.initial?.apiKey ?? ""))
   const [isTesting, setIsTesting] = useState(false)
   const [testStatus, setTestStatus] = useState("")
@@ -120,11 +129,26 @@ export function DeepLServiceEditorView(props: {
           footer={
             <Text>
               {kind === "deepl"
-                ? "默认使用 DeepL Free 接口；Pro 密钥请改为 https://api.deepl.com/v2/translate。验证会消耗少量字符额度。"
+                ? "验证会消耗少量字符额度。"
                 : "填写 DeepLX 服务的接口地址，例如 http://localhost:1188/translate"}
             </Text>
           }
         >
+          {kind === "deepl" ? (
+            <Picker
+              title="账号类型"
+              value={accountType}
+              onChanged={(value: string) => {
+                const next = value === "pro" ? "pro" : "free"
+                setAccountType(next)
+                setBaseUrl(DEEPL_ENDPOINTS[next])
+                setTestStatus("")
+              }}
+            >
+              <Text tag="free">Free</Text>
+              <Text tag="pro">Pro</Text>
+            </Picker>
+          ) : null}
           <TextField
             title="接口地址"
             value={baseUrl}

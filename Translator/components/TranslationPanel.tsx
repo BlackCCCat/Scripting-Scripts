@@ -5,6 +5,7 @@ import {
   Image,
   List,
   Menu,
+  Navigation,
   Picker,
   ProgressView,
   Section,
@@ -46,7 +47,11 @@ import {
   getExecutableEngines,
   loadTranslatorSettings,
 } from "../utils/translator_settings"
+import {
+  historyEngineResult, historyResults, saveTranslationHistory, updateHistoryResult,
+} from "../utils/translation_history"
 import { EngineIcon } from "./EngineIcon"
+import { TranslationHistoryView } from "./TranslationHistoryView"
 
 type TranslationPanelProps = {
   inputText?: string | null
@@ -257,6 +262,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const [engineResults, setEngineResults] = useState<EngineTranslationState[]>([])
   const [isSourceExpanded, setIsSourceExpanded] = useState(false)
   const requestIdRef = useRef(0)
+  const historyIdRef = useRef<string | null>(null)
+  const historyWriteRef = useRef<Promise<void> | null>(null)
   const targetTouchedRef = useRef(false)
   const executableEngines = getExecutableEngines(settings)
   const assistantConfig = settings.engines.find((engine) => engine.kind === "assistant")?.config
@@ -385,6 +392,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
+    historyIdRef.current = null
+    historyWriteRef.current = null
     const startedAt = Date.now()
     setErrorText("")
     setEngineResults(createLoadingStates())
@@ -402,7 +411,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
     try {
       // 这里逐条回填每个引擎的状态，不再在最后整体覆盖，避免未完成项丢掉自己的加载态。
-      await Promise.allSettled(
+      const settled = await Promise.allSettled(
         visibleEngines.map(async (engine) => {
           const engineStartedAt = Date.now()
           logTranslationEvent("引擎开始翻译", {
@@ -461,6 +470,19 @@ export function TranslationPanel(props: TranslationPanelProps) {
       )
 
       if (requestId !== requestIdRef.current) return
+      const historyId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      historyIdRef.current = historyId
+      historyWriteRef.current = saveTranslationHistory({
+        id: historyId,
+        createdAt: startedAt,
+        sourceText,
+        sourceLanguageCode,
+        targetLanguageCode,
+        results: historyResults(visibleEngines, settled),
+      }).catch((error) => {
+        console.error("[Translator] 保存翻译历史失败", error)
+      })
+      await historyWriteRef.current
       logTranslationEvent("翻译完成", {
         requestId,
         elapsedMs: Date.now() - startedAt,
@@ -594,6 +616,17 @@ export function TranslationPanel(props: TranslationPanelProps) {
       setEngineResults((current) => current.map((item) => (
         item.engineId === engineId ? result : item
       )))
+      const historyId = historyIdRef.current
+      if (historyId) {
+        try {
+          await historyWriteRef.current
+          if (requestId === requestIdRef.current) {
+            await updateHistoryResult(historyId, historyEngineResult(engine, result))
+          }
+        } catch (error) {
+          console.error("[Translator] 更新翻译历史失败", error)
+        }
+      }
       try {
         HapticFeedback.notificationSuccess()
       } catch {}
@@ -619,6 +652,19 @@ export function TranslationPanel(props: TranslationPanelProps) {
             }
           : item
       )))
+      const historyId = historyIdRef.current
+      if (historyId) {
+        try {
+          await historyWriteRef.current
+          if (requestId === requestIdRef.current) {
+            await updateHistoryResult(historyId, historyEngineResult(engine, {
+              engineId, engineName: engine.label, translatedText: "", errorText: message, isTranslating: false,
+            }))
+          }
+        } catch (historyError) {
+          console.error("[Translator] 更新翻译历史失败", historyError)
+        }
+      }
       try {
         HapticFeedback.notificationError()
       } catch {}
@@ -639,6 +685,14 @@ export function TranslationPanel(props: TranslationPanelProps) {
       },
     }),
     translationHost: systemTranslationHost,
+    toolbar: {
+      topBarTrailing: (
+        <Button title="历史" action={async () => {
+          await historyWriteRef.current
+          void Navigation.present({ element: <TranslationHistoryView /> })
+        }} />
+      ),
+    },
     ...(props.embedded ? {} : {
       presentationDetents: ["medium", "large"] as PresentationDetent[],
       presentationDragIndicator: "visible" as const,

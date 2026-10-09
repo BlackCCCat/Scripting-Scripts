@@ -1,3 +1,7 @@
+## v3.0.7
+- improve:增加翻译历史保留及查看
+- improve:添加DeepL引擎时可选择pro或free
+
 ## v3.0.6
 - fix:引擎列表左滑删除时的错误动画
 - improve:左滑删除按钮使用红色

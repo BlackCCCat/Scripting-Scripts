@@ -28,6 +28,9 @@ import { isExternalEngineConfigured } from "../utils/external_translation_engine
 import { isLocalTranslationAvailable } from "../utils/translation_engine"
 import { isSystemTranslationAvailable } from "../utils/system_translation_engine"
 import {
+  HISTORY_LIMITS, clearTranslationHistory, historyLimit, setHistoryLimit,
+} from "../utils/translation_history"
+import {
   addAiApiEngine,
   addDeepLEngine,
   addDeepLxEngine,
@@ -104,6 +107,7 @@ export function TranslatorSettingsView(props: {
   const engines = useObservable<TranslatorEngineEntry[]>(() => loadTranslatorSettings().engines)
   const editMode = useObservable(() => EditMode.inactive())
   const [isEditing, setIsEditing] = useState(false)
+  const [retainedHistory, setRetainedHistory] = useState(historyLimit)
   const [skipNextSync] = useState(() => ({ current: false }))
 
   // When ForEach with editActions="move" auto-updates the observable on drag reorder,
@@ -407,6 +411,43 @@ export function TranslatorSettingsView(props: {
               </Picker>
             </Menu>
           </HStack>
+        </Section>
+
+        <Section header={<Text>翻译历史</Text>}>
+          <Picker
+            title="保留条数"
+            value={retainedHistory}
+            onChanged={(value: number) => {
+              void setHistoryLimit(value).then(
+                () => setRetainedHistory(value),
+                (error) => { void Dialog.alert({ title: "设置失败", message: String(error) }) }
+              )
+            }}
+          >
+            {HISTORY_LIMITS.map((count) => (
+              <Text key={count} tag={count}>{count} 条</Text>
+            ))}
+          </Picker>
+          <Button
+            title="清空历史记录"
+            role="destructive"
+            action={() => {
+              void (async () => {
+                const confirmed = await Dialog.confirm({
+                  title: "清空翻译历史",
+                  message: "此操作将删除所有已保存的翻译记录，无法恢复。",
+                  confirmLabel: "清空",
+                  cancelLabel: "取消",
+                })
+                if (!confirmed) return
+                try {
+                  await clearTranslationHistory()
+                } catch (error) {
+                  await Dialog.alert({ title: "清空失败", message: String(error) })
+                }
+              })()
+            }}
+          />
         </Section>
 
         <Section header={<Text>翻译引擎</Text>}>

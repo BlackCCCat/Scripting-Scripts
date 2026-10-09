@@ -50,7 +50,11 @@ import {
   getExecutableEngines,
   loadTranslatorSettings,
 } from "../utils/translator_settings"
+import {
+  historyEngineResult, historyResults, saveTranslationHistory, updateHistoryResult,
+} from "../utils/translation_history"
 import { EngineIcon } from "./EngineIcon"
+import { TranslationHistoryView } from "./TranslationHistoryView"
 
 type ScriptTranslationViewProps = {
   settingsRefreshKey?: number
@@ -314,6 +318,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
   const [appleEngine] = useState(() => createTranslationEngine())
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
   const requestIdRef = useRef(0)
+  const historyIdRef = useRef<string | null>(null)
+  const historyWriteRef = useRef<Promise<void> | null>(null)
   const targetTouchedRef = useRef(false)
   const executableEngines = getExecutableEngines(settings)
   const assistantConfig = settings.engines.find((engine) => engine.kind === "assistant")?.config
@@ -465,6 +471,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
+    historyIdRef.current = null
+    historyWriteRef.current = null
     const startedAt = Date.now()
     setErrorText("")
     setEngineResults(createLoadingStates())
@@ -482,7 +490,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     })
 
     try {
-      await Promise.allSettled(
+      const settled = await Promise.allSettled(
         visibleEngines.map(async (engine) => {
           const engineStartedAt = Date.now()
           try {
@@ -537,6 +545,20 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       )
 
       if (requestId !== requestIdRef.current) return
+
+      const historyId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      historyIdRef.current = historyId
+      historyWriteRef.current = saveTranslationHistory({
+        id: historyId,
+        createdAt: startedAt,
+        sourceText,
+        sourceLanguageCode,
+        targetLanguageCode,
+        results: historyResults(visibleEngines, settled),
+      }).catch((error) => {
+        console.error("[Translator] 保存翻译历史失败", error)
+      })
+      await historyWriteRef.current
 
       logTranslationEvent("脚本内翻译完成", {
         requestId,
@@ -600,6 +622,17 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       setEngineResults((current) => current.map((item) => (
         item.engineId === engineId ? result : item
       )))
+      const historyId = historyIdRef.current
+      if (historyId) {
+        try {
+          await historyWriteRef.current
+          if (requestId === requestIdRef.current) {
+            await updateHistoryResult(historyId, historyEngineResult(engine, result))
+          }
+        } catch (error) {
+          console.error("[Translator] 更新翻译历史失败", error)
+        }
+      }
       try {
         HapticFeedback.notificationSuccess()
       } catch {}
@@ -626,6 +659,19 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
             }
           : item
       )))
+      const historyId = historyIdRef.current
+      if (historyId) {
+        try {
+          await historyWriteRef.current
+          if (requestId === requestIdRef.current) {
+            await updateHistoryResult(historyId, historyEngineResult(engine, {
+              engineId, engineName: engine.label, translatedText: "", errorText: message, isTranslating: false,
+            }))
+          }
+        } catch (historyError) {
+          console.error("[Translator] 更新翻译历史失败", historyError)
+        }
+      }
       try {
         HapticFeedback.notificationError()
       } catch {}
@@ -685,6 +731,12 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
             <Button action={() => dismiss()}>
               <Image systemName="xmark" fontWeight="semibold" foregroundStyle="red" />
             </Button>
+          ),
+          topBarTrailing: (
+            <Button title="历史" action={async () => {
+              await historyWriteRef.current
+              void Navigation.present({ element: <TranslationHistoryView /> })
+            }} />
           ),
         }}
       >
