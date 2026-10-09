@@ -243,11 +243,12 @@ function CopyableTextRow(props: {
 function shouldCollapseSourceText(text: string) {
   const normalized = String(text ?? "").trim()
   if (!normalized) return false
+  if (normalized.length > 110) return true
 
   const lines = normalized.split(/\r?\n/)
   if (lines.length > 2) return true
   if (lines.some((line) => line.trim().length > 56)) return true
-  return normalized.length > 110
+  return false
 }
 
 export function TranslationPanel(props: TranslationPanelProps) {
@@ -305,6 +306,17 @@ export function TranslationPanel(props: TranslationPanelProps) {
     )))
   }
 
+  function partialUpdate(engineId: string, requestId: number) {
+    let lastUpdateAt = 0
+    return async (text: string) => {
+      if (requestId !== requestIdRef.current) return
+      const now = Date.now()
+      if (now - lastUpdateAt < 150) return
+      lastUpdateAt = now
+      updatePartialEngineResult(engineId, text)
+    }
+  }
+
   async function translateEngine(
     engine: typeof visibleEngines[number],
     options?: {
@@ -350,13 +362,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
     setEngineResults([])
     targetTouchedRef.current = false
   }, [props.settingsRefreshKey])
-
-  useEffect(() => {
-    appleEngine.prewarm()
-    return () => {
-      appleEngine.dispose()
-    }
-  }, [appleEngine])
 
   const runTranslation = useEffectEvent(async () => {
     if (!hasInput) return
@@ -410,9 +415,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
     })
 
     try {
-      // 这里逐条回填每个引擎的状态，不再在最后整体覆盖，避免未完成项丢掉自己的加载态。
-      const settled = await Promise.allSettled(
-        visibleEngines.map(async (engine) => {
+      // 每个引擎独立回填结果，同时限制扩展中并行持有的模型会话和响应流。
+      const runEngine = async (engine: typeof visibleEngines[number]) => {
           const engineStartedAt = Date.now()
           logTranslationEvent("引擎开始翻译", {
             requestId,
@@ -422,10 +426,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
           })
           try {
             const result = await translateEngine(engine, {
-              onPartialText: async (text: string) => {
-                if (requestId !== requestIdRef.current) return
-                updatePartialEngineResult(engine.id, text)
-              },
+              onPartialText: partialUpdate(engine.id, requestId),
             })
             if (requestId !== requestIdRef.current) return null
             logTranslationEvent("引擎翻译成功", {
@@ -466,8 +467,19 @@ export function TranslationPanel(props: TranslationPanelProps) {
             )))
             return failed
           }
-        })
-      )
+      }
+      const settled: PromiseSettledResult<EngineTranslationState | null>[] = []
+      let nextEngineIndex = 0
+      await Promise.all(Array.from({ length: Math.min(2, visibleEngines.length) }, async () => {
+        while (nextEngineIndex < visibleEngines.length && requestId === requestIdRef.current) {
+          const index = nextEngineIndex++
+          try {
+            settled[index] = { status: "fulfilled", value: await runEngine(visibleEngines[index]) }
+          } catch (reason) {
+            settled[index] = { status: "rejected", reason }
+          }
+        }
+      }))
 
       if (requestId !== requestIdRef.current) return
       const historyId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -597,10 +609,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
     try {
       const result = await translateEngine(engine, {
-        onPartialText: async (text: string) => {
-          if (requestId !== requestIdRef.current) return
-          updatePartialEngineResult(engine.id, text)
-        },
+        onPartialText: partialUpdate(engine.id, requestId),
       })
       if (requestId !== requestIdRef.current) return
       logTranslationEvent("单引擎重试成功", {

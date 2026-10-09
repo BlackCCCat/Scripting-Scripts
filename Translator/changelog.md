@@ -1,3 +1,6 @@
+## v3.0.8
+- improve:系统翻译界面最多2个引擎并行，防止崩溃
+
 ## v3.0.7
 - improve:增加翻译历史保留及查看
 - improve:添加DeepL引擎时可选择pro或free

@@ -648,7 +648,7 @@ async function readAiStreamResponse(
     const piece = readStringFromData(chunk, ["utf-8", "utf8", "gb18030", "gbk"])
     if (!piece) continue
 
-    rawText += piece
+    if (!sawSse) rawText += piece
     buffer += piece
 
     while (true) {
@@ -668,6 +668,7 @@ async function readAiStreamResponse(
       }
 
       sawSse = true
+      rawText = ""
       translatedText = update.mode === "replace"
         ? update.text
         : `${translatedText}${update.text}`
