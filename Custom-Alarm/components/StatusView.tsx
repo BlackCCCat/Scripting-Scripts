@@ -15,6 +15,7 @@ import {
   formatDateTime,
 } from "../utils/alarm_runtime"
 import { CenterRowButton } from "./CenterRowButton"
+import { PageGradientBackground } from "./PageGradientBackground"
 
 function MetricRow(props: {
   icon: string
@@ -52,8 +53,10 @@ export function StatusView(props: {
   currentMonthRemainingWorkCount: number
   lastSyncedAt: number | null
   alarmCardGradientEnabled: boolean
+  pageGradientEnabled: boolean
   onOpenSoundSettings?: () => void
   onAlarmCardGradientEnabledChange?: (enabled: boolean) => void
+  onPageGradientEnabledChange?: (enabled: boolean) => void
   embedded?: boolean
 }) {
   const dismiss = Navigation.useDismiss()
@@ -62,6 +65,8 @@ export function StatusView(props: {
       navigationTitle="状态"
       navigationBarTitleDisplayMode="inline"
       formStyle="grouped"
+      background={props.pageGradientEnabled ? <PageGradientBackground /> : undefined}
+      scrollContentBackground={props.pageGradientEnabled ? "hidden" : "automatic"}
     >
       <Section
         header={<Text>闹钟</Text>}
@@ -115,6 +120,22 @@ export function StatusView(props: {
       </Section>
 
       <Section header={<Text>页面显示</Text>}>
+        <HStack spacing={12}>
+          <Image
+            systemName="rectangle.fill"
+            foregroundStyle={"#4F96AD" as any}
+            frame={{ width: 20, alignment: "center" as any }}
+          />
+          <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            页面渐变背景
+          </Text>
+          <Toggle
+            title=""
+            value={props.pageGradientEnabled}
+            onChanged={(value: boolean) => props.onPageGradientEnabledChange?.(value)}
+            toggleStyle="switch"
+          />
+        </HStack>
         <HStack spacing={12}>
           <Image
             systemName="paintpalette.fill"

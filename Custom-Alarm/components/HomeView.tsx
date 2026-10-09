@@ -28,6 +28,7 @@ import {
 import type { AlarmDraft, AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { AddAlarmView } from "./AddAlarmView"
 import { CalendarSettingsView } from "./CalendarSettingsView"
+import { PageGradientBackground } from "./PageGradientBackground"
 import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SoundSettingsView } from "./SoundSettingsView"
 import { StatusView } from "./StatusView"
@@ -43,7 +44,7 @@ import {
   scheduleAlarm,
 } from "../utils/alarm_runtime"
 import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
-import { DEFAULT_SOUND_NAME, loadAvailableSoundNames } from "../utils/alarm_sounds"
+import { DEFAULT_SOUND_NAME, loadAvailableSoundNames, soundDisplayName } from "../utils/alarm_sounds"
 import {
   ALARM_CONFIGURATION_VERSION,
   collectRecordSystemAlarmIds,
@@ -244,8 +245,9 @@ function AlarmMetaTag(props: {
         frame={{ width: 12, alignment: "center" as any }}
       />
       <Text
-        font="caption2"
+        font="caption"
         foregroundStyle="secondaryLabel"
+        lineLimit={2}
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
       >
         {props.text}
@@ -361,13 +363,15 @@ function AlarmRow(props: {
       <HStack
         spacing={10}
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        padding={{ top: 12, bottom: 12, leading: 14, trailing: 10 }}
+        padding={{ top: 16, bottom: 16, leading: 16, trailing: 12 }}
       >
-        <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={6}>
+        <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={10}>
           <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
-            <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={2}>
+            <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={3}>
               <Text
-                font="title2"
+                font="largeTitle"
+                fontWeight="semibold"
+                monospacedDigit
                 foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
                 frame={{ maxWidth: "infinity", alignment: "leading" as any }}
               >
@@ -377,6 +381,7 @@ function AlarmRow(props: {
                 <Text
                   font="subheadline"
                   foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
+                  lineLimit={1}
                   frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 >
                   {titleText}
@@ -392,7 +397,7 @@ function AlarmRow(props: {
               />
             </VStack>
           </HStack>
-          <VStack spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <VStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
             <AlarmMetaTag
               icon="arrow.trianglehead.2.clockwise"
               text={props.subtitle}
@@ -401,6 +406,10 @@ function AlarmRow(props: {
               icon="calendar"
               text={`下次 ${props.nextDateText}`}
               tint="#2563EB"
+            />
+            <AlarmMetaTag
+              icon="speaker.wave.2"
+              text={`声音 ${soundDisplayName(props.record.soundName)}`}
             />
           </VStack>
         </VStack>
@@ -421,6 +430,7 @@ export function HomeView() {
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
   const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
   const [alarmCardGradientEnabled, setAlarmCardGradientEnabled] = useState<boolean>(() => initialState.alarmCardGradientEnabled)
+  const [pageGradientEnabled, setPageGradientEnabled] = useState<boolean>(() => initialState.pageGradientEnabled)
   const [managedSystemAlarmIds, setManagedSystemAlarmIds] = useState<string[]>(() => initialState.managedSystemAlarmIds)
   const [cleanupCandidateAlarmIds, setCleanupCandidateAlarmIds] = useState<string[]>(() => initialState.cleanupCandidateAlarmIds)
   const [alarmConfigurationVersion, setAlarmConfigurationVersion] = useState<number>(() => initialState.alarmConfigurationVersion)
@@ -492,6 +502,7 @@ export function HomeView() {
       holidaySources: nextHolidaySources,
       availableSounds: nextAvailableSounds,
       alarmCardGradientEnabled,
+      pageGradientEnabled,
       managedSystemAlarmIds: nextManagedSystemAlarmIds,
       cleanupCandidateAlarmIds: nextCleanupCandidateAlarmIds,
       alarmConfigurationVersion: nextAlarmConfigurationVersion,
@@ -609,11 +620,12 @@ export function HomeView() {
       holidaySources,
       availableSounds,
       alarmCardGradientEnabled,
+      pageGradientEnabled,
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds,
       alarmConfigurationVersion,
     })
-  }, [records, holidaySources, availableSounds, alarmCardGradientEnabled, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
+  }, [records, holidaySources, availableSounds, alarmCardGradientEnabled, pageGradientEnabled, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
 
   useEffect(() => {
     if (!AlarmManager.isAvailable) return
@@ -979,6 +991,11 @@ export function HomeView() {
     setAlarmCardGradientEnabled(enabled)
   }
 
+  function updatePageGradientEnabled(enabled: boolean) {
+    if (enabled === pageGradientEnabled) return
+    setPageGradientEnabled(enabled)
+  }
+
   function renderStatusTab() {
     return (
       <NavigationStack>
@@ -997,10 +1014,12 @@ export function HomeView() {
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
           availableSoundCount={Math.max(0, availableSounds.length - 1)}
           alarmCardGradientEnabled={alarmCardGradientEnabled}
+          pageGradientEnabled={pageGradientEnabled}
           onOpenSoundSettings={() => {
             void openSoundSettings()
           }}
           onAlarmCardGradientEnabledChange={updateAlarmCardGradientEnabled}
+          onPageGradientEnabledChange={updatePageGradientEnabled}
         />
       </NavigationStack>
     )
@@ -1013,6 +1032,8 @@ export function HomeView() {
           navigationTitle="闹钟"
           navigationBarTitleDisplayMode="inline"
           listStyle="insetGroup"
+          background={pageGradientEnabled ? <PageGradientBackground /> : undefined}
+          scrollContentBackground={pageGradientEnabled ? "hidden" : "automatic"}
           toolbar={{
             topBarTrailing: (
               <Button
@@ -1078,6 +1099,7 @@ export function HomeView() {
           embedded
           sources={holidaySources}
           isRefreshing={calendarRefreshing}
+          pageGradientEnabled={pageGradientEnabled}
         />
       </NavigationStack>
     )

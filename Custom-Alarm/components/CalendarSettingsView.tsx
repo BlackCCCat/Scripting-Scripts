@@ -15,11 +15,13 @@ import type { HolidayCalendarSource } from "../types"
 import { formatDateTime } from "../utils/alarm_runtime"
 import { DEFAULT_HOLIDAY_SOURCE_ID } from "../utils/storage"
 import { HolidayCalendarMonthView } from "./HolidayPreviewView"
+import { PageGradientBackground } from "./PageGradientBackground"
 
 export function CalendarSettingsView(props: {
   sources: HolidayCalendarSource[]
   embedded?: boolean
   isRefreshing?: boolean
+  pageGradientEnabled?: boolean
 }) {
   const colorScheme = useColorScheme()
   const source = props.sources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? props.sources[0] ?? null
@@ -53,6 +55,8 @@ export function CalendarSettingsView(props: {
         navigationTitle="日历"
         navigationBarTitleDisplayMode="inline"
         formStyle="grouped"
+        background={props.pageGradientEnabled ? <PageGradientBackground /> : undefined}
+        scrollContentBackground={props.pageGradientEnabled ? "hidden" : "automatic"}
       >
           <Section header={<Text>中国节假日</Text>}>
             <HStack spacing={12}>

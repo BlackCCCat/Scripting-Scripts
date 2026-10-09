@@ -163,7 +163,8 @@ export function nextOccurrenceDateLabel(
   const yyyy = date.getFullYear()
   const mm = twoDigits(date.getMonth() + 1)
   const dd = twoDigits(date.getDate())
-  return `${yyyy}-${mm}-${dd}`
+  const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][date.getDay()]
+  return `${yyyy}-${mm}-${dd} · ${weekday}`
 }
 
 function buildAttributes(
