@@ -25,7 +25,7 @@ import {
   privateRulesForItem,
   type PrivateFieldRule,
 } from "../utils/favorite_fields"
-import { getLanShareAccessToken } from "./lan_share_credentials"
+import { getLanShareAccessToken, isTrustedDeviceToken, trustDevice } from "./lan_share_credentials"
 import { imageFromUploadRequest, MAX_LAN_IMAGE_UPLOAD_BYTES } from "./lan_share_image_upload"
 
 const MAX_REQUEST_BODY_SIZE = MAX_LAN_IMAGE_UPLOAD_BYTES + 256 * 1024
@@ -47,6 +47,7 @@ export type LanShareRuntimeStatus = {
 }
 
 type RateEntry = { count: number; resetAt: number }
+type AuthorizedSession = { session: WebSocketSession; token: string }
 
 let server: HttpServer | null = null
 let serverPort: number | null = null
@@ -55,8 +56,7 @@ let lastBroadcastVersion = 0
 let lastDatabaseDataVersion: number | null = null
 let checkingDatabaseDataVersion = false
 let unsubscribeDataChanges: (() => void) | null = null
-let activeAccessToken = ""
-let sessions: WebSocketSession[] = []
+let sessions: AuthorizedSession[] = []
 let reconcileQueue: Promise<LanShareRuntimeStatus> = Promise.resolve({
   state: "stopped",
   port: 8787,
@@ -127,6 +127,10 @@ function queryValue(request: HttpRequest, key: string): string {
 
 function requestToken(request: HttpRequest): string {
   return (header(request, "x-cais-token") || queryValue(request, "token")).trim().toUpperCase()
+}
+
+function authorizedToken(token: string): boolean {
+  return token === getLanShareAccessToken() || isTrustedDeviceToken(token)
 }
 
 function isPublicAsset(path: string): boolean {
@@ -238,8 +242,12 @@ function notifyDataChanged(version = readClipDataVersion()): void {
   if (version <= lastBroadcastVersion) return
   lastBroadcastVersion = version
   const message = JSON.stringify({ type: "dataChanged", version })
-  sessions = sessions.filter((session) => {
+  sessions = sessions.filter(({ session, token }) => {
     try {
+      if (!authorizedToken(token)) {
+        session.close()
+        return false
+      }
       session.writeText(message)
       return true
     } catch {
@@ -255,16 +263,12 @@ function startVersionBroadcasting(): void {
   void readDatabaseDataVersion().then((version) => {
     lastDatabaseDataVersion = version
   }).catch(() => {})
-  activeAccessToken = getLanShareAccessToken()
   versionTimer = (globalThis as any).setInterval?.(() => {
-    const accessToken = getLanShareAccessToken()
-    if (accessToken !== activeAccessToken) {
-      activeAccessToken = accessToken
-      sessions.forEach((session) => {
-        try { session.close() } catch {}
-      })
-      sessions = []
-    }
+    sessions = sessions.filter(({ session, token }) => {
+      if (authorizedToken(token)) return true
+      try { session.close() } catch {}
+      return false
+    })
     if (!checkingDatabaseDataVersion) {
       checkingDatabaseDataVersion = true
       void readDatabaseDataVersion().then((databaseVersion) => {
@@ -286,7 +290,6 @@ function stopVersionBroadcasting(): void {
   versionTimer = null
   unsubscribeDataChanges?.()
   unsubscribeDataChanges = null
-  activeAccessToken = ""
   lastDatabaseDataVersion = null
   checkingDatabaseDataVersion = false
 }
@@ -357,8 +360,8 @@ function registerRoutes(nextServer: HttpServer): void {
   nextServer.registerMiddleware(async (request) => {
     const limited = rateLimitResponse(request)
     if (limited) return limited
-    if (isPublicAsset(request.path)) return null
-    if (requestToken(request) !== getLanShareAccessToken()) return errorResponse(401, "访问码无效")
+    if (isPublicAsset(request.path) || request.path === "/ws") return null
+    if (!authorizedToken(requestToken(request))) return errorResponse(401, "访问凭证无效")
     return null
   })
 
@@ -379,6 +382,18 @@ function registerRoutes(nextServer: HttpServer): void {
   nextServer.registerAsyncHandler("/api/health", async (request) => {
     const invalid = requireMethod(request, "GET")
     return invalid ?? jsonResponse({ service: "CAIS", version: 1, port: serverPort })
+  })
+  nextServer.registerAsyncHandler("/api/trust", async (request) => {
+    const invalid = requireMethod(request, "POST")
+    if (invalid) return invalid
+    if (requestToken(request) !== getLanShareAccessToken()) return errorResponse(401, "访问码无效")
+    try {
+      const body = parseJsonBody(request)
+      return jsonResponse({ token: trustDevice(String(body.name ?? "")) }, 201, "Created")
+    } catch (error: any) {
+      const message = String(error?.message ?? error ?? "信任设备添加失败")
+      return errorResponse(message.includes("上限") ? 409 : 400, message)
+    }
   })
   nextServer.registerAsyncHandler("/api/items", async (request) => {
     if (request.method.toUpperCase() === "GET") {
@@ -525,14 +540,29 @@ function registerRoutes(nextServer: HttpServer): void {
 
   nextServer.registerWebsocket("/ws", {
     onConnected: (session) => {
-      sessions.push(session)
+      ;(globalThis as any).setTimeout?.(() => {
+        if (!sessions.some((entry) => entry.session === session)) {
+          try { session.close() } catch {}
+        }
+      }, 5000)
+    },
+    handleText: (session, text) => {
+      if (sessions.some((entry) => entry.session === session)) return
       try {
+        const message = JSON.parse(text)
+        const token = String(message?.token ?? "").trim().toUpperCase()
+        if (message?.type !== "auth" || !authorizedToken(token)) {
+          session.close()
+          return
+        }
+        sessions.push({ session, token })
         session.writeText(JSON.stringify({ type: "connected", version: readClipDataVersion() }))
       } catch {
+        session.close()
       }
     },
     onDisconnected: (session) => {
-      sessions = sessions.filter((item) => item !== session)
+      sessions = sessions.filter((entry) => entry.session !== session)
     },
   })
 
@@ -558,7 +588,7 @@ async function probeExistingServer(port: number): Promise<boolean> {
 
 function stopOwnedServer(): void {
   stopVersionBroadcasting()
-  sessions.forEach((session) => {
+  sessions.forEach(({ session }) => {
     try { session.close() } catch {}
   })
   sessions = []

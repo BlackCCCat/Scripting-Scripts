@@ -1,6 +1,17 @@
 const LAN_SHARE_TOKEN_KEY = "cais_lan_share_token_v1"
+const TRUSTED_DEVICES_KEY = "cais_lan_trusted_devices_v1"
 const ACCESS_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const ACCESS_CODE_LENGTH = 8
+const MAX_TRUSTED_DEVICES = 32
+
+type StoredTrustedDevice = {
+  id: string
+  name: string
+  createdAt: number
+  tokenHash: string
+}
+
+export type TrustedDevice = Omit<StoredTrustedDevice, "tokenHash">
 
 function storage(): any {
   return (globalThis as any).Storage
@@ -61,4 +72,71 @@ export function rotateLanShareAccessToken(): string {
   const token = createToken()
   writeToken(token)
   return token
+}
+
+function storedTrustedDevices(): StoredTrustedDevice[] {
+  try {
+    const st = storage()
+    const raw = st?.get?.(TRUSTED_DEVICES_KEY) ?? st?.getString?.(TRUSTED_DEVICES_KEY)
+    const value = typeof raw === "string" ? JSON.parse(raw) : raw
+    return Array.isArray(value) ? value.filter((item): item is StoredTrustedDevice =>
+      typeof item?.id === "string" && typeof item?.name === "string" &&
+      Number.isFinite(item?.createdAt) && /^[A-F0-9]{64}$/.test(item?.tokenHash)
+    ) : []
+  } catch {
+    return []
+  }
+}
+
+function saveTrustedDevices(devices: StoredTrustedDevice[]): void {
+  const st = storage()
+  const raw = JSON.stringify(devices)
+  if (typeof st?.set === "function") {
+    if (st.set(TRUSTED_DEVICES_KEY, raw) !== false) return
+  } else if (typeof st?.setString === "function") {
+    st.setString(TRUSTED_DEVICES_KEY, raw)
+    return
+  }
+  throw new Error("信任设备保存失败")
+}
+
+function trustedTokenHash(token: string): string {
+  const data = Data.fromRawString(token, "utf-8")
+  if (!data) throw new Error("凭证编码失败")
+  return Crypto.sha256(data).toHexString().toUpperCase()
+}
+
+export function isTrustedDeviceToken(token: string): boolean {
+  if (!/^[A-F0-9]{64}$/.test(token)) return false
+  try {
+    const hash = trustedTokenHash(token)
+    return storedTrustedDevices().some((device) => device.tokenHash === hash)
+  } catch {
+    return false
+  }
+}
+
+export function listTrustedDevices(): TrustedDevice[] {
+  return storedTrustedDevices().map(({ id, name, createdAt }) => ({ id, name, createdAt }))
+}
+
+export function trustDevice(name: string): string {
+  const devices = storedTrustedDevices()
+  if (devices.length >= MAX_TRUSTED_DEVICES) throw new Error("信任设备已达上限，请先移除旧设备")
+  const token = Crypto.generateSymmetricKey(256).toHexString().toUpperCase()
+  if (!/^[A-F0-9]{64}$/.test(token)) throw new Error("安全凭证生成失败")
+  const hash = trustedTokenHash(token)
+  devices.push({
+    id: hash.slice(0, 16),
+    name: name.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 60) || "浏览器设备",
+    createdAt: Date.now(),
+    tokenHash: hash,
+  })
+  saveTrustedDevices(devices)
+  return token
+}
+
+export function revokeTrustedDevice(id: string): void {
+  const devices = storedTrustedDevices()
+  saveTrustedDevices(devices.filter((device) => device.id !== id))
 }

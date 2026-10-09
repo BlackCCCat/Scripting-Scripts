@@ -2,6 +2,7 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  const TRUSTED_TOKEN_KEY = "caisTrustedDeviceToken";
   const state = {
     token: "",
     scope: "clipboard",
@@ -47,6 +48,27 @@
     $("serverState").classList.toggle("disconnected", message !== "已连接到 CAIS");
   }
 
+  function forgetCredentials() {
+    state.token = "";
+    sessionStorage.removeItem("caisAccessCode");
+    try { localStorage.removeItem(TRUSTED_TOKEN_KEY); } catch { /* Storage may be unavailable. */ }
+    state.socket?.close();
+    state.socket = null;
+  }
+
+  function savedTrustedToken() {
+    try { return localStorage.getItem(TRUSTED_TOKEN_KEY) || ""; }
+    catch { return ""; }
+  }
+
+  function canRememberDevice() {
+    try {
+      localStorage.setItem("caisStorageCheck", "1");
+      localStorage.removeItem("caisStorageCheck");
+      return true;
+    } catch { return false; }
+  }
+
   async function checkConnection() {
     if (checkingConnection || !state.token || $("appShell").classList.contains("hidden")) return;
     checkingConnection = true;
@@ -55,9 +77,8 @@
       setConnection("已连接到 CAIS");
     } catch (error) {
       if (error.status === 401) {
-        state.token = "";
-        sessionStorage.removeItem("caisAccessCode");
-        showAuth("访问码已失效，请重新输入");
+        forgetCredentials();
+        showAuth("访问凭证已失效，请重新输入访问码");
       } else {
         setConnection("连接中断");
       }
@@ -257,9 +278,8 @@
     } catch (error) {
       if (generation !== state.generation) return;
       if (error.status === 401) {
-        state.token = "";
-        sessionStorage.removeItem("caisAccessCode");
-        showAuth("访问码已失效，请重新输入");
+        forgetCredentials();
+        showAuth("访问凭证已失效，请重新输入访问码");
         return;
       }
       showNotice(error.message || "加载失败");
@@ -277,16 +297,18 @@
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     let socket;
     try {
-      socket = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(state.token)}`);
+      socket = new WebSocket(`${protocol}//${location.host}/ws`);
     } catch {
       reconnectTimer = setTimeout(connectSocket, 2000);
       return;
     }
     state.socket = socket;
-    socket.onopen = () => setConnection("已连接到 CAIS");
+    socket.onopen = () => socket.send(JSON.stringify({ type: "auth", token: state.token }));
     socket.onmessage = (event) => {
       try {
-        if (JSON.parse(event.data).type === "dataChanged") scheduleRefresh();
+        const message = JSON.parse(event.data);
+        if (message.type === "connected") setConnection("已连接到 CAIS");
+        if (message.type === "dataChanged") scheduleRefresh();
       } catch { /* Ignore malformed notifications. */ }
     };
     socket.onclose = () => {
@@ -298,19 +320,69 @@
     };
   }
 
-  async function signIn(token) {
+  async function deviceLabel() {
+    // shortcut: browsers that hide their brand in the user agent may appear as Chrome or Safari; use explicit browser metadata when available.
+    const ua = navigator.userAgent;
+    let brave = false;
+    try { brave = Boolean(await navigator.brave?.isBrave?.()); } catch { /* Browser detection is optional. */ }
+    const browser = brave ? "Brave"
+      : /Edg(?:e|A|iOS)?\//.test(ua) ? "Edge"
+      : /OPR\/|OPiOS\/|Opera\//.test(ua) ? "Opera"
+      : /Vivaldi\//.test(ua) ? "Vivaldi"
+      : /Arc\//.test(ua) ? "Arc"
+      : /DuckDuckGo\//.test(ua) ? "DuckDuckGo"
+      : /SamsungBrowser\//.test(ua) ? "Samsung Internet"
+      : /TorBrowser\//.test(ua) ? "Tor Browser"
+      : /FxiOS\/|Firefox\//.test(ua) ? "Firefox"
+      : /CriOS\/|Chrome\//.test(ua) ? "Chrome"
+      : /Safari\//.test(ua) ? "Safari" : "浏览器";
+    const platform = /iPad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ? "iPad"
+      : /iPhone/.test(ua) ? "iPhone"
+      : /Android/.test(ua) ? "Android"
+      : /Mac/.test(ua) ? "Mac"
+      : /Windows|Win32/.test(ua + navigator.platform) ? "Windows"
+      : /Linux/.test(ua) ? "Linux" : "设备";
+    return `${platform} · ${browser}`;
+  }
+
+  async function signIn(token, trusted = false, quiet = false) {
     state.token = token.trim().toUpperCase();
+    let remembered = trusted;
     try {
       await api("/api/health");
-      sessionStorage.setItem("caisAccessCode", state.token);
+      if (!trusted && canRememberDevice()) {
+        try {
+          const result = await api("/api/trust", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: await deviceLabel() }),
+          });
+          localStorage.setItem(TRUSTED_TOKEN_KEY, result.token);
+          state.token = result.token;
+          remembered = true;
+          sessionStorage.removeItem("caisAccessCode");
+        } catch {
+          sessionStorage.setItem("caisAccessCode", state.token);
+        }
+      } else if (!trusted) {
+        sessionStorage.setItem("caisAccessCode", state.token);
+      } else {
+        sessionStorage.removeItem("caisAccessCode");
+      }
       if (location.search) history.replaceState(null, "", location.pathname);
       $("authScreen").classList.add("hidden");
       $("appShell").classList.remove("hidden");
       await loadItems(false);
+      if (!state.token) return false;
       connectSocket();
+      if (!remembered) showToast("当前仅临时连接，未记住此设备");
+      return true;
     } catch (error) {
-      state.token = "";
-      showAuth(error.status === 401 ? "访问码不正确" : error.message || "无法连接到 CAIS");
+      if (trusted) forgetCredentials();
+      else state.token = "";
+      if (!quiet) showAuth(error.status === 401
+        ? trusted ? "设备信任已失效，请输入访问码" : "访问码不正确"
+        : error.message || "无法连接到 CAIS");
+      return false;
     }
   }
 
@@ -586,7 +658,12 @@
     }
   });
 
-  const token = new URLSearchParams(location.search).get("token") || sessionStorage.getItem("caisAccessCode");
-  if (token) signIn(token);
+  const code = new URLSearchParams(location.search).get("token") || sessionStorage.getItem("caisAccessCode");
+  const trustedToken = savedTrustedToken();
+  if (trustedToken) {
+    void signIn(trustedToken, true, Boolean(code)).then((connected) => {
+      if (!connected && code) void signIn(code);
+    });
+  } else if (code) void signIn(code);
   else showAuth();
 })();

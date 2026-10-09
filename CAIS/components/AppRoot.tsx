@@ -2802,7 +2802,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
             onClearFavorites={() => void requestClear("favorites")}
             onClearClipboard={(range) => void requestClear(range)}
             lanShareStatus={lanShareStatus}
-            onRotateLanShareToken={() => void rotateLanShareToken()}
+            onRotateLanShareToken={rotateLanShareToken}
             embeddedNavigation={embeddedHomeNavigation}
             keepHomeNavigationDestination
             zoomNamespace={homeZoomNamespace}
@@ -2907,7 +2907,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
               onClearFavorites={() => void requestClear("favorites")}
               onClearClipboard={(range) => void requestClear(range)}
               lanShareStatus={lanShareStatus}
-              onRotateLanShareToken={() => void rotateLanShareToken()}
+              onRotateLanShareToken={rotateLanShareToken}
               leadingToolbar={toolbarLeading()}
               trailingToolbar={settingsToolbarButtons()}
             />

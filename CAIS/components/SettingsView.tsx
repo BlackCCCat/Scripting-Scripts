@@ -671,11 +671,11 @@ function CustomActionEditorView(props: {
 
 export function SettingsView(props: {
   value: CaisSettings;
-  onChanged: (settings: CaisSettings) => void;
+  onChanged: (settings: CaisSettings) => void | Promise<void>;
   onClearFavorites?: () => void;
   onClearClipboard?: (range: ClipboardClearRange) => void;
   lanShareStatus?: LanShareRuntimeStatus;
-  onRotateLanShareToken?: () => void;
+  onRotateLanShareToken?: () => void | Promise<void>;
   leadingToolbar?: any;
   trailingToolbar?: any;
   embeddedNavigation?: boolean;
@@ -781,6 +781,8 @@ export function SettingsView(props: {
     status={props.lanShareStatus}
     onChanged={props.onChanged}
     onRotateToken={props.onRotateLanShareToken}
+    standalone={!props.keepHomeNavigationDestination}
+    zoomNamespace={props.zoomNamespace}
     navigationTransition={props.zoomNamespace ? {
       type: "zoom",
       sourceID: "lan-share-settings",
@@ -891,7 +893,7 @@ export function SettingsView(props: {
             </HStack>
           </Toggle>
         ) : null}
-        {props.keepHomeNavigationDestination && !props.embeddedNavigation ? (
+        {!props.embeddedNavigation ? (
           <Button
             buttonStyle="plain"
             action={() => void Navigation.present({
