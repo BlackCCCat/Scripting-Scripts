@@ -1038,7 +1038,7 @@ export function HomeView() {
       await Dialog.alert({ message: "当前系统不支持 AlarmManager。" })
       return
     }
-    if (busyRecordId === record.id) return
+    if (globalBusy || busyRecordId || skipMutationInProgress.current) return
 
     setBusyRecordId(record.id)
     try {
@@ -1223,7 +1223,7 @@ export function HomeView() {
                       nextDateText={nextOccurrenceDateLabel(record, holidaySourceMap)}
                       gradientEnabled={alarmCardGradientEnabled}
                       darkMode={colorScheme === "dark"}
-                      busy={globalBusy || busyRecordId !== null}
+                      busy={globalBusy || busyRecordId === record.id}
                       onToggle={toggleAlarm}
                       onSkip={(item) => changeSkippedAlarm(item, false)}
                       onUndoSkip={(item) => changeSkippedAlarm(item, true)}
