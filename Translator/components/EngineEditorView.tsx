@@ -236,9 +236,9 @@ export function EngineEditorView(props: {
             </Button>
           ),
           topBarTrailing: (
-            <Button 
+            <Button
               title="保存"
-              fontWeight="semibold" 
+              fontWeight="semibold"
               foregroundStyle="#007AFF"
               action={save}
             />
@@ -295,7 +295,7 @@ export function EngineEditorView(props: {
                 setUserAgent(value)
                 setModelIds([])
               }}
-              prompt="默认"
+              prompt="User-Agent,可留空"
             />
           ) : null}
           <TextField
