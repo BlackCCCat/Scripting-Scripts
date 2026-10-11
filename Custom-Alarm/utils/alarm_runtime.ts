@@ -1,6 +1,7 @@
 import type { AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { SnoozeCustomAlarmIntent, StopCustomAlarmIntent } from "../app_intents"
 import { DEFAULT_SOUND_NAME } from "./alarm_sounds"
+import { nextSearchStart, pendingSkippedOccurrences } from "./alarm_skip"
 import { buildHolidayDayMap } from "./holiday_calendar"
 
 export const EXPANDED_RULE_HORIZON_DAYS = 365
@@ -118,33 +119,35 @@ export function nextOccurrenceTimestamp(
 ): number | null {
   if (!record.enabled) return null
 
+  const after = nextSearchStart(record, now)
+
   switch (record.repeatRule.kind) {
     case "once":
       return record.repeatRule.timestamp > now ? record.repeatRule.timestamp : null
     case "daily": {
       const limit = effectiveOccurrenceLimit(record.repeatRule)
       if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
-      return buildNextDailyTimestamp(record.repeatRule, now)
+      return buildNextDailyTimestamp(record.repeatRule, after)
     }
     case "weekly": {
       const limit = effectiveOccurrenceLimit(record.repeatRule)
       if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
-      return buildNextWeeklyTimestamp(record.repeatRule, now)
+      return buildNextWeeklyTimestamp(record.repeatRule, after)
     }
     case "monthly": {
       const limit = effectiveOccurrenceLimit(record.repeatRule)
       if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
-      return buildNextMonthlyTimestamp(record.repeatRule, now)
+      return buildNextMonthlyTimestamp(record.repeatRule, after)
     }
     case "holiday": {
       const source = sourceMap.get(record.repeatRule.sourceId)
       if (!source) return null
-      return buildNextHolidayTimestamp(record.repeatRule, source, now)
+      return buildNextHolidayTimestamp(record.repeatRule, source, after)
     }
     case "custom": {
       const limit = effectiveOccurrenceLimit(record.repeatRule)
       if (limit !== null && (record.completedOccurrences ?? 0) >= limit) return null
-      return buildNextCustomTimestamp(record.repeatRule, now)
+      return buildNextCustomTimestamp(record.repeatRule, after)
     }
     default:
       return null
@@ -740,8 +743,9 @@ export async function scheduleAlarm(
         break
       }
       case "daily": {
-        if (effectiveOccurrenceLimit(record.repeatRule)) {
-          const nextTimestamp = buildNextDailyTimestamp(record.repeatRule, scheduledAt)
+        // 已有跳过记录继续使用固定实例，逐次撤销或过期后恢复系统每日重复。
+        if (effectiveOccurrenceLimit(record.repeatRule) || pendingSkippedOccurrences(record, scheduledAt).length) {
+          const nextTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, scheduledAt)
           if (!nextTimestamp) throw new Error("没有可安排的每日闹钟。")
           const systemId = UUID.string()
           const configuration = buildConfiguration(
@@ -771,8 +775,9 @@ export async function scheduleAlarm(
         break
       }
       case "weekly": {
-        if (effectiveOccurrenceLimit(record.repeatRule)) {
-          const nextTimestamp = buildNextWeeklyTimestamp(record.repeatRule, scheduledAt)
+        // 已有跳过记录继续使用固定实例，逐次撤销或过期后恢复系统每周重复。
+        if (effectiveOccurrenceLimit(record.repeatRule) || pendingSkippedOccurrences(record, scheduledAt).length) {
+          const nextTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, scheduledAt)
           if (!nextTimestamp) throw new Error("没有可安排的每周闹钟。")
           const systemId = UUID.string()
           const configuration = buildConfiguration(
@@ -806,7 +811,7 @@ export async function scheduleAlarm(
         break
       }
       case "monthly": {
-        const nextTimestamp = buildNextMonthlyTimestamp(record.repeatRule, scheduledAt)
+        const nextTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, scheduledAt)
         if (!nextTimestamp) throw new Error("未来 18 个月内没有可安排的每月闹钟。")
         const systemId = UUID.string()
         const configuration = buildConfiguration(
@@ -828,7 +833,7 @@ export async function scheduleAlarm(
         if (!source.lastSyncedAt && !source.holidayItems.length && !source.holidayDates.length) {
           throw new Error("节假日日历还没有同步到本地，请先打开日历设置进行同步。")
         }
-        const nextTimestamp = buildNextHolidayTimestamp(record.repeatRule, source, scheduledAt)
+        const nextTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, scheduledAt)
         if (!nextTimestamp) {
           throw new Error("今年剩余时间内没有可安排的班休日闹钟。")
         }
@@ -847,7 +852,7 @@ export async function scheduleAlarm(
         break
       }
       case "custom": {
-        const nextTimestamp = buildNextCustomTimestamp(record.repeatRule, scheduledAt)
+        const nextTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, scheduledAt)
         if (!nextTimestamp) throw new Error("未来一年内没有可安排的自定义周期闹钟。")
         const systemId = UUID.string()
         const configuration = buildConfiguration(

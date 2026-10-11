@@ -225,6 +225,12 @@ function normalizeRecord(value: any): AlarmRecord | null {
     soundName: String(value.soundName ?? DEFAULT_SOUND_NAME).trim() || DEFAULT_SOUND_NAME,
     repeatRule,
     completedOccurrences: Math.max(0, Math.floor(Number(value.completedOccurrences) || 0)),
+    skippedOccurrences: Array.isArray(value.skippedOccurrences)
+      ? Array.from(new Set((value.skippedOccurrences as unknown[])
+          .map((item: unknown) => Number(item))
+          .filter((timestamp: number) => Number.isFinite(timestamp) && timestamp > Date.now())))
+          .sort((a: number, b: number) => a - b)
+      : [],
     systemAlarmIds: Array.isArray(value.systemAlarmIds)
       ? (value.systemAlarmIds as unknown[]).map((item: unknown) => String(item)).filter(Boolean)
       : [],

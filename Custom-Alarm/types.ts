@@ -50,6 +50,7 @@ export type AlarmRecord = {
   soundName: string
   repeatRule: AlarmRepeatRule
   completedOccurrences?: number
+  skippedOccurrences?: number[]
   systemAlarmIds: string[]
   lastScheduledAt: number | null
   createdAt: number
