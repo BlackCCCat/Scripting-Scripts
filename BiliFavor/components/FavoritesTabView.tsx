@@ -460,12 +460,12 @@ export function FavoritesTabView(props: {
             <VStack
               spacing={12}
               padding={{ top: 20, bottom: 20 }}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
               listRowBackground={<EmptyView />}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
             >
-              <Text font="title3" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>还没有收藏 UP 主</Text>
-              <Text font="subheadline" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              <Text font="title3">还没有收藏 UP 主</Text>
+              <Text font="subheadline" foregroundStyle="secondaryLabel">
                 可以按昵称或 UID 搜索后加入收藏。
               </Text>
               <Button
@@ -482,12 +482,12 @@ export function FavoritesTabView(props: {
             <VStack
               spacing={10}
               padding={{ top: 24, bottom: 24 }}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
               listRowBackground={<EmptyView />}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
             >
               <ProgressView progressViewStyle="circular" />
-              <Text foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>正在加载收藏视频…</Text>
+              <Text foregroundStyle="secondaryLabel">正在加载收藏视频…</Text>
             </VStack>
           </Section>
         ) : null}
@@ -497,12 +497,12 @@ export function FavoritesTabView(props: {
             <VStack
               spacing={10}
               padding={{ top: 16, bottom: 16 }}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
               listRowBackground={<EmptyView />}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
             >
-              <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>加载失败</Text>
-              <Text foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>{props.errorMessage}</Text>
+              <Text font="headline">加载失败</Text>
+              <Text foregroundStyle="secondaryLabel">{props.errorMessage}</Text>
               <Button title="重新加载" systemImage="arrow.clockwise" action={() => { void props.onRefresh() }} />
             </VStack>
           </Section>
@@ -581,12 +581,12 @@ export function FavoritesTabView(props: {
             <VStack
               spacing={10}
               padding={{ top: 16, bottom: 16 }}
-              frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+              frame={{ maxWidth: "infinity", alignment: "center" as any }}
               listRowBackground={<EmptyView />}
               listRowSeparator={{ visibility: "hidden", edges: "all" as any }}
             >
-              <Text font="headline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>暂时没有可显示的视频</Text>
-              <Text foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+              <Text font="headline">暂时没有可显示的视频</Text>
+              <Text foregroundStyle="secondaryLabel">
                 这些收藏 UP 最近没有公开视频投稿，或者接口暂时没有返回结果。
               </Text>
             </VStack>
