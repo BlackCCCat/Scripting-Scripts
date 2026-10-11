@@ -417,56 +417,56 @@ export function TranslationPanel(props: TranslationPanelProps) {
     try {
       // 每个引擎独立回填结果，同时限制扩展中并行持有的模型会话和响应流。
       const runEngine = async (engine: typeof visibleEngines[number]) => {
-          const engineStartedAt = Date.now()
-          logTranslationEvent("引擎开始翻译", {
+        const engineStartedAt = Date.now()
+        logTranslationEvent("引擎开始翻译", {
+          requestId,
+          engineId: engine.id,
+          engineName: engine.label,
+          ...assistantLogOptions(engine),
+        })
+        try {
+          const result = await translateEngine(engine, {
+            onPartialText: partialUpdate(engine.id, requestId),
+          })
+          if (requestId !== requestIdRef.current) return null
+          logTranslationEvent("引擎翻译成功", {
             requestId,
             engineId: engine.id,
             engineName: engine.label,
             ...assistantLogOptions(engine),
+            elapsedMs: Date.now() - engineStartedAt,
+            translatedLength: result.translatedText.length,
+            translatedPreview: summarizeText(result.translatedText),
           })
-          try {
-            const result = await translateEngine(engine, {
-              onPartialText: partialUpdate(engine.id, requestId),
-            })
-            if (requestId !== requestIdRef.current) return null
-            logTranslationEvent("引擎翻译成功", {
-              requestId,
-              engineId: engine.id,
-              engineName: engine.label,
-              ...assistantLogOptions(engine),
-              elapsedMs: Date.now() - engineStartedAt,
-              translatedLength: result.translatedText.length,
-              translatedPreview: summarizeText(result.translatedText),
-            })
 
-            setEngineResults((current) => current.map((item) => (
-              item.engineId === engine.id ? result : item
-            )))
-            return result
-          } catch (error) {
-            if (requestId !== requestIdRef.current) return null
-            const message = error instanceof Error ? error.message : String(error)
-            console.error(`[Translator] 引擎翻译失败`, {
-              requestId,
-              engineId: engine.id,
-              engineName: engine.label,
-              ...assistantLogOptions(engine),
-              elapsedMs: Date.now() - engineStartedAt,
-              error: message,
-            })
+          setEngineResults((current) => current.map((item) => (
+            item.engineId === engine.id ? result : item
+          )))
+          return result
+        } catch (error) {
+          if (requestId !== requestIdRef.current) return null
+          const message = error instanceof Error ? error.message : String(error)
+          console.error(`[Translator] 引擎翻译失败`, {
+            requestId,
+            engineId: engine.id,
+            engineName: engine.label,
+            ...assistantLogOptions(engine),
+            elapsedMs: Date.now() - engineStartedAt,
+            error: message,
+          })
 
-            const failed = {
-              engineId: engine.id,
-              engineName: engine.label,
-              translatedText: "",
-              errorText: message,
-              isTranslating: false,
-            } satisfies EngineTranslationState
-            setEngineResults((current) => current.map((item) => (
-              item.engineId === engine.id ? failed : item
-            )))
-            return failed
-          }
+          const failed = {
+            engineId: engine.id,
+            engineName: engine.label,
+            translatedText: "",
+            errorText: message,
+            isTranslating: false,
+          } satisfies EngineTranslationState
+          setEngineResults((current) => current.map((item) => (
+            item.engineId === engine.id ? failed : item
+          )))
+          return failed
+        }
       }
       const settled: PromiseSettledResult<EngineTranslationState | null>[] = []
       let nextEngineIndex = 0

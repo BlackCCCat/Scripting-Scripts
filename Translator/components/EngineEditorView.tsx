@@ -104,6 +104,7 @@ export function EngineEditorView(props: {
       : "custom"
   )
   const [baseUrl, setBaseUrl] = useState(String(props.initial?.config?.baseUrl || aiProvider(compatibilityMode).baseUrl))
+  const [userAgent, setUserAgent] = useState(String(props.initial?.config?.userAgent ?? ""))
   const [apiKey, setApiKey] = useState(String(props.initial?.config?.apiKey ?? ""))
   const [model, setModel] = useState(String(props.initial?.config?.model ?? ""))
   const [modelIds, setModelIds] = useState<string[]>([])
@@ -129,6 +130,7 @@ export function EngineEditorView(props: {
       const result = await fetchAiApiModels({
         compatibilityMode,
         baseUrl: currentBaseUrl,
+        userAgent: compatibilityMode === "custom" ? userAgent.trim() : undefined,
         apiKey: currentApiKey,
       })
       if (requestId !== modelRequestId.current) return
@@ -151,7 +153,7 @@ export function EngineEditorView(props: {
 
   useEffect(() => {
     void reloadModels()
-  }, [apiKey, baseUrl, compatibilityMode, reloadModels])
+  }, [apiKey, baseUrl, userAgent, compatibilityMode, reloadModels])
 
   function save() {
     const normalizedLabel = label.trim() || aiProvider(compatibilityMode).label
@@ -169,6 +171,14 @@ export function EngineEditorView(props: {
       void Dialog.alert({
         title: "无法保存",
         message: "请先填写 API Key。",
+      })
+      return
+    }
+
+    if (compatibilityMode === "custom" && /[\r\n]/.test(userAgent)) {
+      void Dialog.alert({
+        title: "无法保存",
+        message: "User-Agent 不能包含换行符。",
       })
       return
     }
@@ -202,6 +212,7 @@ export function EngineEditorView(props: {
       config: {
         compatibilityMode,
         baseUrl: normalizedBaseUrl,
+        ...(compatibilityMode === "custom" && userAgent.trim() ? { userAgent: userAgent.trim() } : {}),
         apiKey: apiKey.trim(),
         model: model.trim(),
       },
@@ -276,6 +287,17 @@ export function EngineEditorView(props: {
             }}
             prompt="https://example.com"
           />
+          {compatibilityMode === "custom" ? (
+            <TextField
+              title="User-Agent"
+              value={userAgent}
+              onChanged={(value) => {
+                setUserAgent(value)
+                setModelIds([])
+              }}
+              prompt="默认"
+            />
+          ) : null}
           <TextField
             title="API Key"
             value={apiKey}

@@ -885,7 +885,9 @@ async function translateWithAiApiSingle(
     for (const headers of buildAiHeaders(mode, apiKey)) {
       response = await fetch(endpoint, {
         method: "POST",
-        headers,
+        headers: mode === "custom" && engine.config?.userAgent?.trim()
+          ? { ...headers, "User-Agent": engine.config.userAgent.trim() }
+          : headers,
         body,
         timeout: AI_TRANSLATION_TIMEOUT_SECONDS,
       })

@@ -151,6 +151,7 @@ function filterTranslationModelIds(mode: AiApiCompatibilityMode, modelIds: strin
 export async function fetchAiApiModels(input: {
   compatibilityMode: AiApiCompatibilityMode
   baseUrl: string
+  userAgent?: string
   apiKey: string
 }) {
   const compatibilityMode = normalizeMode(input.compatibilityMode)
@@ -176,7 +177,9 @@ export async function fetchAiApiModels(input: {
     for (const headers of headerCandidates) {
       const response = await fetch(url, {
         method: "GET",
-        headers,
+        headers: compatibilityMode === "custom" && input.userAgent?.trim()
+          ? { ...headers, "User-Agent": input.userAgent.trim() }
+          : headers,
         timeout: 12,
       })
 
