@@ -2,7 +2,7 @@ import {
   Button, HStack, Image, List, Navigation, NavigationStack, Section,
   Spacer, Text, VStack, useEffect, useState,
 } from "scripting"
-import { LANGUAGE_OPTIONS } from "../constants"
+import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import {
   deleteTranslationHistory, listTranslationHistory,
   type TranslationHistoryRecord,
@@ -11,7 +11,7 @@ import { EngineIcon } from "./EngineIcon"
 
 function languageName(code: string) {
   return code === "auto"
-    ? "自动检测"
+    ? AUTO_LANGUAGE.label
     : LANGUAGE_OPTIONS.find((item) => item.code === code)?.label ?? code
 }
 
@@ -54,14 +54,14 @@ function HistoryDetailView({ record }: { record: TranslationHistoryRecord }) {
   )
 }
 
-export function TranslationHistoryView() {
+export function TranslationHistoryView({ origin }: { origin?: "live" } = {}) {
   const dismiss = Navigation.useDismiss()
   const [records, setRecords] = useState<TranslationHistoryRecord[]>([])
   const [error, setError] = useState("")
 
   async function refresh() {
     try {
-      setRecords(await listTranslationHistory())
+      setRecords(await listTranslationHistory(origin))
       setError("")
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -91,7 +91,7 @@ export function TranslationHistoryView() {
   return (
     <NavigationStack>
       <List
-        navigationTitle="翻译历史"
+        navigationTitle={origin === "live" ? "实时翻译历史" : "翻译历史"}
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={{ topBarLeading: <Button title="关闭" action={() => dismiss()} /> }}
@@ -120,7 +120,7 @@ export function TranslationHistoryView() {
                 }}
               >
                 <HStack spacing={10}>
-                  <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+                  <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" }}>
                     <Text foregroundStyle="label" lineLimit={2} multilineTextAlignment="leading">{record.sourceText}</Text>
                     <Text font="caption" foregroundStyle="secondaryLabel">
                       {new Date(record.createdAt).toLocaleString()} · {record.results.map((item) => item.engineName).join("、")}

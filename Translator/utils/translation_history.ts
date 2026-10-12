@@ -20,6 +20,7 @@ export type TranslationHistoryRecord = {
   sourceLanguageCode: string
   targetLanguageCode: string
   results: HistoryEngineResult[]
+  origin?: "live" | "translation"
 }
 
 export function historyEngineResult(engine: TranslatorEngineEntry, result: EngineTranslationState): HistoryEngineResult {
@@ -57,6 +58,7 @@ type HistoryRow = {
   source_language: string
   target_language: string
   results_json: string
+  origin: "live" | "translation"
 }
 
 const DIRECTORY = Path.join(FileManager.appGroupDocumentsDirectory, "Translator")
@@ -80,9 +82,14 @@ async function database() {
           source_text TEXT NOT NULL,
           source_language TEXT NOT NULL,
           target_language TEXT NOT NULL,
-          results_json TEXT NOT NULL
+          results_json TEXT NOT NULL,
+          origin TEXT NOT NULL DEFAULT 'translation'
         )
       `)
+      const columns = await db.fetchAll<{ name: string }>("PRAGMA table_info(translation_history)")
+      if (!columns.some((column) => column.name === "origin")) {
+        await db.execute("ALTER TABLE translation_history ADD COLUMN origin TEXT NOT NULL DEFAULT 'translation'")
+      }
       return db
     })().catch((error) => {
       databasePromise = null
@@ -111,10 +118,10 @@ export async function saveTranslationHistory(record: TranslationHistoryRecord) {
   const db = await database()
   await db.transaction([
     {
-      sql: "INSERT INTO translation_history (id, created_at, source_text, source_language, target_language, results_json) VALUES (?, ?, ?, ?, ?, ?)",
+      sql: "INSERT INTO translation_history (id, created_at, source_text, source_language, target_language, results_json, origin) VALUES (?, ?, ?, ?, ?, ?, ?)",
       args: [
         record.id, record.createdAt, record.sourceText, record.sourceLanguageCode,
-        record.targetLanguageCode, JSON.stringify(record.results),
+        record.targetLanguageCode, JSON.stringify(record.results), record.origin ?? "translation",
       ],
     },
     {
@@ -144,10 +151,13 @@ export function updateHistoryResult(id: string, result: HistoryEngineResult) {
   return update
 }
 
-export async function listTranslationHistory(): Promise<TranslationHistoryRecord[]> {
+export async function listTranslationHistory(origin?: "live"): Promise<TranslationHistoryRecord[]> {
   const db = await database()
   const rows = await db.fetchAll<HistoryRow>(
-    "SELECT * FROM translation_history ORDER BY created_at DESC, rowid DESC"
+    origin
+      ? "SELECT * FROM translation_history WHERE origin = ? ORDER BY created_at DESC, rowid DESC"
+      : "SELECT * FROM translation_history ORDER BY created_at DESC, rowid DESC",
+    origin ? [origin] : []
   )
   return rows.map((row) => ({
     id: row.id,
@@ -156,6 +166,7 @@ export async function listTranslationHistory(): Promise<TranslationHistoryRecord
     sourceLanguageCode: row.source_language,
     targetLanguageCode: row.target_language,
     results: JSON.parse(row.results_json) as HistoryEngineResult[],
+    origin: row.origin,
   }))
 }
 
