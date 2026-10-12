@@ -12,6 +12,7 @@ export type FontInfo = {
   fullName: string
   postScriptName: string
   supportsChinese: boolean
+  variation?: { axes: Record<string, number> }
 }
 
 export type InspectedFont = {
@@ -68,7 +69,7 @@ function nameRecordScore(platformID: number, languageID: number): number {
   return 0
 }
 
-function parseNames(bytes: Uint8Array): Partial<Record<1 | 2 | 4 | 6, string>> {
+function parseNames(bytes: Uint8Array): Record<number, string> {
   const tableCount = readUInt16(bytes, 4)
   let nameTableOffset = -1
   let nameTableLength = 0
@@ -92,9 +93,8 @@ function parseNames(bytes: Uint8Array): Partial<Record<1 | 2 | 4 | 6, string>> {
 
   const recordCount = readUInt16(bytes, nameTableOffset + 2)
   const stringStorageOffset = nameTableOffset + readUInt16(bytes, nameTableOffset + 4)
-  const wantedIDs = new Set([1, 2, 4, 6])
-  const names: Partial<Record<1 | 2 | 4 | 6, string>> = {}
-  const scores: Partial<Record<1 | 2 | 4 | 6, number>> = {}
+  const names: Record<number, string> = {}
+  const scores: Record<number, number> = {}
 
   for (let index = 0; index < recordCount; index += 1) {
     const recordOffset = nameTableOffset + 6 + index * 12
@@ -103,24 +103,21 @@ function parseNames(bytes: Uint8Array): Partial<Record<1 | 2 | 4 | 6, string>> {
     const platformID = readUInt16(bytes, recordOffset)
     const languageID = readUInt16(bytes, recordOffset + 4)
     const nameID = readUInt16(bytes, recordOffset + 6)
-    if (!wantedIDs.has(nameID)) continue
-
     const length = readUInt16(bytes, recordOffset + 8)
     const relativeOffset = readUInt16(bytes, recordOffset + 10)
     const valueOffset = stringStorageOffset + relativeOffset
     if (valueOffset < nameTableOffset || valueOffset + length > nameTableOffset + nameTableLength) continue
 
     const score = nameRecordScore(platformID, languageID)
-    if (score <= (scores[nameID as 1 | 2 | 4 | 6] ?? -1)) continue
+    if (score <= (scores[nameID] ?? -1)) continue
 
     const value = platformID === 0 || platformID === 3
       ? decodeUTF16BE(bytes, valueOffset, length)
       : decodeSingleByte(bytes, valueOffset, length)
     if (!value) continue
 
-    const typedNameID = nameID as 1 | 2 | 4 | 6
-    names[typedNameID] = value
-    scores[typedNameID] = score
+    names[nameID] = value
+    scores[nameID] = score
   }
 
   return names
@@ -129,6 +126,52 @@ function parseNames(bytes: Uint8Array): Partial<Record<1 | 2 | 4 | 6, string>> {
 type FontTable = {
   offset: number
   length: number
+}
+
+function readFixed(bytes: Uint8Array, offset: number): number {
+  const raw = readUInt32(bytes, offset)
+  return (raw >= 0x80000000 ? raw - 0x100000000 : raw) / 65536
+}
+
+function parseNamedVariations(bytes: Uint8Array, names: Record<number, string>): Array<{
+  styleName: string
+  postScriptName?: string
+  axes: Record<string, number>
+}> {
+  const table = findTable(bytes, "fvar")
+  if (!table || table.length < 16) return []
+  const end = table.offset + table.length
+  const axesOffset = readUInt16(bytes, table.offset + 4)
+  const axisCount = readUInt16(bytes, table.offset + 8)
+  const axisSize = readUInt16(bytes, table.offset + 10)
+  const instanceCount = readUInt16(bytes, table.offset + 12)
+  const instanceSize = readUInt16(bytes, table.offset + 14)
+  if (!axisCount || axisSize < 20 || instanceSize < 4 + axisCount * 4) return []
+  const axesStart = table.offset + axesOffset
+  const instancesStart = axesStart + axisCount * axisSize
+  if (axesStart < table.offset + 16 || instancesStart + instanceCount * instanceSize > end) return []
+  const axisTags: string[] = []
+  for (let axis = 0; axis < axisCount; axis += 1) {
+    const offset = axesStart + axis * axisSize
+    const tag = readTag(bytes, offset)
+    if (!/^[\x20-\x7e]{4}$/.test(tag)) return []
+    axisTags.push(tag)
+  }
+  const variations = []
+  for (let instance = 0; instance < instanceCount; instance += 1) {
+    const offset = instancesStart + instance * instanceSize
+    const styleName = names[readUInt16(bytes, offset)]
+    if (!styleName) continue
+    const axes: Record<string, number> = {}
+    for (let axis = 0; axis < axisCount; axis += 1) {
+      axes[axisTags[axis]] = readFixed(bytes, offset + 4 + axis * 4)
+    }
+    const postScriptNameID = instanceSize >= 6 + axisCount * 4
+      ? readUInt16(bytes, offset + 4 + axisCount * 4)
+      : 0xffff
+    variations.push({ styleName, postScriptName: names[postScriptNameID], axes })
+  }
+  return variations
 }
 
 function findTable(bytes: Uint8Array, tag: string): FontTable | null {
@@ -328,10 +371,33 @@ export function inspectFontData(path: string, data: Data): FontInfo {
   }
 }
 
-export async function inspectFontFile(path: string): Promise<InspectedFont> {
+export async function inspectFontFileVariants(path: string): Promise<InspectedFont[]> {
   if (!path || !FileManager.existsSync(path) || !FileManager.isFileSync(path)) {
     throw new Error("找不到输入的字体文件。")
   }
   const data = await FileManager.readAsData(path)
-  return { info: inspectFontData(path, data), data }
+  return inspectFontVariants(path, data)
 }
+
+export function inspectFontVariants(path: string, data: Data): InspectedFont[] {
+  const base = inspectFontData(path, data)
+  const bytes = data.toUint8Array()
+  if (!bytes) throw new Error("无法读取字体内容。")
+  const variations = parseNamedVariations(bytes, parseNames(bytes))
+  if (!variations.length) return [{ info: base, data }]
+  return variations.map(variation => {
+    const fullName = `${base.familyName} ${variation.styleName}`.trim()
+    return {
+      data,
+      info: {
+        ...base,
+        styleName: variation.styleName,
+        fullName,
+        postScriptName: variation.postScriptName
+          || sanitizePostScriptName(`${base.familyName.replace(/\s+/g, "")}-${variation.styleName.replace(/\s+/g, "")}`),
+        variation: { axes: variation.axes },
+      },
+    }
+  })
+}
+

@@ -14,19 +14,14 @@ import {
   ZStack,
   useState,
 } from "scripting"
-import { formatFileSize, inspectFontFile, type InspectedFont } from "./font"
+import { formatFileSize, inspectFontFileVariants, type InspectedFont } from "./font"
+import { prepareFontForInstall } from "./font-instance"
 import { CopyFontValueButton, FontDetailRow } from "./font-detail-row"
 import { useMarkdownChangelogSheet } from "./changelog"
 import { recordInstalledFont } from "./font-history"
 import { FontHistoryView } from "./font-history-view"
 import { openFontInstaller } from "./profile"
 import { presentFontPreview } from "./preview"
-import {
-  removeExpiredStagedFonts,
-  removeStagedFont,
-  sharedFontPathFromQuery,
-} from "./shared-font"
-import { SharedFontInstallView } from "./shared-install-view"
 import { colors, CustomGradientBackground } from "./theme"
 
 const isIOS26OrLater = Number.parseInt(Device.systemVersion.split(".")[0] || "0", 10) >= 26
@@ -100,7 +95,7 @@ function FontsInstallerView() {
       const failures: string[] = []
       for (const path of paths) {
         try {
-          importedFonts.push(await inspectFontFile(path))
+          importedFonts.push(...await inspectFontFileVariants(path))
         } catch (error) {
           failures.push(`${Path.basename(path)}：${errorMessage(error)}`)
         }
@@ -144,13 +139,15 @@ function FontsInstallerView() {
   const installFont = async (selected: InspectedFont) => {
     if (busy) return
     setBusy(true)
-    setStatus("正在生成配置描述文件…")
+    setStatus(selected.info.variation ? "正在生成独立字重…" : "正在生成配置描述文件…")
     try {
-      await openFontInstaller(selected.info, selected.data)
+      const font = await prepareFontForInstall(selected)
+      setStatus("正在生成配置描述文件…")
+      await openFontInstaller(font.info, font.data)
       setStatus("描述文件已交给系统，请在“设置”中确认安装")
       HapticFeedback.notificationSuccess()
       try {
-        recordInstalledFont(selected.info)
+        recordInstalledFont(font.info)
       } catch (historyError) {
         setStatus("描述文件已交给系统，但历史记录保存失败")
         await Dialog.alert({
@@ -322,32 +319,11 @@ function FontsInstallerView() {
 }
 
 async function run() {
-  const sharedFontPath = sharedFontPathFromQuery()
-  let pendingSharedFontPath = sharedFontPath
   try {
-    await removeExpiredStagedFonts()
-    if (sharedFontPath) {
-      const font = await inspectFontFile(sharedFontPath)
-      try {
-        await removeStagedFont(sharedFontPath)
-        pendingSharedFontPath = null
-      } catch (error) {
-        console.warn("字体已识别，但暂时无法清理分享的字体副本", error)
-      }
-      await Navigation.present({ element: <SharedFontInstallView selectedFont={font} /> })
-    } else {
-      await Navigation.present({ element: <FontsInstallerView /> })
-    }
+    await Navigation.present({ element: <FontsInstallerView /> })
   } catch (error) {
     await Dialog.alert({ title: "无法打开字体", message: errorMessage(error) })
   } finally {
-    if (pendingSharedFontPath) {
-      try {
-        await removeStagedFont(pendingSharedFontPath)
-      } catch (error) {
-        console.warn("无法清理分享的字体副本", error)
-      }
-    }
     DocumentPicker.stopAcessingSecurityScopedResources()
     Script.exit()
   }

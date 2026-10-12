@@ -1,15 +1,10 @@
-import { Intent, Script } from "scripting"
-import {
-  removeBookmarksForSharedFont,
-  removeStagedFont,
-  SHARED_FONT_PARAMETER,
-  sharedFontPathFromToken,
-  stageSharedFont,
-} from "./shared-font"
+import { Intent, Navigation, Path, Script } from "scripting"
+import { inspectFontFileVariants, type FontInfo } from "./font"
+import { removeBookmarksForSharedFont } from "./shared-font"
+import { SharedFontInstallView } from "./shared-install-view"
 
 function resolveFontPath(): string | null {
   if (Intent.fileURLsParameter?.length === 1) return Intent.fileURLsParameter[0]
-
   const parameter = Intent.shortcutParameter
   if (parameter?.type === "fileURL" && typeof parameter.value === "string") {
     return parameter.value
@@ -21,10 +16,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+async function inspectSharedFont(sourcePath: string, destination: string): Promise<FontInfo[]> {
+  await FileManager.copyFile(sourcePath, destination)
+  const inspected = await inspectFontFileVariants(destination)
+  return inspected.map(({ info }) => ({
+    ...info,
+    path: sourcePath,
+    fileName: Path.basename(sourcePath),
+  }))
+}
+
 async function run() {
-  let stagedPath: string | null = null
   let sourcePath: string | null = null
-  let sourceAccessReleased = false
+  let previewDirectory: string | null = null
   let failureMessage: string | null = null
 
   try {
@@ -37,52 +41,51 @@ async function run() {
       throw new Error("请提供一个 .ttf 或 .otf 字体文件；其他输入类型不会被处理。")
     }
 
-    const token = await stageSharedFont(sourcePath)
-    stagedPath = sharedFontPathFromToken(token)
-    if (!stagedPath) throw new Error("无法准备分享的字体文件。")
-
+    previewDirectory = Path.join(FileManager.temporaryDirectory, `fonts-installer-preview-${UUID.string()}`)
+    const fontFileName = `font${Path.extname(sourcePath).toLowerCase()}`
+    await FileManager.createDirectory(previewDirectory, true)
+    const fonts = await inspectSharedFont(sourcePath, Path.join(previewDirectory, fontFileName))
     try {
       removeBookmarksForSharedFont(sourcePath)
     } catch (error) {
       console.warn("无法清理分享字体的文件书签", error)
     }
     DocumentPicker.stopAcessingSecurityScopedResources()
-    sourceAccessReleased = true
-
-    const url = Script.createRunSingleURLScheme(Script.name, {
-      [SHARED_FONT_PARAMETER]: token,
+    sourcePath = null
+    await Navigation.present({
+      element: <SharedFontInstallView
+        fonts={fonts}
+        previewDirectory={previewDirectory}
+        fontFileName={fontFileName}
+      />,
     })
-    const opened = await Safari.openURL(url)
-    if (!opened) throw new Error("系统未能打开 Fonts Installer。")
-
-    stagedPath = null
   } catch (error) {
-    if (stagedPath) {
-      try {
-        await removeStagedFont(stagedPath)
-      } catch (cleanupError) {
-        console.warn("无法清理分享的字体副本", cleanupError)
-      }
-    }
     failureMessage = `无法打开字体：${errorMessage(error)}`
   } finally {
-    if (!sourceAccessReleased) {
-      if (sourcePath) {
-        try {
-          removeBookmarksForSharedFont(sourcePath)
-        } catch (error) {
-          console.warn("无法清理分享字体的文件书签", error)
-        }
+    if (previewDirectory) {
+      try {
+        await FileManager.remove(previewDirectory)
+      } catch (error) {
+        console.warn("无法清理分享预览的临时文件", error)
+      }
+    }
+    if (sourcePath) {
+      try {
+        removeBookmarksForSharedFont(sourcePath)
+      } catch (error) {
+        console.warn("无法清理分享字体的文件书签", error)
       }
       DocumentPicker.stopAcessingSecurityScopedResources()
     }
   }
-
   if (failureMessage) {
-    Script.exit(Intent.text(failureMessage))
-    return
+    try {
+      await Dialog.alert({ title: "无法打开字体", message: failureMessage })
+    } catch (error) {
+      console.warn("无法显示字体错误", error)
+    }
   }
-  Script.exit()
+  Script.exit(failureMessage ? Intent.text(failureMessage) : undefined)
 }
 
 run()

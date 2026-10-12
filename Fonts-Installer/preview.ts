@@ -2,6 +2,7 @@ import type { FontInfo } from "./font"
 
 export type FontPreviewHTMLOptions = {
   embedded?: boolean
+  fontURL?: string
 }
 
 function escapeHTML(value: string): string {
@@ -15,11 +16,12 @@ function escapeHTML(value: string): string {
 
 export function createFontPreviewHTML(
   info: FontInfo,
-  fontData: Data,
+  fontData: Data | null,
   options: FontPreviewHTMLOptions = {},
 ): string {
   const mimeType = info.format === "OpenType" ? "font/otf" : "font/ttf"
-  const fontURL = `data:${mimeType};base64,${fontData.toBase64String()}`
+  if (!options.fontURL && !fontData) throw new Error("缺少字体预览数据。")
+  const fontURL = options.fontURL ?? `data:${mimeType};base64,${fontData!.toBase64String()}`
   const title = escapeHTML(info.fullName)
   const family = escapeHTML(info.familyName)
   const postScriptName = escapeHTML(info.postScriptName)
@@ -27,6 +29,11 @@ export function createFontPreviewHTML(
   const chineseSample = info.supportsChinese
     ? '<div class="sample">天地玄黄，宇宙洪荒。<br>春风又绿江南岸。</div>'
     : ""
+  const variationSettings = info.variation
+    ? Object.entries(info.variation.axes)
+      .map(([tag, value]) => `"${tag.replace(/["\\]/g, "\\$&")}" ${value}`)
+      .join(", ")
+    : "normal"
   const bodyPadding = options.embedded
     ? "18px 16px calc(env(safe-area-inset-bottom, 0px) + 18px)"
     : "calc(env(safe-area-inset-top, 0px) + 72px) 20px calc(env(safe-area-inset-bottom, 0px) + 44px)"
@@ -53,6 +60,7 @@ export function createFontPreviewHTML(
     .meta { color: #687086; font-size: 14px; line-height: 1.5; margin-top: 7px; }
     .specimen {
       font-family: "ImportedFont", sans-serif;
+      font-variation-settings: ${variationSettings};
       background: white;
       border: 1px solid rgba(23,32,51,.09);
       border-radius: 22px;

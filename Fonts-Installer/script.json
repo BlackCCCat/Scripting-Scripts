@@ -27,7 +27,7 @@
     "hash": "",
     "autoUpdateInterval": 86400
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "name": "Fonts Installer",
   "entry": "index.tsx",
   "intentInputTypes": [

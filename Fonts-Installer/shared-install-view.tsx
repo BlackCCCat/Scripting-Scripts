@@ -4,6 +4,8 @@ import {
   Image,
   Navigation,
   NavigationStack,
+  Path,
+  Picker,
   ProgressView,
   Text,
   VStack,
@@ -13,7 +15,8 @@ import {
   useMemo,
   useState,
 } from "scripting"
-import { formatFileSize, type InspectedFont } from "./font"
+import { formatFileSize, type FontInfo } from "./font"
+import { prepareFontForInstall } from "./font-instance"
 import { CopyFontValueButton, FontDetailRow } from "./font-detail-row"
 import { recordInstalledFont } from "./font-history"
 import { openFontInstaller } from "./profile"
@@ -28,21 +31,37 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function SharedFontInstallView({ selectedFont }: { selectedFont: InspectedFont }) {
+export function SharedFontInstallView({ fonts, previewDirectory, fontFileName }: {
+  fonts: FontInfo[]
+  previewDirectory: string
+  fontFileName: string
+}) {
   const dismiss = Navigation.useDismiss()
-  const controller = useMemo(() => new WebViewController({ ephemeral: true }), [])
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const controller = useMemo(() => new WebViewController({ ephemeral: true }), [selectedIndex])
+  const selectedFont = fonts[selectedIndex]
   const [previewState, setPreviewState] = useState<PreviewState>("loading")
   const [installing, setInstalling] = useState(false)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const previewReady = previewState === "ready"
 
   useEffect(() => {
+    return () => controller.dispose()
+  }, [controller])
+
+  useEffect(() => {
     let active = true
+    setPreviewState("loading")
 
     const loadPreview = async () => {
       try {
-        const html = createFontPreviewHTML(selectedFont.info, selectedFont.data, { embedded: true })
-        const loaded = await controller.loadHTML(html)
+        const html = createFontPreviewHTML(selectedFont, null, {
+          embedded: true,
+          fontURL: fontFileName,
+        })
+        const htmlPath = Path.join(previewDirectory, `preview-${selectedIndex}.html`)
+        await FileManager.writeAsString(htmlPath, html, "utf-8")
+        const loaded = await controller.loadFile(htmlPath, previewDirectory)
         if (!loaded) throw new Error("无法载入字体预览。")
         if (active) setPreviewState("ready")
       } catch (error) {
@@ -53,9 +72,8 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
     void loadPreview()
     return () => {
       active = false
-      controller.dispose()
     }
-  }, [controller, selectedFont])
+  }, [controller, selectedFont, selectedIndex, previewDirectory, fontFileName])
 
   const copyFontValue = async (value: string, label: string) => {
     try {
@@ -71,10 +89,12 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
     if (!previewReady || installing) return
     setInstalling(true)
     try {
-      await openFontInstaller(selectedFont.info, selectedFont.data)
+      const data = await FileManager.readAsData(Path.join(previewDirectory, fontFileName))
+      const font = await prepareFontForInstall({ info: selectedFont, data })
+      await openFontInstaller(font.info, font.data)
       HapticFeedback.notificationSuccess()
       try {
-        recordInstalledFont(selectedFont.info)
+        recordInstalledFont(font.info)
       } catch (historyError) {
         await Dialog.alert({
           title: "安装请求已发出",
@@ -101,6 +121,23 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
           padding={{ top: 14, bottom: 18, leading: 16, trailing: 16 }}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
         >
+          {fonts.length > 1 ? (
+            <Picker
+              title="选择字重"
+              value={selectedIndex}
+              disabled={installing}
+              onChanged={(index: number) => {
+                setPreviewState("loading")
+                setCopyMessage(null)
+                setSelectedIndex(index)
+              }}
+              pickerStyle="menu"
+            >
+              {fonts.map((font, index) => (
+                <Text tag={index}>{font.styleName}</Text>
+              ))}
+            </Picker>
+          ) : null}
           <VStack
             spacing={12}
             padding={14}
@@ -121,9 +158,9 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
                 spacing={3}
                 frame={{ maxWidth: "infinity", alignment: "leading" }}
               >
-                <Text font="headline" foregroundStyle={colors.primary}>{selectedFont.info.fullName}</Text>
+                <Text font="headline" foregroundStyle={colors.primary}>{selectedFont.fullName}</Text>
                 <Text font="caption" foregroundStyle={colors.secondary}>
-                  {selectedFont.info.format} · {formatFileSize(selectedFont.info.fileSize)}
+                  {selectedFont.format} · {formatFileSize(selectedFont.fileSize)}
                 </Text>
               </VStack>
             </HStack>
@@ -131,23 +168,23 @@ export function SharedFontInstallView({ selectedFont }: { selectedFont: Inspecte
             <VStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
               <FontDetailRow
                 label="字体家族"
-                value={selectedFont.info.familyName}
+                value={selectedFont.familyName}
                 trailing={(
                   <CopyFontValueButton
                     accessibilityLabel="复制字体家族名称"
                     disabled={installing}
-                    action={() => void copyFontValue(selectedFont.info.familyName, "字体家族名称")}
+                    action={() => void copyFontValue(selectedFont.familyName, "字体家族名称")}
                   />
                 )}
               />
               <FontDetailRow
                 label="PostScript"
-                value={selectedFont.info.postScriptName}
+                value={selectedFont.postScriptName}
                 trailing={(
                   <CopyFontValueButton
                     accessibilityLabel="复制 PostScript 名称"
                     disabled={installing}
-                    action={() => void copyFontValue(selectedFont.info.postScriptName, "PostScript 名称")}
+                    action={() => void copyFontValue(selectedFont.postScriptName, "PostScript 名称")}
                   />
                 )}
               />
