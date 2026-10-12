@@ -1,4 +1,5 @@
 import {
+  AppEvents,
   Button,
   ControlGroup,
   Divider,
@@ -875,6 +876,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   useEffect(() => {
     let stopped = false
     let reconciling = false
+    let verifyLanServer = true
 
     async function reconcile() {
       if (stopped || reconciling) return
@@ -894,17 +896,26 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           settingsRef.current = merged
           if (!stopped) setSettings(merged)
         }
-        const status = await reconcileLanShareServer(latest)
+        const verifyRunning = verifyLanServer
+        verifyLanServer = false
+        const status = await reconcileLanShareServer(latest, verifyRunning)
         if (!stopped) publishLanShareStatus(status)
       } finally {
         reconciling = false
       }
     }
 
+    const onScenePhase = (phase: "active" | "inactive" | "background") => {
+      if (phase !== "active") return
+      verifyLanServer = true
+      void reconcile()
+    }
+    AppEvents.scenePhase.addListener(onScenePhase)
     void reconcile()
     const timer = (globalThis as any).setInterval?.(() => void reconcile(), 1500)
     return () => {
       stopped = true
+      AppEvents.scenePhase.removeListener(onScenePhase)
       if (timer) (globalThis as any).clearInterval?.(timer)
       releaseLanShareServer()
     }

@@ -34,6 +34,7 @@ const MAX_TITLE_LENGTH = 160
 const RATE_LIMIT_WINDOW_MS = 60_000
 const RATE_LIMIT_REQUESTS = 600
 const VERSION_POLL_INTERVAL_MS = 700
+const HEALTH_CHECK_INTERVAL_MS = 15_000
 
 export type LanShareRuntimeState = "stopped" | "starting" | "running" | "delegated" | "error"
 
@@ -71,6 +72,7 @@ let runtimeStatus: LanShareRuntimeStatus = {
 }
 let writeQueue: Promise<void> = Promise.resolve()
 let lastStartAttemptAt = 0
+let lastHealthCheckAt = 0
 const rateEntries = new Map<string, RateEntry>()
 const assetCache = new Map<string, Data>()
 
@@ -569,7 +571,7 @@ function registerRoutes(nextServer: HttpServer): void {
   nextServer.setNotFoundHandler(async () => errorResponse(404, "接口不存在"))
 }
 
-async function probeExistingServer(port: number): Promise<boolean> {
+async function probeExistingServer(port: number, timeoutMs = 700): Promise<boolean> {
   const request = fetch(`http://127.0.0.1:${port}/api/health`, {
     headers: { "X-CAIS-Token": getLanShareAccessToken() },
   }).then(async (response) => {
@@ -579,7 +581,7 @@ async function probeExistingServer(port: number): Promise<boolean> {
   }).catch(() => false)
   let timer: any
   const timeout = new Promise<boolean>((resolve) => {
-    timer = (globalThis as any).setTimeout?.(() => resolve(false), 700)
+    timer = (globalThis as any).setTimeout?.(() => resolve(false), timeoutMs)
   })
   const result = await Promise.race([request, timeout])
   if (timer) (globalThis as any).clearTimeout?.(timer)
@@ -595,9 +597,10 @@ function stopOwnedServer(): void {
   try { server?.stop() } catch {}
   server = null
   serverPort = null
+  lastHealthCheckAt = 0
 }
 
-async function applyDesiredState(settings: CaisSettings): Promise<LanShareRuntimeStatus> {
+async function applyDesiredState(settings: CaisSettings, verifyRunning: boolean): Promise<LanShareRuntimeStatus> {
   const port = settings.lanSharingPort
   if (!settings.lanSharingEnabled) {
     if (!server && runtimeStatus.state === "stopped" && runtimeStatus.port === port) {
@@ -608,7 +611,13 @@ async function applyDesiredState(settings: CaisSettings): Promise<LanShareRuntim
   }
 
   if (server?.state === "running" && serverPort === port) {
-    return setRuntimeStatus(statusFor("running", port, "服务正在运行"))
+    if (!verifyRunning && Date.now() - lastHealthCheckAt < HEALTH_CHECK_INTERVAL_MS) {
+      return setRuntimeStatus(statusFor("running", port, "服务正在运行"))
+    }
+    lastHealthCheckAt = Date.now()
+    if (await probeExistingServer(port, 1500)) {
+      return setRuntimeStatus(statusFor("running", port, "服务正在运行"))
+    }
   }
 
   const retryDelay = runtimeStatus.state === "delegated" ? 3000 : runtimeStatus.state === "error" ? 5000 : 0
@@ -650,14 +659,15 @@ async function applyDesiredState(settings: CaisSettings): Promise<LanShareRuntim
   }
   server = nextServer
   serverPort = nextServer.port ?? port
+  lastHealthCheckAt = Date.now()
   startVersionBroadcasting()
   return setRuntimeStatus(statusFor("running", serverPort, "服务正在运行"))
 }
 
-export function reconcileLanShareServer(settings: CaisSettings): Promise<LanShareRuntimeStatus> {
+export function reconcileLanShareServer(settings: CaisSettings, verifyRunning = false): Promise<LanShareRuntimeStatus> {
   reconcileQueue = reconcileQueue.then(
-    () => applyDesiredState(settings),
-    () => applyDesiredState(settings)
+    () => applyDesiredState(settings, verifyRunning),
+    () => applyDesiredState(settings, verifyRunning)
   )
   return reconcileQueue
 }
