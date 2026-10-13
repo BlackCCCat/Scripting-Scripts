@@ -18,12 +18,13 @@ import {
   loadPacks,
   loadRecentStickers,
   loadSoundEnabled,
+  loadSoundMode,
   loadTargetKeyboardScript,
   migrateLegacySharedStorage,
   rememberRecentSticker,
 } from "./storage"
 import { prepareKeyboardFeedback, playKeyboardFeedback } from "./keyboardFeedback"
-import type { CachedSticker, StickerPack } from "./types"
+import type { CachedSticker, KeyboardSoundMode, StickerPack } from "./types"
 
 const GRID_COLUMNS = Array.from({ length: 4 }, () => ({
   size: { type: "flexible" as const, min: 0, max: "infinity" as const },
@@ -55,6 +56,7 @@ function KeyboardView() {
   const [activeName, setActiveName] = useState("")
   const [targetScript, setTargetScript] = useState("")
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const [soundMode, setSoundMode] = useState<KeyboardSoundMode>("system")
   const [status, setStatus] = useState("")
 
   useEffect(() => {
@@ -66,11 +68,13 @@ function KeyboardView() {
       }))
       .filter((pack) => pack.stickers.length > 0)
     const nextSoundEnabled = loadSoundEnabled()
+    const nextSoundMode = loadSoundMode()
     setPacks(loaded)
     setRecentStickers(loadRecentStickers().filter((sticker) => sticker.kind === "static"))
     setTargetScript(loadTargetKeyboardScript())
     setSoundEnabled(nextSoundEnabled)
-    setTimeout(() => prepareKeyboardFeedback({ soundEnabled: nextSoundEnabled }), 0)
+    setSoundMode(nextSoundMode)
+    setTimeout(() => prepareKeyboardFeedback({ soundEnabled: nextSoundEnabled, soundMode: nextSoundMode }), 0)
     setActiveName((current) => current || loaded[0]?.name || RECENT_PACK_NAME)
   }, [])
 
@@ -132,7 +136,7 @@ function KeyboardView() {
   }
 
   function feedback(beforeAction = false) {
-    playKeyboardFeedback({ soundEnabled }, beforeAction)
+    playKeyboardFeedback({ soundEnabled, soundMode }, beforeAction)
   }
 
   function withFeedback(action: () => void | Promise<void>, delayAction = false) {

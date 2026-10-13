@@ -1,4 +1,5 @@
 export type StickerKind = "static" | "animated" | "video" | "unknown"
+export type KeyboardSoundMode = "system" | "engine"
 
 export type CachedSticker = {
   id: string

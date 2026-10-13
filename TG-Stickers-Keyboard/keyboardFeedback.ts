@@ -1,3 +1,5 @@
+import type { KeyboardSoundMode } from "./types"
+
 type CoreHapticsGlobals = {
   HapticEngine?: any
   HapticPattern?: any
@@ -7,6 +9,7 @@ type CoreHapticsGlobals = {
 
 export type KeyboardFeedbackSettings = {
   soundEnabled: boolean
+  soundMode: KeyboardSoundMode
 }
 
 type HapticPlayerPool = {
@@ -156,7 +159,7 @@ export function prepareKeyboardFeedback(settings: KeyboardFeedbackSettings) {
         prepareKeyboardFeedback(settings)
       }
     }
-    try { reusableHapticEngine.isMutedForAudio = !settings.soundEnabled } catch {}
+    try { reusableHapticEngine.isMutedForAudio = !settings.soundEnabled || settings.soundMode !== "engine" } catch {}
 
     const startResult = reusableHapticEngine.startAsync
       ? reusableHapticEngine.startAsync()
@@ -166,7 +169,7 @@ export function prepareKeyboardFeedback(settings: KeyboardFeedbackSettings) {
         hapticEngineReady = true
         hapticEngineStartPromise = null
         makeTransientPlayer()
-        if (settings.soundEnabled) makeClickPlayer()
+        if (settings.soundEnabled && settings.soundMode === "engine") makeClickPlayer()
       })
       .catch(() => {
         disposeKeyboardFeedback()
@@ -180,16 +183,16 @@ export function prepareKeyboardFeedback(settings: KeyboardFeedbackSettings) {
 
 function playPreparedClick(settings: KeyboardFeedbackSettings) {
   if (!settings.soundEnabled) return
-  if (!hapticEngineReady || !reusableHapticEngine || coreHapticsClickUnavailable) {
+  if (settings.soundMode === "system") {
     playSystemInputClick(settings)
     return
   }
+  if (!hapticEngineReady || !reusableHapticEngine || coreHapticsClickUnavailable) return
   try {
     const player = makeClickPlayer()
     player?.start?.(0)
   } catch {
     coreHapticsClickUnavailable = true
-    playSystemInputClick(settings)
   }
 }
 

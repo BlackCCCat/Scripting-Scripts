@@ -1,5 +1,5 @@
 import { Path } from "scripting"
-import type { CachedSticker, StickerPack } from "./types"
+import type { CachedSticker, KeyboardSoundMode, StickerPack } from "./types"
 import { readPrivateStorage, STORAGE_KEYS, writePrivateStorage } from "./privateStorage"
 
 const SCRIPT_NAME = "TG Stickers Keyboard"
@@ -33,6 +33,14 @@ export function loadSoundEnabled(): boolean {
 
 export function saveSoundEnabled(enabled: boolean) {
   writePrivateStorage(STORAGE_KEYS.soundEnabled, enabled)
+}
+
+export function loadSoundMode(): KeyboardSoundMode {
+  return readPrivateStorage<KeyboardSoundMode>(STORAGE_KEYS.soundMode) === "engine" ? "engine" : "system"
+}
+
+export function saveSoundMode(mode: KeyboardSoundMode) {
+  writePrivateStorage(STORAGE_KEYS.soundMode, mode)
 }
 
 export function loadDynamicStickersEnabled(): boolean {

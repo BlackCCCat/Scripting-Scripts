@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   targetScript: "tg-stickers-keyboard:target-keyboard-script:v1",
   recentStickers: "tg-stickers-keyboard:recent-stickers:v1",
   soundEnabled: "tg-stickers-keyboard:sound-enabled:v1",
+  soundMode: "tg-stickers-keyboard:sound-mode:v1",
   dynamicStickersEnabled: "tg-stickers-keyboard:dynamic-stickers-enabled:v1",
   photoAlbumId: "tg-stickers-keyboard:photo-album-id:v1",
   photoAssets: "tg-stickers-keyboard:photo-assets:v1",

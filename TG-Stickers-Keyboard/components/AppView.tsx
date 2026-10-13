@@ -8,6 +8,7 @@ import {
   Menu,
   Navigation,
   NavigationStack,
+  Picker,
   ProgressView,
   ScrollView,
   SecureField,
@@ -31,6 +32,7 @@ import {
   loadDynamicStickersEnabled,
   loadPacks,
   loadSoundEnabled,
+  loadSoundMode,
   loadTargetKeyboardScript,
   migrateLegacySharedStorage,
   removePackDirectories,
@@ -38,13 +40,14 @@ import {
   saveDynamicStickersEnabled,
   savePacks,
   saveSoundEnabled,
+  saveSoundMode,
   saveTargetKeyboardScript,
   stickersDirectory,
   thumbnailLocalPath,
 } from "../storage"
 import { downloadStickerSelection, fetchStickerSetPreview } from "../telegram"
 import { clearStickersFromAlbum, saveStickersToAlbum } from "../photoAlbum"
-import type { CachedSticker, ImportProgress, PreviewSticker, StickerPack, StickerPackPreview } from "../types"
+import type { CachedSticker, ImportProgress, KeyboardSoundMode, PreviewSticker, StickerPack, StickerPackPreview } from "../types"
 import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 
 const CARD = { type: "rect", cornerRadius: 12 } as any
@@ -58,6 +61,7 @@ export function AppView() {
   const [botToken, setBotToken] = useState("")
   const [targetScript, setTargetScript] = useState("")
   const [soundEnabled, setSoundEnabled] = useState(true)
+  const [soundMode, setSoundMode] = useState<KeyboardSoundMode>("system")
   const [dynamicStickersEnabled, setDynamicStickersEnabled] = useState(false)
   const [packs, setPacks] = useState<StickerPack[]>([])
   const [status, setStatus] = useState("正在读取本地贴纸")
@@ -80,6 +84,7 @@ export function AppView() {
     setBotToken(token)
     setTargetScript(loadTargetKeyboardScript())
     setSoundEnabled(loadSoundEnabled())
+    setSoundMode(loadSoundMode())
     setDynamicStickersEnabled(loadDynamicStickersEnabled())
     const loaded = loadPacks()
     setPacks(loaded)
@@ -128,15 +133,18 @@ export function AppView() {
     nextToken: string,
     nextTargetScript: string,
     nextSoundEnabled: boolean,
+    nextSoundMode: KeyboardSoundMode,
     nextDynamicStickersEnabled: boolean,
   ) {
     setBotToken(nextToken)
     setTargetScript(nextTargetScript)
     setSoundEnabled(nextSoundEnabled)
+    setSoundMode(nextSoundMode)
     setDynamicStickersEnabled(nextDynamicStickersEnabled)
     saveBotToken(nextToken)
     saveTargetKeyboardScript(nextTargetScript)
     saveSoundEnabled(nextSoundEnabled)
+    saveSoundMode(nextSoundMode)
     saveDynamicStickersEnabled(nextDynamicStickersEnabled)
     setStatus(nextToken.trim() ? "设置已保存" : "未设置 Bot Token，请先打开右上角设置")
     setShowSettings(false)
@@ -212,6 +220,7 @@ export function AppView() {
           botToken={botToken}
           targetScript={targetScript}
           soundEnabled={soundEnabled}
+          soundMode={soundMode}
           dynamicStickersEnabled={dynamicStickersEnabled}
           onCancel={() => setShowSettings(false)}
           onSave={saveSettings}
@@ -349,12 +358,14 @@ function SettingsSheet(props: {
   botToken: string
   targetScript: string
   soundEnabled: boolean
+  soundMode: KeyboardSoundMode
   dynamicStickersEnabled: boolean
   onCancel: () => void
   onSave: (
     botToken: string,
     targetScript: string,
     soundEnabled: boolean,
+    soundMode: KeyboardSoundMode,
     dynamicStickersEnabled: boolean,
   ) => void
 }) {
@@ -362,6 +373,7 @@ function SettingsSheet(props: {
   const [token, setToken] = useState(props.botToken)
   const [targetScript, setTargetScript] = useState(props.targetScript)
   const [soundEnabled, setSoundEnabled] = useState(props.soundEnabled)
+  const [soundMode, setSoundMode] = useState<KeyboardSoundMode>(props.soundMode)
   const [dynamicStickersEnabled, setDynamicStickersEnabled] = useState(props.dynamicStickersEnabled)
 
   function cancel() {
@@ -370,7 +382,7 @@ function SettingsSheet(props: {
   }
 
   function save() {
-    props.onSave(token, targetScript, soundEnabled, dynamicStickersEnabled)
+    props.onSave(token, targetScript, soundEnabled, soundMode, dynamicStickersEnabled)
     dismiss(null)
   }
 
@@ -411,6 +423,17 @@ function SettingsSheet(props: {
             value={soundEnabled}
             onChanged={setSoundEnabled}
           />
+          {soundEnabled && (
+            <Picker
+              title="按键音"
+              pickerStyle="segmented"
+              value={soundMode}
+              onChanged={(value: string) => setSoundMode(value === "engine" ? "engine" : "system")}
+            >
+              <Text tag="system">系统声音</Text>
+              <Text tag="engine">震动引擎声音</Text>
+            </Picker>
+          )}
         </Section>
         <Section footer={<Text>开启后读取 WEBM 视频贴纸时会通过 FFmpeg 生成动态 GIF 预览，下载后仅在主脚本中使用，不会显示在键盘中。TGS 矢量贴纸暂不支持转换。</Text>}>
           <Toggle
