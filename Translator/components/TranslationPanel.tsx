@@ -129,7 +129,6 @@ function LanguageMenu(props: {
             lineLimit={1}
             truncationMode="tail"
             allowsTightening
-            frame={{ maxWidth: 150, alignment: align as any }}
             multilineTextAlignment={align}
           >
             {props.selectedLabel}

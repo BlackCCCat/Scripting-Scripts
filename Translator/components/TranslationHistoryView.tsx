@@ -91,7 +91,7 @@ export function TranslationHistoryView({ origin }: { origin?: "live" } = {}) {
   return (
     <NavigationStack>
       <List
-        navigationTitle={origin === "live" ? "实时翻译历史" : "翻译历史"}
+        navigationTitle={origin === "live" ? "浮窗翻译历史" : "翻译历史"}
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={{ topBarLeading: <Button title="关闭" action={() => dismiss()} /> }}

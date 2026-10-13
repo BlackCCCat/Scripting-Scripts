@@ -756,7 +756,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                     lineLimit={1}
                     truncationMode="tail"
                     allowsTightening
-                    frame={{ maxWidth: 160, alignment: "trailing" as any }}
                     multilineTextAlignment="trailing"
                   >
                     {sourceLanguageLabel(sourceLanguageCode)}
@@ -793,7 +792,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                     lineLimit={1}
                     truncationMode="tail"
                     allowsTightening
-                    frame={{ maxWidth: 160, alignment: "trailing" as any }}
                     multilineTextAlignment="trailing"
                   >
                     {targetLanguageLabel(targetLanguageCode)}

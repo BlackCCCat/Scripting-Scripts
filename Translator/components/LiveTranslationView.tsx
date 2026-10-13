@@ -180,7 +180,7 @@ export function LiveTranslationView(props: {
           >
             <HStack spacing={8} frame={{ width: 220, alignment: "center" }}>
               <Image systemName={props.active ? "stop.fill" : "pip.enter"} />
-              <Text>{props.active ? "停止实时翻译" : "启动实时翻译"}</Text>
+              <Text>{props.active ? "停止浮窗翻译" : "启动浮窗翻译"}</Text>
             </HStack>
           </Button>
           <Spacer />

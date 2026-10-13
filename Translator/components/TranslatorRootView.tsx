@@ -180,7 +180,7 @@ export function TranslatorRootView() {
         />
       </Tab>
 
-      <Tab title="实时翻译" systemImage="pip.enter" value={LIVE_TAB}>
+      <Tab title="浮窗翻译" systemImage="pip.enter" value={LIVE_TAB}>
         <LiveTranslationView
           engines={engines}
           engineId={selectedEngine?.id ?? ""}
