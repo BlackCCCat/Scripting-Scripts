@@ -85,9 +85,9 @@ function KeyboardView() {
   const activePack = displayPacks.find((pack) => pack.name === activeName) ?? packs[0] ?? recentPack
   const stickers = useMemo(() => activePack?.stickers ?? [], [activePack])
 
-  async function handleStickerPress(sticker: CachedSticker) {
+  function handleStickerPress(sticker: CachedSticker) {
+    void copyImageSticker(sticker)
     feedback()
-    await copyImageSticker(sticker)
   }
 
   async function copyImageSticker(sticker: CachedSticker) {
@@ -131,18 +131,19 @@ function KeyboardView() {
     }
   }
 
-  function feedback() {
-    playKeyboardFeedback({ soundEnabled })
+  function feedback(beforeAction = false) {
+    playKeyboardFeedback({ soundEnabled }, beforeAction)
   }
 
   function withFeedback(action: () => void | Promise<void>, delayAction = false) {
     return () => {
-      feedback()
       if (delayAction) {
+        feedback(true)
         setTimeout(() => void action(), KEYBOARD_EXIT_FEEDBACK_DELAY_MS)
         return
       }
       void action()
+      feedback()
     }
   }
 

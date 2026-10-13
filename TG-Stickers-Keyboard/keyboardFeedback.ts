@@ -207,8 +207,13 @@ function playPreparedHaptic() {
   }
 }
 
-export function playKeyboardFeedback(settings: KeyboardFeedbackSettings) {
+export function playKeyboardFeedback(settings: KeyboardFeedbackSettings, beforeAction = false) {
   prepareKeyboardFeedback(settings)
-  playPreparedClick(settings)
-  playPreparedHaptic()
+  if (beforeAction) {
+    playPreparedHaptic()
+    playPreparedClick(settings)
+  } else {
+    playPreparedClick(settings)
+    playPreparedHaptic()
+  }
 }
