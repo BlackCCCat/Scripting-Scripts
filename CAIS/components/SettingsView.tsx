@@ -1035,7 +1035,7 @@ export function SettingsView(props: {
           ))}
         </Picker>
         <Picker
-          title="键盘保留条数"
+          title="键盘每批加载"
           pickerStyle="menu"
           value={optionIndex(
             KEYBOARD_MAX_ITEM_OPTIONS,

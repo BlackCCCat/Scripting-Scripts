@@ -92,6 +92,8 @@ let activeKeyboardScope: ClipListScope = "clipboard"
 let lastKeyboardItemsByScope: Record<ClipListScope, ClipItem[]> = { favorites: [], clipboard: [] }
 let lastKeyboardItemsKeyByScope: Record<ClipListScope, string> = { favorites: "", clipboard: "" }
 let lastKeyboardItemsVersionByScope: Record<ClipListScope, number> = { favorites: 0, clipboard: 0 }
+let lastKeyboardHasMoreByScope: Record<ClipListScope, boolean> = { favorites: false, clipboard: false }
+let lastKeyboardLoadedHasMoreByScope: Record<ClipListScope, boolean> = { favorites: false, clipboard: false }
 let keyboardMonitorStopper: (() => void) | null = null
 let keyboardMonitorStartTimer: any = null
 let currentFeedbackSettings: CaisSettings | null = null
@@ -99,6 +101,7 @@ let currentKeyboardNativeGlassEffect = true
 
 export type KeyboardInitialState = {
   items: ClipItem[]
+  hasMore: boolean
   settings: CaisSettings
   loaded: boolean
   scope: ClipListScope
@@ -473,18 +476,38 @@ function cachedKeyboardItems(scope: ClipListScope): ClipItem[] {
   return lastKeyboardItemsVersionByScope[scope] === readClipDataVersion() ? lastKeyboardItemsByScope[scope] : []
 }
 
-function rememberKeyboardItems(scope: ClipListScope, items: ClipItem[], version = readClipDataVersion()) {
-  lastKeyboardItemsByScope[scope] = items
+function rememberKeyboardItems(scope: ClipListScope, items: ClipItem[], hasMore: boolean, pageSize: number, version = readClipDataVersion()) {
+  lastKeyboardItemsByScope[scope] = items.slice(0, pageSize)
   lastKeyboardItemsKeyByScope[scope] = clipListKey(items)
   lastKeyboardItemsVersionByScope[scope] = version
+  lastKeyboardHasMoreByScope[scope] = hasMore || items.length > pageSize
+  lastKeyboardLoadedHasMoreByScope[scope] = hasMore
+}
+
+async function keyboardPage(settings: CaisSettings, scope: ClipListScope, offset: number) {
+  const pageSize = queryLimitForKeyboard(settings)
+  const rows = await getClips("", pageSize + 1, scope, offset)
+  return { items: rows.slice(0, pageSize), hasMore: rows.length > pageSize }
+}
+
+async function keyboardPrefix(settings: CaisSettings, scope: ClipListScope, count: number) {
+  const target = Math.max(queryLimitForKeyboard(settings), count)
+  const rows: ClipItem[] = []
+  while (rows.length <= target) {
+    const limit = Math.min(500, target + 1 - rows.length)
+    const page = await getClips("", limit, scope, rows.length)
+    rows.push(...page)
+    if (page.length < limit) break
+  }
+  return { items: rows.slice(0, target), hasMore: rows.length > target }
 }
 
 export async function preloadKeyboardInitialState(): Promise<KeyboardInitialState> {
   const settings = loadSettings()
   const scope = keyboardScopeForTab(readKeyboardTab())
-  const items = await getClips("", queryLimitForKeyboard(settings), scope)
-  rememberKeyboardItems(scope, items)
-  return { items, settings, loaded: true, scope }
+  const page = await keyboardPage(settings, scope, 0)
+  rememberKeyboardItems(scope, page.items, page.hasMore, queryLimitForKeyboard(settings))
+  return { items: page.items, hasMore: page.hasMore, settings, loaded: true, scope }
 }
 
 function ClipTile(props: {
@@ -495,6 +518,7 @@ function ClipTile(props: {
   tileWidth: number
   tileHeight: number
   hideTitle?: boolean
+  onNearEnd?: () => void
   onInsert: (item: ClipItem) => void | Promise<void>
   onTokenize: (item: ClipItem) => void | Promise<void>
   onStatus: (message: string) => void
@@ -532,6 +556,7 @@ function ClipTile(props: {
           />
         ),
       }}
+      onAppear={props.onNearEnd}
     >
       <ZStack
         frame={tileFrame}
@@ -923,9 +948,18 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     ? props.initialState.items
     : cachedKeyboardItems(initialScope)
   const initialLoaded = Boolean(props.initialState?.loaded || initialItems.length)
+  const initialHasMore = props.initialState?.loaded
+    ? props.initialState.hasMore
+    : initialItems.length > 0 && lastKeyboardHasMoreByScope[initialScope]
   const [activeTab, setActiveTab] = useState(initialTab)
   activeKeyboardScope = keyboardScopeForTab(activeTab)
   const items = useObservable<ClipItem[]>(() => initialItems)
+  const hasMoreRef = useRef(initialHasMore)
+  const nextOffsetRef = useRef(initialItems.length)
+  const loadingMoreRef = useRef<object | null>(null)
+  const refreshingRef = useRef(0)
+  const loadMorePendingRef = useRef(false)
+  const mountedRef = useRef(false)
   const [settings] = useState<CaisSettings>(() => props.initialState?.settings ?? loadSettings())
   const privateKeywords = useMemo(
     () => privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled),
@@ -954,10 +988,15 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
   }
 
   useEffect(() => {
+    mountedRef.current = true
     currentFeedbackSettings = settings
     prepareCaisFeedback(settings)
     const lifecycle = ++keyboardLifecycleGeneration
     void boot(lifecycle)
+    if (loadMorePendingRef.current) {
+      loadMorePendingRef.current = false
+      void loadMore()
+    }
     let lastSeenDatabaseDataVersion: number | null = null
     let checkingDatabaseDataVersion = false
     let refreshQueued = false
@@ -996,6 +1035,8 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       })
     }, 900)
     return () => {
+      mountedRef.current = false
+      loadMorePendingRef.current = false
       stopped = true
       if (keyboardLifecycleGeneration === lifecycle) keyboardLifecycleGeneration += 1
       if (timer) (globalThis as any).clearInterval?.(timer)
@@ -1019,6 +1060,10 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
     const scope = keyboardScopeForTab(activeTab)
     activeKeyboardScope = scope
     const cached = cachedKeyboardItems(scope)
+    hasMoreRef.current = cached.length > 0 && lastKeyboardHasMoreByScope[scope]
+    nextOffsetRef.current = cached.length
+    loadingMoreRef.current = null
+    loadMorePendingRef.current = false
     if (cached.length) {
       items.setValue(cached)
       setLoading(false)
@@ -1067,14 +1112,72 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
 
   async function refresh(force = false, lifecycle = keyboardLifecycleGeneration, scope = activeKeyboardScope) {
     const generation = ++keyboardRefreshGeneration
-    const next = await getClips("", queryLimitForKeyboard(settings), scope)
-    if (lifecycle !== keyboardLifecycleGeneration) return
-    if (generation !== keyboardRefreshGeneration) return
-    const key = clipListKey(next)
-    if (!force && key === lastKeyboardItemsKeyByScope[scope]) return
-    rememberKeyboardItems(scope, next)
-    if (scope !== activeKeyboardScope) return
-    items.setValue(next)
+    refreshingRef.current += 1
+    try {
+      const count = scope === activeKeyboardScope ? items.value.length : lastKeyboardItemsByScope[scope].length
+      const next = await keyboardPrefix(settings, scope, count)
+      if (lifecycle !== keyboardLifecycleGeneration || generation !== keyboardRefreshGeneration) return
+      if (scope === activeKeyboardScope && items.value.length > count) {
+        await refresh(force, lifecycle, scope)
+        return
+      }
+      const key = clipListKey(next.items)
+      if (!force && key === lastKeyboardItemsKeyByScope[scope] && next.hasMore === lastKeyboardLoadedHasMoreByScope[scope]) return
+      rememberKeyboardItems(scope, next.items, next.hasMore, queryLimitForKeyboard(settings))
+      if (scope !== activeKeyboardScope) return
+      nextOffsetRef.current = next.items.length
+      hasMoreRef.current = next.hasMore
+      items.setValue(next.items)
+    } finally {
+      refreshingRef.current -= 1
+      if (refreshingRef.current === 0 && loadMorePendingRef.current) {
+        loadMorePendingRef.current = false
+        void loadMore()
+      }
+    }
+  }
+
+  async function loadMore() {
+    if (!mountedRef.current) {
+      loadMorePendingRef.current = true
+      return
+    }
+    if (!hasMoreRef.current || loadingMoreRef.current) return
+    if (refreshingRef.current) {
+      loadMorePendingRef.current = true
+      return
+    }
+    const request = {}
+    loadingMoreRef.current = request
+    const lifecycle = keyboardLifecycleGeneration
+    const generation = keyboardRefreshGeneration
+    const scope = activeKeyboardScope
+    const offset = nextOffsetRef.current
+    try {
+      const page = await keyboardPage(settings, scope, offset)
+      if (lifecycle !== keyboardLifecycleGeneration || scope !== activeKeyboardScope) return
+      if (generation !== keyboardRefreshGeneration) {
+        loadMorePendingRef.current = true
+        return
+      }
+      nextOffsetRef.current = offset + page.items.length
+      hasMoreRef.current = page.hasMore
+      const current = items.value
+      const existingIds = new Set(current.map((item) => item.id))
+      const added = page.items.filter((item) => !existingIds.has(item.id))
+      const next = added.length ? [...current, ...added] : current
+      rememberKeyboardItems(scope, next, page.hasMore, queryLimitForKeyboard(settings))
+      if (added.length) items.setValue(next)
+    } catch {
+    } finally {
+      if (loadingMoreRef.current === request) {
+        loadingMoreRef.current = null
+        if (loadMorePendingRef.current && refreshingRef.current === 0) {
+          loadMorePendingRef.current = false
+          void loadMore()
+        }
+      }
+    }
   }
 
   function pasteLastContent() {
@@ -1574,7 +1677,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                   >
                     <ForEach
                       data={items}
-                      builder={(item) => (
+                      builder={(item, index) => (
                         <ClipTile
                           key={item.id}
                           item={item}
@@ -1588,6 +1691,12 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
                           onTokenize={openTokenPage}
                           onRefresh={refresh}
                           onStatus={() => {}}
+                          onNearEnd={items.value.length - index <= Math.max(rowCount * columnCount, 6)
+                            ? () => {
+                              const tail = items.value.slice(-Math.max(rowCount * columnCount, 6))
+                              if (tail.some((candidate) => candidate.id === item.id)) void loadMore()
+                            }
+                            : undefined}
                         />
                       )}
                     />

@@ -212,8 +212,8 @@ export async function addClipFromPayload(payload: ClipPayload, settings: CaisSet
   return { status: "created", item }
 }
 
-export async function getClips(search = "", limit = 120, scope?: ClipListScope): Promise<ClipItem[]> {
-  return listClips({ search, limit, scope })
+export async function getClips(search = "", limit = 120, scope?: ClipListScope, offset = 0): Promise<ClipItem[]> {
+  return listClips({ search, limit, scope, offset })
 }
 
 export async function getClipGroups(scope: ClipListScope, search = "", limit = 120, offset = 0, kind?: ClipKind, favoriteFormat?: FavoriteFormat): Promise<ClipGroup[]> {

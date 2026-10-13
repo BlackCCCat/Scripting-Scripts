@@ -384,6 +384,7 @@ async function fetchClipRows(db: DB, options: {
   scope?: ClipListScope
   search?: string
   limit?: number
+  offset?: number
 }): Promise<any[]> {
   const params: any[] = []
   const clauses: string[] = ["deleted_at IS NULL"]
@@ -405,11 +406,12 @@ async function fetchClipRows(db: DB, options: {
        (SELECT created_at FROM favorite_groups WHERE id = clips.favorite_group_id) ASC,
        favorite_pinned DESC,
        COALESCE(favorite_order, -favorite_updated_at, -updated_at) ASC,
-       favorite_updated_at DESC`
-    : "pinned DESC, updated_at DESC"
-  params.push(limit)
+       favorite_updated_at DESC, id ASC`
+    : "pinned DESC, updated_at DESC, id ASC"
+  const offset = Math.max(0, Number(options.offset ?? 0) || 0)
+  params.push(limit, offset)
   return db.fetchAll(
-    `SELECT ${CLIP_ROW_SELECT} FROM clips ${where} ORDER BY ${order} LIMIT ?`,
+    `SELECT ${CLIP_ROW_SELECT} FROM clips ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
     params
   )
 }
@@ -418,6 +420,7 @@ export async function listClips(options: {
   scope?: ClipListScope
   search?: string
   limit?: number
+  offset?: number
 } = {}): Promise<ClipItem[]> {
   const db = await openCaisDatabase()
   let rows: any[]
