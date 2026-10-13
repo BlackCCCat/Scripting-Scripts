@@ -59,6 +59,12 @@ export const TRANSLATION_ENGINE_OPTIONS: TranslationEngineOption[] = [
     isDefault: true,
   },
   {
+    id: "system_translation_offline",
+    label: "System Translate Offline",
+    systemImage: "apple.logo",
+    isDefault: false,
+  },
+  {
     id: "google_translate",
     label: "Google Translate",
     systemImage: "g.circle",

@@ -26,7 +26,7 @@ import { isAssistantTranslationAvailable } from "../utils/assistant_translation_
 import { AI_PROVIDERS } from "../utils/ai_providers"
 import { isExternalEngineConfigured } from "../utils/external_translation_engines"
 import { isLocalTranslationAvailable } from "../utils/translation_engine"
-import { isSystemTranslationAvailable } from "../utils/system_translation_engine"
+import { isInstalledSystemTranslationAvailable, isSystemTranslationAvailable } from "../utils/system_translation_engine"
 import {
   HISTORY_LIMITS, clearTranslationHistory, historyLimit, setHistoryLimit,
 } from "../utils/translation_history"
@@ -67,6 +67,10 @@ function isEngineAvailable(engine: TranslatorEngineEntry) {
 
   if (engine.kind === "system_translation") {
     return isSystemTranslationAvailable()
+  }
+
+  if (engine.kind === "system_translation_offline") {
+    return isInstalledSystemTranslationAvailable()
   }
 
   if (

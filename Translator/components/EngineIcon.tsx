@@ -48,7 +48,7 @@ export function EngineIcon(props: {
     }
   }
 
-  const vector = props.kind === "system_translation"
+  const vector = props.kind === "system_translation" || props.kind === "system_translation_offline"
     ? "apple.svg"
     : providerIcon?.endsWith(".svg") ? providerIcon : undefined
 

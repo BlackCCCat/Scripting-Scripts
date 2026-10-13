@@ -9,6 +9,7 @@ import type {
 import { isAssistantTranslationAvailable } from "./assistant_translation_engine"
 import { PREVIOUS_AI_PROVIDER_LABELS, aiProvider } from "./ai_providers"
 import { isLocalTranslationAvailable } from "./translation_engine"
+import { isInstalledSystemTranslationAvailable } from "./system_translation_engine"
 
 const STORAGE_KEY = "translator_settings_v2"
 const DEFAULT_TARGET_LANGUAGE_CODE = "zh-Hans"
@@ -44,6 +45,7 @@ function createDefaultSettings(): TranslatorSettings {
       builtInEntry("apple_intelligence"),
       builtInEntry("assistant"),
       builtInEntry("system_translation"),
+      builtInEntry("system_translation_offline"),
       builtInEntry("google_translate"),
     ],
   }
@@ -53,6 +55,7 @@ const REQUIRED_BUILT_INS: BuiltInTranslationEngineKind[] = [
   "apple_intelligence",
   "assistant",
   "system_translation",
+  "system_translation_offline",
   "google_translate",
 ]
 
@@ -171,6 +174,10 @@ function applyAvailabilityRules(entry: TranslatorEngineEntry): TranslatorEngineE
     }
   }
 
+  if (entry.kind === "system_translation_offline" && !isInstalledSystemTranslationAvailable()) {
+    return { ...entry, enabled: false }
+  }
+
   if (entry.kind === "assistant") {
     if (!isAssistantTranslationAvailable()) {
       return {
@@ -244,7 +251,15 @@ export function normalizeTranslatorSettings(raw?: Partial<TranslatorSettings> | 
   }
 
   for (const entry of defaults.values()) {
-    normalized.push(applyAvailabilityRules(entry))
+    const availableEntry = applyAvailabilityRules(entry)
+    if (entry.kind === "system_translation_offline") {
+      const systemIndex = normalized.findIndex((item) => item.kind === "system_translation")
+      if (systemIndex >= 0) {
+        normalized.splice(systemIndex + 1, 0, availableEntry)
+        continue
+      }
+    }
+    normalized.push(availableEntry)
   }
 
   return applyAvailabilityRulesToSettings({

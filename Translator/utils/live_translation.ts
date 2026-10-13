@@ -2,7 +2,7 @@ import type { TranslationProgressCallbacks, TranslationRequest, TranslatorEngine
 import { createAssistantTranslationEngine, isAssistantTranslationAvailable } from "./assistant_translation_engine"
 import { isExternalEngineConfigured, translateWithExternalEngine } from "./external_translation_engines"
 import { historyEngineResult, saveTranslationHistory } from "./translation_history"
-import { createSystemTranslationEngine, isSystemTranslationAvailable } from "./system_translation_engine"
+import { createInstalledSystemTranslationEngine, createSystemTranslationEngine, isInstalledSystemTranslationAvailable, isSystemTranslationAvailable } from "./system_translation_engine"
 import { createTranslationEngine, detectSourceLanguageCode, isLocalTranslationAvailable } from "./translation_engine"
 
 export const LIVE_PIP_SIZES = [
@@ -20,6 +20,7 @@ export function isLiveEngineAvailable(engine: TranslatorEngineEntry) {
   if (engine.kind === "apple_intelligence") return isLocalTranslationAvailable()
   if (engine.kind === "assistant") return isAssistantTranslationAvailable()
   if (engine.kind === "system_translation") return isSystemTranslationAvailable()
+  if (engine.kind === "system_translation_offline") return isInstalledSystemTranslationAvailable()
   return isExternalEngineConfigured(engine)
 }
 
@@ -43,11 +44,13 @@ async function translateLiveText(
   request: TranslationRequest,
   localEngine: ReturnType<typeof createTranslationEngine>,
   systemEngine: ReturnType<typeof createSystemTranslationEngine>,
+  installedSystemEngine: ReturnType<typeof createInstalledSystemTranslationEngine>,
   callbacks: TranslationProgressCallbacks
 ) {
   if (engine.kind === "apple_intelligence") return localEngine.translate(request, callbacks)
   if (engine.kind === "assistant") return createAssistantTranslationEngine(engine.config).translate(request, callbacks)
   if (engine.kind === "system_translation") return systemEngine.translate(request)
+  if (engine.kind === "system_translation_offline") return installedSystemEngine.translate(request)
   return translateWithExternalEngine(engine, request, callbacks)
 }
 
@@ -58,6 +61,7 @@ export async function translateLiveClipboardText(input: {
   targetLanguageCode: string
   localEngine: ReturnType<typeof createTranslationEngine>
   systemEngine: ReturnType<typeof createSystemTranslationEngine>
+  installedSystemEngine: ReturnType<typeof createInstalledSystemTranslationEngine>
   isCurrent: () => boolean
   onText: (text: string) => void
 }) {
@@ -93,6 +97,7 @@ export async function translateLiveClipboardText(input: {
         { sourceText, sourceLanguageCode: sourceCode, targetLanguageCode: target },
         input.localEngine,
         input.systemEngine,
+        input.installedSystemEngine,
         {
           onPartialText: (text) => {
             if (!isCurrent() || Date.now() - lastUpdateAt < 180) return

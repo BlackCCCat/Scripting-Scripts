@@ -140,8 +140,8 @@ export function updateHistoryResult(id: string, result: HistoryEngineResult) {
     if (!rows.length) return
     const results = JSON.parse(rows[0].results_json) as HistoryEngineResult[]
     const index = results.findIndex((item) => item.engineId === result.engineId)
-    if (index < 0) return
-    results[index] = result
+    if (index < 0) results.push(result)
+    else results[index] = result
     await db.execute(
       "UPDATE translation_history SET results_json = ? WHERE id = ?",
       [JSON.stringify(results), id]

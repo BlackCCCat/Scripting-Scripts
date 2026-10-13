@@ -5,7 +5,7 @@ import { LiveTranslationView } from "./LiveTranslationView"
 import { ScriptTranslationView } from "./ScriptTranslationView"
 import { TranslatorSettingsView } from "./TranslatorSettingsView"
 import { createTranslationEngine } from "../utils/translation_engine"
-import { createSystemTranslationEngine } from "../utils/system_translation_engine"
+import { createInstalledSystemTranslationEngine, createSystemTranslationEngine } from "../utils/system_translation_engine"
 import { isLiveEngineAvailable, translateLiveClipboardText } from "../utils/live_translation"
 import { useTranslatorReleaseNotesSheet } from "../utils/release_notes_sheet"
 import { getExecutableEngines, loadTranslatorSettings } from "../utils/translator_settings"
@@ -31,6 +31,7 @@ export function TranslatorRootView() {
   const [systemTranslationHost] = useState(() => new Translation())
   const [appleEngine] = useState(() => createTranslationEngine())
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
+  const [installedSystemEngine] = useState(() => createInstalledSystemTranslationEngine())
   const timerRef = useRef<number | null>(null)
   const lastClipboardChangeCountRef = useRef<number | null>(null)
   const lastClipboardCheckAtRef = useRef(0)
@@ -85,6 +86,7 @@ export function TranslatorRootView() {
         targetLanguageCode,
         localEngine: appleEngine,
         systemEngine,
+        installedSystemEngine,
         isCurrent,
         onText: (text) => preview.setValue(text),
       }).catch((error) => {

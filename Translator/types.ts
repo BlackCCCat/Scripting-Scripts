@@ -8,6 +8,7 @@ export type BuiltInTranslationEngineKind =
   | "apple_intelligence"
   | "assistant"
   | "system_translation"
+  | "system_translation_offline"
   | "google_translate"
 
 export type KnownTranslationEngineKind =

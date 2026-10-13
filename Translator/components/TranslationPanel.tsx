@@ -39,7 +39,9 @@ import {
   translateWithExternalEngine,
 } from "../utils/external_translation_engines"
 import {
+  createInstalledSystemTranslationEngine,
   createSystemTranslationEngine,
+  isInstalledSystemTranslationAvailable,
   isSystemTranslationAvailable,
 } from "../utils/system_translation_engine"
 import { finishTranslation } from "../utils/translation_session"
@@ -269,6 +271,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const assistantConfig = settings.engines.find((engine) => engine.kind === "assistant")?.config
   const [appleEngine] = useState(() => createTranslationEngine())
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
+  const [installedSystemEngine] = useState(() => createInstalledSystemTranslationEngine())
 
   const visibleEngines = executableEngines.filter((engine) => {
     const available = engine.kind === "apple_intelligence"
@@ -277,6 +280,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
         ? isAssistantTranslationAvailable()
       : engine.kind === "system_translation"
         ? isSystemTranslationAvailable()
+        : engine.kind === "system_translation_offline"
+          ? isInstalledSystemTranslationAvailable()
         : isExternalEngineConfigured(engine)
 
     return engine.enabled && available
@@ -334,6 +339,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
         ? await createAssistantTranslationEngine(assistantConfig).translate(request, options)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
+          : engine.kind === "system_translation_offline"
+            ? await installedSystemEngine.translate(request)
           : await translateWithExternalEngine(engine, request, options)
 
     return {

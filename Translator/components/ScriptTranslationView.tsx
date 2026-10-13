@@ -43,7 +43,9 @@ import {
   translateWithExternalEngine,
 } from "../utils/external_translation_engines"
 import {
+  createInstalledSystemTranslationEngine,
   createSystemTranslationEngine,
+  isInstalledSystemTranslationAvailable,
   isSystemTranslationAvailable,
 } from "../utils/system_translation_engine"
 import {
@@ -317,10 +319,16 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
   const [systemTranslationHost] = useState(() => new Translation())
   const [appleEngine] = useState(() => createTranslationEngine())
   const [systemEngine] = useState(() => createSystemTranslationEngine(systemTranslationHost))
+  const [installedSystemEngine] = useState(() => createInstalledSystemTranslationEngine())
   const requestIdRef = useRef(0)
   const historyIdRef = useRef<string | null>(null)
   const historyWriteRef = useRef<Promise<void> | null>(null)
   const targetTouchedRef = useRef(false)
+  const translatedRequestRef = useRef<{ sourceText: string; sourceLanguageCode: string; targetLanguageCode: string } | null>(null)
+  const previousVisibleIdsRef = useRef<Set<string> | null>(null)
+  const engineRunVersionsRef = useRef<Record<string, number>>({})
+  const pendingHistoryResultsRef = useRef<Map<string, { engine: TranslatorEngineEntry; result: EngineTranslationState }>>(new Map())
+  const fullTranslationPendingRef = useRef(false)
   const executableEngines = getExecutableEngines(settings)
   const assistantConfig = settings.engines.find((engine) => engine.kind === "assistant")?.config
   const hasInput = sourceText.trim().length > 0
@@ -332,6 +340,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         ? isAssistantTranslationAvailable()
       : engine.kind === "system_translation"
         ? isSystemTranslationAvailable()
+        : engine.kind === "system_translation_offline"
+          ? isInstalledSystemTranslationAvailable()
         : isExternalEngineConfigured(engine)
 
     return engine.enabled && available
@@ -378,6 +388,8 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         ? await createAssistantTranslationEngine(assistantConfig).translate(request, options)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
+          : engine.kind === "system_translation_offline"
+            ? await installedSystemEngine.translate(request)
           : await translateWithExternalEngine(engine, request, options)
 
     return {
@@ -401,11 +413,6 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
 
     const nextSettings = loadTranslatorSettings()
     setSettings(nextSettings)
-    setSourceLanguageCode(nextSettings.defaultSourceLanguageCode)
-    setTargetLanguageCode(nextSettings.defaultTargetLanguageCode)
-    setErrorText("")
-    setEngineResults([])
-    targetTouchedRef.current = false
   }, [props.settingsRefreshKey])
 
   useEffect(() => {
@@ -439,12 +446,18 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     dismissKeyboardIfNeeded()
 
     if (!hasInput) {
+      resetTranslationSession()
       setErrorText("请输入要翻译的文本。")
-      setEngineResults([])
       return
     }
 
     if (!visibleEngines.length) {
+      requestIdRef.current += 1
+      translatedRequestRef.current = { sourceText, sourceLanguageCode, targetLanguageCode }
+      historyIdRef.current = null
+      historyWriteRef.current = null
+      pendingHistoryResultsRef.current.clear()
+      fullTranslationPendingRef.current = false
       logTranslationEvent("没有可执行的翻译引擎", {
         sourceLanguageCode,
         targetLanguageCode,
@@ -458,6 +471,12 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       sourceLanguageCode !== AUTO_LANGUAGE.code &&
       sourceLanguageCode === targetLanguageCode
     ) {
+      requestIdRef.current += 1
+      translatedRequestRef.current = null
+      historyIdRef.current = null
+      historyWriteRef.current = null
+      pendingHistoryResultsRef.current.clear()
+      fullTranslationPendingRef.current = false
       setEngineResults(visibleEngines.map((engine) => ({
         engineId: engine.id,
         engineName: engine.label,
@@ -471,8 +490,11 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
+    translatedRequestRef.current = { sourceText, sourceLanguageCode, targetLanguageCode }
     historyIdRef.current = null
     historyWriteRef.current = null
+    pendingHistoryResultsRef.current.clear()
+    fullTranslationPendingRef.current = true
     const startedAt = Date.now()
     setErrorText("")
     setEngineResults(createLoadingStates())
@@ -493,14 +515,16 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       const settled = await Promise.allSettled(
         visibleEngines.map(async (engine) => {
           const engineStartedAt = Date.now()
+          const runVersion = (engineRunVersionsRef.current[engine.id] ?? 0) + 1
+          engineRunVersionsRef.current[engine.id] = runVersion
           try {
             const result = await translateEngine(engine, {
               onPartialText: async (text: string) => {
-                if (requestId !== requestIdRef.current) return
+                if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engine.id]) return
                 updatePartialEngineResult(engine.id, text)
               },
             })
-            if (requestId !== requestIdRef.current) return null
+            if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engine.id]) return null
 
             logTranslationEvent("脚本内引擎翻译成功", {
               requestId,
@@ -517,7 +541,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
             )))
             return result
           } catch (error) {
-            if (requestId !== requestIdRef.current) return null
+            if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engine.id]) return null
 
             const message = error instanceof Error ? error.message : String(error)
             console.error(`[Translator] 脚本内引擎翻译失败`, {
@@ -559,6 +583,15 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         console.error("[Translator] 保存翻译历史失败", error)
       })
       await historyWriteRef.current
+      if (requestId !== requestIdRef.current) return
+      for (const { engine, result } of pendingHistoryResultsRef.current.values()) {
+        try {
+          await updateHistoryResult(historyId, historyEngineResult(engine, result))
+        } catch (error) {
+          console.error("[Translator] 更新新增引擎的翻译历史失败", error)
+        }
+      }
+      pendingHistoryResultsRef.current.clear()
 
       logTranslationEvent("脚本内翻译完成", {
         requestId,
@@ -580,34 +613,82 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       try {
         HapticFeedback.notificationError()
       } catch {}
+    } finally {
+      if (requestId === requestIdRef.current) fullTranslationPendingRef.current = false
     }
   })
+
+  async function persistSingleEngineHistory(
+    engine: TranslatorEngineEntry,
+    result: EngineTranslationState,
+    requestId: number,
+    runVersion: number
+  ) {
+    if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engine.id]) return
+
+    if (!historyIdRef.current && fullTranslationPendingRef.current) {
+      pendingHistoryResultsRef.current.set(engine.id, { engine, result })
+      return
+    }
+
+    if (!historyIdRef.current) {
+      const historyId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      historyIdRef.current = historyId
+      historyWriteRef.current = saveTranslationHistory({
+        id: historyId,
+        createdAt: Date.now(),
+        sourceText,
+        sourceLanguageCode,
+        targetLanguageCode,
+        results: [historyEngineResult(engine, result)],
+      }).catch((error) => {
+        console.error("[Translator] 保存翻译历史失败", error)
+      })
+      await historyWriteRef.current
+      return
+    }
+
+    try {
+      await historyWriteRef.current
+      if (requestId === requestIdRef.current && runVersion === engineRunVersionsRef.current[engine.id]) {
+        await updateHistoryResult(historyIdRef.current, historyEngineResult(engine, result))
+      }
+    } catch (error) {
+      console.error("[Translator] 更新翻译历史失败", error)
+    }
+  }
 
   const rerunSingleEngine = useEffectEvent(async (engineId: string) => {
     const engine = visibleEngines.find((item) => item.id === engineId)
     if (!engine || !hasInput) return
 
     const requestId = requestIdRef.current
+    const runVersion = (engineRunVersionsRef.current[engineId] ?? 0) + 1
+    engineRunVersionsRef.current[engineId] = runVersion
     const startedAt = Date.now()
     setErrorText("")
-    setEngineResults((current) => current.map((item) => (
-      item.engineId === engineId
-        ? {
-            ...item,
-            isTranslating: true,
-            errorText: "",
-          }
-        : item
-    )))
+    setEngineResults((current) => {
+      const existing = current.find((item) => item.engineId === engineId)
+      const loading = {
+        engineId,
+        engineName: engine.label,
+        translatedText: existing?.translatedText ?? "",
+        errorText: "",
+        isTranslating: true,
+      }
+      const byId = new Map(current.map((item) => [item.engineId, item]))
+      byId.set(engineId, loading)
+      return visibleEngines.map((item) => byId.get(item.id)).filter((item): item is EngineTranslationState => !!item)
+    })
 
     try {
       const result = await translateEngine(engine, {
         onPartialText: async (text: string) => {
-          if (requestId !== requestIdRef.current) return
+          if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engineId]) return
           updatePartialEngineResult(engine.id, text)
         },
       })
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engineId]) return
 
       logTranslationEvent("脚本内单引擎重试成功", {
         requestId,
@@ -622,22 +703,12 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       setEngineResults((current) => current.map((item) => (
         item.engineId === engineId ? result : item
       )))
-      const historyId = historyIdRef.current
-      if (historyId) {
-        try {
-          await historyWriteRef.current
-          if (requestId === requestIdRef.current) {
-            await updateHistoryResult(historyId, historyEngineResult(engine, result))
-          }
-        } catch (error) {
-          console.error("[Translator] 更新翻译历史失败", error)
-        }
-      }
+      await persistSingleEngineHistory(engine, result, requestId, runVersion)
       try {
         HapticFeedback.notificationSuccess()
       } catch {}
     } catch (error) {
-      if (requestId !== requestIdRef.current) return
+      if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engineId]) return
 
       const message = error instanceof Error ? error.message : String(error)
       console.error(`[Translator] 脚本内单引擎重试失败`, {
@@ -659,24 +730,53 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
             }
           : item
       )))
-      const historyId = historyIdRef.current
-      if (historyId) {
-        try {
-          await historyWriteRef.current
-          if (requestId === requestIdRef.current) {
-            await updateHistoryResult(historyId, historyEngineResult(engine, {
-              engineId, engineName: engine.label, translatedText: "", errorText: message, isTranslating: false,
-            }))
-          }
-        } catch (historyError) {
-          console.error("[Translator] 更新翻译历史失败", historyError)
-        }
-      }
+      await persistSingleEngineHistory(engine, {
+        engineId, engineName: engine.label, translatedText: "", errorText: message, isTranslating: false,
+      }, requestId, runVersion)
       try {
         HapticFeedback.notificationError()
       } catch {}
     }
   })
+
+  useEffect(() => {
+    const currentIds = new Set(visibleEngines.map((engine) => engine.id))
+    const previousIds = previousVisibleIdsRef.current
+    previousVisibleIdsRef.current = currentIds
+    if (!previousIds) return
+
+    for (const id of previousIds) {
+      if (!currentIds.has(id)) {
+        engineRunVersionsRef.current[id] = (engineRunVersionsRef.current[id] ?? 0) + 1
+        pendingHistoryResultsRef.current.delete(id)
+      }
+    }
+
+    const translatedRequest = translatedRequestRef.current
+    const canTranslateAdded = translatedRequest?.sourceText === sourceText
+      && translatedRequest.sourceLanguageCode === sourceLanguageCode
+      && translatedRequest.targetLanguageCode === targetLanguageCode
+    const added = canTranslateAdded
+      ? visibleEngines.filter((engine) => !previousIds.has(engine.id))
+      : []
+    const addedIds = new Set(added.map((engine) => engine.id))
+
+    setEngineResults((current) => {
+      const byId = new Map(current.map((item) => [item.engineId, item]))
+      const next = visibleEngines.flatMap((engine) => {
+        const existing = byId.get(engine.id)
+        if (existing) return [existing.engineName === engine.label ? existing : { ...existing, engineName: engine.label }]
+        return addedIds.has(engine.id)
+          ? [{ engineId: engine.id, engineName: engine.label, translatedText: "", errorText: "", isTranslating: true }]
+          : []
+      })
+      return next.length === current.length && next.every((item, index) => item === current[index])
+        ? current
+        : next
+    })
+
+    for (const engine of added) void rerunSingleEngine(engine.id)
+  }, [settings])
 
   const pasteFromPasteboard = useEffectEvent(async () => {
     const value = (await Pasteboard.getString())?.trim() ?? ""
@@ -695,11 +795,20 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     } catch {}
   })
 
-  const clearSourceText = useEffectEvent(() => {
+  function resetTranslationSession() {
     requestIdRef.current += 1
+    translatedRequestRef.current = null
+    pendingHistoryResultsRef.current.clear()
+    fullTranslationPendingRef.current = false
+    historyIdRef.current = null
+    historyWriteRef.current = null
+    setEngineResults([])
+  }
+
+  const clearSourceText = useEffectEvent(() => {
+    resetTranslationSession()
     setSourceText("")
     setErrorText("")
-    setEngineResults([])
     targetTouchedRef.current = false
     try {
       HapticFeedback.selection()
@@ -832,6 +941,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                 title=""
                 value={sourceText}
                 onChanged={(value: string) => {
+                  if (!value.trim()) resetTranslationSession()
                   setSourceText(value)
                   setErrorText("")
                 }}
