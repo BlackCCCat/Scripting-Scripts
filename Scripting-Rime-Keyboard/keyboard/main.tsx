@@ -1010,9 +1010,9 @@ function KeyboardContent(props: {
   function runWithFeedback(action: () => void) {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
-    action();
-    playReleaseFeedback();
     playPressFeedback();
+    playClickFeedback();
+    action();
   }
 
   function runWithFeedbackBeforeAction(
@@ -1022,7 +1022,7 @@ function KeyboardContent(props: {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
     playPressFeedback(true);
-    playReleaseFeedback();
+    playClickFeedback();
     if (delayMs > 0) setTimeout(action, delayMs);
     else action();
   }
@@ -1040,7 +1040,7 @@ function KeyboardContent(props: {
     playPreparedConfiguredHaptic(settings);
   }
 
-  function playReleaseFeedback() {
+  function playClickFeedback() {
     playConfiguredClick(settings);
   }
 
@@ -1176,6 +1176,7 @@ function KeyboardContent(props: {
     stopRepeatingCursorMove();
     setKeyPressed(id, true);
     playPressFeedback();
+    playConfiguredClick(settings);
   }
 
   function endKeyTouch(id: string) {
@@ -1188,7 +1189,6 @@ function KeyboardContent(props: {
     ) {
       stopRepeatingBackspace();
     }
-    playReleaseFeedback();
     setKeyPressed(id, false);
   }
 
@@ -1257,6 +1257,7 @@ function KeyboardContent(props: {
         return target?.safetyReleaseDelay ??
           (target?.onLongPress ? 1500 : 520);
       },
+      cancelPendingOnSafetyRelease: USE_NATIVE_KEY_TOUCH,
       longPressSafetyReleaseDelay: () => LONG_PRESS_PRESSED_RELEASE_DELAY,
       shouldCancelLongPress: (details: any) => {
         const target = activeHitTargetRef.current.get(rowId);
@@ -1267,6 +1268,7 @@ function KeyboardContent(props: {
       },
       onTouchEnd: () => {
         clearRowTracking(rowId);
+        if (USE_NATIVE_KEY_TOUCH) rowGestureMachineRef.current.delete(rowId);
       },
       onLongPress: () => {
         const target = activeHitTargetRef.current.get(rowId);
@@ -1309,7 +1311,6 @@ function KeyboardContent(props: {
         const touchStartedAt = settings.performanceDiagnostics
           ? rowDiagnosticTouchStartedAtRef.current.get(rowId)
           : undefined;
-        playReleaseFeedback();
         setKeyPressed(target.id, false);
         clearRowTracking(rowId, true);
         enqueueKeyboardAction(
@@ -1326,7 +1327,6 @@ function KeyboardContent(props: {
         const touchStartedAt = settings.performanceDiagnostics
           ? rowDiagnosticTouchStartedAtRef.current.get(rowId)
           : undefined;
-        playReleaseFeedback();
         setKeyPressed(target.id, false);
         clearRowTracking(rowId, true);
         enqueueKeyboardAction(
@@ -1523,6 +1523,7 @@ function KeyboardContent(props: {
       }
       setKeyPressed(target.id, true);
       playPressFeedback();
+      playConfiguredClick(settings);
       rowSpaceDragConsumedRef.current.set(rowId, false);
       spaceCursorDragXRef.current.delete(rowId);
       machine.start();
@@ -1574,6 +1575,7 @@ function KeyboardContent(props: {
     const touchKey = `${rowId}:${event.touchId}`;
     const currentTargets = nativeRowTargetsRef.current.get(rowId) ?? [];
     if (event.phase === "began") {
+      if (!hitTargetFromGesture(event, currentTargets)) return;
       handleHitRowGestureChanged(touchKey, event, currentTargets);
       return;
     }
@@ -2207,8 +2209,8 @@ function KeyboardContent(props: {
   }
 
   function selectT9Pinyin(option: T9PinyinOption) {
-    playReleaseFeedback();
     playPressFeedback(true);
+    playClickFeedback();
     setT9DelimiterVisualPositions([]);
     setT9FilterState({
       digits: option.digits,

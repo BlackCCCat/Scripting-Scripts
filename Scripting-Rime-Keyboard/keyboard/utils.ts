@@ -553,6 +553,7 @@ export function createTouchIntentMachine(options: {
   longPressDuration?: number | (() => number);
   swipeTriggerDistance?: number | (() => number);
   safetyReleaseDelay?: number | (() => number);
+  cancelPendingOnSafetyRelease?: boolean;
   longPressSafetyReleaseDelay?: number | (() => number);
   isLongPressEnabled?: () => boolean;
   shouldCancelLongPress?: (details: any) => boolean;
@@ -640,6 +641,10 @@ export function createTouchIntentMachine(options: {
     clearSafetyTimer();
     safetyTimer = setTimeout(() => {
       if (state !== "pending" && state !== "longpress_locked") return;
+      if (state === "pending" && options.cancelPendingOnSafetyRelease) {
+        finishLifecycle(true, false);
+        return;
+      }
       settleCurrentIntent(latestDetails);
     }, delay);
   }

@@ -545,6 +545,7 @@ export function KeyFace(props: {
   function endTouchOnce() {
     if (touchEndedRef.current) return;
     touchEndedRef.current = true;
+    nativeTouchIdRef.current = null;
     releaseManualKeyTouch(touchOwnerRef.current!);
     propsRef.current.onTouchEnd?.();
   }
@@ -598,6 +599,7 @@ export function KeyFace(props: {
         propsRef.current.contextMenu && !propsRef.current.onLongPress
           ? 180
           : 1500,
+      cancelPendingOnSafetyRelease: USE_NATIVE_KEY_TOUCH,
       isLongPressEnabled,
       shouldCancelLongPress: (details: any) =>
         !!propsRef.current.onLongPress && dragIntent(details),

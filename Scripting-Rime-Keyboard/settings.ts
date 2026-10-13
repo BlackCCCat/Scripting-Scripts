@@ -589,8 +589,8 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   letterLongPressDuration: 520,
   swipeTriggerDistance: 80,
   showKeyPopups: true,
-  inputClicks: false,
-  hapticEngineClicks: true,
+  inputClicks: true,
+  hapticEngineClicks: false,
   haptics: true,
   hapticLevel: 7,
   showNotifications: false,
@@ -1239,13 +1239,14 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     showKeyPopups: typeof raw?.showKeyPopups === "boolean"
       ? raw.showKeyPopups
       : DEFAULT_RIME_KEYBOARD_SETTINGS.showKeyPopups,
-    inputClicks: typeof raw?.hapticEngineClicks === "boolean" &&
-        typeof raw?.inputClicks === "boolean"
+    inputClicks: typeof raw?.inputClicks === "boolean"
       ? raw.inputClicks
-      : false,
+      : typeof raw?.hapticEngineClicks === "boolean"
+      ? false
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.inputClicks,
     hapticEngineClicks: typeof raw?.hapticEngineClicks === "boolean"
       ? raw.hapticEngineClicks
-      : true,
+      : DEFAULT_RIME_KEYBOARD_SETTINGS.hapticEngineClicks,
     haptics: typeof raw?.haptics === "boolean" ? raw.haptics : true,
     hapticLevel: clampDecimalNumber(
       raw?.hapticLevel,
