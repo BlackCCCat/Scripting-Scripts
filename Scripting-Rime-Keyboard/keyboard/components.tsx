@@ -1,5 +1,6 @@
 import {
   createContext,
+  Device,
   DragGesture,
   Group,
   HStack,
@@ -13,6 +14,7 @@ import {
   useState,
   VStack,
   ZStack,
+  type TouchGestureEvent,
 } from "scripting";
 import { BASE_KEY_HEIGHT, KEY_SPACING } from "./constants";
 import type { Palette } from "./types";
@@ -36,6 +38,10 @@ const HIT_TEST_BACKGROUND = "rgba(0,0,0,0.001)";
 const CANDIDATE_WIDTH_CACHE_LIMIT = 360;
 const candidateWidthCache = new Map<string, number>();
 type KeyPopupEdge = "center" | "left" | "right";
+
+// Keep the established gesture path below iOS 27.
+export const USE_NATIVE_KEY_TOUCH =
+  Number(String(Device.systemVersion ?? "").match(/\d+/)?.[0] ?? 0) >= 27;
 
 type PressVisualSubscriber = (pressed: boolean) => void;
 
@@ -374,6 +380,8 @@ export function KeyFace(props: {
   const propsRef = useRef(props);
   propsRef.current = props;
   const gestureMachineRef = useRef<any>(null);
+  const nativeTouchIdRef = useRef<string | null>(null);
+  const cancellingNativeTouchRef = useRef(false);
   const touchOwnerRef = useRef<ManualKeyTouchOwner | null>(null);
   if (touchOwnerRef.current == null) {
     touchOwnerRef.current = {
@@ -528,7 +536,9 @@ export function KeyFace(props: {
   function beginTouch() {
     touchEndedRef.current = false;
     touchStartedAtRef.current = keyboardActionDiagnosticTimestamp();
-    claimManualKeyTouch(touchOwnerRef.current!);
+    if (nativeTouchIdRef.current == null) {
+      claimManualKeyTouch(touchOwnerRef.current!);
+    }
     propsRef.current.onTouchStart?.();
   }
 
@@ -602,7 +612,10 @@ export function KeyFace(props: {
       onLongPressEnd: () => {
         const selection = longPressPopupSelectionRef.current;
         setLongPressPopupSelection(null);
-        if (selection && propsRef.current.onLongPressOptionEnd) {
+        if (
+          !cancellingNativeTouchRef.current && selection &&
+          propsRef.current.onLongPressOptionEnd
+        ) {
           propsRef.current.onLongPressOptionEnd(selection);
           return;
         }
@@ -663,13 +676,71 @@ export function KeyFace(props: {
   useEffect(() => {
     return () => {
       releaseManualKeyTouch(touchOwnerRef.current!);
+      cancellingNativeTouchRef.current = true;
       gestureMachineRef.current?.dispose?.();
     };
   }, []);
 
+  function handleNativeTouch(event: TouchGestureEvent) {
+    const machine = gestureMachineRef.current;
+    if (event.phase === "began") {
+      if (nativeTouchIdRef.current != null) return;
+      nativeTouchIdRef.current = event.touchId;
+      try {
+        machine?.start();
+        machine?.update(event);
+      } catch (error) {
+        try {
+          machine?.cancel({ invokeTouchEnd: true, invokeLongPressEnd: true });
+        } finally {
+          nativeTouchIdRef.current = null;
+        }
+        throw error;
+      }
+      return;
+    }
+    if (nativeTouchIdRef.current !== event.touchId) return;
+    if (event.phase === "moved") {
+      updateSwipePopup(event);
+      if (immediateDragConsumedRef.current) {
+        propsRef.current.onImmediateDrag?.(event);
+      } else if (propsRef.current.onImmediateDrag?.(event)) {
+        immediateDragConsumedRef.current = true;
+        machine?.cancel();
+      } else {
+        machine?.update(event);
+      }
+      return;
+    }
+    cancellingNativeTouchRef.current = event.phase === "cancelled";
+    try {
+      if (event.phase === "cancelled") {
+        machine?.cancel({ invokeTouchEnd: true, invokeLongPressEnd: true });
+        endTouchOnce();
+      } else if (immediateDragConsumedRef.current) {
+        endTouchOnce();
+      } else {
+        machine?.end(event);
+      }
+    } finally {
+      cancellingNativeTouchRef.current = false;
+      nativeTouchIdRef.current = null;
+      immediateDragConsumedRef.current = false;
+      setSwipePopup(null);
+      setLongPressPopupSelection(null);
+    }
+  }
+
+  const nativeTouchGesture = useMemo(
+    () => needsManualGesture && USE_NATIVE_KEY_TOUCH
+      ? { onTouchGesture: { onEvent: handleNativeTouch } }
+      : undefined,
+    [needsManualGesture],
+  );
+
   const manualGesture = useMemo(
     () =>
-      needsManualGesture
+      needsManualGesture && !USE_NATIVE_KEY_TOUCH
         ? {
           gesture: DragGesture({ minDistance: 0, coordinateSpace: "local" })
             .onChanged((details: any) => {
@@ -718,6 +789,7 @@ export function KeyFace(props: {
       contentShape="rect"
       zIndex={popupVisible ? 50 : active ? 5 : 0}
       {...tapGesture}
+      {...(nativeTouchGesture as any)}
       {...(manualGesture ? { highPriorityGesture: manualGesture } : {})}
       {...(props.contextMenu ? { contextMenu: props.contextMenu } : {})}
     >

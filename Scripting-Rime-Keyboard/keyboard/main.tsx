@@ -15,6 +15,7 @@ import {
   useState,
   VStack,
   ZStack,
+  type TouchGestureEvent,
 } from "scripting";
 import {
   type ActionSendMode,
@@ -49,6 +50,7 @@ import {
   KeyPressVisualContext,
   KeyPressVisualController,
   type PressVisualCommit,
+  USE_NATIVE_KEY_TOUCH,
 } from "./components";
 import {
   CandidateHeader,
@@ -499,12 +501,21 @@ function KeyboardContent(props: {
   const pressedReleaseTimersRef = useRef(new Map<string, any>());
   const activeHitTargetRef = useRef(new Map<string, KeyHitTarget>());
   const rowGestureMachineRef = useRef(new Map<string, any>());
+  const nativeRowTargetsRef = useRef(new Map<string, KeyHitTarget[]>());
+  const nativeRowInputsRef = useRef(
+    new Map<string, {
+      onTouchGesture: { onEvent: (event: TouchGestureEvent) => void };
+    }>(),
+  );
+  const nativeRowHandlerRef = useRef(
+    (_rowId: string, _event: TouchGestureEvent) => {},
+  );
   const rowSpaceDragConsumedRef = useRef(new Map<string, boolean>());
   const rowDiagnosticTouchStartedAtRef = useRef(
     new Map<string, number | undefined>(),
   );
   const hitTargetActionsRef = useRef<Record<string, any>>({});
-  const spaceCursorDragXRef = useRef<number | null>(null);
+  const spaceCursorDragXRef = useRef(new Map<string, number>());
   const lastPressFeedbackAtRef = useRef(0);
   const lastCursorFeedbackAtRef = useRef(0);
   const lastDeleteHapticAtRef = useRef(0);
@@ -585,8 +596,12 @@ function KeyboardContent(props: {
         machine?.dispose?.();
       }
       rowGestureMachineRef.current.clear();
+      nativeRowTargetsRef.current.clear();
+      nativeRowInputsRef.current.clear();
       rowSpaceDragConsumedRef.current.clear();
       rowDiagnosticTouchStartedAtRef.current.clear();
+      activeHitTargetRef.current.clear();
+      spaceCursorDragXRef.current.clear();
       stopRepeatingCursorMove();
       for (const timer of pressedReleaseTimersRef.current.values()) {
         clearTimeout(timer);
@@ -1269,7 +1284,7 @@ function KeyboardContent(props: {
       onLongPressMove: (details: any) => {
         const activeId = activeHitTargetRef.current.get(rowId)?.id;
         if (isSpaceCursorKey(activeId)) {
-          void updateSpaceLongPressDrag(details);
+          void updateSpaceLongPressDrag(rowId, details);
         } else if (
           activeId === "backspace" || activeId === "numeric-backspace"
         ) {
@@ -1334,7 +1349,7 @@ function KeyboardContent(props: {
     rowSpaceDragConsumedRef.current.clear();
     rowDiagnosticTouchStartedAtRef.current.clear();
     activeHitTargetRef.current.clear();
-    spaceCursorDragXRef.current = null;
+    spaceCursorDragXRef.current.clear();
   }
 
   function clearRowTracking(rowId: string, keepVisual = false) {
@@ -1355,7 +1370,7 @@ function KeyboardContent(props: {
     ) {
       stopRepeatingCursorMove();
     }
-    if (isSpaceCursorKey(target?.id)) spaceCursorDragXRef.current = null;
+    spaceCursorDragXRef.current.delete(rowId);
   }
 
   function isLongPressDragIntent(details: any) {
@@ -1435,33 +1450,39 @@ function KeyboardContent(props: {
     return true;
   }
 
-  function updateSpaceLongPressDrag(details: any) {
+  function updateSpaceLongPressDrag(rowId: string, details: any) {
     const x = Number(details?.location?.x ?? details?.startLocation?.x ?? 0);
-    if (spaceCursorDragXRef.current == null) {
-      spaceCursorDragXRef.current = Number(details?.startLocation?.x ?? x);
+    const origin = spaceCursorDragXRef.current.get(rowId) ??
+      Number(details?.startLocation?.x ?? x);
+    if (!spaceCursorDragXRef.current.has(rowId)) {
+      spaceCursorDragXRef.current.set(rowId, origin);
     }
     const hasCandidateNavigation = currentPreedit().length > 0 &&
       currentCandidates().length > 0;
     const stepSize = hasCandidateNavigation
       ? SPACE_CANDIDATE_DRAG_STEP
       : SPACE_CURSOR_DRAG_STEP;
-    const dx = x - spaceCursorDragXRef.current;
+    const dx = x - origin;
     const steps = Math.trunc(dx / stepSize);
     if (steps === 0) return false;
     const direction = steps < 0 ? -1 : 1;
     const moved = hasCandidateNavigation
       ? moveHighlightedCandidateBySpaceDrag(direction)
       : moveHostCursorByDrag(direction);
-    spaceCursorDragXRef.current += direction * stepSize;
+    spaceCursorDragXRef.current.set(rowId, origin + direction * stepSize);
     return moved;
   }
 
-  function trackImmediateSpaceDrag(details: any, consumed = false) {
+  function trackImmediateSpaceDrag(
+    rowId: string,
+    details: any,
+    consumed = false,
+  ) {
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
     const hasHorizontalDragIntent = dx >= SPACE_CURSOR_DRAG_STEP && dx >= dy;
     if (!consumed && !hasHorizontalDragIntent) return false;
-    return updateSpaceLongPressDrag(details) || consumed ||
+    return updateSpaceLongPressDrag(rowId, details) || consumed ||
       hasHorizontalDragIntent;
   }
 
@@ -1480,7 +1501,7 @@ function KeyboardContent(props: {
       machine.update(details);
       if (isSpaceCursorKey(activeTarget.id)) {
         const consumed = rowSpaceDragConsumedRef.current.get(rowId) ?? false;
-        if (trackImmediateSpaceDrag(details, consumed)) {
+        if (trackImmediateSpaceDrag(rowId, details, consumed)) {
           rowSpaceDragConsumedRef.current.set(rowId, true);
           machine.cancel();
           return;
@@ -1503,7 +1524,7 @@ function KeyboardContent(props: {
       setKeyPressed(target.id, true);
       playPressFeedback();
       rowSpaceDragConsumedRef.current.set(rowId, false);
-      spaceCursorDragXRef.current = null;
+      spaceCursorDragXRef.current.delete(rowId);
       machine.start();
       machine.update(details);
     }
@@ -1547,6 +1568,53 @@ function KeyboardContent(props: {
         ),
       mask: "gesture" as any,
     };
+  }
+
+  nativeRowHandlerRef.current = (rowId, event) => {
+    const touchKey = `${rowId}:${event.touchId}`;
+    const currentTargets = nativeRowTargetsRef.current.get(rowId) ?? [];
+    if (event.phase === "began") {
+      handleHitRowGestureChanged(touchKey, event, currentTargets);
+      return;
+    }
+    const machine = rowGestureMachineRef.current.get(touchKey);
+    if (!machine) return;
+    if (event.phase === "moved") {
+      handleHitRowGestureChanged(touchKey, event, currentTargets);
+      return;
+    }
+    try {
+      if (event.phase === "ended") {
+        handleHitRowGestureEnded(touchKey, event, currentTargets);
+      } else {
+        machine.cancel({ invokeTouchEnd: true, invokeLongPressEnd: true });
+        clearRowTracking(touchKey);
+      }
+    } finally {
+      try {
+        machine.dispose();
+      } finally {
+        clearRowTracking(touchKey);
+        rowGestureMachineRef.current.delete(touchKey);
+      }
+    }
+  };
+
+  function hitRowInput(rowId: string, targets: KeyHitTarget[]) {
+    if (!USE_NATIVE_KEY_TOUCH) {
+      return { highPriorityGesture: hitRowGesture(rowId, targets) };
+    }
+    nativeRowTargetsRef.current.set(rowId, targets);
+    const existing = nativeRowInputsRef.current.get(rowId);
+    if (existing) return existing;
+    const input = {
+      onTouchGesture: {
+        onEvent: (event: TouchGestureEvent) =>
+          nativeRowHandlerRef.current(rowId, event),
+      },
+    };
+    nativeRowInputsRef.current.set(rowId, input);
+    return input;
   }
 
   function processSessionKey(
@@ -2924,10 +2992,10 @@ function KeyboardContent(props: {
       width: bottomSpaceWidth,
       onPress: () => hitTargetActionsRef.current.pressSpace(),
       onLongPress: () => {
-        spaceCursorDragXRef.current = null;
+        spaceCursorDragXRef.current.clear();
       },
       onLongPressEnd: () => {
-        spaceCursorDragXRef.current = null;
+        spaceCursorDragXRef.current.clear();
       },
       onSwipeUp: isT9Keyboard
         ? () => hitTargetActionsRef.current.runT9SpaceSwipe("up")
@@ -2993,12 +3061,12 @@ function KeyboardContent(props: {
         },
         onLongPress: value === "space"
           ? () => {
-            spaceCursorDragXRef.current = null;
+            spaceCursorDragXRef.current.clear();
           }
           : undefined,
         onLongPressEnd: value === "space"
           ? () => {
-            spaceCursorDragXRef.current = null;
+            spaceCursorDragXRef.current.clear();
           }
           : undefined,
         onSwipeUp: value === "space" && canSpaceSwipeCandidate("2")
@@ -3866,10 +3934,10 @@ function KeyboardContent(props: {
             height: functionRowTouch.touchHeight,
           }}
           contentShape="rect"
-          highPriorityGesture={hitRowGesture(
+          {...(hitRowInput(
             "func-comp",
             cachedComposingFunctionHitTargets,
-          )}
+          ) as any)}
         >
           {settings.composingFunctionOrder.map(
             usesT9MixedFunctionRow
@@ -3887,10 +3955,10 @@ function KeyboardContent(props: {
           height: functionRowTouch.touchHeight,
         }}
         contentShape="rect"
-        highPriorityGesture={hitRowGesture(
+        {...(hitRowInput(
           "func-idle",
           cachedIdleFunctionHitTargets,
-        )}
+        ) as any)}
       >
         {settings.idleFunctionOrder.map(renderIdleFunctionKey)}
       </HStack>
@@ -3918,10 +3986,10 @@ function KeyboardContent(props: {
           height: bottomRowTouch.touchHeight,
         }}
         contentShape="rect"
-        highPriorityGesture={hitRowGesture(
+        {...(hitRowInput(
           "bottom-row",
           cachedBottomRowHitTargets,
-        )}
+        ) as any)}
       >
         {showNextKeyboardButton
           ? (
@@ -4291,10 +4359,10 @@ function KeyboardContent(props: {
                                 height: rowTouch.touchHeight,
                               }}
                               contentShape="rect"
-                              highPriorityGesture={hitRowGesture(
+                              {...(hitRowInput(
                                 `num-row-${rowIndex}`,
                                 hitTargets,
-                              )}
+                              ) as any)}
                             >
                               {row.map((value) => (
                                 <KeyFace
@@ -4327,10 +4395,10 @@ function KeyboardContent(props: {
                             height: numericBottomTouch.touchHeight,
                           }}
                           contentShape="rect"
-                          highPriorityGesture={hitRowGesture(
+                          {...(hitRowInput(
                             "num-row-zero",
                             cachedNumericBottomHitTargets,
-                          )}
+                          ) as any)}
                         >
                           <KeyFace
                             id="numeric-abc"
@@ -4385,10 +4453,10 @@ function KeyboardContent(props: {
                           height: numericPanelHeight,
                         }}
                         contentShape="rect"
-                        highPriorityGesture={hitRowGesture(
+                        {...(hitRowInput(
                           "num-row-right",
                           cachedNumericRightHitTargets,
-                        )}
+                        ) as any)}
                       >
                         <KeyFace
                           id="numeric-backspace"
@@ -4533,10 +4601,10 @@ function KeyboardContent(props: {
                           height: bottomRowTouch.touchHeight,
                         }}
                         contentShape="rect"
-                        highPriorityGesture={hitRowGesture(
+                        {...(hitRowInput(
                           "bottom-row",
                           cachedBottomRowHitTargets,
-                        )}
+                        ) as any)}
                       >
                         {showNextKeyboardButton
                           ? (
