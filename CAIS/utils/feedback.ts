@@ -99,7 +99,14 @@ function makeClickPlayer() {
     return player
   }
   try {
-    const pattern = new HapticPattern([
+    const profile = hapticProfile(DEFAULT_HAPTIC_LEVEL)
+    const events = HapticEngine?.supportsHaptics === false ? [] : [
+      new HapticEvent("hapticTransient", [
+        new HapticEventParameter("hapticIntensity", profile.intensity),
+        new HapticEventParameter("hapticSharpness", profile.sharpness),
+      ], 0),
+    ]
+    events.push(
       new HapticEvent(
         "audioContinuous",
         [
@@ -112,7 +119,8 @@ function makeClickPlayer() {
         0,
         0.018,
       ),
-    ])
+    )
+    const pattern = new HapticPattern(events)
     const players = Array.from(
       { length: HAPTIC_PLAYER_POOL_SIZE },
       () => reusableHapticEngine.makePlayer(pattern),
@@ -220,13 +228,17 @@ export function playCaisHaptic() {
   playLegacyHapticFallback()
 }
 
-function playCoreClick() {
-  if (!hapticEngineReady || !reusableHapticEngine) return
-  if (coreHapticsClickUnavailable) return
+function playCoreClick(): boolean {
+  if (!hapticEngineReady || !reusableHapticEngine) return false
+  if (coreHapticsClickUnavailable) return false
   try {
-    makeClickPlayer()?.start?.(0)
+    const player = makeClickPlayer()
+    if (!player) return false
+    player.start(0)
+    return true
   } catch {
     coreHapticsClickUnavailable = true
+    return false
   }
 }
 
@@ -242,9 +254,9 @@ function playSystemClick() {
 export function playCaisFeedback(settings?: Pick<CaisSettings, "inputClicks" | "hapticEngineClicks">) {
   prepareCaisFeedback(settings)
   if (settings?.hapticEngineClicks) {
-    playCoreClick()
-  } else if (settings?.inputClicks) {
-    playSystemClick()
+    if (!playCoreClick()) playCaisHaptic()
+    return
   }
   playCaisHaptic()
+  if (settings?.inputClicks) playSystemClick()
 }
