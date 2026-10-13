@@ -1021,8 +1021,8 @@ function KeyboardContent(props: {
   ) {
     stopRepeatingBackspace();
     stopRepeatingCursorMove();
-    playReleaseFeedback();
     playPressFeedback(true);
+    playReleaseFeedback();
     if (delayMs > 0) setTimeout(action, delayMs);
     else action();
   }
