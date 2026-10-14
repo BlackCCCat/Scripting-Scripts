@@ -758,19 +758,6 @@ function normalizeToolbarButtons(raw: unknown): ToolbarButtonConfig[] {
       action,
     });
   }
-  const caisButton = DEFAULT_TOOLBAR_LEFT_BUTTONS.find((item) =>
-    item.id === "cais"
-  );
-  if (
-    caisButton &&
-    result.length < TOOLBAR_LEFT_BUTTON_MAX &&
-    !result.some((item) =>
-      item.id === caisButton.id || item.action === caisButton.action
-    )
-  ) {
-    const insertAt = Math.min(2, result.length);
-    result.splice(insertAt, 0, caisButton);
-  }
   return result;
 }
 

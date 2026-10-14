@@ -1563,6 +1563,20 @@ function SettingsView() {
   }
 
   function removeToolbarButton(id: string) {
+    const index = settings.toolbarLeftButtons.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const drafts = pendingTextDraftsRef.current;
+    for (let i = index; i < settings.toolbarLeftButtons.length; i += 1) {
+      for (const field of ["symbol", "action"]) {
+        const key = `toolbarLeftButtons.${i}.${field}`;
+        const nextKey = `toolbarLeftButtons.${i + 1}.${field}`;
+        if (Object.prototype.hasOwnProperty.call(drafts, nextKey)) {
+          drafts[key] = drafts[nextKey];
+        } else {
+          delete drafts[key];
+        }
+      }
+    }
     updateSettings({
       ...settings,
       toolbarLeftButtons: settings.toolbarLeftButtons.filter((item) =>
