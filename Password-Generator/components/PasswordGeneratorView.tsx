@@ -593,7 +593,11 @@ export function PasswordGeneratorView(props: { mode: ViewMode }) {
 
   if (props.mode === "keyboard") {
     return (
-      <ScrollView frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      <ScrollView
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        scrollContentBackground="hidden"
+        scrollEdgeEffectHidden={true}
+      >
         <VStack spacing={12} padding={{ top: topPadding, bottom: 20, leading: 12, trailing: 12 }}>
           {firstCard}
           {showKeyboardHistory ? keyboardHistoryContent : null}
