@@ -7,6 +7,14 @@ export function prepareRimeSession(
   settings: RimeKeyboardSettings,
   isDisposed: () => boolean,
 ) {
+  if (settings.disableRime) {
+    return Promise.resolve({
+      list: [] as Rime.Schema[],
+      session: null,
+      stages: [] as Array<{ name: string; timestamp: number }>,
+      error: null as string | null,
+    });
+  }
   // Rime is process-wide; only its startup work is serialized, never key input.
   const result = pendingPreparation.then(() => Thread.runInBackground(async () => {
     const stages: Array<{ name: string; timestamp: number }> = [];

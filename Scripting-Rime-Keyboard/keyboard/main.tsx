@@ -406,7 +406,7 @@ function KeyboardContent(props: {
   const settings = props.settings;
   const [keyboardTypeOverride, setKeyboardTypeOverride] = useState<
     KeyboardType | null
-  >(null);
+  >(settings.disableRime && settings.keyboardType === "t9" ? "qwerty" : null);
   const activeKeyboardType = keyboardTypeOverride ?? settings.keyboardType;
   const isT9Keyboard = activeKeyboardType === "t9";
   const isT9KeyboardRef = useRef(isT9Keyboard);
@@ -439,7 +439,7 @@ function KeyboardContent(props: {
     hasThirdCandidate: false,
     t9Preedit: "",
     t9PreeditCursor: 0,
-    ascii: false,
+    ascii: settings.disableRime,
     currentSchemaId: null,
     schemas: schemasRef.current,
   });
@@ -750,7 +750,9 @@ function KeyboardContent(props: {
       return;
     }
     rimeSetupStartedRef.current = true;
-    performanceDiagnosticsRef.current?.recordStartup("Rime 后台准备请求");
+    performanceDiagnosticsRef.current?.recordStartup(
+      settings.disableRime ? "纯键盘模式" : "Rime 后台准备请求",
+    );
     try {
       const result = await prepareRimeSession(settings, () => disposedRef.current);
       if (disposedRef.current) {
@@ -764,18 +766,22 @@ function KeyboardContent(props: {
         );
       }
       if (result.error) throw new Error(result.error);
-      performanceDiagnosticsRef.current?.recordStartup(
-        "Rime 后台结果返回主线程",
-        Date.now(),
-        `方案数=${result.list.length}`,
-      );
+      if (!settings.disableRime) {
+        performanceDiagnosticsRef.current?.recordStartup(
+          "Rime 后台结果返回主线程",
+          Date.now(),
+          `方案数=${result.list.length}`,
+        );
+      }
       schemasRef.current = result.list;
       const s = result.session;
       if (!s) {
         applyRimeMetadata({ ascii: true });
         if (settings.keyboardType === "t9") setKeyboardTypeOverride("qwerty");
         rimeReadyRef.current = true;
-        performanceDiagnosticsRef.current?.recordStartup("键盘可输入（无方案）");
+        performanceDiagnosticsRef.current?.recordStartup(
+          settings.disableRime ? "键盘可输入（禁用Rime）" : "键盘可输入（无方案）",
+        );
         return;
       }
       sessionRef.current = s;
@@ -1690,7 +1696,7 @@ function KeyboardContent(props: {
     if (!s) {
       if (fallback) {
         performanceDiagnosticsRef.current?.recordStartupOnce(
-          "首次 Rime 就绪前直接输入",
+          settings.disableRime ? "纯键盘首次输入" : "首次 Rime 就绪前直接输入",
         );
         insertTextReplacingSelectAll(fallback);
       }

@@ -131,6 +131,7 @@ export type RimeKeyboardSettings = {
   showNotifications: boolean;
   performanceDiagnostics: boolean;
   autoDeployOnLaunch: boolean;
+  disableRime: boolean;
 };
 
 const SETTINGS_KEY = "rime_pinyin_keyboard_settings_v1";
@@ -596,6 +597,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   showNotifications: false,
   performanceDiagnostics: false,
   autoDeployOnLaunch: false,
+  disableRime: false,
 };
 
 export const KEYBOARD_HEIGHT_MIN = 286;
@@ -1263,6 +1265,9 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       : DEFAULT_RIME_KEYBOARD_SETTINGS.performanceDiagnostics,
     autoDeployOnLaunch: typeof raw?.autoDeployOnLaunch === "boolean"
       ? raw.autoDeployOnLaunch
+      : false,
+    disableRime: typeof raw?.disableRime === "boolean"
+      ? raw.disableRime
       : false,
   };
   if (normalized.composingFunctionPress.filter === "{backslashWrap}") {

@@ -2623,6 +2623,14 @@ function SettingsView() {
             )
             : null}
         </Section>
+        <Section footer={<SettingHint>重新打开键盘后生效。</SettingHint>}>
+          <Toggle
+            title="禁用Rime"
+            systemImage="keyboard"
+            value={settings.disableRime}
+            onChanged={(value) => patchSettings({ disableRime: value })}
+          />
+        </Section>
       </List>
     );
   }
