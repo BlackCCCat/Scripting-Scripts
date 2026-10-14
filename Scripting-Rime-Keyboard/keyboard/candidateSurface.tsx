@@ -143,7 +143,7 @@ export function CandidateHeader(props: {
   displayPreedit?: string;
   displayPreeditCursor?: number;
   error: string | null;
-  composing: boolean;
+  composing?: boolean;
   candidateExpanded: boolean;
   notificationToast: RimeNotificationToast | null;
   candidateMenuActions: CandidateMenuAction[];
@@ -167,6 +167,7 @@ export function CandidateHeader(props: {
   } = rimeState;
   const preedit = props.displayPreedit ?? rawPreedit;
   const preeditCursor = props.displayPreeditCursor ?? rawPreeditCursor;
+  const composing = props.composing ?? rawPreedit.length > 0;
   const preeditScrollProxyRef = useRef<any>(null);
   const candidateScrollProxyRef = useRef<any>(null);
   const preeditScrollTimerRef = useRef<any>(null);
@@ -203,12 +204,12 @@ export function CandidateHeader(props: {
       : props.settings.candidateRightButtonMode;
   const toolbarLeftButtons = useMemo(
     () =>
-      props.composing
+      composing
         ? []
         : props.settings.toolbarLeftButtons.filter((item) =>
           item.symbol && item.action
         ).slice(0, TOOLBAR_LEFT_BUTTON_MAX),
-    [props.composing, props.settings.toolbarLeftButtons],
+    [composing, props.settings.toolbarLeftButtons],
   );
   const rightButtonVisible = effectiveRightButtonMode !== "hidden";
   const toolbarWidth = toolbarLeftButtons.length * TOOLBAR_BUTTON_WIDTH;
@@ -237,6 +238,23 @@ export function CandidateHeader(props: {
       pageNo,
       rimePageSize,
       props.settings.showCandidateComment,
+    ],
+  );
+  const candidateMenus = useMemo(
+    () =>
+      Array.from({ length: candidates.length }, (_, pageIndex) =>
+        candidateContextMenu(
+          props.candidateMenuActions,
+          pageNo * rimePageSize + pageIndex,
+          props.onCandidateAction,
+        )
+      ),
+    [
+      candidates.length,
+      pageNo,
+      rimePageSize,
+      props.candidateMenuActions,
+      props.onCandidateAction,
     ],
   );
   const highlightedCandidate = candidates[highlightedIdx];
@@ -521,11 +539,7 @@ export function CandidateHeader(props: {
                         height={props.metrics.candidateButtonHeight}
                         candidateFontSize={props.metrics.candidateFontSize}
                         commentFontSize={props.metrics.candidateCommentFontSize}
-                        contextMenu={candidateContextMenu(
-                          props.candidateMenuActions,
-                          item.absoluteIndex,
-                          props.onCandidateAction,
-                        )}
+                        contextMenu={candidateMenus[item.pageIndex]}
                         onPress={() =>
                           props.onSelectCandidate(item.absoluteIndex)}
                       />

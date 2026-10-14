@@ -21,6 +21,8 @@ const HAPTIC_PLAYER_POOL_SIZE = 3;
 const SYSTEM_CLICK_MIN_INTERVAL_MS = 32;
 let reusableHapticEngine: any = null;
 let hapticEngineStartPromise: Promise<void> | null = null;
+let hapticEngineReleasePromise: Promise<void> | null = null;
+let hapticEngineGeneration = 0;
 let hapticEngineReady = false;
 let coreHapticsUnavailable = false;
 let coreHapticsClickUnavailable = false;
@@ -29,7 +31,7 @@ let reusableClickPlayers: HapticPlayerPool | null = null;
 let lastSystemClickAt = 0;
 let cachedGraphemeSegmenter: any = null;
 const queuedKeyboardActions: Array<() => void> = [];
-const queuedKeyboardActionNeedsRunLoopYield: boolean[] = [];
+const queuedKeyboardActionYieldModes: number[] = [];
 const queuedKeyboardActionDiagnostics: Array<
   QueuedKeyboardActionDiagnosticEnvelope | null
 > = [];
@@ -79,6 +81,8 @@ function keyboardActionNow() {
 
 const KEYBOARD_ACTION_BATCH_BUDGET_MS = 8;
 const KEYBOARD_ACTION_BATCH_LIMIT = 3;
+const YIELD_BEFORE_ACTION = 1;
+const YIELD_AFTER_ACTION = 2;
 const SLOW_QUEUE_SAMPLE_THRESHOLD_MS = 8;
 export const KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL = 4;
 
@@ -94,13 +98,17 @@ function pendingKeyboardActionCount() {
 
 function resetConsumedKeyboardActions() {
   queuedKeyboardActions.length = 0;
-  queuedKeyboardActionNeedsRunLoopYield.length = 0;
+  queuedKeyboardActionYieldModes.length = 0;
   queuedKeyboardActionDiagnostics.length = 0;
   queuedKeyboardActionHead = 0;
 }
 
-function actionNeedsRunLoopYield(keyId?: string) {
-  return keyId === "space" || keyId === "numeric-space" || keyId === "comma";
+function keyboardActionYieldMode(keyId?: string) {
+  if (keyId === "comma") return YIELD_BEFORE_ACTION | YIELD_AFTER_ACTION;
+  if (keyId === "space" || keyId === "numeric-space") {
+    return YIELD_AFTER_ACTION;
+  }
+  return 0;
 }
 
 function scheduleKeyboardActionTimer() {
@@ -117,8 +125,8 @@ function runKeyboardActionBatch() {
     const actionIndex = queuedKeyboardActionHead++;
     const action = queuedKeyboardActions[actionIndex];
     const diagnosticEnvelope = queuedKeyboardActionDiagnostics[actionIndex];
-    const needsRunLoopYield =
-      queuedKeyboardActionNeedsRunLoopYield[actionIndex] === true;
+    const yieldsAfterAction =
+      (queuedKeyboardActionYieldModes[actionIndex] & YIELD_AFTER_ACTION) !== 0;
     try {
       if (diagnosticEnvelope) {
         keyboardActionSequence += 1;
@@ -149,7 +157,7 @@ function runKeyboardActionBatch() {
     }
     processed += 1;
     if (
-      needsRunLoopYield &&
+      yieldsAfterAction &&
       queuedKeyboardActionHead < queuedKeyboardActions.length
     ) {
       keyboardActionBatchRunning = false;
@@ -158,8 +166,8 @@ function runKeyboardActionBatch() {
     }
     if (
       queuedKeyboardActionHead < queuedKeyboardActions.length &&
-      (queuedKeyboardActionNeedsRunLoopYield[queuedKeyboardActionHead] ===
-          true ||
+      ((queuedKeyboardActionYieldModes[queuedKeyboardActionHead] &
+            YIELD_BEFORE_ACTION) !== 0 ||
         processed >= KEYBOARD_ACTION_BATCH_LIMIT ||
         keyboardActionNow() - batchStartedAt >=
           KEYBOARD_ACTION_BATCH_BUDGET_MS)
@@ -183,7 +191,8 @@ function scheduleNextKeyboardAction() {
   }
   const generation = keyboardActionQueueGeneration;
   if (
-    queuedKeyboardActionNeedsRunLoopYield[queuedKeyboardActionHead] === true
+    (queuedKeyboardActionYieldModes[queuedKeyboardActionHead] &
+      YIELD_BEFORE_ACTION) !== 0
   ) {
     scheduleKeyboardActionTimer();
     return;
@@ -201,7 +210,7 @@ export function enqueueKeyboardAction(
   gesture = "tap",
   touchStartedAt?: number,
 ) {
-  const needsRunLoopYield = actionNeedsRunLoopYield(keyId);
+  const yieldMode = keyboardActionYieldMode(keyId);
   let diagnosticEnvelope: QueuedKeyboardActionDiagnosticEnvelope | null = null;
   if (keyboardActionDiagnosticsEnabled) {
     const enqueuedAt = keyboardActionNow();
@@ -224,7 +233,7 @@ export function enqueueKeyboardAction(
     };
   }
   queuedKeyboardActions.push(action);
-  queuedKeyboardActionNeedsRunLoopYield.push(needsRunLoopYield);
+  queuedKeyboardActionYieldModes.push(yieldMode);
   if (diagnosticEnvelope) {
     queuedKeyboardActionDiagnostics[queuedKeyboardActions.length - 1] =
       diagnosticEnvelope;
@@ -257,7 +266,7 @@ export function clearQueuedKeyboardActions() {
     queuedKeyboardActionTimer = null;
   }
   queuedKeyboardActions.length = 0;
-  queuedKeyboardActionNeedsRunLoopYield.length = 0;
+  queuedKeyboardActionYieldModes.length = 0;
   queuedKeyboardActionDiagnostics.length = 0;
   queuedKeyboardActionHead = 0;
   currentKeyboardActionDiagnosticContext = null;
@@ -396,23 +405,41 @@ function makeClickPlayer() {
 }
 
 function resetCoreHaptics() {
+  hapticEngineGeneration += 1;
   reusableHapticPlayers.clear();
   reusableClickPlayers = null;
   hapticEngineReady = false;
-  hapticEngineStartPromise = null;
 }
 
 export function disposeConfiguredHaptics() {
   const engine = reusableHapticEngine;
+  const pendingStart = hapticEngineStartPromise;
   reusableHapticEngine = null;
   resetCoreHaptics();
+  hapticEngineStartPromise = null;
   if (!engine) return;
   try {
-    void engine.stop?.();
+    engine.onStopped = undefined;
+    engine.onReset = undefined;
   } catch {}
-  try {
-    engine.dispose?.();
-  } catch {}
+  // Native start, stop and disposal must finish in order across keyboard switches.
+  const release = (async () => {
+    try {
+      await pendingStart;
+    } catch {}
+    try {
+      await engine.stop?.();
+    } catch {}
+    try {
+      engine.dispose?.();
+    } catch {}
+  })();
+  hapticEngineReleasePromise = release;
+  void release.then(() => {
+    if (hapticEngineReleasePromise === release) {
+      hapticEngineReleasePromise = null;
+    }
+  });
 }
 
 export function prepareConfiguredHaptics(settings: RimeKeyboardSettings) {
@@ -422,61 +449,83 @@ export function prepareConfiguredHaptics(settings: RimeKeyboardSettings) {
   ) {
     return;
   }
-  if (hapticEngineReady || hapticEngineStartPromise) return;
+  if (hapticEngineReady || hapticEngineStartPromise) {
+    return hapticEngineStartPromise ?? undefined;
+  }
   const { HapticEngine } = coreHaptics();
   if (!HapticEngine) {
     return;
   }
-  try {
-    if (
-      settings.haptics && HapticEngine.supportsHaptics === false &&
-      (!settings.hapticEngineClicks || HapticEngine.supportsAudio === false)
-    ) {
-      coreHapticsUnavailable = true;
-      return;
-    }
-    if (!reusableHapticEngine) {
-      reusableHapticEngine = new HapticEngine();
-      try {
-        reusableHapticEngine.autoShutdownEnabled = false;
-      } catch {}
-      try {
-        reusableHapticEngine.playsHapticsOnly = false;
-      } catch {}
-      try {
-        reusableHapticEngine.playsAudioOnly = false;
-      } catch {}
-      try {
-        reusableHapticEngine.isMutedForAudio = !settings.hapticEngineClicks;
-      } catch {}
-      reusableHapticEngine.onStopped = () => {
-        resetCoreHaptics();
-      };
-      reusableHapticEngine.onReset = () => {
-        resetCoreHaptics();
-        prepareConfiguredHaptics(settings);
-      };
-    }
-    const startResult = reusableHapticEngine.startAsync
-      ? reusableHapticEngine.startAsync()
-      : reusableHapticEngine.start();
-    hapticEngineStartPromise = Promise.resolve(startResult)
-      .then(() => {
-        hapticEngineReady = true;
-        hapticEngineStartPromise = null;
-        if (settings.haptics) {
-          makeTransientPlayer(settings.hapticLevel);
-        }
-        if (settings.hapticEngineClicks) makeClickPlayer();
-      })
-      .catch(() => {
-        disposeConfiguredHaptics();
-        coreHapticsUnavailable = true;
-      });
-  } catch {
-    disposeConfiguredHaptics();
+  if (
+    settings.haptics && HapticEngine.supportsHaptics === false &&
+    (!settings.hapticEngineClicks || HapticEngine.supportsAudio === false)
+  ) {
     coreHapticsUnavailable = true;
+    return;
   }
+  const generation = hapticEngineGeneration;
+  const start = async () => {
+    if (generation !== hapticEngineGeneration) return;
+    let engine = reusableHapticEngine;
+    try {
+      if (!engine) {
+        engine = new HapticEngine();
+        reusableHapticEngine = engine;
+        try {
+          engine.autoShutdownEnabled = false;
+        } catch {}
+        try {
+          engine.playsHapticsOnly = false;
+        } catch {}
+        try {
+          engine.playsAudioOnly = false;
+        } catch {}
+        try {
+          engine.isMutedForAudio = !settings.hapticEngineClicks;
+        } catch {}
+        engine.onStopped = () => {
+          if (reusableHapticEngine !== engine) return;
+          resetCoreHaptics();
+        };
+        engine.onReset = () => {
+          if (reusableHapticEngine !== engine) return;
+          resetCoreHaptics();
+          const resetGeneration = hapticEngineGeneration;
+          const restart = () => {
+            if (
+              reusableHapticEngine === engine &&
+              hapticEngineGeneration === resetGeneration
+            ) prepareConfiguredHaptics(settings);
+          };
+          if (hapticEngineStartPromise) {
+            void hapticEngineStartPromise.then(restart);
+          } else restart();
+        };
+      }
+      await (engine.startAsync ? engine.startAsync() : engine.start());
+      if (
+        generation !== hapticEngineGeneration || reusableHapticEngine !== engine
+      ) return;
+      hapticEngineReady = true;
+      if (settings.haptics) {
+        makeTransientPlayer(settings.hapticLevel);
+      }
+      if (settings.hapticEngineClicks) makeClickPlayer();
+    } catch {
+      if (
+        generation !== hapticEngineGeneration || reusableHapticEngine !== engine
+      ) return;
+      disposeConfiguredHaptics();
+      coreHapticsUnavailable = true;
+    }
+  };
+  const pendingStart: Promise<void> = (
+    hapticEngineReleasePromise ? hapticEngineReleasePromise.then(start) : start()
+  ).finally(() => {
+    if (hapticEngineStartPromise === pendingStart) hapticEngineStartPromise = null;
+  });
+  hapticEngineStartPromise = pendingStart;
+  return pendingStart;
 }
 
 export function playConfiguredHaptic(

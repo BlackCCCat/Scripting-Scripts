@@ -6,6 +6,7 @@ import {
 
 type PerformanceDiagnosticSample = {
   sampleId: number;
+  runId?: number;
   timestamp: number;
   keyboardType: "qwerty" | "t9";
   keyId: string;
@@ -21,6 +22,8 @@ type PerformanceDiagnosticSample = {
   contextReadMs: number;
   candidateCompareMs: number;
   refreshMs: number;
+  commitInsertMs?: number;
+  markedTextMs?: number;
   totalMs: number;
   stateChanged: boolean;
   candidateCount: number;
@@ -52,17 +55,31 @@ export type PendingPerformanceDiagnosticSample = {
 };
 
 type PressVisualDiagnosticSample = {
+  runId?: number;
   keyId: string;
   pressed: boolean;
   durationMs: number;
 };
 
 type TouchDiagnosticSample = {
+  runId?: number;
   touchId: number;
   keyId: string;
   startedAt: number;
   endedAt?: number;
   durationMs?: number;
+};
+
+type StartupEvent = {
+  name: string;
+  timestamp: number;
+  detail?: string;
+};
+
+type StartupRun = {
+  id: number;
+  startedAt: number;
+  events: StartupEvent[];
 };
 
 type StoredPerformanceDiagnostics = {
@@ -72,12 +89,15 @@ type StoredPerformanceDiagnostics = {
   samples: PerformanceDiagnosticSample[];
   pressVisualCommits: PressVisualDiagnosticSample[];
   touches: TouchDiagnosticSample[];
+  startupRuns?: StartupRun[];
 };
 
 type PerformanceCompletionValues = {
   contextReadMs: number;
   candidateCompareMs: number;
   refreshMs: number;
+  commitInsertMs?: number;
+  markedTextMs?: number;
   stateChanged: boolean;
   candidateCount: number;
   preeditLength: number;
@@ -90,6 +110,7 @@ const LEGACY_STORAGE_KEYS = [
 ];
 const SAMPLE_INTERVAL = KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL;
 const SAMPLE_LIMIT = 400;
+const STARTUP_RUN_LIMIT = 10;
 const FLUSH_DELAY_MS = 15000;
 const SLOW_VISUAL_SAMPLE_THRESHOLD_MS = 50;
 const CHINA_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -128,6 +149,9 @@ function loadStoredDiagnostics(): StoredPerformanceDiagnostics {
         touches: Array.isArray(stored.touches)
           ? stored.touches.slice(-SAMPLE_LIMIT)
           : [],
+        startupRuns: Array.isArray(stored.startupRuns)
+          ? stored.startupRuns.slice(-STARTUP_RUN_LIMIT)
+          : [],
       };
     }
   } catch {
@@ -140,10 +164,13 @@ function loadStoredDiagnostics(): StoredPerformanceDiagnostics {
     samples: [],
     pressVisualCommits: [],
     touches: [],
+    startupRuns: [],
   };
 }
 
 export class KeyboardPerformanceDiagnostics {
+  private readonly run: StartupRun;
+  private readonly firstEvents = new Set<string>();
   private sampleId: number;
   private touchId: number;
   private touchCount = 0;
@@ -158,8 +185,14 @@ export class KeyboardPerformanceDiagnostics {
   private dirty = false;
   private stored: StoredPerformanceDiagnostics;
 
-  constructor() {
+  constructor(startedAt = Date.now()) {
     this.stored = loadStoredDiagnostics();
+    this.run = { id: startedAt, startedAt, events: [] };
+    this.stored.startupRuns ??= [];
+    this.stored.startupRuns.push(this.run);
+    if (this.stored.startupRuns.length > STARTUP_RUN_LIMIT) {
+      this.stored.startupRuns.shift();
+    }
     this.sampleId = this.stored.samples.reduce(
       (maximum, sample) => Math.max(maximum, sample.sampleId),
       0,
@@ -170,18 +203,37 @@ export class KeyboardPerformanceDiagnostics {
     );
   }
 
+  recordStartup(name: string, timestamp = Date.now(), detail?: string) {
+    this.run.events.push({ name, timestamp, detail });
+    this.lastActivityAt = performanceNow();
+    this.dirty = true;
+    this.scheduleFlush();
+  }
+
+  recordStartupOnce(name: string, detail?: string) {
+    if (this.firstEvents.has(name)) return false;
+    this.firstEvents.add(name);
+    this.recordStartup(name, Date.now(), detail);
+    return true;
+  }
+
   begin(
     action: string,
     keyboardType: "qwerty" | "t9",
     context: KeyboardActionDiagnosticContext | null = null,
   ): PendingPerformanceDiagnosticSample | null {
+    const firstRimeAction = this.recordStartupOnce(
+      "首个 Rime 按键处理",
+      action,
+    );
     const keyId = context?.keyId || action;
     const previousKeyId = this.previousKeyId;
     this.previousKeyId = keyId;
     const queueWait = context == null
       ? 0
       : context.actionStartedAt - context.enqueuedAt;
-    const shouldSample = context == null || context.forceSample ||
+    const shouldSample = firstRimeAction || context == null ||
+      context.forceSample ||
       context.sampleRequested && !context.sampleConsumed;
     if (!shouldSample) return null;
     if (context && !context.forceSample) context.sampleConsumed = true;
@@ -219,6 +271,7 @@ export class KeyboardPerformanceDiagnostics {
   ) {
     this.stored.samples.push({
       sampleId: pending.sampleId,
+      runId: this.run.id,
       timestamp: pending.timestamp,
       keyboardType: pending.keyboardType,
       keyId: pending.keyId,
@@ -234,6 +287,12 @@ export class KeyboardPerformanceDiagnostics {
       contextReadMs: roundedMs(values.contextReadMs),
       candidateCompareMs: roundedMs(values.candidateCompareMs),
       refreshMs: roundedMs(values.refreshMs),
+      commitInsertMs: values.commitInsertMs == null
+        ? undefined
+        : roundedMs(values.commitInsertMs),
+      markedTextMs: values.markedTextMs == null
+        ? undefined
+        : roundedMs(values.markedTextMs),
       totalMs: roundedMs(performanceNow() - pending.startedAt),
       stateChanged: values.stateChanged,
       candidateCount: values.candidateCount,
@@ -286,6 +345,7 @@ export class KeyboardPerformanceDiagnostics {
       commit.durationMs < SLOW_VISUAL_SAMPLE_THRESHOLD_MS
     ) return;
     this.stored.pressVisualCommits.push({
+      runId: this.run.id,
       keyId: commit.keyId,
       pressed: commit.pressed,
       durationMs: roundedMs(commit.durationMs),
@@ -302,6 +362,7 @@ export class KeyboardPerformanceDiagnostics {
   }
 
   recordTouchStart(keyId: string) {
+    this.recordStartupOnce("首次触摸按键", keyId);
     this.touchCount += 1;
     const shouldSample = this.touchCount % SAMPLE_INTERVAL === 0 ||
       isPriorityDiagnosticKey(keyId);
@@ -312,6 +373,7 @@ export class KeyboardPerformanceDiagnostics {
       return;
     }
     const touch: TouchDiagnosticSample = {
+      runId: this.run.id,
       touchId: ++this.touchId,
       keyId,
       startedAt: performanceNow(),
@@ -328,6 +390,7 @@ export class KeyboardPerformanceDiagnostics {
   }
 
   recordTouchEnd(keyId: string) {
+    this.recordStartupOnce("首次抬起按键", keyId);
     const openTouches = this.openTouchesByKey.get(keyId);
     const touch = openTouches?.pop();
     if (openTouches?.length === 0) this.openTouchesByKey.delete(keyId);
@@ -509,19 +572,62 @@ function touchDiagnosticLines(
 
 export function performanceDiagnosticsReport(): string | null {
   const stored = loadStoredDiagnostics();
-  const samples = stored.samples;
-  if (samples.length === 0) return null;
+  const latestRun = stored.startupRuns?.at(-1);
+  const samples = latestRun
+    ? stored.samples.filter((sample) => sample.runId === latestRun.id)
+    : stored.samples;
+  const touches = latestRun
+    ? stored.touches.filter((touch) => touch.runId === latestRun.id)
+    : stored.touches;
+  const pressVisualCommits = latestRun
+    ? stored.pressVisualCommits.filter((commit) =>
+      commit.runId === latestRun.id
+    )
+    : stored.pressVisualCommits;
+  if (samples.length === 0 && !latestRun) return null;
   const changedCount = samples.filter((sample) => sample.stateChanged).length;
   const unresolvedTouchCount =
-    stored.touches.filter((touch) => touch.endedAt == null).length;
+    touches.filter((touch) => touch.endedAt == null).length;
   const keyGroups = groupedSamples(samples, (sample) => sample.keyId);
   const pairGroups = groupedSamples(samples, (sample) => sample.keyPair);
+  const startupEvents = [...(latestRun?.events ?? [])].sort((a, b) =>
+    a.timestamp - b.timestamp
+  );
+  const readyEvent = startupEvents.find((event) =>
+    event.name === "Rime 可输入" ||
+    event.name === "键盘可输入（无方案）" ||
+    event.name === "Rime 准备失败，键盘回退输入"
+  );
+  const firstTouchEvent = startupEvents.find((event) =>
+    event.name === "首次触摸按键"
+  );
   const lines = [
     "Scripting Rime Keyboard 增强性能报告",
     `更新时间: ${chinaTime(stored.updatedAt)}`,
-    `样本数: ${samples.length}（常规动作每 ${stored.sampleInterval} 次采样，关键动作与慢样本保留）`,
+    `样本数: ${samples.length}（本次运行；常规动作每 ${stored.sampleInterval} 次采样，关键动作与慢样本保留）`,
     `状态变化样本: ${changedCount}/${samples.length}`,
-    `触摸样本: ${stored.touches.length}，未收到抬起: ${unresolvedTouchCount}`,
+    `触摸样本: ${touches.length}，未收到抬起: ${unresolvedTouchCount}`,
+    "",
+    "键盘启动与 Rime 准备时间线:",
+    ...(readyEvent && latestRun
+      ? [`启动到可输入: ${roundedMs(readyEvent.timestamp - latestRun.startedAt).toFixed(3)}ms`]
+      : []),
+    ...(readyEvent && firstTouchEvent
+      ? [`首次触摸相对可输入: ${(
+        firstTouchEvent.timestamp - readyEvent.timestamp
+      ).toFixed(3)}ms（负数表示 Rime 就绪前触摸）`]
+      : []),
+    ...(startupEvents.length && latestRun
+      ? startupEvents.map((event, index) => {
+        const elapsed = roundedMs(event.timestamp - latestRun.startedAt);
+        const gap = roundedMs(
+          event.timestamp -
+            (startupEvents[index - 1]?.timestamp ?? latestRun.startedAt),
+        );
+        return `${chinaTime(event.timestamp)} | +${elapsed.toFixed(3)}ms | 距前节点 ${gap.toFixed(3)}ms | ${event.name}${event.detail ? ` | ${event.detail}` : ""}`;
+      })
+      : ["无启动记录（旧版报告）"]),
+    "",
     metricLine(
       "touchDuration",
       optionalMetric(samples, (sample) => sample.touchDurationMs),
@@ -545,6 +651,14 @@ export function performanceDiagnosticsReport(): string | null {
       samples.map((sample) => sample.candidateCompareMs),
     ),
     metricLine("refresh", samples.map((sample) => sample.refreshMs)),
+    metricLine(
+      "commitInsert",
+      optionalMetric(samples, (sample) => sample.commitInsertMs),
+    ),
+    metricLine(
+      "markedText",
+      optionalMetric(samples, (sample) => sample.markedTextMs),
+    ),
     metricLine("processTotal", samples.map((sample) => sample.totalMs)),
     metricLine(
       "renderCommit",
@@ -578,10 +692,10 @@ export function performanceDiagnosticsReport(): string | null {
     ),
     "",
     "触摸事件统计:",
-    ...touchDiagnosticLines(stored.touches, samples),
+    ...touchDiagnosticLines(touches, samples),
     "",
     "按压视觉提交统计:",
-    ...pressVisualLines(stored.pressVisualCommits),
+    ...pressVisualLines(pressVisualCommits),
     "",
     "最近样本:",
     ...samples.slice(-40).map((sample) =>
@@ -601,6 +715,8 @@ export function performanceDiagnosticsReport(): string | null {
         `context=${sample.contextReadMs.toFixed(3)}`,
         `compare=${sample.candidateCompareMs.toFixed(3)}`,
         `refresh=${sample.refreshMs.toFixed(3)}`,
+        `insert=${sample.commitInsertMs?.toFixed(3) ?? "-"}`,
+        `marked=${sample.markedTextMs?.toFixed(3) ?? "-"}`,
         `total=${sample.totalMs.toFixed(3)}`,
         `render=${sample.renderCommitMs?.toFixed(3) ?? "-"}`,
         `processToCommit=${sample.processToCommitMs?.toFixed(3) ?? "-"}`,

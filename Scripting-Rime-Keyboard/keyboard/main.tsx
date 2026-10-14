@@ -90,7 +90,7 @@ import {
   prepareConfiguredHaptics,
   setKeyboardActionDiagnosticsEnabled,
 } from "./utils";
-import { ensureT9ProcessorLuaInstalled } from "../t9ProcessorInstall";
+import { prepareRimeSession } from "./rimePreparation";
 import {
   KeyboardPerformanceDiagnostics,
   type PendingPerformanceDiagnosticSample,
@@ -375,7 +375,10 @@ function t9VisualDelimiterOffset(cursor: number, positions: number[]) {
     .length;
 }
 
-export function KeyboardView() {
+export function KeyboardView(props: {
+  settings: RimeKeyboardSettings;
+  diagnostics: KeyboardPerformanceDiagnostics | null;
+}) {
   return (
     <GeometryReader>
       {(proxy) => {
@@ -385,6 +388,8 @@ export function KeyboardView() {
           <KeyboardContent
             availableHeight={height}
             availableWidth={width}
+            settings={props.settings}
+            diagnostics={props.diagnostics}
           />
         );
       }}
@@ -395,10 +400,10 @@ export function KeyboardView() {
 function KeyboardContent(props: {
   availableHeight?: number;
   availableWidth?: number;
+  settings: RimeKeyboardSettings;
+  diagnostics: KeyboardPerformanceDiagnostics | null;
 }) {
-  const [settings] = useState<RimeKeyboardSettings>(() =>
-    loadRimeKeyboardSettings()
-  );
+  const settings = props.settings;
   const [keyboardTypeOverride, setKeyboardTypeOverride] = useState<
     KeyboardType | null
   >(null);
@@ -528,15 +533,10 @@ function KeyboardContent(props: {
   const disposedRef = useRef(false);
   const performanceDiagnosticsRef = useRef<
     KeyboardPerformanceDiagnostics | null
-  >(null);
+  >(props.diagnostics);
   const pendingRimeRenderSamplesRef = useRef<
     PendingPerformanceDiagnosticSample[]
   >([]);
-  if (
-    settings.performanceDiagnostics && performanceDiagnosticsRef.current == null
-  ) {
-    performanceDiagnosticsRef.current = new KeyboardPerformanceDiagnostics();
-  }
   const metrics = useMemo(
     () =>
       keyboardMetrics(
@@ -548,6 +548,7 @@ function KeyboardContent(props: {
   );
 
   useEffect(() => {
+    performanceDiagnosticsRef.current?.recordStartup("键盘首帧提交");
     clearQueuedKeyboardActions();
     stopRepeatingBackspace();
     const syncKeyboardAppearance = (
@@ -562,14 +563,26 @@ function KeyboardContent(props: {
     syncKeyboardAppearance();
     CustomKeyboard.addListener("textDidChange", syncKeyboardAppearance);
     CustomKeyboard.addListener("selectionDidChange", syncKeyboardAppearance);
-    const hapticPrepareTimer = setTimeout(
-      () => prepareConfiguredHaptics(settings),
-      0,
-    );
+    const hapticPrepareTimer = setTimeout(() => {
+      performanceDiagnosticsRef.current?.recordStartup("震动引擎准备开始");
+      const pending = prepareConfiguredHaptics(settings);
+      if (pending) {
+        void pending.then(() => {
+          if (!disposedRef.current) {
+            performanceDiagnosticsRef.current?.recordStartup(
+              "震动引擎准备结束",
+            );
+          }
+        });
+      } else {
+        performanceDiagnosticsRef.current?.recordStartup("震动引擎无需等待");
+      }
+    }, 0);
     void setupRimeSession();
 
     return () => {
       disposedRef.current = true;
+      performanceDiagnosticsRef.current?.recordStartup("键盘关闭");
       clearTimeout(hapticPrepareTimer);
       if (
         rimeNotificationHandlerRef.current &&
@@ -585,10 +598,7 @@ function KeyboardContent(props: {
         clearTimeout(rimeNotificationFlushTimerRef.current);
       }
       CustomKeyboard.removeListener("textDidChange", syncKeyboardAppearance);
-      CustomKeyboard.removeListener(
-        "selectionDidChange",
-        syncKeyboardAppearance,
-      );
+      CustomKeyboard.removeListener("selectionDidChange", syncKeyboardAppearance);
       try {
         CustomKeyboard.unmarkText();
       } catch {}
@@ -640,6 +650,9 @@ function KeyboardContent(props: {
 
   const onCandidateRenderCommit = useCallback(() => {
     if (!settings.performanceDiagnostics) return;
+    if (rimeStateRef.current.candidates.length > 0) {
+      performanceDiagnosticsRef.current?.recordStartupOnce("首个候选区提交");
+    }
     const pending = pendingRimeRenderSamplesRef.current.splice(0);
     for (const sample of pending) {
       performanceDiagnosticsRef.current?.recordRimeRenderCommit(sample);
@@ -737,45 +750,56 @@ function KeyboardContent(props: {
       return;
     }
     rimeSetupStartedRef.current = true;
+    performanceDiagnosticsRef.current?.recordStartup("Rime 后台准备请求");
     try {
-      const result = await Thread.runInBackground(async () => {
-        if (!Rime.isSetUp) await Rime.setup();
-        if (settings.keyboardType === "t9") {
-          await ensureT9ProcessorLuaInstalled();
-        }
-        if (settings.autoDeployOnLaunch) {
-          await Rime.deploy({ fullCheck: false });
-        }
-        const list = await Rime.listSchemas();
-        const session = list.length > 0 ? new Rime.Session() : null;
-        return { list, session };
-      });
+      const result = await prepareRimeSession(settings, () => disposedRef.current);
       if (disposedRef.current) {
         result.session?.close();
         return;
       }
+      for (const stage of result.stages) {
+        performanceDiagnosticsRef.current?.recordStartup(
+          stage.name,
+          stage.timestamp,
+        );
+      }
+      if (result.error) throw new Error(result.error);
+      performanceDiagnosticsRef.current?.recordStartup(
+        "Rime 后台结果返回主线程",
+        Date.now(),
+        `方案数=${result.list.length}`,
+      );
       schemasRef.current = result.list;
       const s = result.session;
       if (!s) {
         applyRimeMetadata({ ascii: true });
         if (settings.keyboardType === "t9") setKeyboardTypeOverride("qwerty");
         rimeReadyRef.current = true;
+        performanceDiagnosticsRef.current?.recordStartup("键盘可输入（无方案）");
         return;
       }
       sessionRef.current = s;
+      performanceDiagnosticsRef.current?.recordStartup("Rime 会话状态读取开始");
       rimeMetadataRef.current = readRimeMetadata(s);
       refresh(s);
       publishRimeState(rimeStateRef.current);
+      performanceDiagnosticsRef.current?.recordStartup("Rime 首次状态刷新完成");
       if (settings.showNotifications) {
         refreshKnownRimeOptionStates(s);
       }
       installRimeNotificationHandler();
       rimeReadyRef.current = true;
+      performanceDiagnosticsRef.current?.recordStartup("Rime 可输入");
     } catch (e) {
       if (disposedRef.current) return;
       applyRimeMetadata({ ascii: true });
       if (settings.keyboardType === "t9") setKeyboardTypeOverride("qwerty");
       rimeReadyRef.current = true;
+      performanceDiagnosticsRef.current?.recordStartup(
+        "Rime 准备失败，键盘回退输入",
+        Date.now(),
+        String(e),
+      );
       setError((e as Error).message ?? String(e));
     }
   }
@@ -821,13 +845,21 @@ function KeyboardContent(props: {
       ? performanceNow() - contextStartedAt
       : 0;
     const committed = Boolean(commit && !options.suppressCommit);
+    const commitStartedAt = performanceSample ? performanceNow() : 0;
     if (commit && !options.suppressCommit) insertTextReplacingSelectAll(commit);
+    const commitInsertMs = performanceSample && committed
+      ? performanceNow() - commitStartedAt
+      : undefined;
+    const markedStartedAt = performanceSample ? performanceNow() : 0;
     updateMarkedText(
       ctx,
       committed,
       Boolean(options.suppressInlineMarkedText) ||
         suppressSchemaMenuInlineRef.current,
     );
+    const markedTextMs = performanceSample
+      ? performanceNow() - markedStartedAt
+      : undefined;
     const nextPreedit = ctx?.preedit ?? "";
     const nextCursor = displayedPreeditCursor(
       nextPreedit,
@@ -904,6 +936,8 @@ function KeyboardContent(props: {
         contextReadMs,
         candidateCompareMs,
         refreshMs,
+        commitInsertMs,
+        markedTextMs,
         stateChanged,
         candidateCount: nextCandidates.length,
         preeditLength: nextPreedit.length,
@@ -1654,7 +1688,12 @@ function KeyboardContent(props: {
     else clearSelectAllStateForExternalAction();
     const s = sessionRef.current;
     if (!s) {
-      if (fallback) insertTextReplacingSelectAll(fallback);
+      if (fallback) {
+        performanceDiagnosticsRef.current?.recordStartupOnce(
+          "首次 Rime 就绪前直接输入",
+        );
+        insertTextReplacingSelectAll(fallback);
+      }
       return;
     }
     const consumed = processSessionKey(
@@ -4215,6 +4254,49 @@ function KeyboardContent(props: {
     );
   }
 
+  const cachedCandidateHeader = useMemo(
+    () => (
+      <CandidateHeader
+        controller={rimeViewStateControllerRef.current!}
+        settings={settings}
+        metrics={metrics}
+        palette={palette}
+        displayPreedit={isT9Keyboard ? keyboardPreedit : undefined}
+        displayPreeditCursor={isT9Keyboard ? safePreeditCursor : undefined}
+        error={error}
+        composing={isT9Keyboard ? composing : undefined}
+        candidateExpanded={candidateExpanded}
+        notificationToast={rimeNotificationToast}
+        candidateMenuActions={candidateMenuActions}
+        schemaMenu={schemaMenu}
+        onToolbarAction={onToolbarHeaderAction}
+        onCandidateAction={onCandidateMenuAction}
+        onSelectCandidate={onSelectCandidateFromHeader}
+        onRightButton={onCandidateRightButton}
+        onRenderCommit={onCandidateRenderCommit}
+      />
+    ),
+    [
+      settings,
+      metrics,
+      palette,
+      isT9Keyboard,
+      isT9Keyboard ? keyboardPreedit : null,
+      isT9Keyboard ? safePreeditCursor : null,
+      isT9Keyboard ? composing : null,
+      error,
+      candidateExpanded,
+      rimeNotificationToast,
+      candidateMenuActions,
+      schemaMenu,
+      onToolbarHeaderAction,
+      onCandidateMenuAction,
+      onSelectCandidateFromHeader,
+      onCandidateRightButton,
+      onCandidateRenderCommit,
+    ],
+  );
+
   return (
     <KeyPressVisualContext.Provider value={pressVisualControllerRef.current}>
       <VStack
@@ -4225,25 +4307,7 @@ function KeyboardContent(props: {
           maxHeight: "infinity" as any,
         }}
       >
-        <CandidateHeader
-          controller={rimeViewStateControllerRef.current!}
-          settings={settings}
-          metrics={metrics}
-          palette={palette}
-          displayPreedit={isT9Keyboard ? keyboardPreedit : undefined}
-          displayPreeditCursor={isT9Keyboard ? safePreeditCursor : undefined}
-          error={error}
-          composing={composing}
-          candidateExpanded={candidateExpanded}
-          notificationToast={rimeNotificationToast}
-          candidateMenuActions={candidateMenuActions}
-          schemaMenu={schemaMenu}
-          onToolbarAction={onToolbarHeaderAction}
-          onCandidateAction={onCandidateMenuAction}
-          onSelectCandidate={onSelectCandidateFromHeader}
-          onRightButton={onCandidateRightButton}
-          onRenderCommit={onCandidateRenderCommit}
-        />
+        {cachedCandidateHeader}
 
         <ZStack frame={{ width: metrics.width, height: expandedPanelHeight }}>
           <VStack
@@ -4854,7 +4918,15 @@ function KeyboardContent(props: {
 }
 
 function main() {
+  const startedAt = Date.now();
   const settings = loadRimeKeyboardSettings();
+  const settingsLoadedAt = Date.now();
+  const diagnostics = settings.performanceDiagnostics
+    ? new KeyboardPerformanceDiagnostics(startedAt)
+    : null;
+  diagnostics?.recordStartup("键盘脚本入口", startedAt);
+  diagnostics?.recordStartup("设置读取完成", settingsLoadedAt);
+  diagnostics?.recordStartup("性能诊断初始化完成");
   try {
     CustomKeyboard.setToolbarVisible(false);
   } catch {}
@@ -4869,7 +4941,11 @@ function main() {
       CustomKeyboard.requestHeight(settings.keyboardHeight);
     } catch {}
   }
-  CustomKeyboard.present(<KeyboardView />);
+  diagnostics?.recordStartup("键盘宿主配置完成");
+  diagnostics?.recordStartup("键盘呈现请求");
+  CustomKeyboard.present(
+    <KeyboardView settings={settings} diagnostics={diagnostics} />,
+  );
 }
 
 main();
