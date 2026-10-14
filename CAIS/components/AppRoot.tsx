@@ -124,8 +124,8 @@ let appMonitorStopper: (() => void) | null = null
 type AppRootMode = "app" | "home"
 type ClipKindFilter = ClipKind | null
 type HomeRoute =
-  | { kind: "addContent"; zoomSourceID?: string }
-  | { kind: "editContent"; item: ClipItem; content: string; initialChangeCount: number; zoomSourceID?: string }
+  | { kind: "addContent"; sessionId: string; zoomSourceID?: string }
+  | { kind: "editContent"; sessionId: string; item: ClipItem; content: string; initialChangeCount: number; zoomSourceID?: string }
   | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[]; zoomSourceID?: string }
   | { kind: "favoriteGroupEditor" }
   | { kind: "favoriteGroupManager"; groups: FavoriteGroup[]; counts: Record<string, number> }
@@ -1200,7 +1200,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   async function openBlankEditor() {
     if (blankEditorOpening.current) return
     if (embeddedHomeNavigation) {
-      presentHomeRoute({ kind: "addContent", zoomSourceID: homeZoomNamespace ? "home-add-content" : undefined })
+      presentHomeRoute({ kind: "addContent", sessionId: makeId("content-editor"), zoomSourceID: homeZoomNamespace ? "home-add-content" : undefined })
       return
     }
     blankEditorOpening.current = true
@@ -1564,6 +1564,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     if (embeddedHomeNavigation) {
       presentHomeRoute({
         kind: "editContent",
+        sessionId: makeId("content-editor"),
         item,
         content: fullContent,
         initialChangeCount,
@@ -2640,6 +2641,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     if (homeRoute.kind === "addContent") {
       return (
         <ClipContentEditorView
+          key={homeRoute.sessionId}
           content=""
           navigationTitle="添加内容"
           iconOnlyToolbar
@@ -2661,6 +2663,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       const route = homeRoute
       return (
         <ClipContentEditorView
+          key={route.sessionId}
           content={route.content}
           embedded
           navigationTransition={route.zoomSourceID ? homeZoomTransition(route.zoomSourceID) : undefined}
