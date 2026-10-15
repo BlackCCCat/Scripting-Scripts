@@ -1,6 +1,11 @@
 ## 说明
 该脚本为二次修改，原版为：[Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scripting/FileStore)
 
+## v3.0.4
+- 调整底部tab为两部分
+- 非设置tab页的设置项UI优化
+- 依赖检测逻辑优化，弹窗提示
+
 ## v3.0.3
 - 同步上游 3c09e92：修复文件行滑动操作与点击冲突，关闭全幅滑动自动执行操作
 

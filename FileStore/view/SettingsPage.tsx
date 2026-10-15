@@ -60,7 +60,7 @@ export function SettingsPage({ settings, onUpdateSettings }: SettingsPageProps) 
 
   return (
     <NavigationStack>
-      <List listStyle="plain" navigationTitle="设置" navigationBarTitleDisplayMode="inline">
+      <List listStyle="automatic" navigationTitle="设置" navigationBarTitleDisplayMode="inline">
         <Section title="显示模式">
           <Picker
             title="浏览视图"
@@ -73,7 +73,6 @@ export function SettingsPage({ settings, onUpdateSettings }: SettingsPageProps) 
           <Toggle title="网格文件名自动滚动" value={settings.gridFileNameMarquee ?? true} onChanged={(value: boolean) => onUpdateSettings({ gridFileNameMarquee: value })} />
           <Toggle title="显示文件夹内项目个数" value={settings.showFolderItemCounts ?? true} onChanged={(value: boolean) => onUpdateSettings({ showFolderItemCounts: value })} />
           <Toggle title="滑动时隐藏TAB" value={settings.tabBarMinimizeOnScroll ?? true} onChanged={(value: boolean) => onUpdateSettings({ tabBarMinimizeOnScroll: value })} />
-          <Toggle title="独立显示退出按钮" value={settings.showExitButton} onChanged={(value: boolean) => onUpdateSettings({ showExitButton: value })} />
         </Section>
 
         <Section title="首页收藏夹">

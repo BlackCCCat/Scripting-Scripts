@@ -1,6 +1,6 @@
 // 预览容器 - TabView 主布局 + 全屏切换 + 退出
 
-import { Script, TabView, Tab, Group, EmptyView, ZStack, useState, useEffect, useRef } from "scripting"
+import { Device, Script, TabView, Tab, Group, EmptyView, ZStack, useState, useEffect, useRef } from "scripting"
 import { getAllBookmarks, Bookmark } from "../manager/BookmarkManager"
 import { readSettings, saveSettings } from "../manager/Settings"
 import { MountDirectoriesPage } from "./MountDirectoriesPage"
@@ -10,7 +10,7 @@ import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { ToastOverlay } from "./ToastOverlay"
 import { showToast } from "../manager/ToastManager"
 import { getServerCount, hasActiveServers, stopHttpBackgroundIfIdle } from "../manager/LocalHttpServer"
-import { ensureNpmDependencies } from "../manager/npmDeps"
+import { checkNpmDependencies } from "../manager/npmDeps"
 
 /* ───── 主页视图 ───── */
 export function HomeView({
@@ -105,10 +105,10 @@ export function HomeView({
       }, 233)
     }
   }
-  // UI 已就绪（ToastOverlay 已挂载）后，再检查 npm 运行环境，缺失时自动安装并 Toast 提示
+  // 每次运行检查格式化依赖；缺失时提示。
   useEffect(() => {
     const timer = setTimeout(() => {
-      void ensureNpmDependencies().catch((error) => {
+      void checkNpmDependencies().catch((error) => {
         console.log("检查 npm 依赖失败:", error)
       })
     }, 0)
@@ -119,12 +119,12 @@ export function HomeView({
   return (
     <ZStack alignment="bottomTrailing" frame={{ maxWidth: "infinity", maxHeight: "infinity" }} sheet={releaseNotesSheet}>
       <TabView
-        //tabBarMinimizeBehavior={"onScrollDown"}
+        tabViewStyle="sidebarAdaptable"
         tabBarMinimizeBehavior={settings.tabBarMinimizeOnScroll ? "onScrollDown" : "never"}
+        tabViewSearchActivation={Number.parseInt(Device.systemVersion, 10) >= 26 ? "searchTabSelection" : undefined}
         tabIndex={tabIndex}
         onTabIndexChanged={handleTabChange}
         labelStyle="iconOnly"
-        tabBarVisibility="hidden"
       >
         <Tab title="双栏浏览" systemImage="book.pages.fill" value={0}>
           <Group labelStyle="titleAndIcon">
@@ -160,7 +160,7 @@ export function HomeView({
           </Group>
         </Tab>
 
-        <Tab title="退出" systemImage="pencil.slash" value={3} role={settings.showExitButton ? "search" : undefined}>
+        <Tab title="关闭" systemImage="xmark" value={3} role="search">
           <EmptyView />
         </Tab>
       </TabView>

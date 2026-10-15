@@ -11,8 +11,6 @@ export interface AppSettingsCore {
   defaultSortOrder: string;
   /** 默认筛选类型 */
   defaultFilterType: string;
-  /** 是否独立显示退出按钮 */
-  showExitButton: boolean;
   /** 滑动时隐藏底部标签栏 */
   tabBarMinimizeOnScroll: boolean;
   /** 浏览列表显示模式：list=列表, grid=网格(文件夹视图) */
@@ -61,7 +59,6 @@ const defaultSettings: AppSettings = {
   showFolderItemCounts: true,
   defaultSortOrder: "modified-asc",
   defaultFilterType: "all",
-  showExitButton: false,
   tabBarMinimizeOnScroll: true,
   browserLayout: "list",
   gridFileNameMarquee: true,

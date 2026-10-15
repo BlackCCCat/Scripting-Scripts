@@ -382,7 +382,6 @@ export function SettingsTabPage({ settings, onSettingsChange, bookmarks, onSwitc
           <Toggle title="网格文件名自动滚动" value={settings.gridFileNameMarquee ?? true} onChanged={(value: boolean) => update({ gridFileNameMarquee: value })} />
           <Toggle title="显示文件夹内项目个数" value={settings.showFolderItemCounts ?? true} onChanged={(value: boolean) => update({ showFolderItemCounts: value })} />
           <Toggle title="滑动时隐藏TAB" value={settings.tabBarMinimizeOnScroll ?? true} onChanged={(value: boolean) => update({ tabBarMinimizeOnScroll: value })} />
-          <Toggle title="独立显示退出按钮" value={settings.showExitButton} onChanged={(value: boolean) => update({ showExitButton: value })} />
         </Section>
       </List>
     </NavigationStack>
