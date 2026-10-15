@@ -1815,6 +1815,23 @@ function SettingsView() {
             onChanged={(value) =>
               patchSettings({ uppercaseLetterLabels: value })}
           />
+          <Toggle
+            title="显示功能行"
+            systemImage="rectangle.split.3x1"
+            value={settings.showFunctionRow}
+            onChanged={setFunctionRowVisible}
+          />
+          {settings.showFunctionRow
+            ? (
+              <Toggle
+                title="启用预编辑功能行"
+                systemImage="text.cursor"
+                value={settings.composingFunctionRowEnabled}
+                onChanged={(value) =>
+                  patchSettings({ composingFunctionRowEnabled: value })}
+              />
+            )
+            : null}
           <VStack alignment="leading" spacing={8}>
             <HStack>
               <Text>按钮间距</Text>
@@ -2349,6 +2366,7 @@ function SettingsView() {
           <Picker
             title="候选栏右侧按钮"
             value={settings.candidateRightButtonMode}
+            disabled={!settings.showFunctionRow}
             onChanged={(value: string) =>
               patchSettings({
                 candidateRightButtonMode: value as CandidateRightButtonMode,
@@ -2458,23 +2476,6 @@ function SettingsView() {
     return (
       <List navigationTitle="输入反馈" navigationBarTitleDisplayMode="inline">
         <Section>
-          <Toggle
-            title="显示功能行"
-            systemImage="rectangle.split.3x1"
-            value={settings.showFunctionRow}
-            onChanged={setFunctionRowVisible}
-          />
-          {settings.showFunctionRow
-            ? (
-              <Toggle
-                title="启用预编辑功能行"
-                systemImage="text.cursor"
-                value={settings.composingFunctionRowEnabled}
-                onChanged={(value) =>
-                  patchSettings({ composingFunctionRowEnabled: value })}
-              />
-            )
-            : null}
           <Toggle
             title="显示按键气泡"
             systemImage="bubble.left"

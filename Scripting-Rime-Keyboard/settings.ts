@@ -909,9 +909,9 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
       CANDIDATE_BAR_HEIGHT_MIN,
       CANDIDATE_BAR_HEIGHT_MAX,
     ),
-    candidateRightButtonMode: normalizeCandidateRightButtonMode(
-      raw?.candidateRightButtonMode,
-    ),
+    candidateRightButtonMode: raw?.showFunctionRow === false
+      ? "expand"
+      : normalizeCandidateRightButtonMode(raw?.candidateRightButtonMode),
     useNativeKeyStyle: typeof raw?.useNativeKeyStyle === "boolean"
       ? raw.useNativeKeyStyle
       : DEFAULT_RIME_KEYBOARD_SETTINGS.useNativeKeyStyle,
