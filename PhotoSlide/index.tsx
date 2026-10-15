@@ -23,11 +23,14 @@ import {
   useState,
   ScrollView,
   Markdown,
+  Map as NativeMap,
+  Marker,
 } from "scripting"
 import { PhotoCardStack } from "./components/PhotoCardStack"
 import {
   FETCH_LIMIT,
   SWIPE_THRESHOLD,
+  CARD_CORNER_RADIUS,
   cardHeight,
   cardWidth,
   screenWidth,
@@ -43,6 +46,15 @@ const initialMotion: CardMotion = { offset: { x: 0, y: 0 }, scale: 1, opacity: 1
 const allPhotosSource: PhotoSource = { kind: "all" }
 const screenshotsSource: PhotoSource = { kind: "screenshots" }
 const dayInMilliseconds = 24 * 60 * 60 * 1000
+const photoCardHeight = Math.max(240, cardHeight - 56)
+
+type SwitchPreview = {
+  image: UIImage | null
+  asset: PHAsset
+  progress: string
+  remaining: number
+  ready: boolean
+}
 
 type UndoAction =
   | {
@@ -85,6 +97,7 @@ function endOfDay(timestamp: number): number {
 
 function App() {
   const dismiss = Navigation.useDismiss()
+  const useGlass = Number.parseInt(Device.systemVersion, 10) >= 26
   const today = startOfDay(Date.now())
   const defaultStartDate = today - 30 * dayInMilliseconds
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
@@ -115,9 +128,11 @@ function App() {
   const [message, setMessage] = useState("")
   const [showToast, setShowToast] = useState(false)
   const [showManagementSheet, setShowManagementSheet] = useState(false)
-  const [showAlbumPicker, setShowAlbumPicker] = useState(false)
+  const [showPhotoDetails, setShowPhotoDetails] = useState(false)
+  const [photoAddress, setPhotoAddress] = useState<{ id: string; value: string } | null>(null)
   const [showInstructions, setShowInstructions] = useState(false)
   const [showSkippedOnly, setShowSkippedOnly] = useState(false)
+  const [switchPreview, setSwitchPreview] = useState<SwitchPreview | null>(null)
   const [skippedPhotoIds, setSkippedPhotoIds] = useState<string[]>(() => {
     return Storage.get<string[]>("skippedPhotoIds") ?? []
   })
@@ -162,7 +177,7 @@ function App() {
     })
   }
 
-  const [, setImageRevision] = useState(0)
+  const [imageRevision, setImageRevision] = useState(0)
   const imageCache = useMemo(() => new PhotoImageCache(async item => {
     const imageScale = Math.min(Device.screen.scale, 2)
     return item.asset.requestImage({
@@ -254,7 +269,7 @@ function App() {
     }
     return { skippedCount: skipped, remainingCount: showSkippedOnly ? skipped : remaining }
   }, [sourceIds, skippedIdSet, unavailableIdSet, showSkippedOnly])
-  const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto
+  const isBusy = isLoading || isThrowing || isDeleting || isEditingPhoto || switchPreview !== null
   const isEmpty = !isLoading && items.length === 0
   const isFinished = !isLoading && items.length > 0 && currentIndex >= items.length
   const activeStats = useMemo(() => {
@@ -478,9 +493,11 @@ function App() {
       setCurrentIndex(0)
       resetCardState()
       setIsLoading(false)
+      setSwitchPreview(previous => previous ? { ...previous, ready: true } : null)
     } catch (error) {
       console.error(error)
       setIsLoading(false)
+      setSwitchPreview(null)
       toast("读取照片失败，请稍后重试。")
     }
   }
@@ -501,6 +518,33 @@ function App() {
   }, [items, currentIndex, nextIndex, skippedIdSet, unavailableIdSet, showSkippedOnly, isLoading])
 
   useEffect(() => () => imageCache.dispose(), [imageCache])
+
+  useEffect(() => {
+    if (!switchPreview?.ready || isLoading) return
+    if (isEmpty || isFinished || imageCache.get(currentItem?.id) || imageCache.isFailed(currentItem?.id)) {
+      setSwitchPreview(null)
+    }
+  }, [switchPreview, isLoading, items, currentIndex, imageRevision])
+
+  useEffect(() => {
+    const asset = showPhotoDetails ? currentItem?.asset : undefined
+    if (!asset?.location) return
+    let cancelled = false
+    void Location.reverseGeocode({
+      latitude: asset.location.latitude,
+      longitude: asset.location.longitude,
+      locale: "zh-CN",
+    }).then(placemarks => {
+      if (cancelled) return
+      const place = placemarks?.[0]
+      const parts = [place?.administrativeArea, place?.locality, place?.subLocality, place?.thoroughfare, place?.subThoroughfare]
+        .filter((part): part is string => Boolean(part))
+      setPhotoAddress({ id: asset.localIdentifier, value: [...new Set(parts)].join("") || place?.name || "地址不可用" })
+    }).catch(() => {
+      if (!cancelled) setPhotoAddress({ id: asset.localIdentifier, value: "地址不可用" })
+    })
+    return () => { cancelled = true }
+  }, [showPhotoDetails, currentItem?.id])
 
   async function refreshCurrentView() {
     await loadAlbums()
@@ -1148,6 +1192,13 @@ function App() {
     )
   }
 
+  function tap(action: () => void): () => void {
+    return () => {
+      try { HapticFeedback.lightImpact() } catch { }
+      action()
+    }
+  }
+
   function renderIconButton({
     systemImage,
     action,
@@ -1167,10 +1218,11 @@ function App() {
   }) {
     return (
       <Button
-        action={action}
+        action={tap(action)}
         disabled={disabled}
         buttonStyle="plain"
         frame={{ width: size, height: size }}
+        glassEffect={useGlass ? "circle" : undefined}
         contextMenu={contextMenu}
         accessibilityLabel={accessibilityLabel}
       >
@@ -1187,9 +1239,18 @@ function App() {
     return (
       <HStack spacing={8}>
         <Button
-          action={() => setShowSkippedOnly(prev => !prev)}
-          disabled={isLoading}
-          glassEffect
+          action={tap(() => {
+            const image = imageCache.get(currentItem?.id)
+            setSwitchPreview(currentItem ? {
+              image,
+              asset: currentItem.asset,
+              progress: progressText,
+              remaining: remainingCount,
+              ready: false,
+            } : null)
+            setShowSkippedOnly(prev => !prev)
+          })}
+          disabled={isLoading || switchPreview !== null}
         >
           <HStack spacing={5}>
             <Image
@@ -1205,7 +1266,7 @@ function App() {
           </HStack>
         </Button>
 
-        <Button action={() => deletePendingPhotos()} disabled={isDeleting} glassEffect>
+        <Button action={tap(() => deletePendingPhotos())} disabled={isDeleting}>
           {renderTrashLabel()}
         </Button>
       </HStack>
@@ -1233,9 +1294,9 @@ function App() {
           {visibleTargetAlbums.map(album => (
             <Button
               key={album.id}
-              action={() => void moveCurrentToAlbum(album)}
+              action={tap(() => void moveCurrentToAlbum(album))}
               disabled={!currentItem || isBusy}
-              buttonStyle="bordered"
+              buttonStyle={useGlass ? "glass" : "bordered"}
               frame={{ maxWidth: 150, height: 44 }}
             >
               <HStack spacing={5}>
@@ -1265,13 +1326,13 @@ function App() {
                 <Button
                   title="新建"
                   systemImage="folder.badge.plus"
-                  action={() => void handleCreateAlbum()}
+                  action={tap(() => void handleCreateAlbum())}
                 />
               </ToolbarItem>
               <ToolbarItem placement="topBarTrailing">
                 <Button
                   title="完成"
-                  action={() => setShowManagementSheet(false)}
+                  action={tap(() => setShowManagementSheet(false))}
                 />
               </ToolbarItem>
             </Toolbar>
@@ -1317,8 +1378,9 @@ function App() {
 
                         <HStack spacing={16}>
                           <Button
-                            action={() => toggleAlbumVisibility(album.id)}
+                            action={tap(() => toggleAlbumVisibility(album.id))}
                             buttonStyle="plain"
+                            glassEffect={useGlass ? "circle" : undefined}
                           >
                             <Image
                               systemName={isHidden ? "eye.slash.fill" : "eye.fill"}
@@ -1328,15 +1390,17 @@ function App() {
                           </Button>
 
                           <Button
-                            action={() => void handleRenameAlbum(album)}
+                            action={tap(() => void handleRenameAlbum(album))}
                             buttonStyle="plain"
+                            glassEffect={useGlass ? "circle" : undefined}
                           >
                             <Image systemName="pencil" font={18} foregroundStyle="systemOrange" />
                           </Button>
 
                           <Button
-                            action={() => void handleDeleteAlbum(album)}
+                            action={tap(() => void handleDeleteAlbum(album))}
                             buttonStyle="plain"
+                            glassEffect={useGlass ? "circle" : undefined}
                           >
                             <Image systemName="trash" font={18} foregroundStyle="systemRed" />
                           </Button>
@@ -1368,7 +1432,7 @@ function App() {
               <ToolbarItem placement="topBarTrailing">
                 <Button
                   title="完成"
-                  action={() => setShowInstructions(false)}
+                  action={tap(() => setShowInstructions(false))}
                 />
               </ToolbarItem>
             </Toolbar>
@@ -1382,13 +1446,105 @@ function App() {
     )
   }
 
-  function renderAlbumContextButton() {
+  function photoType(asset: PHAsset): string {
+    return asset.mediaSubtypes.includes("photoScreenshot") ? "截图"
+      : asset.mediaSubtypes.includes("photoLive") ? "Live" : "照片"
+  }
+
+  function renderPhotoDetailsSheetContent() {
+    const asset = currentItem?.asset
+    const location = asset?.location
+    const details = asset ? [
+      ["拍摄时间", formatDate(asset.creationDate)],
+      ...(asset.modificationDate != null ? [["修改时间", formatDate(asset.modificationDate)]] : []),
+      ["类型", photoType(asset)],
+      ["分辨率", `${asset.pixelWidth} × ${asset.pixelHeight}`],
+      ["像素", `${((asset.pixelWidth * asset.pixelHeight) / 1_000_000).toFixed(1)} MP`],
+      ["收藏", asset.isFavorite ? "已收藏" : "未收藏"],
+      ["隐藏", asset.isHidden ? "已隐藏" : "未隐藏"],
+    ] : []
+
+    return (
+      <NavigationStack
+        background={useGlass ? "clear" : "systemGroupedBackground"}
+        presentationBackground={useGlass ? "clear" : undefined}
+      >
+        <ScrollView
+          padding={20}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          background="clear"
+          scrollContentBackground="hidden"
+          navigationTitle="照片详情"
+          navigationBarTitleDisplayMode="inline"
+          presentationDetents={["medium", "large"]}
+          presentationDragIndicator="visible"
+          presentationBackground={useGlass ? "clear" : undefined}
+          toolbar={
+            <Toolbar>
+              <ToolbarItem placement="topBarTrailing">
+                <Button title="完成" action={tap(() => setShowPhotoDetails(false))} />
+              </ToolbarItem>
+            </Toolbar>
+          }
+        >
+          <VStack spacing={16} frame={{ maxWidth: "infinity" }}>
+            {asset ? (
+              <Group>
+                {details.map(([label, value]) => (
+                  <HStack key={label} spacing={12} frame={{ maxWidth: "infinity" }}>
+                    <Text font={14} foregroundStyle="secondaryLabel">{label}</Text>
+                    <Spacer />
+                    <Text font={14} fontWeight="medium" foregroundStyle="label" lineLimit={1}>{value}</Text>
+                  </HStack>
+                ))}
+                <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity" }}>
+                  <Text font={14} foregroundStyle="secondaryLabel">地址</Text>
+                  <Text
+                    font={14}
+                    foregroundStyle="label"
+                    multilineTextAlignment="leading"
+                    frame={{ maxWidth: "infinity", alignment: "leading" }}
+                  >
+                    {location ? (photoAddress?.id === currentItem?.id ? photoAddress.value : "正在查询地址…") : "无位置数据"}
+                  </Text>
+                </VStack>
+                {location ? (
+                  <Group>
+                    <HStack spacing={12} frame={{ maxWidth: "infinity" }}>
+                      <Text font={14} foregroundStyle="secondaryLabel">坐标</Text>
+                      <Spacer />
+                      <Text font={14} fontWeight="medium" foregroundStyle="label">
+                        {`${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`}
+                      </Text>
+                    </HStack>
+                    {Number.parseInt(Device.systemVersion, 10) >= 17 ? (
+                      <NativeMap
+                        initialCameraPosition={MapCameraPosition.region({
+                          center: { latitude: location.latitude, longitude: location.longitude },
+                          span: { latitudeDelta: 0.01, longitudeDelta: 0.01 },
+                        })}
+                        frame={{ height: 220 }}
+                      >
+                        <Marker title="拍摄位置" coordinate={{ latitude: location.latitude, longitude: location.longitude }} />
+                      </NativeMap>
+                    ) : null}
+                  </Group>
+                ) : null}
+              </Group>
+            ) : <Text foregroundStyle="secondaryLabel">照片已不可用</Text>}
+          </VStack>
+        </ScrollView>
+      </NavigationStack>
+    )
+  }
+
+  function renderPhotoDetailsButton() {
     return (
       renderIconButton({
-        systemImage: "rectangle.stack.badge.plus",
-        action: () => setShowAlbumPicker(visible => !visible),
+        systemImage: "info.circle.fill",
+        action: () => setShowPhotoDetails(true),
         disabled: !currentItem || isBusy,
-        accessibilityLabel: "选择相簿",
+        accessibilityLabel: "照片详情",
       })
     )
   }
@@ -1405,6 +1561,7 @@ function App() {
         }
         buttonStyle="plain"
         frame={{ width: 44, height: 44 }}
+        glassEffect={useGlass ? "circle" : undefined}
       >
         {renderSourceMenuItems()}
       </Menu>
@@ -1420,48 +1577,48 @@ function App() {
         <Button
           title={`${allSelected ? "✓ " : ""}全部照片`}
           systemImage="photo.on.rectangle"
-          action={() => selectSource(allPhotosSource)}
+          action={tap(() => selectSource(allPhotosSource))}
         />
         <Button
           title={`${screenshotsSelected ? "✓ " : ""}截图`}
           systemImage="camera.viewfinder"
-          action={() => selectSource(screenshotsSource)}
+          action={tap(() => selectSource(screenshotsSource))}
         />
         <Menu title="相簿" systemImage="rectangle.stack">
           {albums.length === 0 ? (
             <Button
               title={isLoadingAlbums ? "正在读取相簿" : "没有相簿"}
               systemImage="hourglass"
-              action={() => void loadAlbums()}
+              action={tap(() => void loadAlbums())}
             />
           ) : albums.map(album => (
             <Button
               key={album.id}
               title={`${selectedSource.albumId === album.id ? "✓ " : ""}${album.title} · ${album.count}`}
               systemImage={album.collection.type === "smartAlbum" ? "sparkles.rectangle.stack" : "rectangle.stack"}
-              action={() => selectSource({ kind: "album", albumId: album.id })}
+              action={tap(() => selectSource({ kind: "album", albumId: album.id }))}
             />
           ))}
         </Menu>
         <Button
           title="刷新相簿"
           systemImage="arrow.clockwise"
-          action={() => void loadAlbums()}
+          action={tap(() => void loadAlbums())}
         />
       </Group>
     )
   }
 
-  function renderMetric(label: string, value: string, color: any = "secondaryLabel") {
+  function renderMetric(label: string, value: string, color: any) {
     return (
-      <VStack alignment="leading" spacing={2}>
-        <Text font={11} foregroundStyle="tertiaryLabel">
+      <HStack spacing={4}>
+        <Text font={12} foregroundStyle="secondaryLabel" lineLimit={1}>
           {label}
         </Text>
-        <Text font={15} fontWeight="semibold" foregroundStyle={color}>
+        <Text font={13} fontWeight="semibold" foregroundStyle={color} lineLimit={1}>
           {value}
         </Text>
-      </VStack>
+      </HStack>
     )
   }
 
@@ -1517,14 +1674,9 @@ function App() {
   }
 
   function renderPhotoInfo() {
-    if (!currentItem || isFinished) return null
-
-    const asset = currentItem.asset
-    const subtypeText = asset.mediaSubtypes.includes("photoScreenshot")
-      ? "截图"
-      : asset.mediaSubtypes.includes("photoLive")
-        ? "Live"
-        : "照片"
+    const asset = switchPreview?.asset ?? currentItem?.asset
+    if (!asset || (isFinished && !switchPreview)) return null
+    const subtypeText = photoType(asset)
 
     return (
       <VStack spacing={1} alignment="center">
@@ -1580,11 +1732,12 @@ function App() {
               </HStack>
             </HStack>
 
-            <HStack spacing={12} frame={{ maxWidth: "infinity" }}>
-              {renderMetric("进度", progressText, "label")}
-              {renderMetric("剩余", `${remainingCount}`)}
-              {renderMetric("待删除", `${pendingDeleteIds.length}`, pendingDeleteIds.length > 0 ? "systemRed" : "secondaryLabel")}
-              {dateFilterEnabled ? renderMetric("日期", "已筛选", "systemBlue") : null}
+            <HStack frame={{ maxWidth: "infinity", height: 30 }}>
+              {renderMetric("进度", switchPreview?.progress ?? progressText, "systemGreen")}
+              <Spacer />
+              {renderMetric("剩余", `${switchPreview?.remaining ?? remainingCount}`, "systemYellow")}
+              <Spacer />
+              {renderMetric("待删除", `${pendingDeleteIds.length}`, "systemRed")}
             </HStack>
           </VStack>
         )}
@@ -1602,12 +1755,12 @@ function App() {
       >
         <HStack spacing={16}>
           {renderIconButton({
-            systemImage: currentItem?.asset.isFavorite ? "star.slash" : "star",
+            systemImage: (switchPreview?.asset ?? currentItem?.asset)?.isFavorite ? "star.slash" : "star",
             action: () => void toggleFavoriteForCurrent(),
             disabled: !currentItem || isBusy,
-            foregroundStyle: currentItem?.asset.isFavorite ? "systemYellow" : "systemBlue",
+            foregroundStyle: (switchPreview?.asset ?? currentItem?.asset)?.isFavorite ? "systemYellow" : "systemBlue",
           })}
-          {renderAlbumContextButton()}
+          {renderPhotoDetailsButton()}
         </HStack>
 
         <Spacer />
@@ -1644,17 +1797,24 @@ function App() {
         ignoresSafeArea={{ edges: "bottom" }}
         navigationTitle="整理照片"
         navigationBarTitleDisplayMode="inline"
-        sheet={{
-          isPresented: showManagementSheet,
-          onChanged: setShowManagementSheet,
-          content: renderAlbumManagementSheetContent()
-        }}
+        sheet={[
+          {
+            isPresented: showManagementSheet,
+            onChanged: setShowManagementSheet,
+            content: renderAlbumManagementSheetContent(),
+          },
+          {
+            isPresented: showPhotoDetails,
+            onChanged: setShowPhotoDetails,
+            content: showPhotoDetails ? renderPhotoDetailsSheetContent() : <Group />,
+          },
+        ]}
         toolbar={
           <Toolbar>
             <ToolbarItem placement="topBarLeading">
               <HStack spacing={8}>
-                <Button title="" systemImage="xmark" action={dismiss} glassEffect />
-                <Button title="" systemImage="info.circle" action={() => setShowInstructions(true)} glassEffect />
+                <Button title="" systemImage="xmark" action={tap(dismiss)} />
+                <Button title="" systemImage="info.circle" action={tap(() => setShowInstructions(true))} />
               </HStack>
             </ToolbarItem>
             <ToolbarItem placement="principal">
@@ -1682,13 +1842,13 @@ function App() {
           {renderHeader()}
 
           <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-            {isLoading ? (
+            {isLoading && !switchPreview ? (
               <VStack spacing={12}>
                 <ProgressView />
                 <Text font={15} foregroundStyle="secondaryLabel">正在载入照片索引</Text>
                 <Text font={12} foregroundStyle="tertiaryLabel">只会懒加载当前附近图片</Text>
               </VStack>
-            ) : isEmpty ? (
+            ) : isEmpty && !switchPreview ? (
               <VStack spacing={12} padding={28}>
                 <Image systemName="photo.on.rectangle.angled" imageScale="large" foregroundStyle="secondaryLabel" />
                 <Text font={20} fontWeight="semibold" foregroundStyle="label">
@@ -1698,7 +1858,7 @@ function App() {
                   当前范围没有可整理的图片，切换到全部照片、截图或其他相簿再试。
                 </Text>
               </VStack>
-            ) : isFinished ? (
+            ) : isFinished && !switchPreview ? (
               <VStack spacing={14} padding={28}>
                 <Image systemName="checkmark.circle.fill" imageScale="large" foregroundStyle="systemGreen" />
                 <Text font={22} fontWeight="bold" foregroundStyle="label">
@@ -1712,17 +1872,37 @@ function App() {
                   action: () => void loadPhotos(),
                 })}
               </VStack>
-            ) : currentItem ? (
-              <VStack spacing={showAlbumPicker ? 6 : 12} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-                <PhotoCardStack
-                  height={showAlbumPicker ? Math.max(240, cardHeight - 56) : cardHeight}
-                  currentImage={imageCache.get(currentItem.id)}
-                  nextImage={imageCache.get(nextItem?.id)}
-                  motionController={motionController}
-                  onDragChanged={handleDragChanged}
-                  onDragEnded={handleDragEnded}
-                />
-                {showAlbumPicker ? renderAlbumPicker() : null}
+            ) : currentItem || switchPreview ? (
+              <VStack spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+                {switchPreview ? (
+                  <ZStack
+                    frame={{ width: cardWidth, height: photoCardHeight }}
+                    background="black"
+                    clipShape={{ type: "rect", cornerRadius: CARD_CORNER_RADIUS, style: "continuous" }}
+                    shadow={{ color: "rgba(0,0,0,0.12)", radius: 10, y: 4 }}
+                  >
+                    {switchPreview.image ? (
+                      <Image
+                        image={switchPreview.image}
+                        resizable
+                        scaleToFit
+                        blur={8}
+                        frame={{ width: cardWidth, height: photoCardHeight }}
+                        allowsHitTesting={false}
+                      />
+                    ) : <ProgressView />}
+                  </ZStack>
+                ) : (
+                  <PhotoCardStack
+                    height={photoCardHeight}
+                    currentImage={imageCache.get(currentItem?.id)}
+                    nextImage={imageCache.get(nextItem?.id)}
+                    motionController={motionController}
+                    onDragChanged={handleDragChanged}
+                    onDragEnded={handleDragEnded}
+                  />
+                )}
+                {renderAlbumPicker()}
                 {renderActionBar()}
                 <Spacer />
               </VStack>

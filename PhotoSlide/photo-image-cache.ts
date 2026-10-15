@@ -18,6 +18,10 @@ export class PhotoImageCache {
     return id ? this.images.get(id) ?? null : null
   }
 
+  isFailed(id: string | undefined): boolean {
+    return id ? this.failed.has(id) : false
+  }
+
   setWindow(items: PhotoItem[]) {
     if (this.disposed) return
     this.window = new Map(items.slice(0, 5).map(item => [item.id, item]))
@@ -67,6 +71,7 @@ export class PhotoImageCache {
           this.onChange()
         } else {
           this.failed.add(item.id)
+          this.onChange()
         }
       }
       this.pump()
