@@ -17,6 +17,17 @@ function languageName(code: string) {
 
 function HistoryDetailView({ record }: { record: TranslationHistoryRecord }) {
   const dismiss = Navigation.useDismiss()
+  const [toastMessage, setToastMessage] = useState("")
+
+  async function copyText(text: string) {
+    try {
+      await Pasteboard.setString(text)
+      setToastMessage("已复制")
+    } catch {
+      setToastMessage("复制失败")
+    }
+  }
+
   return (
     <NavigationStack>
       <List
@@ -24,9 +35,22 @@ function HistoryDetailView({ record }: { record: TranslationHistoryRecord }) {
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={{ topBarLeading: <Button title="关闭" action={() => dismiss()} /> }}
+        toast={{
+          message: toastMessage,
+          isPresented: !!toastMessage,
+          onChanged: (shown) => { if (!shown) setToastMessage("") },
+        }}
       >
-        <Section header={<Text>原文 · {languageName(record.sourceLanguageCode)} → {languageName(record.targetLanguageCode)}</Text>}>
-          <Text selectionDisabled={false} fixedSize={{ horizontal: false, vertical: true }}>
+        <Section header={
+          <HStack spacing={8}>
+            <Text lineLimit={1}>原文 · {languageName(record.sourceLanguageCode)} → {languageName(record.targetLanguageCode)}</Text>
+            <Spacer />
+            <Button title="复制" systemImage="doc.on.doc" buttonStyle="borderless" action={() => {
+              void copyText(record.sourceText)
+            }} />
+          </HStack>
+        }>
+          <Text textSelection={true} fixedSize={{ horizontal: false, vertical: true }}>
             {record.sourceText}
           </Text>
         </Section>
@@ -37,11 +61,24 @@ function HistoryDetailView({ record }: { record: TranslationHistoryRecord }) {
               <HStack spacing={8}>
                 <EngineIcon kind={result.kind} mode={result.mode} size={18} />
                 <Text>{result.engineName}</Text>
+                <Spacer />
+                <Button
+                  title="复制"
+                  systemImage="doc.on.doc"
+                  buttonStyle="borderless"
+                  disabled={!result.translatedText.trim() || !!result.errorText}
+                  action={() => { void copyText(result.translatedText) }}
+                />
               </HStack>
             }
           >
             <Text
-              selectionDisabled={false}
+              textSelection={true}
+              onTapGesture={result.translatedText.trim() && !result.errorText
+                ? () => { void copyText(result.translatedText) }
+                : undefined}
+              frame={{ maxWidth: "infinity", alignment: "leading" }}
+              contentShape="rect"
               fixedSize={{ horizontal: false, vertical: true }}
               foregroundStyle={result.errorText ? "systemRed" : undefined}
             >

@@ -754,14 +754,33 @@ async function translateWithGoogleWeb(request: TranslationRequest): Promise<Tran
     `q=${encodeURIComponent(request.sourceText)}`,
   ].join("&")
 
-  const response = await fetch(`${GOOGLE_WEB_ENDPOINT}?${params}`, {
+  const url = `${GOOGLE_WEB_ENDPOINT}?${params}`
+  const options = {
     method: "GET",
     headers: {
       "Accept-Encoding": "identity",
     },
-  })
+  }
+  let response = await fetch(url, options)
+
+  for (let retry = 0; response.status === 429 && retry < 2; retry += 1) {
+    const retryAfter = response.headers.get("retry-after")
+    const retryAfterMs = retryAfter
+      ? /^\d+$/.test(retryAfter)
+        ? Number(retryAfter) * 1000
+        : Date.parse(retryAfter) - Date.now()
+      : NaN
+    if (retryAfterMs > 15000) break
+    await new Promise<void>((resolve) => setTimeout(resolve,
+      Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? retryAfterMs : 1500 * (retry + 1)
+    ))
+    response = await fetch(url, options)
+  }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("Google 网页翻译请求过于频繁（HTTP 429），请稍后重试或切换其他引擎。")
+    }
     throw new Error(normalizeErrorMessage(response, "Google 网页翻译请求失败"))
   }
 
