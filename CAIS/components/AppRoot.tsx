@@ -1347,6 +1347,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
             title={displayFavoriteItemTitle(item, favoriteDelimiterForItem(item, settings.favoriteFieldDelimiter), privateRulesForItem(item, privateKeywords))}
             fields={parsed.fields}
             privateKeywords={privateRulesForItem(item, privateKeywords)}
+            cardGlassEffect={settings.appClipRowGlassEffect}
             onCopy={copyFavoriteField}
             renderFieldContextMenu={renderFavoriteFieldContextMenu}
             onCopyAll={() => {
@@ -2751,6 +2752,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           title={displayFavoriteItemTitle(route.item, favoriteDelimiterForItem(route.item, settings.favoriteFieldDelimiter), privateRulesForItem(route.item, privateKeywords))}
           fields={route.fields}
           privateKeywords={privateRulesForItem(route.item, privateKeywords)}
+          cardGlassEffect={settings.appClipRowGlassEffect}
           embedded
           navigationTransition={homeZoomTransition(`favorite-field:${route.item.id}`)}
           onCopy={copyFavoriteField}

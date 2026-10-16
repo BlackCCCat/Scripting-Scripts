@@ -1,13 +1,16 @@
 import {
   Button,
+  Device,
   EmptyView,
   Form,
   HStack,
   Image,
+  LazyVStack,
   Navigation,
   NavigationStack,
   Picker,
   Section,
+  ScrollView,
   Spacer,
   Text,
   TextField,
@@ -433,6 +436,7 @@ export function FavoriteFieldsDetailView(props: {
   title: string
   fields: FavoriteField[]
   privateKeywords: PrivateFieldRule[]
+  cardGlassEffect: boolean
   onCopy: (field: FavoriteField) => Promise<string | void> | string | void
   onCopyAll: () => Promise<string | void> | string | void
   embedded?: boolean
@@ -445,6 +449,8 @@ export function FavoriteFieldsDetailView(props: {
   const dismiss = Navigation.useDismiss()
   const copyToastPresented = useObservable(false)
   const [copyToastMessage, setCopyToastMessage] = useState("")
+  const glassRows = props.cardGlassEffect && Number.parseInt(Device.systemVersion, 10) >= 26
+  const glassCardShape = { type: "rect", cornerRadius: 18 } as const
 
   async function copyField(field: FavoriteField) {
     const message = await props.onCopy(field)
@@ -458,6 +464,75 @@ export function FavoriteFieldsDetailView(props: {
     presentCopyToast(copyToastPresented, setCopyToastMessage, message)
   }
 
+  const copyToast = {
+    isPresented: copyToastPresented,
+    message: copyToastMessage,
+    duration: 2,
+    position: "bottom" as const,
+  }
+  const toolbar = {
+    topBarLeading: props.embedded
+      ? undefined
+      : <Button title="" systemImage="xmark" accessibilityLabel="关闭" role="cancel" action={() => dismiss()} />,
+    topBarTrailing: <Button title="" systemImage="doc.on.doc" accessibilityLabel="复制全部" action={() => void copyAll()} />,
+  }
+
+  if (glassRows) {
+    const page = (
+      <ScrollView
+        axes="vertical"
+        scrollContentBackground="hidden"
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        navigationTransition={props.navigationTransition}
+        navigationTitle={props.title}
+        navigationBarTitleDisplayMode="inline"
+        tabBarVisibility={props.embedded ? "visible" : undefined}
+        toast={copyToast}
+        presentationDetents={[0.72, "large"]}
+        presentationDragIndicator="visible"
+        toolbar={toolbar}
+      >
+        <LazyVStack
+          spacing={10}
+          frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
+          padding={{ top: 18, bottom: 24, leading: 20, trailing: 20 }}
+        >
+          <Text font="headline" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            子字段
+          </Text>
+          {props.fields.map((field) => {
+            const copy = () => void copyField(field)
+            return (
+              <HStack
+                key={field.id}
+                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                contentShape={{ kind: "contextMenuPreview", shape: glassCardShape } as any}
+                contextMenu={props.renderFieldContextMenu ? {
+                  menuItems: props.renderFieldContextMenu(field, copy),
+                } : undefined}
+              >
+                <HStack
+                  spacing={12}
+                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+                  padding={{ top: 14, bottom: 14, leading: 14, trailing: 14 }}
+                  contentShape={{ kind: "interaction", shape: glassCardShape } as any}
+                  onTapGesture={copy}
+                  glassEffect={glassCardShape}
+                >
+                  <FavoriteFieldContent field={field} privateKeywords={props.privateKeywords} />
+                </HStack>
+              </HStack>
+            )
+          })}
+          <Text font="footnote" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+            点击任意子字段可复制对应的值。
+          </Text>
+        </LazyVStack>
+      </ScrollView>
+    )
+    return props.embedded ? page : <NavigationStack>{page}</NavigationStack>
+  }
+
   const form = (
     <Form
       navigationTransition={props.navigationTransition}
@@ -465,20 +540,10 @@ export function FavoriteFieldsDetailView(props: {
       navigationBarTitleDisplayMode="inline"
       tabBarVisibility={props.embedded ? "visible" : undefined}
       formStyle="grouped"
-      toast={{
-        isPresented: copyToastPresented,
-        message: copyToastMessage,
-        duration: 2,
-        position: "bottom",
-      }}
+      toast={copyToast}
       presentationDetents={[0.72, "large"]}
       presentationDragIndicator="visible"
-      toolbar={{
-        topBarLeading: props.embedded
-          ? undefined
-          : <Button title="" systemImage="xmark" accessibilityLabel="关闭" role="cancel" action={() => dismiss()} />,
-        topBarTrailing: <Button title="" systemImage="doc.on.doc" accessibilityLabel="复制全部" action={() => void copyAll()} />,
-      }}
+      toolbar={toolbar}
     >
       <Section
         header={(
