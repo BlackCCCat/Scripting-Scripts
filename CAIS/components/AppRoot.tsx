@@ -165,7 +165,6 @@ function orderFavoriteGroupsForDisplay(groups: ClipGroup[], ids: string[] | null
 
 function InteractiveClipRow(props: {
   item: ClipItem
-  zoomSource?: { id: string; namespace: NavigationZoomNamespace }
   allowDelete: boolean
   onConfirmDelete: (item: ClipItem) => Promise<void>
   contextMenuItems: VirtualNode
@@ -187,9 +186,7 @@ function InteractiveClipRow(props: {
 
   return (
     <HStack
-      matchedTransitionSource={props.zoomSource}
       frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      background="rgba(0,0,0,0.001)"
       contentShape={{
         kind: "contextMenuPreview",
         shape: { type: "rect", cornerRadius: 18 },
@@ -2090,6 +2087,9 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     const rowZoomSourceID = item.kind === "image"
       ? `image-view:${item.id}`
       : isFieldFavorite(item) ? `favorite-field:${item.id}` : `clip-edit:${item.id}`
+    const rowZoomSource = homeZoomNamespace
+      ? { id: rowZoomSourceID, namespace: homeZoomNamespace }
+      : undefined
     const onRowTap = withHaptic(() => {
       if (isFieldFavorite(item)) {
         void openFavoriteFields(item)
@@ -2121,10 +2121,6 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       <InteractiveClipRow
         key={item.id}
         item={item}
-        zoomSource={homeZoomNamespace && rowZoomSourceID ? {
-          id: rowZoomSourceID,
-          namespace: homeZoomNamespace,
-        } : undefined}
         allowDelete={allowDelete}
         onConfirmDelete={confirmDeleteItem}
         primaryTrailingAction={primaryTrailingAction}
@@ -2173,6 +2169,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         content={settings.appClipRowGlassEffect ? (
           <ClipRow
             item={item}
+            zoomSource={rowZoomSource}
             privateKeywords={privateKeywords}
             favoriteFieldDelimiter={settings.favoriteFieldDelimiter}
             contentLineLimit={settings.appContentLineLimit}
@@ -2183,6 +2180,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         ) : (
           <NonGlassClipRow
             item={item}
+            zoomSource={rowZoomSource}
             privateKeywords={privateKeywords}
             favoriteFieldDelimiter={settings.favoriteFieldDelimiter}
             contentLineLimit={settings.appContentLineLimit}

@@ -5,6 +5,7 @@ import { imageListPreviewPath } from "../storage/image_store"
 import { displayFavoriteFieldsContent, displayFavoriteItemTitle, favoriteDelimiterForItem, isFieldFavorite, privateRulesForItem, type PrivateFieldRule } from "../utils/favorite_fields"
 import { linkPreviewFresh, requestLinkPreview } from "../services/link_preview"
 import { previewableWebUrl } from "../utils/link_preview"
+import type { NavigationZoomNamespace } from "../utils/navigation_zoom"
 
 const IMAGE_PREVIEW_HEIGHT = 180
 const failedLinkIcons = new Set<string>()
@@ -145,6 +146,7 @@ function ClipRowContent(props: {
 
 export function NonGlassClipRow(props: {
   item: ClipItem
+  zoomSource?: { id: string; namespace: NavigationZoomNamespace }
   privateKeywords: PrivateFieldRule[]
   favoriteFieldDelimiter: string
   contentLineLimit: number
@@ -157,6 +159,11 @@ export function NonGlassClipRow(props: {
   const previewPath = item.kind === "image" ? imageListPreviewPath(item.imagePath) : undefined
   const colorScheme = useColorScheme()
   const cardFill = colorScheme === "dark" ? "secondarySystemBackground" : "systemBackground"
+  const cardShadow = {
+    color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
+    radius: 10,
+    y: 4,
+  } as const
 
   return (
     <HStack
@@ -166,11 +173,9 @@ export function NonGlassClipRow(props: {
       contentShape={{ kind: "interaction", shape: { type: "rect", cornerRadius: 18 } } as any}
       onTapGesture={props.onTap}
       background={{ style: cardFill, shape: { type: "rect", cornerRadius: 18 } }}
-      shadow={{
-        color: colorScheme === "dark" ? "rgba(0,0,0,0.20)" : "rgba(0,0,0,0.07)",
-        radius: 10,
-        y: 4,
-      }}
+      clipShape={props.zoomSource ? { type: "rect", cornerRadius: 18 } : undefined}
+      matchedTransitionSource={props.zoomSource}
+      shadow={props.zoomSource ? undefined : cardShadow}
     >
       <ClipRowContent key={item.contentHash} item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} favoriteView={props.favoriteView} privateKeywords={props.privateKeywords} favoriteFieldDelimiter={props.favoriteFieldDelimiter} />
     </HStack>
@@ -179,6 +184,7 @@ export function NonGlassClipRow(props: {
 
 export function ClipRow(props: {
   item: ClipItem
+  zoomSource?: { id: string; namespace: NavigationZoomNamespace }
   privateKeywords: PrivateFieldRule[]
   favoriteFieldDelimiter: string
   contentLineLimit: number
@@ -197,6 +203,8 @@ export function ClipRow(props: {
       contentShape={{ kind: "interaction", shape: { type: "rect", cornerRadius: 18 } } as any}
       onTapGesture={props.onTap}
       glassEffect={{ type: "rect", cornerRadius: 18 } as any}
+      clipShape={props.zoomSource ? { type: "rect", cornerRadius: 18 } : undefined}
+      matchedTransitionSource={props.zoomSource}
     >
       <ClipRowContent key={item.contentHash} item={item} lineLimit={lineLimit} previewPath={previewPath} displayTimestamp={props.displayTimestamp} favoriteView={props.favoriteView} privateKeywords={props.privateKeywords} favoriteFieldDelimiter={props.favoriteFieldDelimiter} />
     </HStack>
