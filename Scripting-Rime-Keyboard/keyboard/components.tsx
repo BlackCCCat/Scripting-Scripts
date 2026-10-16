@@ -39,9 +39,9 @@ const CANDIDATE_WIDTH_CACHE_LIMIT = 360;
 const candidateWidthCache = new Map<string, number>();
 type KeyPopupEdge = "center" | "left" | "right";
 
-// Keep the established gesture path below iOS 27.
+// iOS 17 ignores onTouchGesture, so keep DragGesture only there.
 export const USE_NATIVE_KEY_TOUCH =
-  Number(String(Device.systemVersion ?? "").match(/\d+/)?.[0] ?? 0) >= 27;
+  Number(String(Device.systemVersion ?? "").match(/\d+/)?.[0] ?? 0) >= 18;
 
 type PressVisualSubscriber = (pressed: boolean) => void;
 
