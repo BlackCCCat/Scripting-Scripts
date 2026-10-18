@@ -990,7 +990,8 @@ export function isExternalEngineConfigured(engine: TranslatorEngineEntry) {
 export async function translateWithExternalEngine(
   engine: TranslatorEngineEntry,
   request: TranslationRequest,
-  callbacks?: TranslationProgressCallbacks
+  callbacks?: TranslationProgressCallbacks,
+  chunkConcurrency = 2
 ): Promise<TranslationResult> {
   switch (engine.kind) {
     case "google_translate":
@@ -1000,7 +1001,7 @@ export async function translateWithExternalEngine(
     case "deepl":
       return await translateChunkedText(request, {
         maxChunkLength: 5000,
-        concurrency: 2,
+        concurrency: chunkConcurrency,
         translateChunk: async (chunkRequest) => await translateWithDeepL(engine, chunkRequest),
       }, callbacks)
     case "ai_api":
@@ -1008,7 +1009,7 @@ export async function translateWithExternalEngine(
         request,
         {
           maxChunkLength: 1400,
-          concurrency: 2,
+          concurrency: chunkConcurrency,
           translateChunk: async (chunkRequest, chunkCallbacks) => (
             await translateWithAiApiSingle(engine, chunkRequest, chunkCallbacks)
           ),

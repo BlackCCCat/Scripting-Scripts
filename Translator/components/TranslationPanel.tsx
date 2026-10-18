@@ -259,6 +259,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
   const [draftSourceText, setDraftSourceText] = useState(() => props.inputText ?? "")
   const sourceText = props.editableSource ? draftSourceText : (props.inputText ?? "")
   const hasInput = sourceText.trim().length > 0
+  const hasLongInput = sourceText.length > 700
   const [sourceLanguageCode, setSourceLanguageCode] = useState(() => settings.defaultSourceLanguageCode)
   const [targetLanguageCode, setTargetLanguageCode] = useState(() => settings.defaultTargetLanguageCode)
   const [systemTranslationHost] = useState(() => new Translation())
@@ -317,7 +318,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
     return async (text: string) => {
       if (requestId !== requestIdRef.current) return
       const now = Date.now()
-      if (now - lastUpdateAt < 150) return
+      if (now - lastUpdateAt < (hasLongInput ? 600 : 150)) return
       lastUpdateAt = now
       updatePartialEngineResult(engineId, text)
     }
@@ -339,12 +340,12 @@ export function TranslationPanel(props: TranslationPanelProps) {
     const result = engine.kind === "apple_intelligence"
       ? await appleEngine.translate(request, options)
       : engine.kind === "assistant"
-        ? await createAssistantTranslationEngine(assistantConfig).translate(request, options)
+        ? await createAssistantTranslationEngine(assistantConfig).translate(request, options, hasLongInput ? 1 : 2)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
           : engine.kind === "system_translation_offline"
             ? await installedSystemEngine.translate({ ...request, sourceLanguageCode: detectedSource ?? sourceLanguageCode })
-          : await translateWithExternalEngine(engine, request, options)
+          : await translateWithExternalEngine(engine, request, options, hasLongInput ? 1 : 2)
 
     return {
       engineId: engine.id,
@@ -426,7 +427,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
     })
 
     try {
-      // 每个引擎独立回填结果，同时限制扩展中并行持有的模型会话和响应流。
+      // 长文本串行运行引擎，避免扩展进程同时持有多个模型会话和响应流。
       const runEngine = async (engine: typeof visibleEngines[number]) => {
         const engineStartedAt = Date.now()
         logTranslationEvent("引擎开始翻译", {
@@ -481,7 +482,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
       }
       const settled: PromiseSettledResult<EngineTranslationState | null>[] = []
       let nextEngineIndex = 0
-      await Promise.all(Array.from({ length: Math.min(2, visibleEngines.length) }, async () => {
+      await Promise.all(Array.from({ length: Math.min(hasLongInput ? 1 : 2, visibleEngines.length) }, async () => {
         while (nextEngineIndex < visibleEngines.length && requestId === requestIdRef.current) {
           const index = nextEngineIndex++
           try {

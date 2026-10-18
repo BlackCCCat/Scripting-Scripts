@@ -112,13 +112,14 @@ export function createAssistantTranslationEngine(config?: TranslationEngineConfi
 
     async translate(
       request: TranslationRequest,
-      callbacks?: TranslationProgressCallbacks
+      callbacks?: TranslationProgressCallbacks,
+      chunkConcurrency = 2
     ): Promise<TranslationResult> {
       return await translateChunkedText(
         request,
         {
           maxChunkLength: 1400,
-          concurrency: 2,
+          concurrency: chunkConcurrency,
           translateChunk: async (chunkRequest, chunkCallbacks) => (
             await translateSingle(chunkRequest, chunkCallbacks)
           ),
