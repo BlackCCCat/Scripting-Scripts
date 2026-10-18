@@ -33,6 +33,8 @@ import {
   createTranslationEngine,
   detectSourceLanguageCode,
   isLocalTranslationAvailable,
+  resolveTranslationSourceLanguage,
+  SAME_LANGUAGE_MESSAGE,
 } from "../utils/translation_engine"
 import {
   isExternalEngineConfigured,
@@ -332,6 +334,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
       sourceLanguageCode,
       targetLanguageCode,
     }
+    const detectedSource = await resolveTranslationSourceLanguage(request)
 
     const result = engine.kind === "apple_intelligence"
       ? await appleEngine.translate(request, options)
@@ -340,7 +343,7 @@ export function TranslationPanel(props: TranslationPanelProps) {
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
           : engine.kind === "system_translation_offline"
-            ? await installedSystemEngine.translate(request)
+            ? await installedSystemEngine.translate({ ...request, sourceLanguageCode: detectedSource ?? sourceLanguageCode })
           : await translateWithExternalEngine(engine, request, options)
 
     return {
@@ -386,6 +389,8 @@ export function TranslationPanel(props: TranslationPanelProps) {
       sourceLanguageCode !== AUTO_LANGUAGE.code &&
       sourceLanguageCode === targetLanguageCode
     ) {
+      requestIdRef.current += 1
+      historyIdRef.current = null
       logTranslationEvent("源语言和目标语言相同，已拦截翻译", {
         sourceLanguageCode,
         targetLanguageCode,
@@ -394,10 +399,10 @@ export function TranslationPanel(props: TranslationPanelProps) {
         engineId: engine.id,
         engineName: engine.label,
         translatedText: "",
-        errorText: "源语言和目标语言不能相同。",
+        errorText: SAME_LANGUAGE_MESSAGE,
         isTranslating: false,
       })))
-      setErrorText("源语言和目标语言不能相同。")
+      setErrorText(SAME_LANGUAGE_MESSAGE)
       return
     }
 

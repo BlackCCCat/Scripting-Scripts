@@ -1,5 +1,5 @@
 import type { TranslationRequest, TranslationResult } from "../types"
-import { detectSourceLanguageCode } from "./translation_engine"
+import { resolveTranslationSourceLanguage } from "./translation_engine"
 import { translateChunkedText } from "./translation_chunking"
 
 const SYSTEM_TRANSLATION_CHUNK_LENGTH = 1000
@@ -43,14 +43,9 @@ export function createInstalledSystemTranslationEngine() {
       const translation = installedTranslation()
       if (!translation) throw new Error("当前系统或 Scripting 版本不支持离线系统翻译。")
 
-      const source = request.sourceLanguageCode === "auto"
-        ? await detectSourceLanguageCode(request.sourceText)
-        : request.sourceLanguageCode
+      const source = await resolveTranslationSourceLanguage(request)
       if (!source || source === "auto") {
         throw new Error("无法识别源语言，请手动选择源语言后重试。")
-      }
-      if (source === request.targetLanguageCode) {
-        throw new Error("源语言和目标语言不能相同。")
       }
 
       try {
@@ -79,10 +74,8 @@ export function createInstalledSystemTranslationEngine() {
 export function createSystemTranslationEngine(translationHost: Translation) {
   return {
     async translate(request: TranslationRequest): Promise<TranslationResult> {
-      const detectedSourceCode = request.sourceLanguageCode === "auto"
-        ? await detectSourceLanguageCode(request.sourceText)
-        : undefined
-      const source = resolveSystemLanguageCode(detectedSourceCode ?? request.sourceLanguageCode)
+      const sourceCode = await resolveTranslationSourceLanguage(request)
+      const source = resolveSystemLanguageCode(sourceCode ?? request.sourceLanguageCode)
       const target = resolveSystemLanguageCode(request.targetLanguageCode)
 
       return await translateChunkedText(

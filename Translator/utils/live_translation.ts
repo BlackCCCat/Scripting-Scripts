@@ -3,7 +3,7 @@ import { createAssistantTranslationEngine, isAssistantTranslationAvailable } fro
 import { isExternalEngineConfigured, translateWithExternalEngine } from "./external_translation_engines"
 import { historyEngineResult, saveTranslationHistory } from "./translation_history"
 import { createInstalledSystemTranslationEngine, createSystemTranslationEngine, isInstalledSystemTranslationAvailable, isSystemTranslationAvailable } from "./system_translation_engine"
-import { createTranslationEngine, detectSourceLanguageCode, isLocalTranslationAvailable } from "./translation_engine"
+import { createTranslationEngine, detectSourceLanguageCode, isLocalTranslationAvailable, SAME_LANGUAGE_MESSAGE } from "./translation_engine"
 
 export const LIVE_PIP_SIZES = [
   { label: "极小", systemImage: "minus", width: 220, height: 64 },
@@ -87,7 +87,7 @@ export async function translateLiveClipboardText(input: {
     }
     target = resolveLiveTarget(source, target)
     if (!isCurrent()) return
-    if (source === target) throw new Error("源语言和目标语言不能相同。")
+    if (source === target) throw new Error(SAME_LANGUAGE_MESSAGE)
     console.log("[Translator] 实时翻译语言", { engine: engine.label, source, target, length: sourceText.length })
 
     let lastUpdateAt = 0
@@ -123,7 +123,7 @@ export async function translateLiveClipboardText(input: {
     if (isCurrent()) onText(translatedText)
   } catch (error) {
     errorText = error instanceof Error ? error.message : String(error)
-    if (isCurrent()) onText(`翻译失败：${errorText}`)
+    if (isCurrent()) onText(errorText === SAME_LANGUAGE_MESSAGE ? errorText : `翻译失败：${errorText}`)
   }
 
   if (!isCurrent()) return

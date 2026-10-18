@@ -22,6 +22,8 @@ const SESSION_INSTRUCTIONS = [
   "Do not use ellipsis unless the source text itself contains ellipsis.",
 ].join(" ")
 
+export const SAME_LANGUAGE_MESSAGE = "源语言和目标语言一致，请手动更改"
+
 function findLanguage(code: string) {
   return LANGUAGE_OPTIONS.find((item) => item.code === code) ?? LANGUAGE_OPTIONS[0]
 }
@@ -166,6 +168,13 @@ export async function detectSourceLanguageCode(sourceText: string) {
   const text = sourceText.trim()
   if (!text) return undefined
 
+  try {
+    const detected = typeof NaturalLanguage !== "undefined"
+      ? normalizeDetectedLanguageCode(NaturalLanguage.dominantLanguage(text.slice(0, 1200)) ?? "")
+      : ""
+    if (detected) return detected
+  } catch {}
+
   if (resolveLanguageModelAvailability()) {
     const session = new LanguageModelSession({
       instructions: "Identify the source language of the given text. Return only one language code from the allowed list.",
@@ -198,6 +207,14 @@ export async function detectSourceLanguageCode(sourceText: string) {
 
   const fallback = detectByScript(text)
   return fallback || undefined
+}
+
+export async function resolveTranslationSourceLanguage(request: TranslationRequest) {
+  const source = request.sourceLanguageCode === AUTO_LANGUAGE.code
+    ? await detectSourceLanguageCode(request.sourceText)
+    : request.sourceLanguageCode
+  if (source && source === request.targetLanguageCode) throw new Error(SAME_LANGUAGE_MESSAGE)
+  return source
 }
 
 export function isLocalTranslationAvailable() {

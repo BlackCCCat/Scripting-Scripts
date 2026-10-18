@@ -37,6 +37,8 @@ import {
   createTranslationEngine,
   detectSourceLanguageCode,
   isLocalTranslationAvailable,
+  resolveTranslationSourceLanguage,
+  SAME_LANGUAGE_MESSAGE,
 } from "../utils/translation_engine"
 import {
   isExternalEngineConfigured,
@@ -98,11 +100,6 @@ function withHaptic(action: () => void | Promise<void>) {
     } catch {}
     void action()
   }
-}
-
-function dismissKeyboardIfNeeded() {
-  if (!Keyboard.visible) return
-  setTimeout(() => Keyboard.hide(), 0)
 }
 
 function pickerLabel(option: LanguageOption) {
@@ -381,6 +378,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       sourceLanguageCode,
       targetLanguageCode,
     }
+    const detectedSource = await resolveTranslationSourceLanguage(request)
 
     const result = engine.kind === "apple_intelligence"
       ? await appleEngine.translate(request, options)
@@ -389,7 +387,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
           : engine.kind === "system_translation_offline"
-            ? await installedSystemEngine.translate(request)
+            ? await installedSystemEngine.translate({ ...request, sourceLanguageCode: detectedSource ?? sourceLanguageCode })
           : await translateWithExternalEngine(engine, request, options)
 
     return {
@@ -443,7 +441,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
   }, [hasInput, settings.defaultTargetLanguageCode, sourceLanguageCode, sourceText, targetLanguageCode])
 
   const runTranslation = useEffectEvent(async () => {
-    dismissKeyboardIfNeeded()
+    setTimeout(() => Keyboard.hide(), 100)
 
     if (!hasInput) {
       resetTranslationSession()
@@ -481,10 +479,10 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         engineId: engine.id,
         engineName: engine.label,
         translatedText: "",
-        errorText: "源语言和目标语言不能相同。",
+        errorText: SAME_LANGUAGE_MESSAGE,
         isTranslating: false,
       })))
-      setErrorText("源语言和目标语言不能相同。")
+      setErrorText(SAME_LANGUAGE_MESSAGE)
       return
     }
 
