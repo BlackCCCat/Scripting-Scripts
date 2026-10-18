@@ -1,21 +1,14 @@
-import { Text, VStack, useEffect, useMemo, useObservable, useRef, useState } from "scripting"
+import { EmptyView, GeometryReader, Text, VStack, useEffect, useObservable, useRef, useState } from "scripting"
 import { LIVE_PIP_SIZES } from "../utils/live_translation"
 
-function estimateLineCount(text: string, maxUnits: number) {
-  let count = 0
-  for (const paragraph of text.split(/\r?\n/)) {
-    let units = 0
-    for (const character of paragraph) {
-      const nextUnits = /[^\u0000-\u00ff]/.test(character) ? 2 : 1
-      if (units && units + nextUnits > maxUnits) {
-        count += 1
-        units = 0
-      }
-      units += nextUnits
-    }
-    count += 1
-  }
-  return count
+function TextHeightObserver(props: {
+  height: number
+  text: string
+  width: number
+  onChange: (height: number, text: string, width: number) => void
+}) {
+  useEffect(() => props.onChange(props.height, props.text, props.width), [props.height, props.text, props.width])
+  return <EmptyView />
 }
 
 export function LivePipView(props: {
@@ -28,17 +21,17 @@ export function LivePipView(props: {
 }) {
   const [started, setStarted] = useState(false)
   const [scrollY, setScrollY] = useState(0)
+  const [measuredText, setMeasuredText] = useState({ text: "", width: 0, height: 0 })
   const size = LIVE_PIP_SIZES[props.sizeIndex] ?? LIVE_PIP_SIZES[3]
   const text = props.text.value
   const width = Math.min(size.width, Device.screen.width - 40)
   const height = Math.round(size.height * width / size.width)
   const contentWidth = width - 20
   const contentHeight = height - 20
-  const lineCount = useMemo(
-    () => estimateLineCount(text, Math.max(8, Math.floor(contentWidth / 8.5))),
-    [text, contentWidth],
-  )
-  const maxScroll = Math.max(0, lineCount * 23 - contentHeight + 8)
+  const textHeight = measuredText.text === text && measuredText.width === contentWidth
+    ? measuredText.height
+    : 0
+  const maxScroll = Math.max(0, textHeight - contentHeight)
   const maxScrollRef = useRef(maxScroll)
   const previousTextRef = useRef(text)
   maxScrollRef.current = maxScroll
@@ -47,6 +40,10 @@ export function LivePipView(props: {
     if (!text.startsWith(previousTextRef.current)) setScrollY(0)
     previousTextRef.current = text
   }, [text])
+
+  useEffect(() => {
+    if (textHeight > 0) setScrollY((current) => Math.min(current, maxScroll))
+  }, [textHeight, maxScroll])
 
   useEffect(() => {
     if (!started) return
@@ -98,6 +95,22 @@ export function LivePipView(props: {
         multilineTextAlignment="leading"
         frame={{ width: contentWidth, alignment: "topLeading" }}
         fixedSize={{ horizontal: false, vertical: true }}
+        background={
+          <GeometryReader>
+            {(proxy) => (
+              <TextHeightObserver
+                height={proxy.size.height}
+                text={text}
+                width={contentWidth}
+                onChange={(value, measuredValue, measuredWidth) => setMeasuredText({
+                  text: measuredValue,
+                  width: measuredWidth,
+                  height: value,
+                })}
+              />
+            )}
+          </GeometryReader>
+        }
         offset={{ x: 10, y: 10 - scrollY }}
       >
         {text}
