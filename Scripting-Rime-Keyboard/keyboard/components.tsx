@@ -23,6 +23,7 @@ import {
   dragDirection,
   enqueueKeyboardAction,
   estimatedTextWidth,
+  isBackspaceLongPressDrag,
   keyboardActionDiagnosticTimestamp,
 } from "./utils";
 
@@ -358,6 +359,7 @@ export function KeyFace(props: {
   onImmediateDrag?: (details: any) => boolean;
   onLongPressMove?: (details: any) => void;
   longPressDuration?: number;
+  longPressSafetyReleaseDelay?: number | null;
   onSwipeUp?: () => void;
   onSwipeDown?: () => void;
   onSwipeLeft?: () => void;
@@ -521,6 +523,10 @@ export function KeyFace(props: {
       props.onImmediateDrag);
 
   function dragIntent(details: any) {
+    if (
+      propsRef.current.id === "backspace" ||
+      propsRef.current.id === "t9-backspace"
+    ) return isBackspaceLongPressDrag(details);
     const dx = Math.abs(Number(details?.translation?.width ?? 0));
     const dy = Math.abs(Number(details?.translation?.height ?? 0));
     const vx = Math.abs(Number(details?.velocity?.width ?? 0));
@@ -600,6 +606,8 @@ export function KeyFace(props: {
           ? 180
           : 1500,
       cancelPendingOnSafetyRelease: USE_NATIVE_KEY_TOUCH,
+      longPressSafetyReleaseDelay: () =>
+        propsRef.current.longPressSafetyReleaseDelay,
       isLongPressEnabled,
       shouldCancelLongPress: (details: any) =>
         !!propsRef.current.onLongPress && dragIntent(details),

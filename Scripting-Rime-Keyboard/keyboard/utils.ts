@@ -591,6 +591,12 @@ export function dragDirection(
   return dx < 0 ? "left" : "right";
 }
 
+export function isBackspaceLongPressDrag(details: any) {
+  const dx = Math.abs(Number(details?.translation?.width ?? 0));
+  const dy = Math.abs(Number(details?.translation?.height ?? 0));
+  return dx >= 24 || dy >= 24;
+}
+
 export type TouchIntentState =
   | "idle"
   | "pending"
@@ -603,7 +609,7 @@ export function createTouchIntentMachine(options: {
   swipeTriggerDistance?: number | (() => number);
   safetyReleaseDelay?: number | (() => number);
   cancelPendingOnSafetyRelease?: boolean;
-  longPressSafetyReleaseDelay?: number | (() => number);
+  longPressSafetyReleaseDelay?: number | null | (() => number | null | undefined);
   isLongPressEnabled?: () => boolean;
   shouldCancelLongPress?: (details: any) => boolean;
   onTouchStart?: () => void;
@@ -725,7 +731,10 @@ export function createTouchIntentMachine(options: {
             typeof options.longPressSafetyReleaseDelay === "function"
               ? options.longPressSafetyReleaseDelay()
               : options.longPressSafetyReleaseDelay;
-          scheduleSafetyRelease(longPressSafetyDelay ?? 2600);
+          clearSafetyTimer();
+          if (longPressSafetyDelay !== null) {
+            scheduleSafetyRelease(longPressSafetyDelay ?? 2600);
+          }
         }
       }, 0);
     }, duration ?? 360);

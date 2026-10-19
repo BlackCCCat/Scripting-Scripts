@@ -88,6 +88,7 @@ import {
   enqueueKeyboardAction,
   getCurrentKeyboardActionDiagnosticContext,
   hapticInterval,
+  isBackspaceLongPressDrag,
   keyboardActionDiagnosticTimestamp,
   nearestHitTarget,
   playConfiguredClick,
@@ -1141,7 +1142,13 @@ function KeyboardContent(props: {
 
   function holdKeyPressedUntilRelease(id: string) {
     setKeyPressed(id, true);
-    schedulePressedFallbackRelease(id, LONG_PRESS_PRESSED_RELEASE_DELAY);
+    if (
+      USE_NATIVE_KEY_TOUCH &&
+      (id === "backspace" || id === "numeric-backspace" ||
+        id === "t9-backspace")
+    ) {
+      clearPressedReleaseTimer(id);
+    } else schedulePressedFallbackRelease(id, LONG_PRESS_PRESSED_RELEASE_DELAY);
   }
 
   function releaseAllPressedKeys() {
@@ -1309,10 +1316,19 @@ function KeyboardContent(props: {
           (target?.onLongPress ? 1500 : 520);
       },
       cancelPendingOnSafetyRelease: USE_NATIVE_KEY_TOUCH,
-      longPressSafetyReleaseDelay: () => LONG_PRESS_PRESSED_RELEASE_DELAY,
+      longPressSafetyReleaseDelay: () => {
+        const id = activeHitTargetRef.current.get(rowId)?.id;
+        return USE_NATIVE_KEY_TOUCH &&
+            (id === "backspace" || id === "numeric-backspace")
+          ? null
+          : LONG_PRESS_PRESSED_RELEASE_DELAY;
+      },
       shouldCancelLongPress: (details: any) => {
         const target = activeHitTargetRef.current.get(rowId);
         const isSpace = isSpaceCursorKey(target?.id);
+        if (target?.id === "numeric-backspace") {
+          return isBackspaceLongPressDrag(details);
+        }
         return isSpace
           ? isVerticalDragIntent(details)
           : isLongPressDragIntent(details);
@@ -1895,11 +1911,13 @@ function KeyboardContent(props: {
       globalRepeatingDeleteTimer = setTimeout(repeat, 82);
     };
     globalRepeatingDeleteTimer = setTimeout(repeat, 82);
-    globalRepeatingDeleteSafetyTimer = setTimeout(() => {
-      if (repeatToken !== globalRepeatingDeleteToken) return;
-      stopRepeatingBackspace();
-      setKeyPressed(id, false);
-    }, DELETE_REPEAT_SAFETY_DURATION);
+    if (!USE_NATIVE_KEY_TOUCH) {
+      globalRepeatingDeleteSafetyTimer = setTimeout(() => {
+        if (repeatToken !== globalRepeatingDeleteToken) return;
+        stopRepeatingBackspace();
+        setKeyPressed(id, false);
+      }, DELETE_REPEAT_SAFETY_DURATION);
+    }
   }
 
   function startRepeatingCursorMove(offset: number) {
@@ -1967,20 +1985,7 @@ function KeyboardContent(props: {
   }
 
   function backspaceLongPressMove(details: any) {
-    const dx = Math.abs(Number(details?.translation?.width ?? 0));
-    const dy = Math.abs(Number(details?.translation?.height ?? 0));
-    const vx = Math.abs(Number(details?.velocity?.width ?? 0));
-    const vy = Math.abs(Number(details?.velocity?.height ?? 0));
-    const predictedDx = Math.abs(
-      Number(details?.predictedEndTranslation?.width ?? 0),
-    );
-    const predictedDy = Math.abs(
-      Number(details?.predictedEndTranslation?.height ?? 0),
-    );
-    if (
-      dx >= 5 || dy >= 5 || vx >= 8 || vy >= 8 || predictedDx >= 8 ||
-      predictedDy >= 8
-    ) {
+    if (isBackspaceLongPressDrag(details)) {
       stopRepeatingBackspace();
     }
   }
@@ -4055,6 +4060,9 @@ function KeyboardContent(props: {
               onLongPressMove={(details) =>
                 hitTargetActionsRef.current.backspaceLongPressMove(details)}
               longPressDuration={DELETE_LONG_PRESS_DURATION}
+              longPressSafetyReleaseDelay={USE_NATIVE_KEY_TOUCH
+                ? null
+                : undefined}
               onSwipeLeft={() =>
                 hitTargetActionsRef.current.backspaceSwipeLeft()}
               onSwipeUp={() => hitTargetActionsRef.current.backspaceSwipeUp()}
@@ -5086,6 +5094,9 @@ function KeyboardContent(props: {
                         onLongPressEnd={stopRepeatingBackspace}
                         onLongPressMove={backspaceLongPressMove}
                         longPressDuration={DELETE_LONG_PRESS_DURATION}
+                        longPressSafetyReleaseDelay={USE_NATIVE_KEY_TOUCH
+                          ? null
+                          : undefined}
                         onSwipeLeft={backspaceSwipeLeft}
                         onSwipeUp={backspaceSwipeUp}
                         onSwipeDown={backspaceSwipeDown}
