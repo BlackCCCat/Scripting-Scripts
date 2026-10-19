@@ -79,6 +79,13 @@ import {
   clearPerformanceDiagnostics,
   performanceDiagnosticsReport,
 } from "./performanceDiagnostics";
+import {
+  NATIVE_NUMERIC_ENGLISH_SYMBOL_ROW,
+  NATIVE_NUMERIC_LAST_ROW,
+  NATIVE_NUMERIC_MAIN_ROWS,
+  NATIVE_NUMERIC_MORE_ROWS,
+  nativeNumericKeyId,
+} from "./keyboardLayout";
 
 const THEME_OPTIONS: Array<{ value: RimeKeyboardTheme; label: string }> = [
   { value: "system", label: "跟随系统" },
@@ -310,21 +317,75 @@ const KEY_COLOR_GROUPS: Array<{
       { id: "func-right", label: "右括号" },
     ],
   },
+];
+
+const NINE_KEY_NUMERIC_COLOR_GROUP = {
+  title: "数字键盘",
+  keys: [
+    ..."123456789".split("").map((key) => ({
+      id: `numeric-${key}`,
+      label: key,
+    })),
+    { id: "numeric-abc", label: "ABC" },
+    { id: "numeric-0", label: "0" },
+    { id: "numeric-space", label: "空格" },
+    { id: "numeric-backspace", label: "Delete" },
+    { id: "numeric-dot", label: "." },
+    { id: "numeric-equal", label: "=" },
+    { id: "numeric-enter", label: "回车" },
+  ],
+};
+
+function nativeNumericColorKeys(
+  rows: string[][],
+  moreSymbols: boolean,
+  fromEnglish: boolean,
+) {
+  return rows.flatMap((row, rowIndex) =>
+    row.map((label, index) => ({
+      id: nativeNumericKeyId(
+        label,
+        rowIndex,
+        index,
+        moreSymbols,
+        fromEnglish,
+      ),
+      label: label === "{delete}"
+        ? "Delete"
+        : label === "{return}"
+        ? "回车"
+        : label === " "
+        ? "空格"
+        : label,
+    }))
+  );
+}
+
+const NATIVE_NUMERIC_COLOR_GROUPS = [
   {
-    title: "数字键盘",
-    keys: [
-      ..."123456789".split("").map((key) => ({
-        id: `numeric-${key}`,
-        label: key,
-      })),
-      { id: "numeric-abc", label: "ABC" },
-      { id: "numeric-0", label: "0" },
-      { id: "numeric-space", label: "空格" },
-      { id: "numeric-backspace", label: "Delete" },
-      { id: "numeric-dot", label: "小数点" },
-      { id: "numeric-equal", label: "等号" },
-      { id: "numeric-enter", label: "换行" },
-    ],
+    title: "数字键盘 · 中文",
+    keys: nativeNumericColorKeys([
+      ...NATIVE_NUMERIC_MAIN_ROWS,
+      NATIVE_NUMERIC_LAST_ROW.chinese,
+      ["中文", " ", "{return}"],
+    ], false, false),
+  },
+  {
+    title: "数字键盘 · 英文",
+    keys: nativeNumericColorKeys([
+      NATIVE_NUMERIC_MAIN_ROWS[0],
+      NATIVE_NUMERIC_ENGLISH_SYMBOL_ROW,
+      NATIVE_NUMERIC_LAST_ROW.english,
+      ["英文", " ", "{return}"],
+    ], false, true),
+  },
+  {
+    title: "更多符号 · 中文",
+    keys: nativeNumericColorKeys(NATIVE_NUMERIC_MORE_ROWS.chinese, true, false),
+  },
+  {
+    title: "更多符号 · 英文",
+    keys: nativeNumericColorKeys(NATIVE_NUMERIC_MORE_ROWS.english, true, true),
   },
 ];
 
@@ -1733,6 +1794,12 @@ function SettingsView() {
   }
 
   function renderAppearancePage() {
+    const colorGroups = [
+      ...KEY_COLOR_GROUPS,
+      ...(settings.useNumericNineKey
+        ? [NINE_KEY_NUMERIC_COLOR_GROUP]
+        : NATIVE_NUMERIC_COLOR_GROUPS),
+    ];
     return (
       <List
         navigationTitle="键盘外观"
@@ -2006,7 +2073,7 @@ function SettingsView() {
               </Section>
 
               <Section header={<Text>按键背景色 · 单键覆盖</Text>}>
-                {KEY_COLOR_GROUPS.map((group) => (
+                {colorGroups.map((group) => (
                   <NavigationLink
                     key={"color-link-" + group.title}
                     title={group.title}
@@ -2125,7 +2192,7 @@ function SettingsView() {
               </Section>
 
               <Section header={<Text>按键字体颜色 · 单键覆盖</Text>}>
-                {KEY_COLOR_GROUPS.map((group) => (
+                {colorGroups.map((group) => (
                   <NavigationLink
                     key={"font-color-link-" + group.title}
                     title={group.title}
@@ -2837,6 +2904,13 @@ function SettingsView() {
         toolbar={textInputToolbar()}
         toast={savedToast}
       >
+        <Section>
+          <Toggle
+            title="启用数字九键"
+            value={settings.useNumericNineKey}
+            onChanged={(value) => patchSettings({ useNumericNineKey: value })}
+          />
+        </Section>
         <Section
           footer={
             <SettingHint>

@@ -38,6 +38,68 @@ export const NUMERIC_SYMBOLS = [
   { label: "￥", value: "￥" },
 ];
 
+export const NATIVE_NUMERIC_MAIN_ROWS = [
+  "1234567890".split(""),
+  ["-", "/", ":", ";", "(", ")", "$", "@", "“", "”"],
+];
+
+export const NATIVE_NUMERIC_ENGLISH_SYMBOL_ROW = [
+  "-", "/", ":", ";", "(", ")", "$", "@", '"', "'",
+];
+
+export const NATIVE_NUMERIC_LAST_ROW = {
+  chinese: ["#+=", "°", "，", "、", "?", "!", "。", "{delete}"],
+  english: ["#+=", "°", ",", "\\", "?", "!", ".", "{delete}"],
+};
+
+export const NATIVE_NUMERIC_MORE_ROWS = {
+  chinese: [
+    ["【", "】", "{", "}", "#", "%", "^", "*", "+", "="],
+    ["_", "—", "\\", "|", "～", "《", "》", "€", "&", "·"],
+    ["123", "…", "，", "^_^", "?", "!", "’", "{delete}"],
+  ],
+  english: [
+    ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+    ["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"],
+    ["123", ".", ",", "?", "!", "'", "{delete}"],
+  ],
+};
+
+export function nativeNumericKeyId(
+  label: string,
+  rowIndex: number,
+  index: number,
+  moreSymbols: boolean,
+  fromEnglish: boolean,
+) {
+  if (rowIndex === 3) {
+    return ["numeric-abc", "numeric-space", "numeric-enter"][index];
+  }
+  if (label === "{delete}") return "numeric-backspace";
+  if (label === "=") return "numeric-equal";
+  if (rowIndex === 0) return `numeric-${label}`;
+  return `native-numeric-${fromEnglish ? "english-" : ""}${
+    moreSymbols ? "more" : "main"
+  }-${rowIndex}-${index}`;
+}
+
+export const NATIVE_NUMERIC_RIME_INPUT: Record<string, string> = {
+  "“": '"',
+  "”": '"',
+  "【": "[",
+  "】": "]",
+  "—": "-",
+  "～": "~",
+  "《": "<",
+  "》": ">",
+  "，": ",",
+  "、": "\\",
+  "。": ".",
+  "·": ".",
+  "…": "...",
+  "’": "'",
+};
+
 export const BACKSLASH_SYMBOLS: Record<string, string> = {
   a: "[a]",
   b: "【b】",

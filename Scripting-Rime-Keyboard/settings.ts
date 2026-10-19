@@ -111,6 +111,7 @@ export type RimeKeyboardSettings = {
   backspaceComposingSwipeUpMode: ActionSendMode;
   backspaceSwipeDown: string;
   backspaceSwipeDownMode: ActionSendMode;
+  useNumericNineKey: boolean;
   numericEqualsSwipeUp: string;
   t9KeySwipeUp: SwipeSettings;
   t9KeySwipeDown: SwipeSettings;
@@ -577,6 +578,7 @@ export const DEFAULT_RIME_KEYBOARD_SETTINGS: RimeKeyboardSettings = {
   backspaceComposingSwipeUpMode: "auto",
   backspaceSwipeDown: "{restoreDeleted}",
   backspaceSwipeDownMode: "auto",
+  useNumericNineKey: true,
   numericEqualsSwipeUp: "V",
   t9KeySwipeUp: DEFAULT_T9_KEY_SWIPE_UP,
   t9KeySwipeDown: DEFAULT_T9_KEY_SWIPE_DOWN,
@@ -1173,6 +1175,9 @@ export function normalizeRimeKeyboardSettings(raw: any): RimeKeyboardSettings {
     backspaceSwipeDownMode: normalizeActionSendMode(
       raw?.backspaceSwipeDownMode,
     ),
+    useNumericNineKey: typeof raw?.useNumericNineKey === "boolean"
+      ? raw.useNumericNineKey
+      : true,
     numericEqualsSwipeUp: typeof raw?.numericEqualsSwipeUp === "string"
       ? raw.numericEqualsSwipeUp
       : "V",

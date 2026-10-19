@@ -42,6 +42,12 @@ import {
 import {
   BACKSLASH_SYMBOLS,
   LETTER_ROWS,
+  NATIVE_NUMERIC_ENGLISH_SYMBOL_ROW,
+  NATIVE_NUMERIC_LAST_ROW,
+  NATIVE_NUMERIC_MAIN_ROWS,
+  NATIVE_NUMERIC_MORE_ROWS,
+  NATIVE_NUMERIC_RIME_INPUT,
+  nativeNumericKeyId,
   NUMERIC_SYMBOLS,
   T9_KEYS,
 } from "../keyboardLayout";
@@ -459,6 +465,8 @@ function KeyboardContent(props: {
   const [shifted, setShifted] = useState(false);
   const [capsLocked, setCapsLocked] = useState(false);
   const [symbolLayer, setSymbolLayer] = useState(false);
+  const [moreNumericSymbols, setMoreNumericSymbols] = useState(false);
+  const [numericFromEnglish, setNumericFromEnglish] = useState(false);
   const [backslashWrapMode, setBackslashWrapMode] = useState(false);
   const rimeReadyRef = useRef(false);
   const [candidateExpanded, setCandidateExpanded] = useState(false);
@@ -1198,12 +1206,15 @@ function KeyboardContent(props: {
     clearAllRowGestureState();
     releaseAllPressedKeys();
     setSymbolLayer(false);
+    setMoreNumericSymbols(false);
   }
 
   function toggleSymbolLayer() {
     if (symbolLayer) switchToLetterLayer();
     else {
       releaseAllPressedKeys();
+      setNumericFromEnglish(ascii);
+      setMoreNumericSymbols(false);
       setSymbolLayer(true);
     }
   }
@@ -2190,6 +2201,20 @@ function KeyboardContent(props: {
     pressSymbol(value);
   }
 
+  function pressNativeNumericKey(label: string) {
+    if (label === "#+=") {
+      setMoreNumericSymbols(true);
+    } else if (label === "123") {
+      setMoreNumericSymbols(false);
+    } else if (label === "{delete}") {
+      pressBackspace();
+    } else if (numericFromEnglish) {
+      insertTextReplacingSelectAll(label);
+    } else {
+      processTextThroughRime(NATIVE_NUMERIC_RIME_INPUT[label] ?? label);
+    }
+  }
+
   function pressT9Digit(value: string) {
     const s = sessionRef.current;
     if (ascii) {
@@ -2793,6 +2818,109 @@ function KeyboardContent(props: {
   const bottomSplitButtonWidth = Math.max(
     20,
     (bottomNumbersWidth - KEY_SPACING) / 2,
+  );
+
+  const nativeNumericRows = useMemo(() => [
+    ...(moreNumericSymbols
+      ? NATIVE_NUMERIC_MORE_ROWS[
+        numericFromEnglish ? "english" : "chinese"
+      ]
+      : [
+        NATIVE_NUMERIC_MAIN_ROWS[0],
+        numericFromEnglish
+          ? NATIVE_NUMERIC_ENGLISH_SYMBOL_ROW
+          : NATIVE_NUMERIC_MAIN_ROWS[1],
+        NATIVE_NUMERIC_LAST_ROW[
+          numericFromEnglish ? "english" : "chinese"
+        ],
+      ]),
+    [numericFromEnglish ? "英文" : "中文", " ", "{return}"],
+  ], [moreNumericSymbols, numericFromEnglish]);
+
+  function nativeNumericRowWidths(rowIndex: number, count: number) {
+    const available = metrics.width - KEY_SPACING * (count - 1);
+    if (rowIndex === 3) {
+      return [available * 0.25, available * 0.5, available * 0.25];
+    }
+    if (rowIndex === 2) {
+      const symbolWidth = (metrics.width - KEY_SPACING * 9) / 10;
+      const edgeWidth = (available - symbolWidth * (count - 2)) / 2;
+      return [edgeWidth, ...Array(count - 2).fill(symbolWidth), edgeWidth];
+    }
+    return Array(count).fill(available / count) as number[];
+  }
+
+  function nativeNumericRowHitTargets(row: string[], rowIndex: number) {
+    const widths = nativeNumericRowWidths(rowIndex, row.length);
+    let x = 0;
+    return row.map((label, index) => {
+      const id = nativeNumericKeyId(
+        label,
+        rowIndex,
+        index,
+        moreNumericSymbols,
+        numericFromEnglish,
+      );
+      const target: KeyHitTarget = {
+        id,
+        ...horizontalHitFrame(x, widths[index], index, row.length),
+        onPress: () => {
+          if (rowIndex === 3) {
+            if (index === 0) hitTargetActionsRef.current.switchToLetterLayer();
+            else if (index === 1) hitTargetActionsRef.current.pressSpace();
+            else hitTargetActionsRef.current.pressReturn();
+          } else hitTargetActionsRef.current.pressNativeNumericKey(label);
+        },
+      };
+      if (id === "numeric-backspace") {
+        target.onLongPress = () =>
+          hitTargetActionsRef.current.startRepeatingBackspace(id);
+        target.onLongPressEnd = () =>
+          hitTargetActionsRef.current.stopRepeatingBackspace();
+        target.longPressDuration = DELETE_LONG_PRESS_DURATION;
+        target.onSwipeLeft = () =>
+          hitTargetActionsRef.current.backspaceSwipeLeft();
+        target.onSwipeUp = () =>
+          hitTargetActionsRef.current.backspaceSwipeUp();
+        target.onSwipeDown = () =>
+          hitTargetActionsRef.current.backspaceSwipeDown();
+      } else if (id === "numeric-equal") {
+        target.onSwipeUp = () =>
+          hitTargetActionsRef.current.numericEqualSwipeUp();
+      } else if (id === "numeric-enter") {
+        target.onSwipeUp = () => hitTargetActionsRef.current.insertNewline();
+      } else if (id === "numeric-space") {
+        target.onLongPress = () => spaceCursorDragXRef.current.clear();
+        target.onLongPressEnd = () => spaceCursorDragXRef.current.clear();
+        target.onSwipeUp = canSpaceSwipeCandidate("2")
+          ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("2")
+          : undefined;
+        target.onSwipeDown = canSpaceSwipeCandidate("3")
+          ? () => hitTargetActionsRef.current.processSpaceSwipeCandidate("3")
+          : undefined;
+        target.onSwipeLeft = () =>
+          hitTargetActionsRef.current.moveCursorSafely(-1);
+        target.onSwipeRight = () =>
+          hitTargetActionsRef.current.moveCursorSafely(1);
+      }
+      x += widths[index] + KEY_SPACING;
+      return target;
+    });
+  }
+
+  const nativeNumericHitTargets = useMemo(
+    () => symbolLayer && !settings.useNumericNineKey
+      ? nativeNumericRows.map(nativeNumericRowHitTargets)
+      : [],
+    [
+      symbolLayer,
+      settings.useNumericNineKey,
+      nativeNumericRows,
+      metrics.width,
+      rimeComposing,
+      hasSecondCandidate,
+      hasThirdCandidate,
+    ],
   );
 
   const expandedPanelHeight = normalKeyboardBodyHeight;
@@ -3543,6 +3671,7 @@ function KeyboardContent(props: {
     insertNewline,
     switchToLetterLayer,
     pressNumericDigit,
+    pressNativeNumericKey,
     pressT9Digit,
     runT9PunctuationItem,
     pressT9Delimiter,
@@ -4328,7 +4457,114 @@ function KeyboardContent(props: {
             <Group>
               {cachedFunctionRow}
 
-              {symbolLayer
+              {symbolLayer && !settings.useNumericNineKey
+                ? (
+                  <VStack
+                    spacing={0}
+                    frame={{
+                      width: metrics.width,
+                      height: metrics.keyHeight * 4 + bodyRowSpacing * 3 +
+                        (settings.showFunctionRow ? bodyRowSpacing / 2 : 0),
+                    }}
+                  >
+                    {settings.showFunctionRow
+                      ? <VStack frame={{ height: bodyRowSpacing / 2 }} />
+                      : null}
+                    {nativeNumericRows.map((row, rowIndex) => {
+                      const widths = nativeNumericRowWidths(
+                        rowIndex,
+                        row.length,
+                      );
+                      const rowTouch = verticalTouchFrame(
+                        rowIndex,
+                        4,
+                        metrics.keyHeight,
+                        bodyRowSpacing,
+                      );
+                      return (
+                        <HStack
+                          key={`native-numeric-row-${rowIndex}`}
+                          spacing={0}
+                          frame={{
+                            width: metrics.width,
+                            height: rowTouch.touchHeight,
+                          }}
+                          contentShape="rect"
+                          zIndex={10 + rowIndex}
+                          {...(hitRowInput(
+                            `native-numeric-row-${rowIndex}`,
+                            nativeNumericHitTargets[rowIndex] ?? [],
+                          ) as any)}
+                        >
+                          {row.map((label, index) => {
+                            const id = nativeNumericKeyId(
+                              label,
+                              rowIndex,
+                              index,
+                              moreNumericSymbols,
+                              numericFromEnglish,
+                            );
+                            const image = label === "{delete}"
+                              ? "delete.left"
+                              : label === "{return}"
+                              ? "paperplane.fill"
+                              : label === " "
+                              ? "space"
+                              : undefined;
+                            const touchWidth = widths[index] +
+                              (index === 0 || index === row.length - 1
+                                ? KEY_SPACING / 2
+                                : KEY_SPACING);
+                            return (
+                              <KeyFace
+                                key={id}
+                                id={id}
+                                label={image ? undefined : label}
+                                image={image}
+                                palette={palette}
+                                width={widths[index]}
+                                height={metrics.keyHeight}
+                                touchWidth={touchWidth}
+                                touchHeight={rowTouch.touchHeight}
+                                visualOffsetX={index === 0
+                                  ? 0
+                                  : KEY_SPACING / 2}
+                                visualOffsetY={rowTouch.visualOffsetY}
+                                system={rowIndex === 3 ||
+                                  label === "{delete}"}
+                                passive
+                                active={isPressed(id)}
+                                labelFontSize={rowIndex === 0
+                                  ? 25
+                                  : rowIndex === 3 || label === "#+=" ||
+                                      label === "123" || label === "^_^"
+                                  ? 17
+                                  : 22}
+                                bottomRight={label === " " &&
+                                    settings.showWanxiangLabel
+                                  ? settings.spaceLabel
+                                  : undefined}
+                                popupLabel={rowIndex === 0
+                                  ? label
+                                  : undefined}
+                                showPopup={rowIndex === 0 &&
+                                  settings.showKeyPopups}
+                                onPress={() => rowIndex === 3
+                                  ? index === 0
+                                    ? switchToLetterLayer()
+                                    : index === 1
+                                    ? pressSpace()
+                                    : pressReturn()
+                                  : pressNativeNumericKey(label)}
+                              />
+                            );
+                          })}
+                        </HStack>
+                      );
+                    })}
+                  </VStack>
+                )
+                : symbolLayer
                 ? (
                   <VStack
                     spacing={0}
