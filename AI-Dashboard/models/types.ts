@@ -159,6 +159,10 @@ export interface QuotaSnapshot {
   accountIdentity?: string
   sourceCredentialFingerprint?: string
   region?: string
+  codexResetCards?: {
+    availableCount: number
+    expirations?: string[]
+  }
 }
 
 export type RefreshFailureCode =
@@ -183,6 +187,7 @@ export interface SubscriptionAccount {
   preferssynchronizableKeychain: boolean
   serverAddress?: string
   region?: string
+  widgetOrder?: number // 小组件合并与排序显示序号 (可选，从 1 起)
 }
 
 export type AccountQuotaState =
@@ -261,4 +266,6 @@ export interface DashboardSettings {
   prefersICloudKeychain: boolean
   groupByRouteCategory: boolean
   protectAccountIdentity: boolean
+  widgetPrivacyEnabled?: boolean
+  widgetRefreshIntervalMinutes?: number
 }

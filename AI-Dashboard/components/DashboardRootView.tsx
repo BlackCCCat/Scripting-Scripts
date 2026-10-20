@@ -13,6 +13,7 @@ import {
   TabView,
   Text,
   VStack,
+  Widget,
   useEffect,
   useMemo,
   useState,
@@ -86,11 +87,7 @@ function reorderSublistInMaster(
   if (moving.length === 0) return master
 
   const restSub = sublist.filter((_, idx) => !indices.includes(idx))
-  const removedBefore = indices.filter((i) => i < newOffset).length
-  const insertAt = Math.max(
-    0,
-    Math.min(restSub.length, newOffset - removedBefore)
-  )
+  const insertAt = Math.max(0, Math.min(restSub.length, newOffset))
   const reorderedSub = [...restSub]
   reorderedSub.splice(insertAt, 0, ...moving)
 
@@ -262,6 +259,11 @@ export function DashboardRootView() {
   const updateSettings = (next: DashboardSettings) => {
     setSettings(next)
     saveDashboardSettings(next)
+    try {
+      Widget.reloadAll()
+    } catch {
+      // 忽略在非小组件环境的报错
+    }
   }
 
   const refreshSingleAccount = async (account: SubscriptionAccount) => {
@@ -429,29 +431,27 @@ export function DashboardRootView() {
         const next = [...prev]
         const moving = indices.map((i) => next[i]).filter(Boolean)
         const rest = next.filter((_, i) => !indices.includes(i))
-        const removedBefore = indices.filter((i) => i < newOffset).length
-        const insertAt = Math.max(
-          0,
-          Math.min(rest.length, newOffset - removedBefore)
-        )
+        const insertAt = Math.max(0, Math.min(rest.length, newOffset))
         rest.splice(insertAt, 0, ...moving)
         return rest
       })
       HapticFeedback.lightImpact()
+      try {
+        Widget.reloadAll()
+      } catch {}
       return
     }
     const next = [...realAccounts]
     const moving = indices.map((i) => next[i]).filter(Boolean)
     const rest = next.filter((_, i) => !indices.includes(i))
-    const removedBefore = indices.filter((i) => i < newOffset).length
-    const insertAt = Math.max(
-      0,
-      Math.min(rest.length, newOffset - removedBefore)
-    )
+    const insertAt = Math.max(0, Math.min(rest.length, newOffset))
     rest.splice(insertAt, 0, ...moving)
     setRealAccounts(next)
     saveStoredAccounts(next)
     HapticFeedback.lightImpact()
+    try {
+      Widget.reloadAll()
+    } catch {}
   }
 
   const handleAccountCreated = (
@@ -621,6 +621,18 @@ export function DashboardRootView() {
                 content: (
                   <AccountOrderEditSheet
                     accounts={currentAccounts}
+                    onReorderAccounts={(reordered) => {
+                      if (settings.isDemoMode) {
+                        setDemoAccounts(reordered)
+                      } else {
+                        setRealAccounts(reordered)
+                        saveStoredAccounts(reordered)
+                      }
+                      HapticFeedback.lightImpact()
+                      try {
+                        Widget.reloadAll()
+                      } catch {}
+                    }}
                     onMoveAccounts={handleMoveAccountsInEdit}
                     onDeleteAccount={handleDeleteAccount}
                     onDismiss={() => setIsEditSheetPresented(false)}

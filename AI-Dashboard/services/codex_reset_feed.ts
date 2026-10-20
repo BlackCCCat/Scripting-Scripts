@@ -34,7 +34,8 @@ export interface CodexResetStatus {
 }
 
 const FEED_URL = "https://codex-resets.com/api/v1/status"
-const CACHE_STORAGE_KEY = "ai-dashboard:codex-resets:cached-status"
+export const CODEX_RESET_CACHE_KEY = "ai-dashboard:codex-resets:cached-status"
+const CACHE_STORAGE_KEY = CODEX_RESET_CACHE_KEY
 const CACHE_ETAG_KEY = "ai-dashboard:codex-resets:cached-etag"
 const CACHE_EXPIRY_MS = 5 * 60 * 1000 // 5 分钟公开缓存限制
 

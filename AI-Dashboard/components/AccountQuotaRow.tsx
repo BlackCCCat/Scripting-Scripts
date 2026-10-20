@@ -165,14 +165,29 @@ export function AccountQuotaRow(props: {
             </Text>
           </HStack>
 
-          <Text
-            font="caption"
-            fontWeight="medium"
-            foregroundStyle={health.color}
-            lineLimit={1}
-          >
-            {`● ${health.label}`}
-          </Text>
+          <HStack alignment="center" spacing={6}>
+            <Text
+              font="caption"
+              fontWeight="medium"
+              foregroundStyle={health.color}
+              lineLimit={1}
+            >
+              {`● ${health.label}`}
+            </Text>
+
+            {snapshot?.codexResetCards?.availableCount !== undefined ? (
+              <Text
+                font="caption2"
+                fontWeight="bold"
+                foregroundStyle="systemIndigo"
+                padding={{ horizontal: 6, vertical: 1 }}
+                background={<Capsule fill="quaternarySystemFill" />}
+                lineLimit={1}
+              >
+                {`🎟️ 重置卡 ${snapshot.codexResetCards.availableCount} 次`}
+              </Text>
+            ) : null}
+          </HStack>
         </VStack>
 
         <Spacer />

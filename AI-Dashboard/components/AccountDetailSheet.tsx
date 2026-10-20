@@ -7,7 +7,6 @@ import {
   NavigationStack,
   ProgressView,
   Section,
-  SecureField,
   Spacer,
   Text,
   TextField,
@@ -134,6 +133,9 @@ export function AccountDetailSheet(props: {
     (isDemoMode && isApiKeyAccount ? getDemoApiKey(account.provider) : "")
 
   const [displayName, setDisplayName] = useState<string>(account.displayName)
+  const [widgetOrder, setWidgetOrder] = useState<string>(
+    account.widgetOrder !== undefined ? String(account.widgetOrder) : ""
+  )
   const [isEnabled, setIsEnabled] = useState<boolean>(account.isEnabled)
   const [serverAddress, setServerAddress] = useState<string>(
     account.serverAddress ?? existingEnvelope?.metadata.serverAddress ?? ""
@@ -152,6 +154,7 @@ export function AccountDetailSheet(props: {
   // 当切换查看不同账号时，立即同步表单字段，防止沿用上一个查看过的账号名称（如 Cursor）
   useEffect(() => {
     setDisplayName(account.displayName)
+    setWidgetOrder(account.widgetOrder !== undefined ? String(account.widgetOrder) : "")
     setIsEnabled(account.isEnabled)
     setServerAddress(
       account.serverAddress ?? existingEnvelope?.metadata.serverAddress ?? ""
@@ -161,7 +164,7 @@ export function AccountDetailSheet(props: {
     setIsDeleteConfirmPresented(false)
     setIsApiKeyRevealed(false)
     setIsToastPresented(false)
-  }, [account.id, account.displayName, account.isEnabled, account.serverAddress])
+  }, [account.id, account.displayName, account.widgetOrder, account.isEnabled, account.serverAddress])
 
   const handleCopyApiKey = async () => {
     if (!apiKeyToDisplay) return
@@ -207,6 +210,7 @@ export function AccountDetailSheet(props: {
         )
       }
 
+      const parsedOrder = widgetOrder.trim() ? parseInt(widgetOrder.trim(), 10) : undefined
       const updatedAccount: SubscriptionAccount = {
         ...account,
         displayName: displayName.trim() || meta.displayName,
@@ -214,6 +218,7 @@ export function AccountDetailSheet(props: {
         serverAddress: meta.requiresGatewayAddress
           ? serverAddress.trim()
           : account.serverAddress,
+        widgetOrder: parsedOrder !== undefined && !isNaN(parsedOrder) && parsedOrder > 0 ? parsedOrder : undefined,
       }
 
       HapticFeedback.notificationSuccess()
@@ -350,7 +355,16 @@ export function AccountDetailSheet(props: {
             title="显示名称"
             value={displayName}
             prompt={meta.displayName}
+            keyboardType="default"
             onChanged={setDisplayName}
+          />
+
+          <TextField
+            title="小组件序号"
+            value={widgetOrder}
+            prompt="可选排序数字 (用于同供应商合并展示，如 1, 2...)"
+            keyboardType="numberPad"
+            onChanged={setWidgetOrder}
           />
 
           <Toggle
@@ -515,10 +529,13 @@ export function AccountDetailSheet(props: {
               </Button>
             ) : null}
 
-            <SecureField
+            <TextField
               title={meta.credentialLabel}
               value={newCredentialInput}
               prompt="输入新密钥或令牌以覆盖旧凭证"
+              keyboardType="default"
+              autocorrectionDisabled={true}
+              textInputAutocapitalization="never"
               onChanged={setNewCredentialInput}
             />
 

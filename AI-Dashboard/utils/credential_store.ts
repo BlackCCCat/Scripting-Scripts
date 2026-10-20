@@ -17,6 +17,8 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   prefersICloudKeychain: false,
   groupByRouteCategory: false,
   protectAccountIdentity: false,
+  widgetPrivacyEnabled: true,
+  widgetRefreshIntervalMinutes: 30,
 }
 
 export function sha256Hex(raw: string): string {
@@ -345,6 +347,10 @@ export function loadDashboardSettings(): DashboardSettings {
       saved.groupByRouteCategory ?? DEFAULT_SETTINGS.groupByRouteCategory,
     protectAccountIdentity:
       saved.protectAccountIdentity ?? DEFAULT_SETTINGS.protectAccountIdentity,
+    widgetPrivacyEnabled:
+      saved.widgetPrivacyEnabled ?? DEFAULT_SETTINGS.widgetPrivacyEnabled,
+    widgetRefreshIntervalMinutes:
+      saved.widgetRefreshIntervalMinutes ?? DEFAULT_SETTINGS.widgetRefreshIntervalMinutes,
   }
 }
 

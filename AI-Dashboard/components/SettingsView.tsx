@@ -5,15 +5,18 @@ import {
   Image,
   LabeledContent,
   NavigationStack,
+  Picker,
   Section,
   Spacer,
   Text,
   Toggle,
   VStack,
+  Widget,
   useState,
 } from "scripting"
 import { DashboardSettings } from "../models/types"
 import { PROVIDERS_CATALOG } from "../utils/providers_catalog"
+import { WidgetPreviewSheet } from "../widgets"
 
 
 export function SettingsView(props: {
@@ -39,6 +42,8 @@ export function SettingsView(props: {
 
   const [isClearCacheConfirmPresented, setIsClearCacheConfirmPresented] =
     useState<boolean>(false)
+  const [isWidgetPreviewPresented, setIsWidgetPreviewPresented] =
+    useState<boolean>(false)
 
   const handleOpenTokenPulseRepo = async () => {
     await Safari.present("https://github.com/hqwuzhaoyi/TokenPulse", false)
@@ -52,6 +57,15 @@ export function SettingsView(props: {
     <NavigationStack>
       <Form
         navigationTitle="设置"
+        sheet={{
+          isPresented: isWidgetPreviewPresented,
+          onChanged: setIsWidgetPreviewPresented,
+          content: (
+            <WidgetPreviewSheet
+              onDismiss={() => setIsWidgetPreviewPresented(false)}
+            />
+          ),
+        }}
         toolbar={{
           topBarLeading: (
             <Button
@@ -136,12 +150,19 @@ export function SettingsView(props: {
           header={<Text>隐私与账号保护</Text>}
           footer={
             <Text>
-              开启后，看板卡片上的邮箱、手机号或账号名称将自动遮罩显示（如 138****5678），点击卡片底部的账号信息可随时切换明文与遮罩。
+              开启小组件账号隐私保护后，当小组件中显示同一供应商的多个账号时，将自动对邮箱、用户名等进行遮罩（如 d***r@gmail.com）。主看板开启账号保护显示后，卡片上的账号名称也将自动遮罩。
             </Text>
           }
         >
           <Toggle
-            title="账号保护显示"
+            title="小组件账号隐私保护"
+            value={settings.widgetPrivacyEnabled ?? true}
+            onChanged={(val) =>
+              onUpdateSettings({ ...settings, widgetPrivacyEnabled: val })
+            }
+          />
+          <Toggle
+            title="主看板账号保护显示"
             value={settings.protectAccountIdentity}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, protectAccountIdentity: val })
@@ -177,6 +198,40 @@ export function SettingsView(props: {
               action={onOpenChangelog}
             />
           ) : null}
+        </Section>
+
+        <Section
+          header={<Text>桌面小组件</Text>}
+          footer={
+            <Text>
+              原生适配 iOS/iPadOS 桌面小、中、大、特大四种尺寸。小组件受 iOS WidgetKit 能源与网络预算调度，设置较短间隔（如 15/30 分钟）可加快后台轮询；应用内数据变动或下拉刷新时会实时同步推送至小组件。
+            </Text>
+          }
+        >
+          <Picker
+            title="小组件刷新间隔"
+            value={String(settings.widgetRefreshIntervalMinutes ?? 30)}
+            onChanged={(val: string) => {
+              const minutes = Number.parseInt(val, 10) || 30
+              onUpdateSettings({
+                ...settings,
+                widgetRefreshIntervalMinutes: minutes,
+              })
+              void Widget.reloadAll()
+            }}
+          >
+            <Text tag="15">15 分钟</Text>
+            <Text tag="30">30 分钟 (默认推荐)</Text>
+            <Text tag="60">1 小时</Text>
+            <Text tag="120">2 小时</Text>
+            <Text tag="360">6 小时</Text>
+          </Picker>
+
+          <Button
+            title="预览桌面小组件样式 (小/中/大/特大)"
+            systemImage="rectangle.3.group"
+            action={() => setIsWidgetPreviewPresented(true)}
+          />
         </Section>
 
         <Section header={<Text>缓存维护</Text>}>

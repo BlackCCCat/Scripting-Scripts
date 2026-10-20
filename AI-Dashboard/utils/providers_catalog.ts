@@ -21,7 +21,7 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
   },
   {
     id: "miniMax",
-    displayName: "MiniMax (稀宇科技)",
+    displayName: "MiniMax",
     aliases: [
       "minimax",
       "海螺",
@@ -149,7 +149,7 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
   },
   {
     id: "openAIAPI",
-    displayName: "OpenAI API（Legacy 余额）",
+    displayName: "OpenAI API",
     aliases: ["openai", "openai api", "gpt api"],
     routeCategory: "direct_api",
     credentialKind: "apiKey",
@@ -758,7 +758,7 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
   },
   {
     id: "qoder",
-    displayName: "Qoder (百度文心 / 国际)",
+    displayName: "Qoder",
     aliases: [
       "qoder",
       "qoder cn",
@@ -1023,7 +1023,7 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
   },
   {
     id: "trae",
-    displayName: "TRAE (字节跳动)",
+    displayName: "TRAE",
     aliases: [
       "trae",
       "trae.cn",

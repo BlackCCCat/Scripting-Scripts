@@ -12,6 +12,7 @@ const DEMO_DEFAULT_PROVIDERS: {
   displayName: string
   serverAddress?: string
   region?: string
+  widgetOrder?: number
 }[] = [
   {
     id: "demo-deepseek-01",
@@ -66,6 +67,42 @@ const DEMO_DEFAULT_PROVIDERS: {
     provider: "workBuddy",
     displayName: "WorkBuddy",
     region: "cn",
+    widgetOrder: 1,
+  },
+  {
+    id: "demo-workbuddy-02",
+    provider: "workBuddy",
+    displayName: "WorkBuddy",
+    region: "cn",
+    widgetOrder: 2,
+  },
+  {
+    id: "demo-workbuddy-03",
+    provider: "workBuddy",
+    displayName: "WorkBuddy",
+    region: "cn",
+    widgetOrder: 3,
+  },
+  {
+    id: "demo-workbuddy-04",
+    provider: "workBuddy",
+    displayName: "WorkBuddy",
+    region: "cn",
+    widgetOrder: 4,
+  },
+  {
+    id: "demo-workbuddy-05",
+    provider: "workBuddy",
+    displayName: "WorkBuddy",
+    region: "cn",
+    widgetOrder: 5,
+  },
+  {
+    id: "demo-workbuddy-06",
+    provider: "workBuddy",
+    displayName: "WorkBuddy",
+    region: "cn",
+    widgetOrder: 6,
   },
 ]
 
@@ -82,6 +119,7 @@ export function createDefaultDemoAccounts(): SubscriptionAccount[] {
     preferssynchronizableKeychain: false,
     serverAddress: item.serverAddress,
     region: item.region,
+    widgetOrder: item.widgetOrder,
   }))
 }
 
@@ -100,7 +138,8 @@ export function generateDemoSnapshot(
     provider,
     in3Hours,
     in5Days,
-    in22Days
+    in22Days,
+    accountID
   )
 
   return {
@@ -111,6 +150,7 @@ export function generateDemoSnapshot(
     accountIdentity: specificWindows.identity,
     sourceCredentialFingerprint: `demo-fp-${provider}`,
     region,
+    codexResetCards: specificWindows.codexResetCards,
   }
 }
 
@@ -118,11 +158,13 @@ function getProviderDemoWindows(
   provider: ProviderId,
   in3Hours: string,
   in5Days: string,
-  in22Days: string
+  in22Days: string,
+  accountId?: string
 ): {
   planName?: string
   identity?: string
   windows: QuotaWindow[]
+  codexResetCards?: { availableCount: number; expirations?: string[] }
 } {
   switch (provider) {
     case "deepSeek":
@@ -161,6 +203,9 @@ function getProviderDemoWindows(
       return {
         planName: "Pro",
         identity: "dev@example.com",
+        codexResetCards: {
+          availableCount: 2,
+        },
         windows: [
           {
             id: "codex.5h",
@@ -403,28 +448,53 @@ function getProviderDemoWindows(
         ],
       }
 
-    case "workBuddy":
+    case "workBuddy": {
+      const idStr = accountId || ""
+      const idx = idStr.endsWith("-02")
+        ? 2
+        : idStr.endsWith("-03")
+          ? 3
+          : idStr.endsWith("-04")
+            ? 4
+            : idStr.endsWith("-05")
+              ? 5
+              : idStr.endsWith("-06")
+                ? 6
+                : 1
+      const identities = [
+        "15712345678",
+        "谁说我是小警长",
+        "team_wb_user",
+        "889988@gmail.com",
+        "DevOps_Master",
+        "13900008888",
+      ]
+      const usedPcts = [0, 0, 0, 36, 18, 85]
+      const currentIdentity = identities[idx - 1] || "wb_user_cn"
+      const currentUsed = usedPcts[idx - 1] ?? 0
+
       return {
         planName: "Free",
-        identity: "wb_user_cn",
+        identity: currentIdentity,
         windows: [
           {
-            id: "workbuddy.credits.total",
-            name: "WorkBuddy 资源包总额度",
+            id: `workbuddy.credits.${idStr || "01"}`,
+            name: "总配额",
             period: "monthly",
             unit: "积分",
-            usedPercentage: 68.5,
-            remainingCount: 315,
+            usedPercentage: currentUsed,
+            remainingCount: 1000 - currentUsed * 10,
             totalCount: 1000,
             exactCounts: {
-              used: 685,
-              remaining: 315,
+              used: currentUsed * 10,
+              remaining: 1000 - currentUsed * 10,
               total: 1000,
             },
             resetsAt: in22Days,
           },
         ],
       }
+    }
 
     case "antigravity":
       return {

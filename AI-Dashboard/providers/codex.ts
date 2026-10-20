@@ -71,6 +71,84 @@ export const queryCodexQuota: ProviderQuotaHandler = async (
     throw new QuotaQueryError("noQuotaWindows")
   }
 
+  // 解析可用重置卡/充值卡数据 (Reset Credits)
+  let resetCardsCount: number | undefined
+  let resetCardExpirations: string[] = []
+
+  // 1. 优先从 usage 响应内置字段中提取
+  const embeddedReset =
+    (json.rate_limit_reset_credits as Record<string, unknown> | undefined) ||
+    (json.rateLimitResetCredits as Record<string, unknown> | undefined)
+
+  if (embeddedReset) {
+    const countVal = toFiniteNumber(
+      embeddedReset.available_count ?? embeddedReset.availableCount
+    )
+    if (countVal !== undefined && countVal !== null) {
+      resetCardsCount = Math.max(0, Math.floor(countVal))
+    }
+  }
+
+  // 2. 主动尝试请求独立 rate-limit-reset-credits 端点以获取精准可用卡数与到期时间
+  try {
+    const resetCreditsHeaders: Record<string, string> = {
+      Authorization: `Bearer ${envelope.accessToken.trim()}`,
+      Accept: "application/json",
+      "User-Agent":
+        "Codex Desktop/0.147.0-alpha.6.5 (Mac OS 27.0.0; arm64) unknown (Codex Desktop; 26.803.61601)",
+      originator: "Codex Desktop",
+    }
+    if (chatgptAccountId) {
+      resetCreditsHeaders["ChatGPT-Account-Id"] = String(chatgptAccountId)
+    }
+
+    const resetResp = await fetch(
+      "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+      {
+        headers: resetCreditsHeaders,
+        timeout: 4,
+        handleRedirect: async () => null,
+      }
+    )
+    if (resetResp.ok) {
+      const resetPayload = (await resetResp.json()) as Record<string, unknown>
+      const container =
+        (resetPayload.rate_limit_reset_credits as Record<string, unknown> | undefined) ||
+        (resetPayload.rateLimitResetCredits as Record<string, unknown> | undefined) ||
+        resetPayload
+
+      const countVal = toFiniteNumber(
+        container.available_count ?? container.availableCount
+      )
+      if (countVal !== undefined && countVal !== null) {
+        resetCardsCount = Math.max(0, Math.floor(countVal))
+      }
+
+      const rawItems = (
+        container.credits ||
+        container.items ||
+        container.reset_credits ||
+        container.resetCredits
+      ) as unknown[] | undefined
+
+      if (Array.isArray(rawItems)) {
+        resetCardExpirations = rawItems
+          .map((item) => {
+            const obj = item as Record<string, unknown>
+            const exp =
+              obj.expires_at ??
+              obj.expiresAt ??
+              obj.expiration_at ??
+              obj.expirationAt
+            return normalizeEpochDate(exp)
+          })
+          .filter((item): item is string => Boolean(item))
+      }
+    }
+  } catch {
+    // 忽略重置卡端点非致命网络异常
+  }
+
   let accountIdentity: string | undefined =
     envelope.metadata.email ||
     envelope.metadata.accountEmail ||
@@ -103,5 +181,12 @@ export const queryCodexQuota: ProviderQuotaHandler = async (
         : envelope.metadata.planType || "Pro",
     accountIdentity,
     windows,
+    codexResetCards:
+      resetCardsCount !== undefined
+        ? {
+            availableCount: resetCardsCount,
+            expirations: resetCardExpirations,
+          }
+        : undefined,
   }
 }
