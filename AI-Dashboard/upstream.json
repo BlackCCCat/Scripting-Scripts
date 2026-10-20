@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "project": "AI Dashboard",
+  "version": "1.1.0",
+  "description": "上游开源项目追踪标记与版本对齐基线",
+  "lastCheckedAt": "2026-10-20T09:55:00Z",
+  "upstreams": {
+    "tokenPulse": {
+      "name": "TokenPulse",
+      "repo": "hqwuzhaoyi/TokenPulse",
+      "url": "https://github.com/hqwuzhaoyi/TokenPulse",
+      "pinnedCommit": "46ea63dec13192627ea910b0e3820bd23af864eb",
+      "pinnedDate": "2026-10-17T11:04:49Z",
+      "pinnedMessage": "Merge pull request #9 from hqwuzhaoyi/codex/reset-preview-widgets-notifications - feat: 小组件展示 Codex 重置预告并精简卡片与通知",
+      "trackedModules": [
+        "TokenPulse/Providers/* (78 家直连网络 AI 平台接口协议与端点定义，已移除无网络请求的本地 IDE 静态导出)",
+        "TokenPulse/Providers/CodexResetFeed.swift (Codex 重置预告接口与轮询策略)",
+        "TokenPulse/Domain/CodexResetStatus.swift (重置预告/预测数据模型与文本解析)",
+        "TokenPulse/Providers/WebSessionContainer.swift (Web 会话 Cookie 白名单与安全规则)"
+      ]
+    },
+    "antigravityManager": {
+      "name": "Antigravity-Manager",
+      "repo": "lbjlaq/Antigravity-Manager",
+      "url": "https://github.com/lbjlaq/Antigravity-Manager",
+      "pinnedCommit": "9f8e4f24d61b33fa80b8078d104c942752a5fa0b",
+      "pinnedTag": "v4.9.8",
+      "pinnedDate": "2026-10-17T13:44:53Z",
+      "pinnedMessage": "chore(release): bump version to 4.9.8 and update changelog",
+      "trackedModules": [
+        "Antigravity-Manager 多窗口配额提取模型",
+        "Gemini 4 Argon 独立模型解析算法",
+        "Google Antigravity 客户端直连会话维护协议"
+      ]
+    }
+  }
+}

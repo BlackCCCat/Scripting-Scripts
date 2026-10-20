@@ -72,7 +72,10 @@ Telegram贴纸下载，需bot token，支持动图解析转换为GIF保存到相
 ## [FileStore](./FileStore)
 功能齐全的文件管理脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scripting/FileStore)
 
-**Codex完成几乎所有代码**
+## [AI-Dashboard](./AI-Dashboard)
+AI用量看板 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/AI-Dashboard)
+
+**本项目由Codex、Gemini完成**
 
 
 # 感谢
@@ -90,3 +93,4 @@ Telegram贴纸下载，需bot token，支持动图解析转换为GIF保存到相
 - [WLOC-Helper](./WLOC-Helper) 修改自`scripting`群组中`@Waa404`的脚本，修改定位功能基于 [wloc项目](https://github.com/Yu9191/wloc) 实现
 - [Memory-Days](./Memory-Days) 人物及纪念日添加的操作逻辑复用`scripting`群组中`@Waa404`的脚本，重新设计的UI和小组件
 - [FileStore](./FileStore) 原版为 [Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore) 脚本，在此脚本基础上进行了二次修改
+- [AI-Dashboard](./AI-Dashboard) 参考自项目[TokenPulse](https://github.com/hqwuzhaoyi/TokenPulse)，[Antigravity Manager](https://github.com/lbjlaq/Antigravity-Manager)

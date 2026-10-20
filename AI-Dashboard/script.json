@@ -1,0 +1,27 @@
+{
+  "name": "AI Dashboard",
+  "icon": "chart.bar.doc.horizontal.fill",
+  "color": "rgba(255, 149, 0, 1)",
+  "description": "多平台 AI 订阅额度与 API 钱包余额直连监控看板，覆盖 5 大认证路径与 78 家 AI 供应商",
+  "runInApp": true,
+  "version": "1.1.0",
+  "remoteResource": {
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/AI-Dashboard",
+    "hash": "",
+    "autoUpdateInterval": 86400
+  },
+  "author": {
+    "name": "BlackCCCat",
+    "homepage": "https://github.com/BlackCCCat",
+    "email": null
+  },
+  "contributors": [],
+  "localizedNames": {
+    "zh": "AI 额度看板",
+    "en": "AI Dashboard"
+  },
+  "localizedDescriptions": {
+    "zh": "纯客户端直连查询 78 家 AI 供应商的订阅配额与 API 钱包余额",
+    "en": "Client-side quota and wallet balance dashboard for 78 AI providers"
+  }
+}
