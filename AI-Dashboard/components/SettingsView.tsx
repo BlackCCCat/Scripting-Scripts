@@ -17,6 +17,7 @@ import {
 import { DashboardSettings } from "../models/types"
 import { PROVIDERS_CATALOG } from "../utils/providers_catalog"
 import { WidgetPreviewSheet } from "../widgets"
+import { WidgetGuideSheet } from "./WidgetGuideSheet"
 
 
 export function SettingsView(props: {
@@ -44,6 +45,8 @@ export function SettingsView(props: {
     useState<boolean>(false)
   const [isWidgetPreviewPresented, setIsWidgetPreviewPresented] =
     useState<boolean>(false)
+  const [isWidgetGuidePresented, setIsWidgetGuidePresented] =
+    useState<boolean>(false)
 
   const handleOpenTokenPulseRepo = async () => {
     await Safari.present("https://github.com/hqwuzhaoyi/TokenPulse", false)
@@ -57,15 +60,26 @@ export function SettingsView(props: {
     <NavigationStack>
       <Form
         navigationTitle="设置"
-        sheet={{
-          isPresented: isWidgetPreviewPresented,
-          onChanged: setIsWidgetPreviewPresented,
-          content: (
-            <WidgetPreviewSheet
-              onDismiss={() => setIsWidgetPreviewPresented(false)}
-            />
-          ),
-        }}
+        sheet={[
+          {
+            isPresented: isWidgetPreviewPresented,
+            onChanged: setIsWidgetPreviewPresented,
+            content: (
+              <WidgetPreviewSheet
+                onDismiss={() => setIsWidgetPreviewPresented(false)}
+              />
+            ),
+          },
+          {
+            isPresented: isWidgetGuidePresented,
+            onChanged: setIsWidgetGuidePresented,
+            content: (
+              <WidgetGuideSheet
+                onDismiss={() => setIsWidgetGuidePresented(false)}
+              />
+            ),
+          },
+        ]}
         toolbar={{
           topBarLeading: (
             <Button
@@ -226,6 +240,12 @@ export function SettingsView(props: {
             <Text tag="120">2 小时</Text>
             <Text tag="360">6 小时</Text>
           </Picker>
+
+          <Button
+            title="小组件使用说明"
+            systemImage="questionmark.circle"
+            action={() => setIsWidgetGuidePresented(true)}
+          />
 
           <Button
             title="预览桌面小组件样式 (小/中/大/特大)"

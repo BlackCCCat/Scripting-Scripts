@@ -16,6 +16,7 @@ import {
   Widget,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "scripting"
 import {
@@ -116,9 +117,9 @@ export function DashboardRootView() {
   const [demoAccounts, setDemoAccounts] = useState<SubscriptionAccount[]>(() =>
     createDefaultDemoAccounts()
   )
-  const [cachedSnapshots, setCachedSnapshots] = useState<
-    Record<string, QuotaSnapshot>
-  >(() => loadStoredSnapshots())
+  const cachedSnapshotsRef = useRef<Record<string, QuotaSnapshot>>(
+    loadStoredSnapshots()
+  )
 
   const [accountStates, setAccountStates] = useState<
     Record<string, AccountQuotaState>
@@ -134,22 +135,7 @@ export function DashboardRootView() {
     for (const acc of loadStoredAccounts()) {
       const snap = storedSnaps[acc.id]
       if (snap) {
-        const env = loadEnvelopeFromKeychain(
-          acc.credentialKeychainKey,
-          acc.preferssynchronizableKeychain
-        )
-        const currentFp = env
-          ? env.metadata.sourceCredentialFingerprint ||
-            computeCredentialFingerprint(env)
-          : undefined
-        // 核对 SHA-256 指纹：仅当凭证未变更时复用缓存快照
-        if (
-          !currentFp ||
-          !snap.sourceCredentialFingerprint ||
-          snap.sourceCredentialFingerprint === currentFp
-        ) {
-          initial[acc.id] = { type: "loaded", snapshot: snap }
-        }
+        initial[acc.id] = { type: "loaded", snapshot: snap }
       }
     }
     return initial
@@ -275,7 +261,7 @@ export function DashboardRootView() {
           ? prevState.previous
           : prevState?.type === "failed"
             ? prevState.previous
-            : cachedSnapshots[account.id]
+            : cachedSnapshotsRef.current[account.id]
 
     setAccountStates((prev) => ({
       ...prev,
@@ -320,15 +306,18 @@ export function DashboardRootView() {
           account.preferssynchronizableKeychain
         )
       }
-      setCachedSnapshots((prev) => {
-        const next = { ...prev, [account.id]: result.snapshot }
-        saveStoredSnapshots(next)
-        return next
-      })
+      cachedSnapshotsRef.current = {
+        ...cachedSnapshotsRef.current,
+        [account.id]: result.snapshot,
+      }
+      saveStoredSnapshots(cachedSnapshotsRef.current)
       setAccountStates((prev) => ({
         ...prev,
         [account.id]: { type: "loaded", snapshot: result.snapshot },
       }))
+      try {
+        Widget.reloadAll()
+      } catch {}
     } catch (err) {
       const code =
         err instanceof QuotaQueryError ? err.code : "network"
@@ -350,30 +339,156 @@ export function DashboardRootView() {
     }
   }
 
-  const refreshAllAccounts = async () => {
+  // 全部账号刷新（支持手动操作与启动时静默无感拉取）
+  const refreshAllAccounts = async (options?: { isManual?: boolean }) => {
+    const isManual = options?.isManual ?? false
     if (isRefreshingAll) return
     const enabledList = currentAccounts.filter((a) => a.isEnabled)
     if (enabledList.length === 0) return
-    setIsRefreshingAll(true)
+
+    if (isManual) {
+      setIsRefreshingAll(true)
+    }
+
     try {
       if (currentAccounts.some((a) => a.provider === "codex")) {
         void fetchCodexResetStatus(true).then((st) => {
           if (st) setCodexResetStatus(st)
         })
       }
+
+      if (settings.isDemoMode) {
+        setAccountStates((prev) => {
+          const next = { ...prev }
+          for (const acc of enabledList) {
+            next[acc.id] = {
+              type: "loaded",
+              snapshot: generateDemoSnapshot(acc.id, acc.provider, acc.region),
+            }
+          }
+          return next
+        })
+        if (isManual) {
+          HapticFeedback.lightImpact()
+        }
+        return
+      }
+
+      // 仅在用户手动触发时设置各卡片为 loading 状态；启动自动刷新保持现有卡片稳定显示，绝不闪烁或重置视图
+      if (isManual) {
+        setAccountStates((prev) => {
+          const next = { ...prev }
+          for (const acc of enabledList) {
+            const prevState = prev[acc.id]
+            const prevSnapshot =
+              prevState?.type === "loaded"
+                ? prevState.snapshot
+                : prevState?.type === "loading"
+                  ? prevState.previous
+                  : prevState?.type === "failed"
+                    ? prevState.previous
+                    : cachedSnapshotsRef.current[acc.id]
+            next[acc.id] = { type: "loading", previous: prevSnapshot }
+          }
+          return next
+        })
+      }
+
+      const updatedSnapshots: Record<string, QuotaSnapshot> = {}
+      const stateUpdates: Record<string, AccountQuotaState> = {}
+
       await Promise.allSettled(
-        enabledList.map((acc) => refreshSingleAccount(acc))
+        enabledList.map(async (acc) => {
+          const envelope = loadEnvelopeFromKeychain(
+            acc.credentialKeychainKey,
+            acc.preferssynchronizableKeychain
+          )
+          const fallbackSnap =
+            cachedSnapshotsRef.current[acc.id] ??
+            (accountStates[acc.id]?.type === "loaded"
+              ? (accountStates[acc.id] as { snapshot: QuotaSnapshot }).snapshot
+              : undefined)
+
+          if (!envelope) {
+            stateUpdates[acc.id] = {
+              type: "failed",
+              failure: "missingCredential",
+              previous: fallbackSnap,
+            }
+            return
+          }
+
+          try {
+            const result = await queryProviderQuota(acc.id, envelope)
+            if (result.updatedCredential) {
+              saveEnvelopeToKeychain(
+                acc.credentialKeychainKey,
+                result.updatedCredential,
+                acc.preferssynchronizableKeychain
+              )
+            }
+            updatedSnapshots[acc.id] = result.snapshot
+            stateUpdates[acc.id] = {
+              type: "loaded",
+              snapshot: result.snapshot,
+            }
+          } catch (err) {
+            const code =
+              err instanceof QuotaQueryError ? err.code : "network"
+            const detail =
+              err instanceof QuotaQueryError
+                ? err.detail
+                : err instanceof Error
+                  ? err.message
+                  : undefined
+
+            stateUpdates[acc.id] = {
+              type: "failed",
+              failure: code,
+              detail,
+              previous: fallbackSnap,
+            }
+          }
+        })
       )
-      HapticFeedback.lightImpact()
+
+      // 批量单次落盘快照，消除逐个账号写入带来的数十次磁盘 I/O
+      if (Object.keys(updatedSnapshots).length > 0) {
+        cachedSnapshotsRef.current = {
+          ...cachedSnapshotsRef.current,
+          ...updatedSnapshots,
+        }
+        saveStoredSnapshots(cachedSnapshotsRef.current)
+      }
+
+      // 批量单次更新账号状态，避免列表反复重渲染引发页面重置与滚动归零
+      setAccountStates((prev) => ({
+        ...prev,
+        ...stateUpdates,
+      }))
+
+      try {
+        Widget.reloadAll()
+      } catch {}
+
+      if (isManual) {
+        HapticFeedback.lightImpact()
+      }
     } finally {
-      setIsRefreshingAll(false)
+      if (isManual) {
+        setIsRefreshingAll(false)
+      }
     }
   }
 
-  // 首次进入真实模式且开启了自动刷新时触发
+  // 启动应用时自动刷新已启用账号（静默后台拉取，不触发整页重置与震动）
+  const hasAutoRefreshedOnLaunchRef = useRef<boolean>(false)
   useEffect(() => {
     if (!settings.isDemoMode && settings.autoRefreshOnLaunch && realAccounts.length > 0) {
-      refreshAllAccounts()
+      if (!hasAutoRefreshedOnLaunchRef.current) {
+        hasAutoRefreshedOnLaunchRef.current = true
+        void refreshAllAccounts({ isManual: false })
+      }
     }
   }, [settings.isDemoMode])
 
@@ -393,12 +508,10 @@ export function DashboardRootView() {
     const nextAccounts = realAccounts.filter((a) => a.id !== accountId)
     setRealAccounts(nextAccounts)
     saveStoredAccounts(nextAccounts)
-    setCachedSnapshots((prev) => {
-      const copy = { ...prev }
-      delete copy[accountId]
-      saveStoredSnapshots(copy)
-      return copy
-    })
+    const copy = { ...cachedSnapshotsRef.current }
+    delete copy[accountId]
+    cachedSnapshotsRef.current = copy
+    saveStoredSnapshots(copy)
     HapticFeedback.lightImpact()
   }
 
@@ -582,7 +695,7 @@ export function DashboardRootView() {
               onChanged: setSearchQuery,
               prompt: "筛选账号名称或 AI 供应商",
             }}
-            refreshable={refreshAllAccounts}
+            refreshable={() => refreshAllAccounts({ isManual: true })}
             toolbar={{
               topBarLeading: (
                 <HStack spacing={12}>
@@ -604,7 +717,7 @@ export function DashboardRootView() {
                     title="全部刷新"
                     systemImage="arrow.clockwise"
                     disabled={isRefreshingAll || currentAccounts.length === 0}
-                    action={refreshAllAccounts}
+                    action={() => refreshAllAccounts({ isManual: true })}
                   />
                   <Button
                     title="添加账号"
@@ -838,8 +951,9 @@ export function DashboardRootView() {
             HapticFeedback.notificationSuccess()
           }}
           onClearSnapshotCache={() => {
-            setCachedSnapshots({})
+            cachedSnapshotsRef.current = {}
             saveStoredSnapshots({})
+            setAccountStates({})
           }}
           onOpenChangelog={releaseNotes.show}
           onDismiss={() => dismiss()}
