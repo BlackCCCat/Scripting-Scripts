@@ -1268,13 +1268,32 @@ export function searchProviders(
   }).sort((a, b) => a.displayName.localeCompare(b.displayName, "en"))
 }
 
+const PINYIN_FIRST_LETTERS: Record<string, string> = {
+  智: "Z",
+  火: "H",
+  阿: "A",
+  小: "X",
+  百: "B",
+  腾: "T",
+  微: "W",
+  商: "S",
+  月: "Y",
+  阶: "J",
+  零: "L",
+  幻: "H",
+  文: "W",
+  昆: "K",
+}
+
 export function groupProvidersAlphabetically(
   providers: ProviderMeta[]
 ): { letter: string; items: ProviderMeta[] }[] {
   const buckets = new Map<string, ProviderMeta[]>()
   for (const provider of providers) {
-    const firstChar = provider.displayName.trim().charAt(0).toUpperCase()
-    const letter = /^[A-Z]$/.test(firstChar) ? firstChar : "#"
+    const rawChar = provider.displayName.trim().charAt(0)
+    const upper = rawChar.toUpperCase()
+    const mapped = PINYIN_FIRST_LETTERS[rawChar] ?? upper
+    const letter = /^[A-Z]$/.test(mapped) ? mapped : "#"
     const list = buckets.get(letter) ?? []
     list.push(provider)
     buckets.set(letter, list)

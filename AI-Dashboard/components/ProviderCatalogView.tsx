@@ -21,6 +21,7 @@ import {
 } from "../models/types"
 import {
   PROVIDERS_CATALOG,
+  groupProvidersAlphabetically,
   searchProviders,
 } from "../utils/providers_catalog"
 import {
@@ -49,10 +50,18 @@ export function ProviderCatalogView(props: {
   const [selectedCategory, setSelectedCategory] = useState<
     ProviderRouteCategory | "all"
   >("all")
+  const [sortGroupingMode, setSortGroupingMode] = useState<
+    "alphabet" | "category"
+  >("alphabet")
 
   const filtered = useMemo(
     () => searchProviders(searchText, selectedCategory),
     [searchText, selectedCategory]
+  )
+
+  const groupedAlphabetical = useMemo(
+    () => groupProvidersAlphabetically(filtered),
+    [filtered]
   )
 
   const groupedByRoute = useMemo(() => {
@@ -69,8 +78,9 @@ export function ProviderCatalogView(props: {
   return (
     <NavigationStack>
       <List
-        navigationTitle={`供应商目录 (${PROVIDERS_CATALOG.length})`}
+        navigationTitle={`供应商目录 (${filtered.length})`}
         listStyle="insetGroup"
+        listSectionIndexVisibility="automatic"
         searchable={{
           value: searchText,
           onChanged: setSearchText,
@@ -87,7 +97,7 @@ export function ProviderCatalogView(props: {
         }}
       >
         <Section
-          header={<Text>接入路径筛选</Text>}
+          header={<Text>分类与排序</Text>}
           footer={
             <Text>
               所有供应商均采用客户端直连，不经过任何第三方中转后端
@@ -95,7 +105,18 @@ export function ProviderCatalogView(props: {
           }
         >
           <Picker
-            title="接入路径"
+            title="排序与分组"
+            value={sortGroupingMode}
+            onChanged={(val: string) =>
+              setSortGroupingMode(val as "alphabet" | "category")
+            }
+          >
+            <Text tag="alphabet">首字母快速索引 (A-Z)</Text>
+            <Text tag="category">接入路径分类</Text>
+          </Picker>
+
+          <Picker
+            title="接入路径筛选"
             value={selectedCategory}
             onChanged={(val: string) =>
               setSelectedCategory(val as ProviderRouteCategory | "all")
@@ -110,30 +131,47 @@ export function ProviderCatalogView(props: {
           </Picker>
         </Section>
 
-        {groupedByRoute.map((group) => (
-          <Section
-            key={group.category}
-            header={
-              <HStack spacing={6}>
-                <Image
-                  systemName={routeCategorySymbol(group.category)}
-                  font="caption"
-                  foregroundStyle="accentColor"
-                />
-                <Text>{`${routeCategoryTitle(group.category)} (${group.items.length})`}</Text>
-              </HStack>
-            }
-          >
-            {group.items.map((item) => (
-              <ProviderCatalogRow
-                key={item.id}
-                meta={item}
-                isDemoMode={isDemoMode}
-                onAdd={() => onQuickAddAccount(item.id)}
-              />
+        {sortGroupingMode === "alphabet"
+          ? groupedAlphabetical.map((group) => (
+              <Section
+                key={group.letter}
+                header={<Text>{group.letter}</Text>}
+                sectionIndexLabel={group.letter}
+              >
+                {group.items.map((item) => (
+                  <ProviderCatalogRow
+                    key={item.id}
+                    meta={item}
+                    isDemoMode={isDemoMode}
+                    onAdd={() => onQuickAddAccount(item.id)}
+                  />
+                ))}
+              </Section>
+            ))
+          : groupedByRoute.map((group) => (
+              <Section
+                key={group.category}
+                header={
+                  <HStack spacing={6}>
+                    <Image
+                      systemName={routeCategorySymbol(group.category)}
+                      font="caption"
+                      foregroundStyle="accentColor"
+                    />
+                    <Text>{`${routeCategoryTitle(group.category)} (${group.items.length})`}</Text>
+                  </HStack>
+                }
+              >
+                {group.items.map((item) => (
+                  <ProviderCatalogRow
+                    key={item.id}
+                    meta={item}
+                    isDemoMode={isDemoMode}
+                    onAdd={() => onQuickAddAccount(item.id)}
+                  />
+                ))}
+              </Section>
             ))}
-          </Section>
-        ))}
       </List>
     </NavigationStack>
   )
