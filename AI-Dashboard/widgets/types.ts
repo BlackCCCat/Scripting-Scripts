@@ -1,3 +1,4 @@
+import type { Color } from "scripting"
 import type {
   ProviderId,
   QuotaPeriod,
@@ -33,6 +34,7 @@ export type WidgetAccountData = {
   quotas: WidgetQuotaItem[]
   worstUsedPercentage: number
   overallStatus: "normal" | "warning" | "exhausted"
+  statusColor?: Color
   earliestResetCountdown?: string
   codexResetForecast?: {
     scheduledText?: string

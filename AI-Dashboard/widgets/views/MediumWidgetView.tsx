@@ -29,7 +29,7 @@ export function MediumAccountCard(props: {
 }) {
   const { account, lastUpdatedAt, heightMode = "normal", showUpdatedAt = false, adaptTransparent = false } = props
   const isCompact = heightMode === "compact"
-  const statusColor = getQuotaStatusColor(account.worstUsedPercentage)
+  const statusColor = account.statusColor ?? getQuotaStatusColor(account.worstUsedPercentage)
   const isWallet = account.isWallet && Boolean(account.wallet)
   const quotaCount = account.quotas.length
 
@@ -139,6 +139,7 @@ export function MediumAccountCard(props: {
             statusColor={statusColor}
             adaptTransparent={adaptTransparent}
             isCompact={isCompact}
+            baseSize={isCompact ? 5 : 5.5}
           />
         </HStack>
 

@@ -16,7 +16,7 @@ export function WidgetHeader(props: {
   adaptTransparent?: boolean
 }) {
   const { account, size = "small", showCountdown = false, adaptTransparent = false } = props
-  const statusColor = getQuotaStatusColor(account.worstUsedPercentage)
+  const statusColor = account.statusColor ?? getQuotaStatusColor(account.worstUsedPercentage)
   const isCompact = size === "small"
 
   return (
@@ -75,6 +75,7 @@ export function WidgetHeader(props: {
           statusColor={statusColor}
           adaptTransparent={adaptTransparent}
           isCompact={isCompact}
+          baseSize={isCompact ? 5.5 : 6}
         />
       </HStack>
     </HStack>

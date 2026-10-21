@@ -115,7 +115,8 @@ export function shortenQuotaWindowName(
  * 根据消耗百分比获取状态颜色
  */
 export function getQuotaStatusColor(usedPercentage: number): Color {
-  if (usedPercentage >= 100) return "systemRed"
+  // 已耗尽直接使用灰色
+  if (usedPercentage >= 100) return "systemGray"
   // 1-15 额度告急
   if (usedPercentage >= 85) return "systemRed"
   // 16-40 余量偏低

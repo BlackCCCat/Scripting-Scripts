@@ -137,7 +137,7 @@ export function computeAccountOverallQuota(snapshot?: QuotaSnapshot): OverallQuo
       isWalletOnly: true,
       hasUsage: false,
       label: isExhausted ? "余额已耗尽" : "钱包正常",
-      color: isExhausted ? "systemRed" : "systemBlue",
+      color: isExhausted ? "systemGray" : "systemBlue",
       symbol: isExhausted ? "xmark.octagon.fill" : "creditcard.fill",
     }
   }
@@ -272,7 +272,7 @@ export function computeAccountOverallQuota(snapshot?: QuotaSnapshot): OverallQuo
   }
   const finalUsedPct = 100 - finalRemPct
   const dynamicColor = isExhausted
-    ? "systemRed"
+    ? "systemGray"
     : remainingQuotaColor(finalRemPct, false)
 
   let label: string

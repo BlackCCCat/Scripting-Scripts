@@ -15,7 +15,10 @@ import {
 import { getProviderMeta } from "../utils/providers_catalog"
 import { CODEX_RESET_CACHE_KEY } from "../services/codex_reset_feed"
 import { ACTIVE_WALLET_KEY } from "../services/app_intents"
-import { maskIdentity } from "../utils/theme"
+import {
+  computeAccountOverallQuota,
+  maskIdentity,
+} from "../utils/theme"
 import type {
   WidgetAccountData,
   WidgetQuotaItem,
@@ -48,7 +51,6 @@ function buildWidgetAccountData(
   if (acc.provider === "antigravity") planName = "Pro"
 
   const windows = snapshot?.windows ?? []
-  let worstUsed = 0
   let earliestResetMs: number | null = null
   let earliestResetISO: string | undefined = undefined
 
@@ -81,10 +83,6 @@ function buildWidgetAccountData(
     if (w.isExhausted) usedPct = 100
     if (usedPct > 100) usedPct = 100
     if (usedPct < 0) usedPct = 0
-
-    if (usedPct > worstUsed) {
-      worstUsed = usedPct
-    }
 
     if (w.resetsAt) {
       const ms = new Date(w.resetsAt).getTime()
@@ -138,10 +136,14 @@ function buildWidgetAccountData(
   // 如果没有具体配额但有钱包数据
   const wallet = windows.find((w) => w.wallet)?.wallet
 
+  // 遵循与主程序看板柱状图及卡片标题下方一致的全局整体额度统计口径
+  const overall = computeAccountOverallQuota(snapshot ?? undefined)
+  const overallUsed = overall.usedPercent
+
   let overallStatus: "normal" | "warning" | "exhausted" = "normal"
-  if (worstUsed >= 100) {
+  if (overall.isExhausted || overallUsed >= 100) {
     overallStatus = "exhausted"
-  } else if (worstUsed >= 60) {
+  } else if (overallUsed >= 60) {
     overallStatus = "warning"
   }
 
@@ -191,8 +193,9 @@ function buildWidgetAccountData(
     isWallet,
     wallet,
     quotas,
-    worstUsedPercentage: worstUsed,
+    worstUsedPercentage: overallUsed,
     overallStatus,
+    statusColor: overall.color,
     earliestResetCountdown: formatWidgetCountdown(earliestResetISO),
     codexResetForecast,
     codexResetCardsCount: snapshot?.codexResetCards?.availableCount,
@@ -271,15 +274,23 @@ function mergeSingleQuotaAccounts(
       const q1 = formatQuota(a1)
       const mergedQuotas: WidgetQuotaItem[] = [q1]
       let worstUsed = a1.worstUsedPercentage
+      let statusColor = a1.statusColor
 
       if (a2) {
         const q2 = formatQuota(a2)
         mergedQuotas.push(q2)
-        worstUsed = Math.max(worstUsed, a2.worstUsedPercentage)
+        if (a2.worstUsedPercentage > worstUsed) {
+          worstUsed = a2.worstUsedPercentage
+          statusColor = a2.statusColor
+        }
       }
 
       let overallStatus: "normal" | "warning" | "exhausted" = "normal"
-      if (worstUsed >= 100) {
+      if (
+        worstUsed >= 100 ||
+        a1.overallStatus === "exhausted" ||
+        a2?.overallStatus === "exhausted"
+      ) {
         overallStatus = "exhausted"
       } else if (worstUsed >= 60) {
         overallStatus = "warning"
@@ -296,6 +307,7 @@ function mergeSingleQuotaAccounts(
         quotas: mergedQuotas,
         worstUsedPercentage: worstUsed,
         overallStatus,
+        statusColor,
         earliestResetCountdown: a1.earliestResetCountdown || a2?.earliestResetCountdown,
         widgetOrder: a1.widgetOrder,
       }
