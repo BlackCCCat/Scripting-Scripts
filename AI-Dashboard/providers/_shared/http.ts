@@ -256,6 +256,7 @@ export function parseGenericBalanceOrQuotaJson(
       id: `${provider}.quota`,
       name: "周期可用配额",
       usedPercentage: Math.min(Math.max((actualUsed / limit) * 100, 0), 100),
+      isExhausted: actualRem <= 0 || actualUsed >= limit,
       exactCounts: {
         used: actualUsed,
         remaining: actualRem,

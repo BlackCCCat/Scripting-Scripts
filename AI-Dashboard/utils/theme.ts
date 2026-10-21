@@ -94,17 +94,6 @@ export function remainingQuotaColor(
   )
 }
 
-export function usageStatusColor(
-  usedPercentage?: number,
-  isExhausted?: boolean
-): Color {
-  const remaining =
-    usedPercentage !== undefined && Number.isFinite(usedPercentage)
-      ? Math.max(0, 100 - usedPercentage)
-      : undefined
-  return remainingQuotaColor(remaining, isExhausted)
-}
-
 export function accountHealthSummary(snapshot?: QuotaSnapshot): {
   label: string
   color: Color
@@ -140,12 +129,16 @@ export function accountHealthSummary(snapshot?: QuotaSnapshot): {
       const pct = ((w.totalCount - w.remainingCount) / w.totalCount) * 100
       if (pct > maxUsed) maxUsed = pct
     } else if (
-      w.exactCounts?.used !== undefined &&
       w.exactCounts?.total !== undefined &&
-      w.exactCounts.total > 0
+      w.exactCounts.total > 0 &&
+      (w.exactCounts.used !== undefined || w.exactCounts.remaining !== undefined)
     ) {
       hasQuotaWindow = true
-      const pct = (w.exactCounts.used / w.exactCounts.total) * 100
+      const used =
+        w.exactCounts.used !== undefined
+          ? w.exactCounts.used
+          : Math.max(0, w.exactCounts.total - (w.exactCounts.remaining ?? 0))
+      const pct = (used / w.exactCounts.total) * 100
       if (pct > maxUsed) maxUsed = pct
     }
   }

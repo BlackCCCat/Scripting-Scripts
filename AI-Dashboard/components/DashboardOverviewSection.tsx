@@ -19,7 +19,6 @@ import {
 } from "../models/types"
 import {
   formatMoney,
-  formatWindowProgressFraction,
   formatWindowRemainingFraction,
 } from "../utils/quota_formatting"
 import {

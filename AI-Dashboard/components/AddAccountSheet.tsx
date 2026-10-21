@@ -161,7 +161,7 @@ export function AddAccountSheet(props: {
       : envelope.metadata.region
     const isWbGlobal =
       selectedProviderId === "workBuddy" && effectiveRegion === "global"
-    const fallbackName = isWbGlobal ? "Workbuddy AI" : meta.displayName
+    const fallbackName = isWbGlobal ? "Workbuddy AI" : defaultDisplayName
     const finalName = displayName.trim() || fallbackName
     const saved = saveEnvelopeToKeychain(keychainKey, envelope, synchronizable)
     if (!saved) {
@@ -551,7 +551,7 @@ export function AddAccountSheet(props: {
           <TextField
             title="备注名称"
             value={displayName}
-            prompt={`默认：${meta.displayName}`}
+            prompt={`默认：${defaultDisplayName}`}
             onChanged={setDisplayName}
           />
         </Section>
@@ -934,11 +934,20 @@ export function ProviderPickerSheet(props: {
                     </Text>
                   </VStack>
                   <Spacer />
-                  <Image
-                    systemName="chevron.right"
-                    font="caption"
-                    foregroundStyle="tertiaryLabel"
-                  />
+                  {selectedId === item.id ? (
+                    <Image
+                      systemName="checkmark"
+                      font="subheadline"
+                      fontWeight="semibold"
+                      foregroundStyle="accentColor"
+                    />
+                  ) : (
+                    <Image
+                      systemName="chevron.right"
+                      font="caption"
+                      foregroundStyle="tertiaryLabel"
+                    />
+                  )}
                 </HStack>
               </Button>
             ))}

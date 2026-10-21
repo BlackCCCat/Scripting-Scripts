@@ -37,9 +37,9 @@ export function CircularQuotaRing(props: {
   if (item.remainingCount !== undefined && item.remainingCount > 0 && remPct <= 0.5) {
     remPct = 1
   }
-  const isExhausted = item.isExhausted || remPct <= 0
-  const fraction = isExhausted ? 0 : Math.min(1, Math.max(0, remPct / 100))
-  const ringColor = remainingQuotaColor(remPct, isExhausted)
+  const isExhausted = !item.isUnlimited && (item.isExhausted || remPct <= 0)
+  const fraction = item.isUnlimited ? 1 : isExhausted ? 0 : Math.min(1, Math.max(0, remPct / 100))
+  const ringColor = item.isUnlimited ? "systemGreen" : remainingQuotaColor(remPct, isExhausted)
 
   const valFont = customValueFont ?? (size >= 48 ? 15 : size >= 32 ? 9.5 : 7.5)
   const lblFont = customLabelFont ?? (size >= 48 ? 10 : size <= 26 ? 6.8 : 7.5)
@@ -110,15 +110,16 @@ export function CircularQuotaRing(props: {
         {size >= 48 ? (
           <VStack alignment="center" spacing={1}>
             <Text
-              font={valFont}
+              font={item.isUnlimited ? Math.max(11, valFont * 0.8) : valFont}
               fontWeight="heavy"
               foregroundStyle={ringColor}
               monospaced={true}
               lineLimit={1}
             >
-              {isExhausted ? "0%" : `${Math.round(remPct)}%`}
+              {item.isUnlimited ? "无限" : isExhausted ? "0%" : `${Math.round(remPct)}%`}
             </Text>
-            {item.remainingCount !== undefined &&
+            {!item.isUnlimited &&
+            item.remainingCount !== undefined &&
             item.unit !== "%" &&
             !(item.totalCount === 100 && (item.unit === "%" || !item.unit)) ? (
               <Text
@@ -136,13 +137,13 @@ export function CircularQuotaRing(props: {
           </VStack>
         ) : (
           <Text
-            font={valFont}
+            font={item.isUnlimited ? Math.max(8.5, valFont * 0.85) : valFont}
             fontWeight="heavy"
             foregroundStyle={ringColor}
             monospaced={true}
             lineLimit={1}
           >
-            {isExhausted ? "0" : `${Math.round(remPct)}`}
+            {item.isUnlimited ? "∞" : isExhausted ? "0" : `${Math.round(remPct)}`}
           </Text>
         )}
       </ZStack>

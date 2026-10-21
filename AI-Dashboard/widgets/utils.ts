@@ -1,5 +1,5 @@
 import type { Color } from "scripting"
-import type { ProviderId, SubscriptionAccount, QuotaSnapshot } from "../models/types"
+import type { ProviderId } from "../models/types"
 import { getProviderMeta } from "../utils/providers_catalog"
 
 /**

@@ -1,12 +1,10 @@
 import {
   Button,
   Device,
-  HStack,
   NavigationStack,
   Picker,
   RoundedRectangle,
   ScrollView,
-  Spacer,
   Text,
   VStack,
   Widget,

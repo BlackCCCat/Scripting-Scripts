@@ -12,7 +12,6 @@ import {
 import { ProviderIconView } from "../../components/ProviderIconView"
 import { remainingQuotaColor } from "../../utils/theme"
 import { CircularQuotaRing } from "../components/CircularQuotaRing"
-import { CodexForecastPill } from "../components/CodexForecastPill"
 import { MultiQuotaAdaptiveList } from "../components/MultiQuotaAdaptiveList"
 import type { WidgetAccountData } from "../types"
 import {

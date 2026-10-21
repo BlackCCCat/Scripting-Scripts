@@ -2,7 +2,6 @@ import {
   Capsule,
   HStack,
   Image,
-  Spacer,
   Text,
 } from "scripting"
 import type { WidgetAccountData } from "../types"

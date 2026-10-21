@@ -45,8 +45,8 @@ export function QuotaProgressBar(props: {
   if (item.remainingCount !== undefined && item.remainingCount > 0 && remPct <= 0.5) {
     remPct = 1
   }
-  const isExhausted = item.isExhausted || remPct <= 0
-  const barColor = remainingQuotaColor(remPct, isExhausted)
+  const isExhausted = !item.isUnlimited && (item.isExhausted || remPct <= 0)
+  const barColor = item.isUnlimited ? "systemGreen" : remainingQuotaColor(remPct, isExhausted)
 
   // 各额度刷新时间（直接显示在标题后面）
   const countdownText =
@@ -154,9 +154,11 @@ export function QuotaProgressBar(props: {
         <GeometryReader frame={{ height: barHeight }}>
           {(proxy) => {
             const totalWidth = proxy.size.width || 60
-            const fillWidth = isExhausted
-              ? 0
-              : Math.max(barHeight, Math.min(totalWidth, (totalWidth * remPct) / 100))
+            const fillWidth = item.isUnlimited
+              ? totalWidth
+              : isExhausted
+                ? 0
+                : Math.max(barHeight, Math.min(totalWidth, (totalWidth * remPct) / 100))
 
             return (
               <ZStack
@@ -197,7 +199,7 @@ export function QuotaProgressBar(props: {
             monospaced={true}
             lineLimit={1}
           >
-            {isExhausted ? "0%" : `${Math.round(remPct)}%`}
+            {item.isUnlimited ? "无限额" : isExhausted ? "0%" : `${Math.round(remPct)}%`}
           </Text>
         </HStack>
       </HStack>
@@ -251,15 +253,17 @@ export function QuotaProgressBar(props: {
             monospaced={true}
             lineLimit={1}
           >
-            {isExhausted
-              ? "0%"
-              : countStr
-                ? compact
-                  ? `${Math.round(remPct)}%`
-                  : `(${Math.round(remPct)}%)`
-                : compact
-                  ? `${Math.round(remPct)}%`
-                  : `剩余 ${Math.round(remPct)}%`}
+            {item.isUnlimited
+              ? "无限额"
+              : isExhausted
+                ? "0%"
+                : countStr
+                  ? compact
+                    ? `${Math.round(remPct)}%`
+                    : `(${Math.round(remPct)}%)`
+                  : compact
+                    ? `${Math.round(remPct)}%`
+                    : `剩余 ${Math.round(remPct)}%`}
           </Text>
         </HStack>
       </HStack>
@@ -267,9 +271,11 @@ export function QuotaProgressBar(props: {
       <GeometryReader frame={{ height: barHeight }}>
         {(proxy) => {
           const totalWidth = proxy.size.width || 100
-          const fillWidth = isExhausted
-            ? 0
-            : Math.max(barHeight, Math.min(totalWidth, (totalWidth * remPct) / 100))
+          const fillWidth = item.isUnlimited
+            ? totalWidth
+            : isExhausted
+              ? 0
+              : Math.max(barHeight, Math.min(totalWidth, (totalWidth * remPct) / 100))
 
           return (
             <ZStack

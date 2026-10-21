@@ -33,7 +33,6 @@ import {
   SubscriptionAccount,
 } from "../models/types"
 import {
-  computeCredentialFingerprint,
   loadDashboardSettings,
   loadEnvelopeFromKeychain,
   loadStoredAccounts,
@@ -60,7 +59,7 @@ import { AccountQuotaRow } from "./AccountQuotaRow"
 import { AddAccountSheet } from "./AddAccountSheet"
 import { DashboardOverviewSection } from "./DashboardOverviewSection"
 import { ProviderCatalogView } from "./ProviderCatalogView"
-import { ReleaseNotesSheet, useReleaseNotesSheet } from "./ReleaseNotesSheet"
+import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SettingsView } from "./SettingsView"
 import {
   CodexResetStatus,
