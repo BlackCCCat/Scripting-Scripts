@@ -268,4 +268,5 @@ export interface DashboardSettings {
   protectAccountIdentity: boolean
   widgetPrivacyEnabled?: boolean
   widgetRefreshIntervalMinutes?: number
+  widgetConnectionAdaptTransparent?: boolean
 }

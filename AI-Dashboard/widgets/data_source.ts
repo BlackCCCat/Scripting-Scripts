@@ -141,7 +141,7 @@ function buildWidgetAccountData(
   let overallStatus: "normal" | "warning" | "exhausted" = "normal"
   if (worstUsed >= 100) {
     overallStatus = "exhausted"
-  } else if (worstUsed >= 80) {
+  } else if (worstUsed >= 60) {
     overallStatus = "warning"
   }
 
@@ -281,7 +281,7 @@ function mergeSingleQuotaAccounts(
       let overallStatus: "normal" | "warning" | "exhausted" = "normal"
       if (worstUsed >= 100) {
         overallStatus = "exhausted"
-      } else if (worstUsed >= 80) {
+      } else if (worstUsed >= 60) {
         overallStatus = "warning"
       }
 
@@ -330,6 +330,8 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
   const settings = loadDashboardSettings()
   const useDemo = forceDemo ?? settings.isDemoMode
   const widgetPrivacyEnabled = settings.widgetPrivacyEnabled ?? true
+  const widgetConnectionAdaptTransparent =
+    settings.widgetConnectionAdaptTransparent ?? false
 
   let accounts: SubscriptionAccount[] = []
   let snapshots: Record<string, QuotaSnapshot> = {}
@@ -462,6 +464,7 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
     }),
     isDemoMode: useDemo,
     widgetPrivacyEnabled,
+    widgetConnectionAdaptTransparent,
     parameterTokensCount,
   }
 }

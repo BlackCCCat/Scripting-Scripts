@@ -19,10 +19,10 @@ import {
 } from "../models/types"
 import {
   formatMoney,
-  formatWindowRemainingFraction,
 } from "../utils/quota_formatting"
 import {
   adaptiveSecondaryButtonStyle,
+  computeAccountOverallQuota,
   remainingQuotaColor,
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
@@ -87,68 +87,20 @@ export function DashboardOverviewSection(props: {
         }
       }
 
-      // 提取参与平台柱状图统计的配额窗口：
-      // 优先选取具备周/月/年周期的核心周期配额（例如 Antigravity 的 Gemini周配额、Claude/GPT周配额、Gemini 4 Argon）
-      const cycleWindows = snap.windows.filter(
-        (w) =>
-          !w.wallet &&
-          !w.isUnlimited &&
-          (w.period === "weekly" || w.period === "monthly")
-      )
+      // 提取整体额度统计（与供应商卡片健康度使用完全一致的算法）
+      const overall = computeAccountOverallQuota(snap)
 
-      const targetWindows =
-        cycleWindows.length > 0
-          ? cycleWindows
-          : snap.windows.filter((w) => !w.wallet && !w.isUnlimited)
+      if (!overall.isWalletOnly) {
+        chartItems.push({
+          accountId: acc.id,
+          provider: acc.provider,
+          usedPercent: overall.usedPercent,
+          remainingPercent: overall.remainingPercent,
+          isExhausted: overall.isExhausted,
+        })
 
-      if (targetWindows.length > 0) {
-        const fractions: {
-          used: number
-          remaining: number
-          isExhausted: boolean
-        }[] = []
-
-        for (const win of targetWindows) {
-          if (win.isExhausted) {
-            fractions.push({ used: 100, remaining: 0, isExhausted: true })
-            continue
-          }
-
-          const remFrac = formatWindowRemainingFraction(win)
-          if (remFrac !== null) {
-            const remPct = Math.round(remFrac * 100)
-            fractions.push({
-              used: 100 - remPct,
-              remaining: remPct,
-              isExhausted: remPct <= 0,
-            })
-          }
-        }
-
-        if (fractions.length > 0) {
-          const sumRemaining = fractions.reduce(
-            (acc, f) => acc + f.remaining,
-            0
-          )
-          const finalRemPct = Math.round(sumRemaining / fractions.length)
-          const finalUsedPct = 100 - finalRemPct
-          const allExhausted = fractions.every((f) => f.isExhausted)
-          const anyExhausted = fractions.some((f) => f.isExhausted)
-          const isExhausted = allExhausted || finalRemPct <= 0
-
-          chartItems.push({
-            accountId: acc.id,
-            provider: acc.provider,
-            usedPercent: finalUsedPct,
-            remainingPercent: finalRemPct,
-            isExhausted,
-          })
-
-          if (isExhausted || anyExhausted || finalUsedPct >= 75) {
-            warningCount++
-          } else {
-            healthyCount++
-          }
+        if (overall.isExhausted || overall.usedPercent >= 60) {
+          warningCount++
         } else {
           healthyCount++
         }

@@ -241,6 +241,18 @@ export function SettingsView(props: {
             <Text tag="360">6 小时</Text>
           </Picker>
 
+          <Toggle
+            title="连接提示显示适配透明桌面模式"
+            value={settings.widgetConnectionAdaptTransparent ?? false}
+            onChanged={(val) => {
+              onUpdateSettings({
+                ...settings,
+                widgetConnectionAdaptTransparent: val,
+              })
+              void Widget.reloadAll()
+            }}
+          />
+
           <Button
             title="小组件使用说明"
             systemImage="questionmark.circle"

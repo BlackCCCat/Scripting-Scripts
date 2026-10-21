@@ -48,9 +48,10 @@ export function WidgetPreviewSheet(props: {
         return { width: 340, height: 160 }
       case "systemLarge":
         return { width: 340, height: 350 }
-      case "systemExtraLarge":
       case "systemExtraLargePortrait":
-        // 设为 345 宽，确保在 iPhone 屏幕与 iPad 预览中均 100% 完整显示不超边
+        // 设为 340 宽 x 515 高，3 个中号卡片垂直拼接自然舒展，并在可滚动容器中完整呈现
+        return { width: 340, height: 515 }
+      case "systemExtraLarge":
         return { width: 345, height: 360 }
       default:
         return { width: 340, height: 160 }
@@ -94,7 +95,7 @@ export function WidgetPreviewSheet(props: {
             <Text tag="systemSmall">小尺寸 (Small)</Text>
             <Text tag="systemMedium">中尺寸 (Medium)</Text>
             <Text tag="systemLarge">大尺寸 (Large)</Text>
-            <Text tag="systemExtraLarge">特大尺寸 (Extra Large)</Text>
+            <Text tag="systemExtraLargePortrait">特大尺寸 (Extra Large Portrait)</Text>
           </Picker>
 
           <Picker

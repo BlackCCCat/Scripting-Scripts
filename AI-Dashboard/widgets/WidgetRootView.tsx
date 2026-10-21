@@ -20,12 +20,19 @@ export function WidgetRootView(props: {
           account={data.accounts[0]}
           allAccounts={data.accounts}
           lastUpdatedAt={data.lastUpdatedAt}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
           onSelectProvider={onSelectWalletProvider}
         />
       )
 
     case "systemMedium":
-      return <MediumWidgetView accounts={data.accounts} lastUpdatedAt={data.lastUpdatedAt} />
+      return (
+        <MediumWidgetView
+          accounts={data.accounts}
+          lastUpdatedAt={data.lastUpdatedAt}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
+        />
+      )
 
     case "systemLarge":
       return <LargeWidgetView data={data} />
@@ -40,6 +47,7 @@ export function WidgetRootView(props: {
           account={data.accounts[0]}
           allAccounts={data.accounts}
           lastUpdatedAt={data.lastUpdatedAt}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
           onSelectProvider={onSelectWalletProvider}
         />
       )

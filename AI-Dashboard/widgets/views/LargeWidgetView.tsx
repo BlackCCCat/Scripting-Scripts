@@ -58,12 +58,13 @@ export function LargeWidgetView(props: {
           lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
           showUpdatedAt={true}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
         />
       </VStack>
     )
   }
 
-  // 拼接 2 个中号卡片（底部卡片显示小组件统一刷新时间）
+  // 拼接 2 个中号卡片（统一在首个卡片右上角显示小组件刷新时间）
   return (
     <VStack
       alignment="leading"
@@ -73,15 +74,17 @@ export function LargeWidgetView(props: {
     >
       <MediumAccountCard
         account={accounts[0]}
+        lastUpdatedAt={data.lastUpdatedAt}
         heightMode="normal"
-        showUpdatedAt={false}
+        showUpdatedAt={true}
+        adaptTransparent={data.widgetConnectionAdaptTransparent}
       />
       <Divider />
       <MediumAccountCard
         account={accounts[1]}
-        lastUpdatedAt={data.lastUpdatedAt}
         heightMode="normal"
-        showUpdatedAt={true}
+        showUpdatedAt={false}
+        adaptTransparent={data.widgetConnectionAdaptTransparent}
       />
     </VStack>
   )

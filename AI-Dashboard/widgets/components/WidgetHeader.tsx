@@ -13,10 +13,16 @@ export function WidgetHeader(props: {
   size?: "small" | "medium" | "large"
   showIcon?: boolean
   showCountdown?: boolean
+  adaptTransparent?: boolean
 }) {
-  const { account, size = "small", showCountdown = false } = props
+  const { account, size = "small", showCountdown = false, adaptTransparent = false } = props
   const statusColor = getQuotaStatusColor(account.worstUsedPercentage)
   const isCompact = size === "small"
+  const isAbnormal =
+    account.overallStatus === "exhausted" ||
+    account.worstUsedPercentage >= 100 ||
+    statusColor === "systemRed" ||
+    statusColor === "systemOrange"
 
   return (
     <HStack alignment="center" spacing={6} frame={{ maxWidth: "infinity" }}>
@@ -68,10 +74,20 @@ export function WidgetHeader(props: {
             {account.earliestResetCountdown}
           </Text>
         ) : null}
-        <Circle
-          fill={statusColor}
-          frame={{ width: 6, height: 6 }}
-        />
+        {adaptTransparent && isAbnormal ? (
+          <Circle
+            stroke={{
+              shapeStyle: statusColor,
+              strokeStyle: { lineWidth: 1.3 },
+            }}
+            frame={{ width: 6, height: 6 }}
+          />
+        ) : (
+          <Circle
+            fill={statusColor}
+            frame={{ width: 6, height: 6 }}
+          />
+        )}
       </HStack>
     </HStack>
   )

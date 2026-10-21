@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   protectAccountIdentity: false,
   widgetPrivacyEnabled: true,
   widgetRefreshIntervalMinutes: 30,
+  widgetConnectionAdaptTransparent: false,
 }
 
 export function sha256Hex(raw: string): string {
@@ -351,6 +352,8 @@ export function loadDashboardSettings(): DashboardSettings {
       saved.widgetPrivacyEnabled ?? DEFAULT_SETTINGS.widgetPrivacyEnabled,
     widgetRefreshIntervalMinutes:
       saved.widgetRefreshIntervalMinutes ?? DEFAULT_SETTINGS.widgetRefreshIntervalMinutes,
+    widgetConnectionAdaptTransparent:
+      saved.widgetConnectionAdaptTransparent ?? DEFAULT_SETTINGS.widgetConnectionAdaptTransparent,
   }
 }
 

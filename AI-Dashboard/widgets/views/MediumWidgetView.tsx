@@ -25,10 +25,16 @@ export function MediumAccountCard(props: {
   lastUpdatedAt?: string
   heightMode?: "normal" | "compact"
   showUpdatedAt?: boolean
+  adaptTransparent?: boolean
 }) {
-  const { account, lastUpdatedAt, heightMode = "normal", showUpdatedAt = false } = props
+  const { account, lastUpdatedAt, heightMode = "normal", showUpdatedAt = false, adaptTransparent = false } = props
   const isCompact = heightMode === "compact"
   const statusColor = getQuotaStatusColor(account.worstUsedPercentage)
+  const isAbnormal =
+    account.overallStatus === "exhausted" ||
+    account.worstUsedPercentage >= 100 ||
+    statusColor === "systemRed" ||
+    statusColor === "systemOrange"
   const isWallet = account.isWallet && Boolean(account.wallet)
   const quotaCount = account.quotas.length
 
@@ -132,7 +138,17 @@ export function MediumAccountCard(props: {
             </Text>
           ) : null}
 
-          <Circle fill={statusColor} frame={{ width: isCompact ? 5 : 5.5, height: isCompact ? 5 : 5.5 }} />
+          {adaptTransparent && isAbnormal ? (
+            <Circle
+              stroke={{
+                shapeStyle: statusColor,
+                strokeStyle: { lineWidth: 1.3 },
+              }}
+              frame={{ width: isCompact ? 5 : 5.5, height: isCompact ? 5 : 5.5 }}
+            />
+          ) : (
+            <Circle fill={statusColor} frame={{ width: isCompact ? 5 : 5.5, height: isCompact ? 5 : 5.5 }} />
+          )}
         </HStack>
 
         <Divider />
@@ -234,8 +250,9 @@ export function MediumAccountCard(props: {
 export function MediumWidgetView(props: {
   accounts: WidgetAccountData[]
   lastUpdatedAt?: string
+  adaptTransparent?: boolean
 }) {
-  const { accounts, lastUpdatedAt } = props
+  const { accounts, lastUpdatedAt, adaptTransparent } = props
 
   if (!accounts || accounts.length === 0) {
     return (
@@ -266,6 +283,7 @@ export function MediumWidgetView(props: {
       lastUpdatedAt={lastUpdatedAt}
       heightMode="normal"
       showUpdatedAt={true}
+      adaptTransparent={adaptTransparent}
     />
   )
 }

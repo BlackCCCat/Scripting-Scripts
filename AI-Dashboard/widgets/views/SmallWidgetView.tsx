@@ -20,9 +20,10 @@ export function SmallWidgetView(props: {
   account?: WidgetAccountData
   allAccounts?: WidgetAccountData[]
   lastUpdatedAt?: string
+  adaptTransparent?: boolean
   onSelectProvider?: (providerId: string) => void
 }) {
-  const { account, lastUpdatedAt } = props
+  const { account, lastUpdatedAt, adaptTransparent } = props
 
   if (!account) {
     return (
@@ -83,7 +84,12 @@ export function SmallWidgetView(props: {
         frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" }}
       >
         {/* 头部：展示供应商名称、套餐徽标、状态圆点 */}
-        <WidgetHeader account={account} size="small" showCountdown={false} />
+        <WidgetHeader
+          account={account}
+          size="small"
+          showCountdown={false}
+          adaptTransparent={adaptTransparent}
+        />
 
         <Spacer />
 

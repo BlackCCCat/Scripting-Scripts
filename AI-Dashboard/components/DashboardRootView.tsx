@@ -241,14 +241,19 @@ export function DashboardRootView() {
     )
   }, [filteredAccounts, settings.groupByRouteCategory])
 
+  const reloadAllWidgets = () => {
+    try {
+      Widget.reloadAll()
+    } catch {}
+    try {
+      Widget.reloadUserWidgets()
+    } catch {}
+  }
+
   const updateSettings = (next: DashboardSettings) => {
     setSettings(next)
     saveDashboardSettings(next)
-    try {
-      Widget.reloadAll()
-    } catch {
-      // 忽略在非小组件环境的报错
-    }
+    reloadAllWidgets()
   }
 
   const refreshSingleAccount = async (account: SubscriptionAccount) => {
@@ -277,6 +282,7 @@ export function DashboardRootView() {
         ...prev,
         [account.id]: { type: "loaded", snapshot: demoSnap },
       }))
+      reloadAllWidgets()
       return
     }
 
@@ -314,9 +320,7 @@ export function DashboardRootView() {
         ...prev,
         [account.id]: { type: "loaded", snapshot: result.snapshot },
       }))
-      try {
-        Widget.reloadAll()
-      } catch {}
+      reloadAllWidgets()
     } catch (err) {
       const code =
         err instanceof QuotaQueryError ? err.code : "network"
@@ -367,6 +371,7 @@ export function DashboardRootView() {
           }
           return next
         })
+        reloadAllWidgets()
         if (isManual) {
           HapticFeedback.lightImpact()
         }
@@ -466,9 +471,7 @@ export function DashboardRootView() {
         ...stateUpdates,
       }))
 
-      try {
-        Widget.reloadAll()
-      } catch {}
+      reloadAllWidgets()
 
       if (isManual) {
         HapticFeedback.lightImpact()
@@ -480,21 +483,22 @@ export function DashboardRootView() {
     }
   }
 
-  // 启动应用时自动刷新已启用账号（静默后台拉取，不触发整页重置与震动）
+  // 启动应用时自动刷新已启用账号（静默后台拉取，不触发整页重置与震动，更新后广播小组件同步）
   const hasAutoRefreshedOnLaunchRef = useRef<boolean>(false)
   useEffect(() => {
-    if (!settings.isDemoMode && settings.autoRefreshOnLaunch && realAccounts.length > 0) {
+    if (settings.autoRefreshOnLaunch) {
       if (!hasAutoRefreshedOnLaunchRef.current) {
         hasAutoRefreshedOnLaunchRef.current = true
         void refreshAllAccounts({ isManual: false })
       }
     }
-  }, [settings.isDemoMode])
+  }, [settings.autoRefreshOnLaunch, settings.isDemoMode])
 
   const handleDeleteAccount = (accountId: string) => {
     if (settings.isDemoMode) {
       setDemoAccounts((prev) => prev.filter((a) => a.id !== accountId))
       HapticFeedback.lightImpact()
+      reloadAllWidgets()
       return
     }
     const target = realAccounts.find((a) => a.id === accountId)
@@ -512,6 +516,7 @@ export function DashboardRootView() {
     cachedSnapshotsRef.current = copy
     saveStoredSnapshots(copy)
     HapticFeedback.lightImpact()
+    reloadAllWidgets()
   }
 
   const handleMoveSublist = (
@@ -548,9 +553,7 @@ export function DashboardRootView() {
         return rest
       })
       HapticFeedback.lightImpact()
-      try {
-        Widget.reloadAll()
-      } catch {}
+      reloadAllWidgets()
       return
     }
     const next = [...realAccounts]
@@ -561,9 +564,7 @@ export function DashboardRootView() {
     setRealAccounts(next)
     saveStoredAccounts(next)
     HapticFeedback.lightImpact()
-    try {
-      Widget.reloadAll()
-    } catch {}
+    reloadAllWidgets()
   }
 
   const handleAccountCreated = (
@@ -741,9 +742,7 @@ export function DashboardRootView() {
                         saveStoredAccounts(reordered)
                       }
                       HapticFeedback.lightImpact()
-                      try {
-                        Widget.reloadAll()
-                      } catch {}
+                      reloadAllWidgets()
                     }}
                     onMoveAccounts={handleMoveAccountsInEdit}
                     onDeleteAccount={handleDeleteAccount}

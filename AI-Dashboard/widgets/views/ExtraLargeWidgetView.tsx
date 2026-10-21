@@ -57,6 +57,7 @@ export function ExtraLargeWidgetView(props: {
           lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
           showUpdatedAt={true}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
         />
       </VStack>
     )
@@ -72,21 +73,23 @@ export function ExtraLargeWidgetView(props: {
       >
         <MediumAccountCard
           account={accounts[0]}
+          lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
-          showUpdatedAt={false}
+          showUpdatedAt={true}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
         />
         <Divider />
         <MediumAccountCard
           account={accounts[1]}
-          lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
-          showUpdatedAt={true}
+          showUpdatedAt={false}
+          adaptTransparent={data.widgetConnectionAdaptTransparent}
         />
       </VStack>
     )
   }
 
-  // 拼接 3 个中号卡片（底端卡片显示小组件统一刷新时间）
+  // 拼接 3 个中号卡片（统一在首个卡片右上角显示小组件刷新时间）
   return (
     <VStack
       alignment="leading"
@@ -96,21 +99,24 @@ export function ExtraLargeWidgetView(props: {
     >
       <MediumAccountCard
         account={accounts[0]}
+        lastUpdatedAt={data.lastUpdatedAt}
         heightMode="normal"
-        showUpdatedAt={false}
+        showUpdatedAt={true}
+        adaptTransparent={data.widgetConnectionAdaptTransparent}
       />
       <Divider />
       <MediumAccountCard
         account={accounts[1]}
         heightMode="normal"
         showUpdatedAt={false}
+        adaptTransparent={data.widgetConnectionAdaptTransparent}
       />
       <Divider />
       <MediumAccountCard
         account={accounts[2]}
-        lastUpdatedAt={data.lastUpdatedAt}
         heightMode="normal"
-        showUpdatedAt={true}
+        showUpdatedAt={false}
+        adaptTransparent={data.widgetConnectionAdaptTransparent}
       />
     </VStack>
   )

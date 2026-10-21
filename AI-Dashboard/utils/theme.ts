@@ -37,10 +37,10 @@ function rgbToHex(r: number, g: number, b: number): Color {
 /**
  * 根据剩余额度百分比 (0 ~ 100) 返回平滑过渡颜色：
  * - 用完 (<= 0% 或 isExhausted)：返回灰色 systemGray
- * - 100% -> 68%：翠绿 (#34C759) -> 黄绿 (#A2D228)
- * - 68%  -> 42%：黄绿 (#A2D228) -> 琥珀黄 (#FFB800)
- * - 42%  -> 18%：琥珀黄 (#FFB800) -> 橙红 (#FF6B00)
- * - 18%  -> 0% ：橙红 (#FF6B00) -> 警示红 (#FF3B30)
+ * - 100% -> 60%：翠绿 (#34C759) -> 黄绿 (#8ADB28) [余量充足]
+ * - 60%  -> 40%：黄绿 (#8ADB28) -> 明黄色 (#FFCC00) [余量适中]
+ * - 40%  -> 15%：明黄 (#FFCC00) -> 鲜橙色 (#FF9500) [余量偏低]
+ * - 15%  -> 0% ：鲜橙 (#FF9500) -> 警示红 (#FF3B30) [额度告急]
  */
 export function remainingQuotaColor(
   remainingPercentage?: number | null,
@@ -62,36 +62,249 @@ export function remainingQuotaColor(
     return "#34C759"
   }
   const rem = Math.min(100, Math.max(0, remainingPercentage))
-  if (rem >= 68) {
-    const t = (100 - rem) / (100 - 68)
+  if (rem >= 60) {
+    const t = (100 - rem) / (100 - 60)
     return rgbToHex(
-      lerpChannel(0x34, 0xa2, t),
-      lerpChannel(0xc7, 0xd2, t),
+      lerpChannel(0x34, 0x8a, t),
+      lerpChannel(0xc7, 0xdb, t),
       lerpChannel(0x59, 0x28, t)
     )
   }
-  if (rem >= 42) {
-    const t = (68 - rem) / (68 - 42)
+  if (rem >= 40) {
+    const t = (60 - rem) / (60 - 40)
     return rgbToHex(
-      lerpChannel(0xa2, 0xff, t),
-      lerpChannel(0xd2, 0xb8, t),
+      lerpChannel(0x8a, 0xff, t),
+      lerpChannel(0xdb, 0xcc, t),
       lerpChannel(0x28, 0x00, t)
     )
   }
-  if (rem >= 18) {
-    const t = (42 - rem) / (42 - 18)
+  if (rem >= 15) {
+    const t = (40 - rem) / (40 - 15)
     return rgbToHex(
       lerpChannel(0xff, 0xff, t),
-      lerpChannel(0xb8, 0x6b, t),
+      lerpChannel(0xcc, 0x95, t),
       lerpChannel(0x00, 0x00, t)
     )
   }
-  const t = (18 - rem) / 18
+  const t = (15 - rem) / 15
   return rgbToHex(
     lerpChannel(0xff, 0xff, t),
-    lerpChannel(0x6b, 0x3b, t),
+    lerpChannel(0x95, 0x3b, t),
     lerpChannel(0x00, 0x30, t)
   )
+}
+
+import { formatWindowRemainingFraction } from "./quota_formatting"
+
+export interface OverallQuotaSummary {
+  remainingPercent: number // 0 ~ 100
+  usedPercent: number // 0 ~ 100
+  isExhausted: boolean
+  isUnlimited: boolean
+  isWalletOnly: boolean
+  hasUsage: boolean
+  label: string
+  color: Color
+  symbol: string
+}
+
+export function computeAccountOverallQuota(snapshot?: QuotaSnapshot): OverallQuotaSummary {
+  if (!snapshot || snapshot.windows.length === 0) {
+    return {
+      remainingPercent: 100,
+      usedPercent: 0,
+      isExhausted: false,
+      isUnlimited: false,
+      isWalletOnly: false,
+      hasUsage: false,
+      label: "待刷新",
+      color: "secondaryLabel",
+      symbol: "clock.badge.questionmark",
+    }
+  }
+
+  // 1. 过滤钱包与非配额窗口
+  const quotaWindows = snapshot.windows.filter((w) => !w.wallet)
+  if (quotaWindows.length === 0) {
+    // 纯钱包/资金池类型
+    const walletWindows = snapshot.windows.filter((w) => Boolean(w.wallet))
+    const isExhausted = walletWindows.some((w) => w.isExhausted)
+    return {
+      remainingPercent: isExhausted ? 0 : 100,
+      usedPercent: isExhausted ? 100 : 0,
+      isExhausted,
+      isUnlimited: false,
+      isWalletOnly: true,
+      hasUsage: false,
+      label: isExhausted ? "余额已耗尽" : "钱包正常",
+      color: isExhausted ? "systemRed" : "systemBlue",
+      symbol: isExhausted ? "xmark.octagon.fill" : "creditcard.fill",
+    }
+  }
+
+  // 2. 检查是否全为不限额/无限制窗口（如 Copilot）
+  const nonUnlimited = quotaWindows.filter((w) => !w.isUnlimited)
+  if (nonUnlimited.length === 0) {
+    return {
+      remainingPercent: 100,
+      usedPercent: 0,
+      isExhausted: false,
+      isUnlimited: true,
+      isWalletOnly: false,
+      hasUsage: false,
+      label: "不限次数 / 不限额",
+      color: "systemGreen",
+      symbol: "infinity",
+    }
+  }
+
+  // 3. 提取参与整体额度统计的核心目标窗口：
+  // 优先选取具备周/月周期的核心周期配额（例如 Antigravity 的 Gemini 周配额、Claude/GPT 周配额、Gemini 4 Argon，与柱状图完全对齐）
+  const cycleWindows = nonUnlimited.filter(
+    (w) => w.period === "weekly" || w.period === "monthly"
+  )
+  const targetWindows = cycleWindows.length > 0 ? cycleWindows : nonUnlimited
+
+  const fractions: {
+    remPct: number
+    hasUsage: boolean
+    isExhausted: boolean
+  }[] = []
+
+  for (const win of targetWindows) {
+    if (win.isExhausted) {
+      fractions.push({ remPct: 0, hasUsage: true, isExhausted: true })
+      continue
+    }
+
+    let remPct: number | null = null
+    let hasUsage = false
+
+    // 优先采用精准计数（如 WorkBuddy 积分等）
+    if (
+      win.exactCounts?.remaining !== undefined &&
+      win.exactCounts?.total !== undefined &&
+      win.exactCounts.total > 0
+    ) {
+      const used =
+        win.exactCounts.used ?? (win.exactCounts.total - win.exactCounts.remaining)
+      hasUsage = used > 0
+      const frac = win.exactCounts.remaining / win.exactCounts.total
+      remPct = Math.round(frac * 100)
+      if (hasUsage && win.exactCounts.remaining < win.exactCounts.total && remPct >= 100) {
+        remPct = 99
+      }
+      if (win.exactCounts.remaining > 0 && remPct <= 0) {
+        remPct = 1
+      }
+    } else if (
+      win.remainingCount !== undefined &&
+      win.totalCount !== undefined &&
+      win.totalCount > 0
+    ) {
+      const used = win.totalCount - win.remainingCount
+      hasUsage = used > 0
+      const frac = win.remainingCount / win.totalCount
+      remPct = Math.round(frac * 100)
+      if (hasUsage && win.remainingCount < win.totalCount && remPct >= 100) {
+        remPct = 99
+      }
+      if (win.remainingCount > 0 && remPct <= 0) {
+        remPct = 1
+      }
+    } else if (win.usedPercentage !== undefined && Number.isFinite(win.usedPercentage)) {
+      hasUsage = win.usedPercentage > 0
+      remPct = Math.round(100 - win.usedPercentage)
+      if (hasUsage && remPct >= 100) {
+        remPct = 99
+      }
+      if (win.usedPercentage < 100 && remPct <= 0) {
+        remPct = 1
+      }
+    } else {
+      const frac = formatWindowRemainingFraction(win)
+      if (frac !== null) {
+        remPct = Math.round(frac * 100)
+        hasUsage = remPct < 100
+      }
+    }
+
+    if (remPct !== null) {
+      fractions.push({
+        remPct,
+        hasUsage,
+        isExhausted: remPct <= 0,
+      })
+    }
+  }
+
+  if (fractions.length === 0) {
+    return {
+      remainingPercent: 100,
+      usedPercent: 0,
+      isExhausted: false,
+      isUnlimited: false,
+      isWalletOnly: false,
+      hasUsage: false,
+      label: "已连接",
+      color: "systemGreen",
+      symbol: "checkmark.circle.fill",
+    }
+  }
+
+  const sumRemaining = fractions.reduce((acc, f) => acc + f.remPct, 0)
+  let finalRemPct = Math.round(sumRemaining / fractions.length)
+  const anyUsed = fractions.some((f) => f.hasUsage)
+  const allExhausted = fractions.every((f) => f.isExhausted)
+
+  // 全局防呆与对齐：只要产生了消耗，且没有全部剩余，不能显示 100%
+  if (anyUsed && finalRemPct >= 100) {
+    finalRemPct = 99
+  }
+  // 只要还有余量，且不是所有窗口都耗尽，不能显示 0%
+  if (!allExhausted && finalRemPct <= 0) {
+    finalRemPct = 1
+  }
+
+  const isExhausted = allExhausted || finalRemPct <= 0
+  if (isExhausted) {
+    finalRemPct = 0
+  }
+  const finalUsedPct = 100 - finalRemPct
+  const dynamicColor = isExhausted
+    ? "systemRed"
+    : remainingQuotaColor(finalRemPct, false)
+
+  let label: string
+  let symbol: string
+  if (isExhausted) {
+    label = "额度已耗尽 (0%)"
+    symbol = "xmark.octagon.fill"
+  } else if (finalRemPct <= 15) {
+    label = `额度告急 (${finalRemPct}%)`
+    symbol = "exclamationmark.octagon.fill"
+  } else if (finalRemPct <= 40) {
+    label = `余量偏低 (${finalRemPct}%)`
+    symbol = "exclamationmark.triangle.fill"
+  } else if (finalRemPct <= 60) {
+    label = `余量适中 (${finalRemPct}%)`
+    symbol = "exclamationmark.circle.fill"
+  } else {
+    label = `余量充足 (${finalRemPct}%)`
+    symbol = "checkmark.circle.fill"
+  }
+
+  return {
+    remainingPercent: finalRemPct,
+    usedPercent: finalUsedPct,
+    isExhausted,
+    isUnlimited: false,
+    isWalletOnly: false,
+    hasUsage: anyUsed,
+    label,
+    color: dynamicColor,
+    symbol,
+  }
 }
 
 export function accountHealthSummary(snapshot?: QuotaSnapshot): {
@@ -99,87 +312,11 @@ export function accountHealthSummary(snapshot?: QuotaSnapshot): {
   color: Color
   symbol: string
 } {
-  if (!snapshot || snapshot.windows.length === 0) {
-    return {
-      label: "待刷新",
-      color: "secondaryLabel",
-      symbol: "clock.badge.questionmark",
-    }
-  }
-
-  let maxUsed = 0
-  let hasExhausted = false
-  let hasQuotaWindow = false
-
-  for (const w of snapshot.windows) {
-    if (w.isExhausted) {
-      hasExhausted = true
-    }
-    if (w.usedPercentage !== undefined && Number.isFinite(w.usedPercentage)) {
-      hasQuotaWindow = true
-      if (w.usedPercentage > maxUsed) {
-        maxUsed = w.usedPercentage
-      }
-    } else if (
-      w.remainingCount !== undefined &&
-      w.totalCount !== undefined &&
-      w.totalCount > 0
-    ) {
-      hasQuotaWindow = true
-      const pct = ((w.totalCount - w.remainingCount) / w.totalCount) * 100
-      if (pct > maxUsed) maxUsed = pct
-    } else if (
-      w.exactCounts?.total !== undefined &&
-      w.exactCounts.total > 0 &&
-      (w.exactCounts.used !== undefined || w.exactCounts.remaining !== undefined)
-    ) {
-      hasQuotaWindow = true
-      const used =
-        w.exactCounts.used !== undefined
-          ? w.exactCounts.used
-          : Math.max(0, w.exactCounts.total - (w.exactCounts.remaining ?? 0))
-      const pct = (used / w.exactCounts.total) * 100
-      if (pct > maxUsed) maxUsed = pct
-    }
-  }
-
-  if (hasExhausted || hasQuotaWindow) {
-    const remPct = hasExhausted
-      ? 0
-      : Math.max(0, Math.min(100, Math.round(100 - maxUsed)))
-    const dynamicColor = remainingQuotaColor(remPct, hasExhausted || remPct <= 0)
-
-    if (hasExhausted || remPct <= 0) {
-      return {
-        label: "额度已耗尽 (0%)",
-        color: dynamicColor,
-        symbol: "xmark.octagon.fill",
-      }
-    }
-    if (remPct <= 10) {
-      return {
-        label: `额度告急 (${remPct}%)`,
-        color: dynamicColor,
-        symbol: "exclamationmark.octagon.fill",
-      }
-    }
-    if (remPct <= 30) {
-      return {
-        label: `余量偏低 (${remPct}%)`,
-        color: dynamicColor,
-        symbol: "exclamationmark.triangle.fill",
-      }
-    }
-    return {
-      label: `余量充足 (${remPct}%)`,
-      color: dynamicColor,
-      symbol: "checkmark.circle.fill",
-    }
-  }
+  const overall = computeAccountOverallQuota(snapshot)
   return {
-    label: "钱包正常",
-    color: "systemBlue",
-    symbol: "creditcard.fill",
+    label: overall.label,
+    color: overall.color,
+    symbol: overall.symbol,
   }
 }
 
