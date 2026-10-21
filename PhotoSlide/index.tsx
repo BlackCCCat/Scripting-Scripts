@@ -47,6 +47,23 @@ const allPhotosSource: PhotoSource = { kind: "all" }
 const screenshotsSource: PhotoSource = { kind: "screenshots" }
 const dayInMilliseconds = 24 * 60 * 60 * 1000
 const photoCardHeight = Math.max(240, cardHeight - 56)
+const smartAlbumSymbols: Record<string, string> = {
+  smartAlbumSelfPortraits: "camera.rotate",
+  smartAlbumDepthEffect: "person.crop.rectangle",
+  smartAlbumPanoramas: "pano",
+  smartAlbumLivePhotos: "livephoto",
+  smartAlbumScreenshots: "camera.viewfinder",
+  smartAlbumFavorites: "heart.fill",
+  smartAlbumBursts: "square.stack.3d.up",
+  smartAlbumLongExposures: "timer",
+  smartAlbumAnimated: "play.rectangle",
+  smartAlbumRAW: "camera.aperture",
+  smartAlbumRecentlyAdded: "clock",
+  smartAlbumAllHidden: "eye.slash",
+  smartAlbumUserLibrary: "photo.on.rectangle",
+  smartAlbumSpatial: "cube",
+  smartAlbumUnableToUpload: "icloud.slash",
+}
 
 type SwitchPreview = {
   image: UIImage | null
@@ -1584,18 +1601,30 @@ function App() {
           systemImage="camera.viewfinder"
           action={tap(() => selectSource(screenshotsSource))}
         />
+        {albums.some(album => album.collection.type === "smartAlbum" && smartAlbumSymbols[album.collection.subtype]) ? (
+          <Menu title="系统分类" systemImage="square.grid.2x2">
+            {albums.filter(album => album.collection.type === "smartAlbum" && smartAlbumSymbols[album.collection.subtype]).map(album => (
+              <Button
+                key={album.id}
+                title={`${selectedSource.albumId === album.id ? "✓ " : ""}${album.title} · ${album.count}`}
+                systemImage={smartAlbumSymbols[album.collection.subtype]}
+                action={tap(() => selectSource({ kind: "album", albumId: album.id }))}
+              />
+            ))}
+          </Menu>
+        ) : null}
         <Menu title="相簿" systemImage="rectangle.stack">
-          {albums.length === 0 ? (
+          {albums.every(album => album.collection.type !== "album") ? (
             <Button
               title={isLoadingAlbums ? "正在读取相簿" : "没有相簿"}
               systemImage="hourglass"
               action={tap(() => void loadAlbums())}
             />
-          ) : albums.map(album => (
+          ) : albums.filter(album => album.collection.type === "album").map(album => (
             <Button
               key={album.id}
               title={`${selectedSource.albumId === album.id ? "✓ " : ""}${album.title} · ${album.count}`}
-              systemImage={album.collection.type === "smartAlbum" ? "sparkles.rectangle.stack" : "rectangle.stack"}
+              systemImage="rectangle.stack"
               action={tap(() => selectSource({ kind: "album", albumId: album.id }))}
             />
           ))}
@@ -1717,12 +1746,18 @@ function App() {
                 <Text font={12} foregroundStyle="secondaryLabel">
                   当前范围
                 </Text>
-                <Text font={18} fontWeight="bold" foregroundStyle="label">
+                <Text font={18} fontWeight="bold" foregroundStyle="label" lineLimit={1}>
                   {selectedSourceTitle}
                 </Text>
               </VStack>
               <Spacer />
-              <HStack spacing={16}>
+              <HStack spacing={8}>
+                {renderIconButton({
+                  systemImage: "arrow.clockwise",
+                  action: () => void refreshCurrentView(),
+                  disabled: isBusy,
+                  accessibilityLabel: "刷新照片范围",
+                })}
                 {renderSourceMenu("", "rectangle.stack")}
                 {renderIconButton({
                   systemImage: dateFilterEnabled ? "calendar.badge.clock" : "calendar",
@@ -1897,6 +1932,7 @@ function App() {
                     height={photoCardHeight}
                     currentImage={imageCache.get(currentItem?.id)}
                     nextImage={imageCache.get(nextItem?.id)}
+                    showSkippedOnly={showSkippedOnly}
                     motionController={motionController}
                     onDragChanged={handleDragChanged}
                     onDragEnded={handleDragEnded}

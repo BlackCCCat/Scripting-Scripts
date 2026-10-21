@@ -4,17 +4,32 @@ import {
   Text,
   Image,
   ProgressView,
+  Rectangle,
+  gradient,
   useEffect,
   useState,
 } from "scripting"
-import { CARD_CORNER_RADIUS, cardWidth } from "../constants"
+import { CARD_CORNER_RADIUS, SWIPE_THRESHOLD, cardWidth } from "../constants"
 import type { CardMotionController, PointOffset } from "../types"
 import { nextCardOffsetY, nextCardOpacity, nextCardScale } from "../utils"
+
+const greenEdgeGradient = gradient("linear", {
+  colors: ["rgba(52,199,89,0.85)", "rgba(52,199,89,0)"],
+  startPoint: "top",
+  endPoint: "bottom",
+})
+const redEdgeGradient = gradient("linear", {
+  colors: ["rgba(255,59,48,0.85)", "rgba(255,59,48,0)"],
+  startPoint: "bottom",
+  endPoint: "top",
+})
+const edgeHeight = 72
 
 type PhotoCardStackProps = {
   height: number
   currentImage: UIImage | null
   nextImage: UIImage | null
+  showSkippedOnly: boolean
   motionController: CardMotionController
   onDragChanged: (value: any) => void
   onDragEnded: (value: any) => void
@@ -28,6 +43,7 @@ function PhotoImageCard({
   shadowOpacity,
   zIndex,
   height,
+  highlight,
 }: {
   image: UIImage | null
   scaleEffect: number
@@ -36,6 +52,7 @@ function PhotoImageCard({
   shadowOpacity: number
   zIndex: number
   height: number
+  highlight?: { color: "green" | "red"; opacity: number }
 }) {
   return (
     <ZStack
@@ -66,6 +83,15 @@ function PhotoImageCard({
           </Text>
         </VStack>
       )}
+      {highlight ? (
+        <Rectangle
+          fill={highlight.color === "green" ? greenEdgeGradient : redEdgeGradient}
+          frame={{ width: cardWidth, height: edgeHeight }}
+          offset={{ x: 0, y: (highlight.color === "green" ? edgeHeight - height : height - edgeHeight) / 2 }}
+          opacity={highlight.opacity}
+          allowsHitTesting={false}
+        />
+      ) : null}
     </ZStack>
   )
 }
@@ -99,6 +125,7 @@ export function PhotoCardStack({
   height,
   currentImage,
   nextImage,
+  showSkippedOnly,
   motionController,
   onDragChanged,
   onDragEnded,
@@ -113,6 +140,10 @@ export function PhotoCardStack({
     }
   }, [motionController])
   const { offset: dragOffset, scale: cardScale, opacity: cardOpacity } = motion
+  const verticalDrag = Math.abs(dragOffset.y) > Math.abs(dragOffset.x)
+  const highlightOpacity = verticalDrag && (dragOffset.y < 0 || !showSkippedOnly)
+    ? Math.min(1, Math.abs(dragOffset.y) / SWIPE_THRESHOLD)
+    : 0
 
   return (
     <ZStack frame={{ width: cardWidth, height }}>
@@ -134,6 +165,7 @@ export function PhotoCardStack({
         opacity={cardOpacity}
         shadowOpacity={0.12}
         zIndex={2}
+        highlight={{ color: verticalDrag && dragOffset.y > 0 ? "green" : "red", opacity: highlightOpacity }}
       />
 
       <FixedGestureLayer
