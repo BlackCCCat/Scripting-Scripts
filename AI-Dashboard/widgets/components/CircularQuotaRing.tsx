@@ -25,7 +25,18 @@ export function CircularQuotaRing(props: {
     valueFont: customValueFont,
   } = props
   // 联动主脚本：计算剩余比例与过渡色彩
-  const remPct = Math.min(100, Math.max(0, item.remainingPercentage))
+  let remPct = Math.min(100, Math.max(0, item.remainingPercentage))
+  if (
+    item.totalCount !== undefined &&
+    item.remainingCount !== undefined &&
+    item.remainingCount < item.totalCount &&
+    remPct >= 99.5
+  ) {
+    remPct = 99
+  }
+  if (item.remainingCount !== undefined && item.remainingCount > 0 && remPct <= 0.5) {
+    remPct = 1
+  }
   const isExhausted = item.isExhausted || remPct <= 0
   const fraction = isExhausted ? 0 : Math.min(1, Math.max(0, remPct / 100))
   const ringColor = remainingQuotaColor(remPct, isExhausted)
@@ -107,7 +118,9 @@ export function CircularQuotaRing(props: {
             >
               {isExhausted ? "0%" : `${Math.round(remPct)}%`}
             </Text>
-            {item.remainingCount !== undefined ? (
+            {item.remainingCount !== undefined &&
+            item.unit !== "%" &&
+            !(item.totalCount === 100 && (item.unit === "%" || !item.unit)) ? (
               <Text
                 font={Math.max(8.5, valFont * 0.38)}
                 fontWeight="bold"

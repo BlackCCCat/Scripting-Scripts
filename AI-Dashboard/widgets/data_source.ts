@@ -1,7 +1,5 @@
 import { Widget } from "scripting"
 import type {
-  DashboardSettings,
-  ProviderId,
   QuotaSnapshot,
   SubscriptionAccount,
 } from "../models/types"
@@ -56,6 +54,30 @@ function buildWidgetAccountData(
 
   const quotas: WidgetQuotaItem[] = windows.map((w) => {
     let usedPct = w.usedPercentage ?? 0
+
+    // 优先根据精确计数计算真实的已用比例，杜绝使用积分后百分比仍然显示 100% 的不同步问题
+    if (
+      w.exactCounts?.total !== undefined &&
+      w.exactCounts.total > 0 &&
+      w.exactCounts.remaining !== undefined
+    ) {
+      const remFrac = Math.min(1, Math.max(0, w.exactCounts.remaining / w.exactCounts.total))
+      usedPct = Math.round((1 - remFrac) * 1000) / 10
+    } else if (
+      w.exactCounts?.total !== undefined &&
+      w.exactCounts.total > 0 &&
+      w.exactCounts.used !== undefined
+    ) {
+      usedPct = Math.round((w.exactCounts.used / w.exactCounts.total) * 1000) / 10
+    } else if (
+      w.totalCount !== undefined &&
+      w.totalCount > 0 &&
+      w.remainingCount !== undefined
+    ) {
+      const remFrac = Math.min(1, Math.max(0, w.remainingCount / w.totalCount))
+      usedPct = Math.round((1 - remFrac) * 1000) / 10
+    }
+
     if (w.isExhausted) usedPct = 100
     if (usedPct > 100) usedPct = 100
     if (usedPct < 0) usedPct = 0
@@ -85,14 +107,24 @@ function buildWidgetAccountData(
       balanceText = `${w.remainingCount} ${w.unit || ""}`.trim()
     }
 
+    let remPct = Math.max(0, 100 - usedPct)
+    const totalCount = w.totalCount ?? w.exactCounts?.total
+    const remCount = w.remainingCount ?? w.exactCounts?.remaining
+    if (totalCount !== undefined && remCount !== undefined && remCount < totalCount && remPct >= 99.5) {
+      remPct = 99
+    }
+    if (remCount !== undefined && remCount > 0 && remPct <= 0.5) {
+      remPct = 1
+    }
+
     return {
       id: w.id,
       name: shortenQuotaWindowName(w.name, acc.provider),
       period: w.period,
       usedPercentage: usedPct,
-      remainingPercentage: Math.max(0, 100 - usedPct),
-      remainingCount: w.remainingCount ?? w.exactCounts?.remaining ?? w.wallet?.total,
-      totalCount: w.totalCount ?? w.exactCounts?.total,
+      remainingPercentage: remPct,
+      remainingCount: remCount ?? w.wallet?.total,
+      totalCount: totalCount,
       unit: w.unit,
       isExhausted: !!w.isExhausted || usedPct >= 100,
       isUnlimited: !!w.isUnlimited,

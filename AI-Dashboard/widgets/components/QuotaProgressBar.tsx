@@ -33,7 +33,18 @@ export function QuotaProgressBar(props: {
   } = props
 
   // 联动主脚本：计算剩余额度比例与颜色
-  const remPct = Math.min(100, Math.max(0, item.remainingPercentage))
+  let remPct = Math.min(100, Math.max(0, item.remainingPercentage))
+  if (
+    item.totalCount !== undefined &&
+    item.remainingCount !== undefined &&
+    item.remainingCount < item.totalCount &&
+    remPct >= 99.5
+  ) {
+    remPct = 99
+  }
+  if (item.remainingCount !== undefined && item.remainingCount > 0 && remPct <= 0.5) {
+    remPct = 1
+  }
   const isExhausted = item.isExhausted || remPct <= 0
   const barColor = remainingQuotaColor(remPct, isExhausted)
 
@@ -49,8 +60,12 @@ export function QuotaProgressBar(props: {
   const valueFontSize = customValueFont ?? (compact ? 9.5 : 12)
   const countdownFontSize = customTitleFont ? Math.max(7.5, customTitleFont - 3) : (compact ? 7.5 : 9)
 
-  // 提取剩余积分/配额/次数数值展示
-  const hasCount = item.remainingCount !== undefined
+  // 提取剩余积分/配额/次数数值展示（过滤掉纯百分比类型或以 100 为总量的伪计数，防止出现多余的 100/100）
+  const hasCount =
+    item.remainingCount !== undefined &&
+    item.unit !== "%" &&
+    !(item.totalCount === 100 && (item.unit === "%" || !item.unit))
+
   const countStr = hasCount
     ? item.totalCount !== undefined
       ? `${item.remainingCount}/${item.totalCount}${compact ? "" : ` ${item.unit || "积分"}`}`

@@ -644,9 +644,6 @@ export function extractFourQuotaWindows(
       name,
       period,
       usedPercentage: usedPct,
-      remainingCount: remainingPct,
-      totalCount: 100,
-      unit: "%",
       resetsAt: item?.resetTime || undefined,
       isExhausted,
     }

@@ -195,43 +195,61 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
 
   if (window.exactCounts) {
     const { used, remaining, total } = window.exactCounts
-    if (remaining !== undefined && total !== undefined) {
+    if (remaining !== undefined && total !== undefined && total > 0) {
       const computedUsed =
         used !== undefined ? used : Math.max(0, total - remaining)
+      const exactRemFrac = Math.min(1, Math.max(0, remaining / total))
+      let exactRemPct = remaining <= 0 ? 0 : Math.round(exactRemFrac * 100)
+      if (computedUsed > 0 && remaining < total && exactRemPct >= 100) {
+        exactRemPct = 99
+      }
+      if (remaining > 0 && exactRemPct <= 0) {
+        exactRemPct = 1
+      }
+      const exactUsedPct = 100 - exactRemPct
       return {
-        primaryRemainingText:
-          remPct !== null
-            ? `剩余 ${formatAmountNumber(remaining)}${unit} (${remPct}%)`
-            : `剩余 ${formatAmountNumber(remaining)}${unit}`,
+        primaryRemainingText: `剩余 ${formatAmountNumber(remaining)}${unit} (${exactRemPct}%)`,
         secondaryUsedText: `已用 ${formatAmountNumber(computedUsed)} / 共 ${formatAmountNumber(total)}${unit}`,
-        usedPercent: usedPct,
-        remainingPercent: remPct,
+        usedPercent: exactUsedPct,
+        remainingPercent: exactRemPct,
       }
     }
-    if (used !== undefined && total !== undefined) {
+    if (used !== undefined && total !== undefined && total > 0) {
       const computedRem = Math.max(0, total - used)
+      const exactRemFrac = Math.min(1, Math.max(0, computedRem / total))
+      let exactRemPct = computedRem <= 0 ? 0 : Math.round(exactRemFrac * 100)
+      if (used > 0 && computedRem < total && exactRemPct >= 100) {
+        exactRemPct = 99
+      }
+      if (computedRem > 0 && exactRemPct <= 0) {
+        exactRemPct = 1
+      }
+      const exactUsedPct = 100 - exactRemPct
       return {
-        primaryRemainingText:
-          remPct !== null
-            ? `剩余 ${formatAmountNumber(computedRem)}${unit} (${remPct}%)`
-            : `剩余 ${formatAmountNumber(computedRem)}${unit}`,
+        primaryRemainingText: `剩余 ${formatAmountNumber(computedRem)}${unit} (${exactRemPct}%)`,
         secondaryUsedText: `已用 ${formatAmountNumber(used)} / 共 ${formatAmountNumber(total)}${unit}`,
-        usedPercent: usedPct,
-        remainingPercent: remPct,
+        usedPercent: exactUsedPct,
+        remainingPercent: exactRemPct,
       }
     }
   }
 
-  if (window.remainingCount !== undefined && window.totalCount !== undefined) {
+  if (window.remainingCount !== undefined && window.totalCount !== undefined && window.totalCount > 0) {
     const usedCount = Math.max(0, window.totalCount - window.remainingCount)
+    const exactRemFrac = Math.min(1, Math.max(0, window.remainingCount / window.totalCount))
+    let exactRemPct = window.remainingCount <= 0 ? 0 : Math.round(exactRemFrac * 100)
+    if (usedCount > 0 && window.remainingCount < window.totalCount && exactRemPct >= 100) {
+      exactRemPct = 99
+    }
+    if (window.remainingCount > 0 && exactRemPct <= 0) {
+      exactRemPct = 1
+    }
+    const exactUsedPct = 100 - exactRemPct
     return {
-      primaryRemainingText:
-        remPct !== null
-          ? `剩余 ${formatAmountNumber(window.remainingCount, 2)}${unit} (${remPct}%)`
-          : `剩余 ${formatAmountNumber(window.remainingCount, 2)}${unit}`,
+      primaryRemainingText: `剩余 ${formatAmountNumber(window.remainingCount, 2)}${unit} (${exactRemPct}%)`,
       secondaryUsedText: `已用 ${formatAmountNumber(usedCount, 2)} / 共 ${formatAmountNumber(window.totalCount, 2)}${unit}`,
-      usedPercent: usedPct,
-      remainingPercent: remPct,
+      usedPercent: exactUsedPct,
+      remainingPercent: exactRemPct,
     }
   }
 
@@ -275,12 +293,7 @@ export function formatWindowProgressFraction(
   window: QuotaWindow
 ): number | null {
   if (window.wallet || window.isUnlimited) return null
-  if (
-    window.usedPercentage !== undefined &&
-    Number.isFinite(window.usedPercentage)
-  ) {
-    return Math.min(Math.max(window.usedPercentage / 100, 0), 1)
-  }
+  // 优先采用精确计数计算，防止百分比与具体数字不同步
   if (
     window.exactCounts?.used !== undefined &&
     window.exactCounts?.total !== undefined &&
@@ -292,12 +305,26 @@ export function formatWindowProgressFraction(
     )
   }
   if (
+    window.exactCounts?.remaining !== undefined &&
+    window.exactCounts?.total !== undefined &&
+    window.exactCounts.total > 0
+  ) {
+    const used = window.exactCounts.total - window.exactCounts.remaining
+    return Math.min(Math.max(used / window.exactCounts.total, 0), 1)
+  }
+  if (
     window.remainingCount !== undefined &&
     window.totalCount !== undefined &&
     window.totalCount > 0
   ) {
     const used = window.totalCount - window.remainingCount
     return Math.min(Math.max(used / window.totalCount, 0), 1)
+  }
+  if (
+    window.usedPercentage !== undefined &&
+    Number.isFinite(window.usedPercentage)
+  ) {
+    return Math.min(Math.max(window.usedPercentage / 100, 0), 1)
   }
   if (window.isExhausted !== undefined) {
     return window.isExhausted ? 1 : 0
@@ -313,6 +340,27 @@ export function formatWindowRemainingFraction(
 ): number | null {
   if (window.wallet || window.isUnlimited) return null
   if (window.isExhausted) return 0
+  // 优先根据具体余量与总量计算剩余进度
+  if (
+    window.exactCounts?.remaining !== undefined &&
+    window.exactCounts?.total !== undefined &&
+    window.exactCounts.total > 0
+  ) {
+    return Math.min(
+      Math.max(window.exactCounts.remaining / window.exactCounts.total, 0),
+      1
+    )
+  }
+  if (
+    window.remainingCount !== undefined &&
+    window.totalCount !== undefined &&
+    window.totalCount > 0
+  ) {
+    return Math.min(
+      Math.max(window.remainingCount / window.totalCount, 0),
+      1
+    )
+  }
   const usedFraction = formatWindowProgressFraction(window)
   if (usedFraction === null) return null
   return Math.min(1, Math.max(0, 1 - usedFraction))

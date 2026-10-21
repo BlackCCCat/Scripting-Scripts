@@ -165,17 +165,14 @@ export const queryWorkBuddyQuota: ProviderQuotaHandler = async (
       totalUsed = derived
     }
   }
-  const totalDosage = toFiniteNumber(innerData.TotalDosage)
-  if (totalDosage !== undefined && totalDosage > totalSize) {
-    totalSize = totalDosage
-    const derived = totalSize - totalRemain
-    if (derived > totalUsed) {
-      totalUsed = derived
-    }
-  }
   if (totalRemain < 0) {
     totalRemain = 0
   }
+  if (totalSize > 0 && totalRemain > totalSize) {
+    totalRemain = totalSize
+  }
+
+  const totalDosage = toFiniteNumber(innerData.TotalDosage)
 
   if (totalSize > 0) {
     const usedPct = Math.min(100, Math.max(0, (totalUsed / totalSize) * 100))

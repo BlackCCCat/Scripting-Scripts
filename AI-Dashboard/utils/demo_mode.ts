@@ -469,7 +469,7 @@ function getProviderDemoWindows(
         "DevOps_Master",
         "13900008888",
       ]
-      const usedPcts = [0, 0, 0, 36, 18, 85]
+      const usedPcts = [36, 15, 58, 42, 18, 85]
       const currentIdentity = identities[idx - 1] || "wb_user_cn"
       const currentUsed = usedPcts[idx - 1] ?? 0
 
