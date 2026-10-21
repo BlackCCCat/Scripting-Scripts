@@ -242,14 +242,16 @@ export function SettingsView(props: {
           </Picker>
 
           <Toggle
-            title="连接提示显示适配透明桌面模式"
-            value={settings.widgetConnectionAdaptTransparent ?? false}
+            title="用量标识适配透明模式"
+            value={settings.widgetQuotaAdaptTransparent ?? false}
             onChanged={(val) => {
               onUpdateSettings({
                 ...settings,
+                widgetQuotaAdaptTransparent: val,
                 widgetConnectionAdaptTransparent: val,
               })
               void Widget.reloadAll()
+              void Widget.reloadUserWidgets()
             }}
           />
 

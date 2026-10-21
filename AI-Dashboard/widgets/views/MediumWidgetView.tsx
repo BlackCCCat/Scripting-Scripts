@@ -1,6 +1,5 @@
 import {
   Capsule,
-  Circle,
   Divider,
   HStack,
   Image,
@@ -13,6 +12,7 @@ import { ProviderIconView } from "../../components/ProviderIconView"
 import { remainingQuotaColor } from "../../utils/theme"
 import { CircularQuotaRing } from "../components/CircularQuotaRing"
 import { MultiQuotaAdaptiveList } from "../components/MultiQuotaAdaptiveList"
+import { WidgetQuotaStatusDot } from "../components/WidgetQuotaStatusDot"
 import type { WidgetAccountData } from "../types"
 import {
   formatCurrencyAmount,
@@ -30,11 +30,6 @@ export function MediumAccountCard(props: {
   const { account, lastUpdatedAt, heightMode = "normal", showUpdatedAt = false, adaptTransparent = false } = props
   const isCompact = heightMode === "compact"
   const statusColor = getQuotaStatusColor(account.worstUsedPercentage)
-  const isAbnormal =
-    account.overallStatus === "exhausted" ||
-    account.worstUsedPercentage >= 100 ||
-    statusColor === "systemRed" ||
-    statusColor === "systemOrange"
   const isWallet = account.isWallet && Boolean(account.wallet)
   const quotaCount = account.quotas.length
 
@@ -138,17 +133,13 @@ export function MediumAccountCard(props: {
             </Text>
           ) : null}
 
-          {adaptTransparent && isAbnormal ? (
-            <Circle
-              stroke={{
-                shapeStyle: statusColor,
-                strokeStyle: { lineWidth: 1.3 },
-              }}
-              frame={{ width: isCompact ? 5 : 5.5, height: isCompact ? 5 : 5.5 }}
-            />
-          ) : (
-            <Circle fill={statusColor} frame={{ width: isCompact ? 5 : 5.5, height: isCompact ? 5 : 5.5 }} />
-          )}
+          <WidgetQuotaStatusDot
+            usedPercentage={account.worstUsedPercentage}
+            overallStatus={account.overallStatus}
+            statusColor={statusColor}
+            adaptTransparent={adaptTransparent}
+            isCompact={isCompact}
+          />
         </HStack>
 
         <Divider />

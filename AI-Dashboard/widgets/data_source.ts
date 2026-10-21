@@ -330,8 +330,10 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
   const settings = loadDashboardSettings()
   const useDemo = forceDemo ?? settings.isDemoMode
   const widgetPrivacyEnabled = settings.widgetPrivacyEnabled ?? true
-  const widgetConnectionAdaptTransparent =
-    settings.widgetConnectionAdaptTransparent ?? false
+  const widgetQuotaAdaptTransparent =
+    settings.widgetQuotaAdaptTransparent ??
+    settings.widgetConnectionAdaptTransparent ??
+    false
 
   let accounts: SubscriptionAccount[] = []
   let snapshots: Record<string, QuotaSnapshot> = {}
@@ -464,7 +466,8 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
     }),
     isDemoMode: useDemo,
     widgetPrivacyEnabled,
-    widgetConnectionAdaptTransparent,
+    widgetQuotaAdaptTransparent,
+    widgetConnectionAdaptTransparent: widgetQuotaAdaptTransparent,
     parameterTokensCount,
   }
 }

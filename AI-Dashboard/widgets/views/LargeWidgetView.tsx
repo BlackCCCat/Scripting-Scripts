@@ -45,6 +45,9 @@ export function LargeWidgetView(props: {
   }
 
   // 仅配置 1 个账号时单独占满卡片
+  const adaptTransparent =
+    data.widgetQuotaAdaptTransparent ?? data.widgetConnectionAdaptTransparent
+
   if (accounts.length === 1) {
     return (
       <VStack
@@ -58,7 +61,7 @@ export function LargeWidgetView(props: {
           lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
           showUpdatedAt={true}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={adaptTransparent}
         />
       </VStack>
     )
@@ -77,14 +80,14 @@ export function LargeWidgetView(props: {
         lastUpdatedAt={data.lastUpdatedAt}
         heightMode="normal"
         showUpdatedAt={true}
-        adaptTransparent={data.widgetConnectionAdaptTransparent}
+        adaptTransparent={adaptTransparent}
       />
       <Divider />
       <MediumAccountCard
         account={accounts[1]}
         heightMode="normal"
         showUpdatedAt={false}
-        adaptTransparent={data.widgetConnectionAdaptTransparent}
+        adaptTransparent={adaptTransparent}
       />
     </VStack>
   )

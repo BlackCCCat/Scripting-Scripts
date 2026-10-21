@@ -20,7 +20,7 @@ export function WidgetRootView(props: {
           account={data.accounts[0]}
           allAccounts={data.accounts}
           lastUpdatedAt={data.lastUpdatedAt}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={data.widgetQuotaAdaptTransparent ?? data.widgetConnectionAdaptTransparent}
           onSelectProvider={onSelectWalletProvider}
         />
       )
@@ -30,7 +30,7 @@ export function WidgetRootView(props: {
         <MediumWidgetView
           accounts={data.accounts}
           lastUpdatedAt={data.lastUpdatedAt}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={data.widgetQuotaAdaptTransparent ?? data.widgetConnectionAdaptTransparent}
         />
       )
 
@@ -47,7 +47,7 @@ export function WidgetRootView(props: {
           account={data.accounts[0]}
           allAccounts={data.accounts}
           lastUpdatedAt={data.lastUpdatedAt}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={data.widgetQuotaAdaptTransparent ?? data.widgetConnectionAdaptTransparent}
           onSelectProvider={onSelectWalletProvider}
         />
       )

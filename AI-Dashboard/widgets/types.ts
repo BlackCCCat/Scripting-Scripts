@@ -52,6 +52,7 @@ export type WidgetRenderData = {
   lastUpdatedAt: string
   isDemoMode: boolean
   widgetPrivacyEnabled?: boolean
+  widgetQuotaAdaptTransparent?: boolean
   widgetConnectionAdaptTransparent?: boolean
   parameterTokensCount: number
 }

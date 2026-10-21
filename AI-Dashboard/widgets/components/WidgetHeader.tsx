@@ -1,12 +1,12 @@
 import {
   Capsule,
-  Circle,
   HStack,
   Spacer,
   Text,
 } from "scripting"
 import type { WidgetAccountData } from "../types"
 import { getQuotaStatusColor } from "../utils"
+import { WidgetQuotaStatusDot } from "./WidgetQuotaStatusDot"
 
 export function WidgetHeader(props: {
   account: WidgetAccountData
@@ -18,11 +18,6 @@ export function WidgetHeader(props: {
   const { account, size = "small", showCountdown = false, adaptTransparent = false } = props
   const statusColor = getQuotaStatusColor(account.worstUsedPercentage)
   const isCompact = size === "small"
-  const isAbnormal =
-    account.overallStatus === "exhausted" ||
-    account.worstUsedPercentage >= 100 ||
-    statusColor === "systemRed" ||
-    statusColor === "systemOrange"
 
   return (
     <HStack alignment="center" spacing={6} frame={{ maxWidth: "infinity" }}>
@@ -74,20 +69,13 @@ export function WidgetHeader(props: {
             {account.earliestResetCountdown}
           </Text>
         ) : null}
-        {adaptTransparent && isAbnormal ? (
-          <Circle
-            stroke={{
-              shapeStyle: statusColor,
-              strokeStyle: { lineWidth: 1.3 },
-            }}
-            frame={{ width: 6, height: 6 }}
-          />
-        ) : (
-          <Circle
-            fill={statusColor}
-            frame={{ width: 6, height: 6 }}
-          />
-        )}
+        <WidgetQuotaStatusDot
+          usedPercentage={account.worstUsedPercentage}
+          overallStatus={account.overallStatus}
+          statusColor={statusColor}
+          adaptTransparent={adaptTransparent}
+          isCompact={isCompact}
+        />
       </HStack>
     </HStack>
   )

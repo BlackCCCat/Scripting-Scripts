@@ -44,6 +44,9 @@ export function ExtraLargeWidgetView(props: {
     )
   }
 
+  const adaptTransparent =
+    data.widgetQuotaAdaptTransparent ?? data.widgetConnectionAdaptTransparent
+
   if (accounts.length === 1) {
     return (
       <VStack
@@ -57,7 +60,7 @@ export function ExtraLargeWidgetView(props: {
           lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
           showUpdatedAt={true}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={adaptTransparent}
         />
       </VStack>
     )
@@ -76,14 +79,14 @@ export function ExtraLargeWidgetView(props: {
           lastUpdatedAt={data.lastUpdatedAt}
           heightMode="normal"
           showUpdatedAt={true}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={adaptTransparent}
         />
         <Divider />
         <MediumAccountCard
           account={accounts[1]}
           heightMode="normal"
           showUpdatedAt={false}
-          adaptTransparent={data.widgetConnectionAdaptTransparent}
+          adaptTransparent={adaptTransparent}
         />
       </VStack>
     )
@@ -102,21 +105,21 @@ export function ExtraLargeWidgetView(props: {
         lastUpdatedAt={data.lastUpdatedAt}
         heightMode="normal"
         showUpdatedAt={true}
-        adaptTransparent={data.widgetConnectionAdaptTransparent}
+        adaptTransparent={adaptTransparent}
       />
       <Divider />
       <MediumAccountCard
         account={accounts[1]}
         heightMode="normal"
         showUpdatedAt={false}
-        adaptTransparent={data.widgetConnectionAdaptTransparent}
+        adaptTransparent={adaptTransparent}
       />
       <Divider />
       <MediumAccountCard
         account={accounts[2]}
         heightMode="normal"
         showUpdatedAt={false}
-        adaptTransparent={data.widgetConnectionAdaptTransparent}
+        adaptTransparent={adaptTransparent}
       />
     </VStack>
   )
