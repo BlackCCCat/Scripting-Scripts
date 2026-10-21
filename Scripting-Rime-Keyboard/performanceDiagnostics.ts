@@ -82,6 +82,13 @@ type StartupRun = {
   events: StartupEvent[];
 };
 
+export type MemorySample = {
+  runId: number;
+  timestamp: number;
+  processBytes: number | null;
+  availableBytes: number;
+};
+
 type StoredPerformanceDiagnostics = {
   version: 3;
   sampleInterval: number;
@@ -104,6 +111,7 @@ type PerformanceCompletionValues = {
 };
 
 const STORAGE_KEY = "rime_keyboard_performance_diagnostics_v3";
+const MEMORY_STORAGE_KEY = "rime_keyboard_memory_diagnostics_v1";
 const LEGACY_STORAGE_KEYS = [
   "rime_keyboard_performance_diagnostics_v2",
   "rime_keyboard_performance_diagnostics_v1",
@@ -112,6 +120,9 @@ const SAMPLE_INTERVAL = KEYBOARD_ACTION_DIAGNOSTIC_SAMPLE_INTERVAL;
 const SAMPLE_LIMIT = 400;
 const STARTUP_RUN_LIMIT = 10;
 const FLUSH_DELAY_MS = 15000;
+const MEMORY_SAMPLE_INTERVAL_MS = 250;
+const MEMORY_FLUSH_INTERVAL_MS = 5000;
+const MEMORY_SAMPLE_LIMIT = 4800;
 const SLOW_VISUAL_SAMPLE_THRESHOLD_MS = 50;
 const CHINA_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -120,6 +131,88 @@ export function performanceNow() {
     performance?: { now?: () => number };
   }).performance;
   return typeof clock?.now === "function" ? clock.now() : Date.now();
+}
+
+function loadMemorySamples(): MemorySample[] {
+  try {
+    const samples = Storage.get<MemorySample[]>(MEMORY_STORAGE_KEY);
+    return Array.isArray(samples) ? samples.slice(-MEMORY_SAMPLE_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function memoryDiagnosticsData() {
+  const samples = loadMemorySamples();
+  const runId = samples.at(-1)?.runId;
+  return runId == null ? [] : samples.filter((sample) => sample.runId === runId);
+}
+
+export function formatMemoryMiB(bytes: number | null) {
+  return bytes == null ? "不可用" : `${(bytes / 1048576).toFixed(1)} MiB`;
+}
+
+export class KeyboardMemoryDiagnostics {
+  private memorySamples = loadMemorySamples();
+  private memoryTimer: ReturnType<typeof setInterval>;
+  private memoryDirty = false;
+  private lastMemoryFlushAt: number;
+
+  constructor(private readonly runId = Date.now()) {
+    this.lastMemoryFlushAt = runId;
+    this.recordMemory();
+    this.flushMemory();
+    this.memoryTimer = setInterval(
+      () => this.recordMemory(),
+      MEMORY_SAMPLE_INTERVAL_MS,
+    );
+  }
+
+  private recordMemory() {
+    let processBytes: number | null;
+    let availableBytes: number;
+    try {
+      processBytes = Device.processMemoryUsage;
+      availableBytes = Device.availableMemory;
+    } catch {
+      return;
+    }
+    if (processBytes === undefined) return;
+    if (processBytes != null && !Number.isFinite(processBytes)) return;
+    if (!Number.isFinite(availableBytes)) availableBytes = 0;
+    this.memorySamples.push({
+      runId: this.runId,
+      timestamp: Date.now(),
+      processBytes,
+      availableBytes,
+    });
+    if (this.memorySamples.length > MEMORY_SAMPLE_LIMIT) {
+      this.memorySamples = this.memorySamples.filter((_, index) =>
+        index % 2 === 0 || index === this.memorySamples.length - 1
+      );
+    }
+    this.memoryDirty = true;
+    if (Date.now() - this.lastMemoryFlushAt >= MEMORY_FLUSH_INTERVAL_MS) {
+      this.flushMemory();
+    }
+  }
+
+  private flushMemory() {
+    if (!this.memoryDirty) return;
+    this.lastMemoryFlushAt = Date.now();
+    try {
+      Storage.set(MEMORY_STORAGE_KEY, this.memorySamples);
+      this.memoryDirty = false;
+    } catch {
+      // Retry at the next flush interval or when the keyboard closes.
+    }
+  }
+
+  dispose() {
+    clearInterval(this.memoryTimer);
+    this.recordMemory();
+    this.flushMemory();
+  }
 }
 
 function roundedMs(value: number) {
@@ -573,6 +666,10 @@ function touchDiagnosticLines(
 export function performanceDiagnosticsReport(): string | null {
   const stored = loadStoredDiagnostics();
   const latestRun = stored.startupRuns?.at(-1);
+  const memorySamples = memoryDiagnosticsData();
+  const measuredMemory = memorySamples.flatMap((sample) =>
+    sample.processBytes == null ? [] : [sample.processBytes]
+  );
   const samples = latestRun
     ? stored.samples.filter((sample) => sample.runId === latestRun.id)
     : stored.samples;
@@ -584,7 +681,9 @@ export function performanceDiagnosticsReport(): string | null {
       commit.runId === latestRun.id
     )
     : stored.pressVisualCommits;
-  if (samples.length === 0 && !latestRun) return null;
+  if (samples.length === 0 && !latestRun && memorySamples.length === 0) {
+    return null;
+  }
   const changedCount = samples.filter((sample) => sample.stateChanged).length;
   const unresolvedTouchCount =
     touches.filter((touch) => touch.endedAt == null).length;
@@ -627,6 +726,21 @@ export function performanceDiagnosticsReport(): string | null {
         return `${chinaTime(event.timestamp)} | +${elapsed.toFixed(3)}ms | 距前节点 ${gap.toFixed(3)}ms | ${event.name}${event.detail ? ` | ${event.detail}` : ""}`;
       })
       : ["无启动记录（旧版报告）"]),
+    "",
+    "键盘扩展宿主进程内存（含宿主及同进程脚本）:",
+    ...(memorySamples.length && latestRun?.id !== memorySamples[0].runId
+      ? ["内存记录与按键统计来自不同次键盘运行；可能是上次运行在写入性能统计前退出。"]
+      : []),
+    `原始采样间隔: ${MEMORY_SAMPLE_INTERVAL_MS}ms，样本数: ${memorySamples.length}，有效占用样本: ${measuredMemory.length}（超限时压缩较早的采样）`,
+    ...(measuredMemory.length
+      ? [
+        `占用: 初始 ${formatMemoryMiB(measuredMemory[0])}，当前 ${formatMemoryMiB(measuredMemory.at(-1)!)}，最低 ${formatMemoryMiB(Math.min(...measuredMemory))}，峰值 ${formatMemoryMiB(Math.max(...measuredMemory))}，平均 ${formatMemoryMiB(measuredMemory.reduce((sum, value) => sum + value, 0) / measuredMemory.length)}`,
+      ]
+      : []),
+    `当前可用额度估计: ${formatMemoryMiB(memorySamples.at(-1)?.availableBytes || null)}（0 可能表示不可用）`,
+    ...memorySamples.map((sample) =>
+      `${chinaTime(sample.timestamp)} | 占用=${formatMemoryMiB(sample.processBytes)} | 可用额度=${formatMemoryMiB(sample.availableBytes || null)}`
+    ),
     "",
     metricLine(
       "touchDuration",
@@ -735,6 +849,14 @@ export function clearPerformanceDiagnostics() {
   try {
     Storage.remove(STORAGE_KEY);
     for (const key of LEGACY_STORAGE_KEYS) Storage.remove(key);
+  } catch {
+    // There is nothing else to clear when Storage is unavailable.
+  }
+}
+
+export function clearMemoryDiagnostics() {
+  try {
+    Storage.remove(MEMORY_STORAGE_KEY);
   } catch {
     // There is nothing else to clear when Storage is unavailable.
   }

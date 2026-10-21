@@ -99,6 +99,7 @@ import {
 } from "./utils";
 import { prepareRimeSession } from "./rimePreparation";
 import {
+  KeyboardMemoryDiagnostics,
   KeyboardPerformanceDiagnostics,
   type PendingPerformanceDiagnosticSample,
   performanceNow,
@@ -385,6 +386,7 @@ function t9VisualDelimiterOffset(cursor: number, positions: number[]) {
 export function KeyboardView(props: {
   settings: RimeKeyboardSettings;
   diagnostics: KeyboardPerformanceDiagnostics | null;
+  memoryDiagnostics: KeyboardMemoryDiagnostics | null;
 }) {
   return (
     <GeometryReader>
@@ -397,6 +399,7 @@ export function KeyboardView(props: {
             availableWidth={width}
             settings={props.settings}
             diagnostics={props.diagnostics}
+            memoryDiagnostics={props.memoryDiagnostics}
           />
         );
       }}
@@ -409,6 +412,7 @@ function KeyboardContent(props: {
   availableWidth?: number;
   settings: RimeKeyboardSettings;
   diagnostics: KeyboardPerformanceDiagnostics | null;
+  memoryDiagnostics: KeyboardMemoryDiagnostics | null;
 }) {
   const settings = props.settings;
   const [keyboardTypeOverride, setKeyboardTypeOverride] = useState<
@@ -631,6 +635,7 @@ function KeyboardContent(props: {
       clearQueuedKeyboardActions();
       stopRepeatingBackspace();
       performanceDiagnosticsRef.current?.dispose();
+      props.memoryDiagnostics?.dispose();
       rimeViewStateControllerRef.current?.dispose();
       setKeyboardActionDiagnosticsEnabled(false);
       disposeConfiguredHaptics();
@@ -5177,6 +5182,9 @@ function main() {
   const diagnostics = settings.performanceDiagnostics
     ? new KeyboardPerformanceDiagnostics(startedAt)
     : null;
+  const memoryDiagnostics = settings.memoryDiagnostics
+    ? new KeyboardMemoryDiagnostics(startedAt)
+    : null;
   diagnostics?.recordStartup("键盘脚本入口", startedAt);
   diagnostics?.recordStartup("设置读取完成", settingsLoadedAt);
   diagnostics?.recordStartup("性能诊断初始化完成");
@@ -5196,9 +5204,19 @@ function main() {
   }
   diagnostics?.recordStartup("键盘宿主配置完成");
   diagnostics?.recordStartup("键盘呈现请求");
-  CustomKeyboard.present(
-    <KeyboardView settings={settings} diagnostics={diagnostics} />,
-  );
+  try {
+    CustomKeyboard.present(
+      <KeyboardView
+        settings={settings}
+        diagnostics={diagnostics}
+        memoryDiagnostics={memoryDiagnostics}
+      />,
+    );
+  } catch (error) {
+    diagnostics?.dispose();
+    memoryDiagnostics?.dispose();
+    throw error;
+  }
 }
 
 main();

@@ -1,5 +1,6 @@
 import {
   Button,
+  Chart,
   ColorPicker,
   Editor,
   ForEach,
@@ -7,6 +8,7 @@ import {
   HStack,
   Image,
   List,
+  LineCategoryChart,
   Navigation,
   NavigationLink,
   NavigationStack,
@@ -76,8 +78,12 @@ import {
 } from "./t9ProcessorInstall";
 import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet";
 import {
+  clearMemoryDiagnostics,
   clearPerformanceDiagnostics,
+  formatMemoryMiB,
+  memoryDiagnosticsData,
   performanceDiagnosticsReport,
+  type MemorySample,
 } from "./performanceDiagnostics";
 import {
   NATIVE_NUMERIC_ENGLISH_SYMBOL_ROW,
@@ -1207,6 +1213,89 @@ function FunctionSwipeConfigRow(props: {
   );
 }
 
+function MemoryUsageSheet(props: {
+  samples: MemorySample[];
+  onDismiss: () => void;
+}) {
+  const measured = props.samples.filter((sample) => sample.processBytes != null);
+  const available = props.samples.filter((sample) => sample.availableBytes > 0);
+  const stride = Math.max(1, Math.ceil(props.samples.length / 240));
+  const marks = props.samples.filter((_, index) =>
+    index % stride === 0 || index === props.samples.length - 1
+  ).flatMap((sample) => {
+    const label = new Date(sample.timestamp);
+    return [
+      ...(sample.processBytes == null ? [] : [{
+        label,
+        value: sample.processBytes / 1048576,
+        category: "进程占用",
+        foregroundStyleBy: "进程占用",
+      }]),
+      ...(sample.availableBytes <= 0 ? [] : [{
+        label,
+        value: sample.availableBytes / 1048576,
+        category: "可用额度",
+        foregroundStyleBy: "可用额度",
+      }]),
+    ];
+  });
+  const peak = measured.reduce(
+    (maximum, sample) => Math.max(maximum, sample.processBytes!),
+    0,
+  );
+
+  return (
+    <NavigationStack presentationDetents={["medium", "large"]}>
+      <List
+        navigationTitle="内存使用情况"
+        navigationBarTitleDisplayMode="inline"
+        toolbar={{
+          topBarTrailing: <Button title="完成" action={props.onDismiss} />,
+        }}
+      >
+        {measured.length > 1 || available.length > 1
+          ? (
+            <Section header={
+              <HStack spacing={12}>
+                <Text foregroundStyle="systemBlue">进程占用</Text>
+                <Text foregroundStyle="systemGreen">可用额度</Text>
+                <Text>（MiB）</Text>
+              </HStack>
+            }>
+              <Chart
+                frame={{ height: 260 }}
+                chartLegend="hidden"
+                chartForegroundStyleScale={{
+                  "进程占用": "systemBlue",
+                  "可用额度": "systemGreen",
+                }}
+              >
+                <LineCategoryChart marks={marks} />
+              </Chart>
+            </Section>
+          )
+          : null}
+        <Section footer={
+          <Text>
+            统计包含键盘扩展宿主和同进程脚本，不能单独表示本脚本的内存。图表显示最近一次键盘运行的全过程。
+          </Text>
+        }>
+          <Text>采样数：{props.samples.length}</Text>
+          {props.samples.length > 1
+            ? <Text>记录时长：{((props.samples.at(-1)!.timestamp - props.samples[0].timestamp) / 60000).toFixed(1)} 分钟</Text>
+            : null}
+          <Text>最近占用：{formatMemoryMiB(measured.at(-1)?.processBytes ?? null)}</Text>
+          <Text>峰值占用：{formatMemoryMiB(measured.length ? peak : null)}</Text>
+          <Text>当前可用额度估计：{formatMemoryMiB(props.samples.at(-1)?.availableBytes || null)}</Text>
+          {measured.length === 0
+            ? <Text>暂无内存数据。请开启内存统计后重新打开键盘。</Text>
+            : null}
+        </Section>
+      </List>
+    </NavigationStack>
+  );
+}
+
 function SettingsView() {
   const [settings, setSettings] = useState<RimeKeyboardSettings>(() =>
     loadRimeKeyboardSettings()
@@ -1218,6 +1307,8 @@ function SettingsView() {
   });
   const pendingTextDraftsRef = useRef<Record<string, string>>({});
   const [showSavedToast, setShowSavedToast] = useState(false);
+  const [showMemorySheet, setShowMemorySheet] = useState(false);
+  const [memorySamples, setMemorySamples] = useState<MemorySample[]>([]);
   const functionOrderEditMode = useObservable(() => EditMode.inactive());
   const toolbarEditMode = useObservable(() => EditMode.inactive());
   const [functionOrderEditing, setFunctionOrderEditing] = useState(false);
@@ -1757,6 +1848,19 @@ function SettingsView() {
       title: "已清除",
       message: "性能数据已清除。",
     });
+  }
+
+  async function clearMemoryReport() {
+    const confirmed = await Dialog.confirm({
+      title: "清除内存记录",
+      message: "确定清除当前已采集的内存数据吗？",
+      cancelLabel: "取消",
+      confirmLabel: "清除",
+    });
+    if (!confirmed) return;
+    clearMemoryDiagnostics();
+    setMemorySamples([]);
+    await Dialog.alert({ title: "已清除", message: "内存数据已清除。" });
   }
 
   async function updateT9ProcessorLua() {
@@ -2541,7 +2645,20 @@ function SettingsView() {
 
   function renderInputFeedbackPage() {
     return (
-      <List navigationTitle="输入反馈" navigationBarTitleDisplayMode="inline">
+      <List
+        navigationTitle="输入反馈"
+        navigationBarTitleDisplayMode="inline"
+        sheet={{
+          isPresented: showMemorySheet,
+          onChanged: setShowMemorySheet,
+          content: (
+            <MemoryUsageSheet
+              samples={memorySamples}
+              onDismiss={() => setShowMemorySheet(false)}
+            />
+          ),
+        }}
+      >
         <Section>
           <Toggle
             title="显示按键气泡"
@@ -2700,6 +2817,35 @@ function SettingsView() {
                   title="清除性能报告"
                   systemImage="trash"
                   action={() => void clearPerformanceReport()}
+                />
+              </Group>
+            )
+            : null}
+        </Section>
+        <Section header={<Text>内存统计</Text>} footer={
+          <SettingHint>统计键盘扩展宿主进程的内存，包含同进程脚本。重新打开键盘后生效。</SettingHint>
+        }>
+          <Toggle
+            title="内存统计"
+            systemImage="memorychip"
+            value={settings.memoryDiagnostics}
+            onChanged={(value) => patchSettings({ memoryDiagnostics: value })}
+          />
+          {settings.memoryDiagnostics
+            ? (
+              <Group>
+                <Button
+                  title="查看内存使用情况"
+                  systemImage="chart.xyaxis.line"
+                  action={() => {
+                    setMemorySamples(memoryDiagnosticsData());
+                    setShowMemorySheet(true);
+                  }}
+                />
+                <Button
+                  title="清除内存记录"
+                  systemImage="trash"
+                  action={() => void clearMemoryReport()}
                 />
               </Group>
             )
