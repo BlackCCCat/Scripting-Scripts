@@ -1,4 +1,5 @@
 import {
+  Button,
   Capsule,
   HStack,
   Image,
@@ -7,6 +8,7 @@ import {
   VStack,
   ZStack,
 } from "scripting"
+import { RefreshAIDashboardAllIntent } from "../../services/app_intents"
 import { ProviderIconView } from "../../components/ProviderIconView"
 import { CircularQuotaRing } from "../components/CircularQuotaRing"
 import { CodexForecastPill } from "../components/CodexForecastPill"
@@ -188,10 +190,23 @@ export function SmallWidgetView(props: {
             />
           ) : null}
           <Spacer />
-          {lastUpdatedAt ? (
-            <Text font={7.5} foregroundStyle="tertiaryLabel">
-              {`更新于 ${lastUpdatedAt}`}
-            </Text>
+          {account.updateStatusText || lastUpdatedAt ? (
+            <Button intent={RefreshAIDashboardAllIntent(undefined)} buttonStyle="plain">
+              <HStack alignment="center" spacing={3}>
+                <Text
+                  font={7.5}
+                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "tertiaryLabel"}
+                  lineLimit={1}
+                >
+                  {account.updateStatusText || `更新于 ${lastUpdatedAt}`}
+                </Text>
+                <Image
+                  systemName="arrow.triangle.2.circlepath"
+                  font={7.5}
+                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "tertiaryLabel"}
+                />
+              </HStack>
+            </Button>
           ) : null}
         </HStack>
       </VStack>

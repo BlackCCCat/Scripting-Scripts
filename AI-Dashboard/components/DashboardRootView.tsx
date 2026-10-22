@@ -13,7 +13,6 @@ import {
   TabView,
   Text,
   VStack,
-  Widget,
   useEffect,
   useMemo,
   useRef,
@@ -47,6 +46,11 @@ import {
   createDefaultDemoAccounts,
   generateDemoSnapshot,
 } from "../utils/demo_mode"
+import {
+  recordWidgetRefreshFailure,
+  recordWidgetRefreshSuccess,
+  requestWidgetReloadAfterStorage,
+} from "../services/refresh_service"
 import { getProviderMeta } from "../utils/providers_catalog"
 import {
   adaptiveProminentButtonStyle,
@@ -242,12 +246,7 @@ export function DashboardRootView() {
   }, [filteredAccounts, settings.groupByRouteCategory])
 
   const reloadAllWidgets = () => {
-    try {
-      Widget.reloadAll()
-    } catch {}
-    try {
-      Widget.reloadUserWidgets()
-    } catch {}
+    requestWidgetReloadAfterStorage()
   }
 
   const updateSettings = (next: DashboardSettings) => {
@@ -291,6 +290,7 @@ export function DashboardRootView() {
       account.preferssynchronizableKeychain
     )
     if (!envelope) {
+      recordWidgetRefreshFailure(account.id, "missingCredential")
       setAccountStates((prev) => ({
         ...prev,
         [account.id]: {
@@ -316,6 +316,7 @@ export function DashboardRootView() {
         [account.id]: result.snapshot,
       }
       saveStoredSnapshots(cachedSnapshotsRef.current)
+      recordWidgetRefreshSuccess(account.id)
       setAccountStates((prev) => ({
         ...prev,
         [account.id]: { type: "loaded", snapshot: result.snapshot },
@@ -330,6 +331,8 @@ export function DashboardRootView() {
           : err instanceof Error
             ? err.message
             : undefined
+      const isRateLimit = code === "rateLimited"
+      recordWidgetRefreshFailure(account.id, code, isRateLimit ? 429 : undefined)
       setAccountStates((prev) => ({
         ...prev,
         [account.id]: {
@@ -414,6 +417,7 @@ export function DashboardRootView() {
               : undefined)
 
           if (!envelope) {
+            recordWidgetRefreshFailure(acc.id, "missingCredential")
             stateUpdates[acc.id] = {
               type: "failed",
               failure: "missingCredential",
@@ -431,6 +435,7 @@ export function DashboardRootView() {
                 acc.preferssynchronizableKeychain
               )
             }
+            recordWidgetRefreshSuccess(acc.id)
             updatedSnapshots[acc.id] = result.snapshot
             stateUpdates[acc.id] = {
               type: "loaded",
@@ -445,6 +450,8 @@ export function DashboardRootView() {
                 : err instanceof Error
                   ? err.message
                   : undefined
+            const isRateLimit = code === "rateLimited"
+            recordWidgetRefreshFailure(acc.id, code, isRateLimit ? 429 : undefined)
 
             stateUpdates[acc.id] = {
               type: "failed",

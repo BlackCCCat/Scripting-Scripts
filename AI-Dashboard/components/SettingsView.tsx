@@ -11,7 +11,6 @@ import {
   Text,
   Toggle,
   VStack,
-  Widget,
   useState,
 } from "scripting"
 import { DashboardSettings } from "../models/types"
@@ -231,7 +230,6 @@ export function SettingsView(props: {
                 ...settings,
                 widgetRefreshIntervalMinutes: minutes,
               })
-              void Widget.reloadAll()
             }}
           >
             <Text tag="15">15 分钟</Text>
@@ -250,8 +248,6 @@ export function SettingsView(props: {
                 widgetQuotaAdaptTransparent: val,
                 widgetConnectionAdaptTransparent: val,
               })
-              void Widget.reloadAll()
-              void Widget.reloadUserWidgets()
             }}
           />
 

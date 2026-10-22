@@ -1,4 +1,5 @@
 import {
+  Button,
   Capsule,
   Divider,
   HStack,
@@ -8,6 +9,7 @@ import {
   VStack,
   ZStack,
 } from "scripting"
+import { RefreshAIDashboardAllIntent } from "../../services/app_intents"
 import { ProviderIconView } from "../../components/ProviderIconView"
 import { remainingQuotaColor } from "../../utils/theme"
 import { CircularQuotaRing } from "../components/CircularQuotaRing"
@@ -126,11 +128,24 @@ export function MediumAccountCard(props: {
 
           <Spacer />
 
-          {/* 小组件更新时间 */}
-          {showUpdatedAt && lastUpdatedAt ? (
-            <Text font={isCompact ? 7 : 8} foregroundStyle="secondaryLabel" lineLimit={1}>
-              {`更新于 ${lastUpdatedAt}`}
-            </Text>
+          {/* 小组件更新时间与桌面一键刷新 */}
+          {showUpdatedAt && (account.updateStatusText || lastUpdatedAt) ? (
+            <Button intent={RefreshAIDashboardAllIntent(undefined)} buttonStyle="plain">
+              <HStack alignment="center" spacing={3}>
+                <Text
+                  font={isCompact ? 7 : 8}
+                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "secondaryLabel"}
+                  lineLimit={1}
+                >
+                  {account.updateStatusText || `更新于 ${lastUpdatedAt}`}
+                </Text>
+                <Image
+                  systemName="arrow.triangle.2.circlepath"
+                  font={isCompact ? 7 : 8}
+                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "secondaryLabel"}
+                />
+              </HStack>
+            </Button>
           ) : null}
 
           <WidgetQuotaStatusDot

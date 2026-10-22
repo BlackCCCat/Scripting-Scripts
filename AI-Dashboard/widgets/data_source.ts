@@ -15,6 +15,8 @@ import {
 import { getProviderMeta } from "../utils/providers_catalog"
 import { CODEX_RESET_CACHE_KEY } from "../services/codex_reset_feed"
 import { ACTIVE_WALLET_KEY } from "../services/app_intents"
+import { getWidgetRefreshMetadata } from "../services/refresh_service"
+import { getWidgetStatusOrUpdateTime } from "./refresh_planner"
 import {
   computeAccountOverallQuota,
   maskIdentity,
@@ -183,6 +185,13 @@ function buildWidgetAccountData(
     } catch {}
   }
 
+  // 检查该账号刷新元数据与数据新鲜度
+  const refreshMeta = getWidgetRefreshMetadata(acc.id)
+  const statusInfo = getWidgetStatusOrUpdateTime({
+    fetchedAtISO: snapshot?.collectedAt,
+    metadata: refreshMeta,
+  })
+
   return {
     id: acc.id,
     provider: acc.provider,
@@ -200,6 +209,8 @@ function buildWidgetAccountData(
     codexResetForecast,
     codexResetCardsCount: snapshot?.codexResetCards?.availableCount,
     widgetOrder: acc.widgetOrder,
+    updateStatusText: statusInfo.text,
+    isUpdateWarning: statusInfo.isWarning,
   }
 }
 
@@ -296,6 +307,13 @@ function mergeSingleQuotaAccounts(
         overallStatus = "warning"
       }
 
+      const isUpdateWarning = Boolean(a1.isUpdateWarning || a2?.isUpdateWarning)
+      const updateStatusText = a1.isUpdateWarning
+        ? a1.updateStatusText
+        : a2?.isUpdateWarning
+          ? a2.updateStatusText
+          : a1.updateStatusText
+
       const batchItem: WidgetAccountData = {
         id: a1.id,
         provider: a1.provider,
@@ -310,6 +328,8 @@ function mergeSingleQuotaAccounts(
         statusColor,
         earliestResetCountdown: a1.earliestResetCountdown || a2?.earliestResetCountdown,
         widgetOrder: a1.widgetOrder,
+        updateStatusText,
+        isUpdateWarning,
       }
       batches.push(batchItem)
     }
@@ -466,16 +486,41 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
     }
   }
 
+  let latestCollectedAt: string | undefined = undefined
+  for (const acc of accountDataList) {
+    const snap = snapshots[acc.id]
+    if (snap?.collectedAt) {
+      if (!latestCollectedAt || snap.collectedAt > latestCollectedAt) {
+        latestCollectedAt = snap.collectedAt
+      }
+    }
+  }
+
+  const lastUpdatedAt = latestCollectedAt
+    ? new Date(latestCollectedAt).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : new Date().toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+
+  // 检查当前显示账号是否存在刷新异常或超过 6 小时未更新
+  const warningAccount = accountDataList.find((a) => a.isUpdateWarning)
+  const defaultStatusText = `更新于 ${lastUpdatedAt}`
+  const overallStatusText = warningAccount?.updateStatusText || defaultStatusText
+  const isOverallWarning = Boolean(warningAccount?.isUpdateWarning)
+
   return {
     accounts: accountDataList,
     totalAccountsCount: accounts.length,
     totalWalletUSD,
     totalWalletCNY,
     hasCodexForecast: !!codexCache,
-    lastUpdatedAt: new Date().toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    lastUpdatedAt,
+    updateStatusText: overallStatusText,
+    isUpdateWarning: isOverallWarning,
     isDemoMode: useDemo,
     widgetPrivacyEnabled,
     widgetQuotaAdaptTransparent,

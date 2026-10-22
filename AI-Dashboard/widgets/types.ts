@@ -43,6 +43,8 @@ export type WidgetAccountData = {
   }
   codexResetCardsCount?: number
   widgetOrder?: number
+  updateStatusText?: string
+  isUpdateWarning?: boolean
 }
 
 export type WidgetRenderData = {
@@ -52,6 +54,8 @@ export type WidgetRenderData = {
   totalWalletCNY: number
   hasCodexForecast: boolean
   lastUpdatedAt: string
+  updateStatusText?: string
+  isUpdateWarning?: boolean
   isDemoMode: boolean
   widgetPrivacyEnabled?: boolean
   widgetQuotaAdaptTransparent?: boolean
