@@ -9,7 +9,7 @@ import {
   VStack,
   ZStack,
 } from "scripting"
-import { RefreshAIDashboardAllIntent } from "../../services/app_intents"
+import { RefreshAIDashboardAllIntent } from "../../app_intents"
 import { ProviderIconView } from "../../components/ProviderIconView"
 import { remainingQuotaColor } from "../../utils/theme"
 import { CircularQuotaRing } from "../components/CircularQuotaRing"
@@ -134,7 +134,13 @@ export function MediumAccountCard(props: {
               <HStack alignment="center" spacing={3}>
                 <Text
                   font={isCompact ? 7 : 8}
-                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "secondaryLabel"}
+                  foregroundStyle={
+                    account.updateStatusText === "正在刷新..."
+                      ? "systemBlue"
+                      : account.isUpdateWarning
+                        ? "systemOrange"
+                        : "secondaryLabel"
+                  }
                   lineLimit={1}
                 >
                   {account.updateStatusText || `更新于 ${lastUpdatedAt}`}
@@ -142,7 +148,13 @@ export function MediumAccountCard(props: {
                 <Image
                   systemName="arrow.triangle.2.circlepath"
                   font={isCompact ? 7 : 8}
-                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "secondaryLabel"}
+                  foregroundStyle={
+                    account.updateStatusText === "正在刷新..."
+                      ? "systemBlue"
+                      : account.isUpdateWarning
+                        ? "systemOrange"
+                        : "secondaryLabel"
+                  }
                 />
               </HStack>
             </Button>

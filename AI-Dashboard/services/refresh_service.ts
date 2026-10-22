@@ -1,4 +1,4 @@
-import { Widget } from "scripting"
+import { Script, Widget } from "scripting"
 import type {
   QuotaSnapshot,
   SubscriptionAccount,
@@ -26,14 +26,42 @@ export type WidgetRefreshMetadata = {
 }
 
 const STORAGE_REFRESH_META_PREFIX = "ai_dashboard_widget_meta_v1_"
+export const STORAGE_REFRESHING_KEY = "ai_dashboard_widget_refreshing_v1"
 
 let trailingReload: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 标记小组件正在刷新状态（最多维持 15 秒超时防呆）
+ */
+export function setWidgetRefreshingState(isRefreshing: boolean): void {
+  try {
+    if (isRefreshing) {
+      Storage.set(STORAGE_REFRESHING_KEY, Date.now())
+    } else {
+      Storage.remove(STORAGE_REFRESHING_KEY)
+    }
+  } catch {}
+}
+
+export function isWidgetRefreshing(): boolean {
+  try {
+    const raw = Storage.get<number>(STORAGE_REFRESHING_KEY)
+    if (typeof raw === "number" && Date.now() - raw < 15_000) {
+      return true
+    }
+  } catch {}
+  return false
+}
 
 /**
  * 请求所有 Scripting 小组件重新加载时间线
  */
 export function requestWidgetReload(): boolean {
   try {
+    // 若当前已在 widget 执行环境中，本次生命周期最后将直接通过 Widget.present 交付渲染，无需自我触发重载
+    if (typeof Script !== "undefined" && Script.env === "widget") {
+      return false
+    }
     // reloadAll 已在底层覆盖所有用户与测试小组件，无需重复调用 reloadUserWidgets
     Widget.reloadAll()
     return true
@@ -236,10 +264,17 @@ export async function refreshAllAccountsFromBackground(): Promise<{
   succeeded: number
   failed: number
 }> {
-  const accounts = loadStoredAccounts().filter((a) => a.isEnabled)
-  if (accounts.length === 0) {
+  const rawAccounts = loadStoredAccounts().filter((a) => a.isEnabled)
+  if (rawAccounts.length === 0) {
     return { total: 0, succeeded: 0, failed: 0 }
   }
+
+  // 优先级重排：小组件指定序号的展示账号优先排在第一批，确保桌面小组件 1~2 秒内极速拿到最新数据
+  const accounts = [...rawAccounts].sort((a, b) => {
+    const oa = a.widgetOrder ?? 999
+    const ob = b.widgetOrder ?? 999
+    return oa - ob
+  })
 
   const settings = loadDashboardSettings()
   if (settings.isDemoMode) {
@@ -264,7 +299,8 @@ export async function refreshAllAccountsFromBackground(): Promise<{
     chunks.push(accounts.slice(i, i + CONCURRENCY))
   }
 
-  for (const chunk of chunks) {
+  for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
+    const chunk = chunks[cIdx]
     await Promise.allSettled(
       chunk.map(async (acc) => {
         const envelope = loadEnvelopeFromKeychain(
@@ -297,6 +333,12 @@ export async function refreshAllAccountsFromBackground(): Promise<{
         }
       })
     )
+
+    // 首批（小组件核心展示账号）拉取完成后，立即单次落盘快照并重载小组件，让桌面端无需等待后续背景账号
+    if (cIdx === 0 && succeeded > 0 && chunks.length > 1) {
+      saveStoredSnapshots(snapshots)
+      requestWidgetReload()
+    }
   }
 
   if (succeeded > 0) {

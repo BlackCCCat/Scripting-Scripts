@@ -15,7 +15,10 @@ import {
 import { getProviderMeta } from "../utils/providers_catalog"
 import { CODEX_RESET_CACHE_KEY } from "../services/codex_reset_feed"
 import { ACTIVE_WALLET_KEY } from "../services/app_intents"
-import { getWidgetRefreshMetadata } from "../services/refresh_service"
+import {
+  getWidgetRefreshMetadata,
+  isWidgetRefreshing,
+} from "../services/refresh_service"
 import { getWidgetStatusOrUpdateTime } from "./refresh_planner"
 import {
   computeAccountOverallQuota,
@@ -186,6 +189,7 @@ function buildWidgetAccountData(
   }
 
   // 检查该账号刷新元数据与数据新鲜度
+  const isRefreshing = isWidgetRefreshing()
   const refreshMeta = getWidgetRefreshMetadata(acc.id)
   const statusInfo = getWidgetStatusOrUpdateTime({
     fetchedAtISO: snapshot?.collectedAt,
@@ -209,8 +213,8 @@ function buildWidgetAccountData(
     codexResetForecast,
     codexResetCardsCount: snapshot?.codexResetCards?.availableCount,
     widgetOrder: acc.widgetOrder,
-    updateStatusText: statusInfo.text,
-    isUpdateWarning: statusInfo.isWarning,
+    updateStatusText: isRefreshing ? "正在刷新..." : statusInfo.text,
+    isUpdateWarning: !isRefreshing && statusInfo.isWarning,
   }
 }
 
@@ -507,10 +511,13 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
       })
 
   // 检查当前显示账号是否存在刷新异常或超过 6 小时未更新
+  const isRefreshing = isWidgetRefreshing()
   const warningAccount = accountDataList.find((a) => a.isUpdateWarning)
   const defaultStatusText = `更新于 ${lastUpdatedAt}`
-  const overallStatusText = warningAccount?.updateStatusText || defaultStatusText
-  const isOverallWarning = Boolean(warningAccount?.isUpdateWarning)
+  const overallStatusText = isRefreshing
+    ? "正在刷新..."
+    : warningAccount?.updateStatusText || defaultStatusText
+  const isOverallWarning = !isRefreshing && Boolean(warningAccount?.isUpdateWarning)
 
   return {
     accounts: accountDataList,

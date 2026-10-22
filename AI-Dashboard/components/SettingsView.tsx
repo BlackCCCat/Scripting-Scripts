@@ -232,6 +232,7 @@ export function SettingsView(props: {
               })
             }}
           >
+            <Text tag="5">5 分钟 (高频推荐)</Text>
             <Text tag="15">15 分钟</Text>
             <Text tag="30">30 分钟 (默认推荐)</Text>
             <Text tag="60">1 小时</Text>

@@ -8,7 +8,7 @@ import {
   VStack,
   ZStack,
 } from "scripting"
-import { RefreshAIDashboardAllIntent } from "../../services/app_intents"
+import { RefreshAIDashboardAllIntent } from "../../app_intents"
 import { ProviderIconView } from "../../components/ProviderIconView"
 import { CircularQuotaRing } from "../components/CircularQuotaRing"
 import { CodexForecastPill } from "../components/CodexForecastPill"
@@ -195,7 +195,13 @@ export function SmallWidgetView(props: {
               <HStack alignment="center" spacing={3}>
                 <Text
                   font={7.5}
-                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "tertiaryLabel"}
+                  foregroundStyle={
+                    account.updateStatusText === "正在刷新..."
+                      ? "systemBlue"
+                      : account.isUpdateWarning
+                        ? "systemOrange"
+                        : "tertiaryLabel"
+                  }
                   lineLimit={1}
                 >
                   {account.updateStatusText || `更新于 ${lastUpdatedAt}`}
@@ -203,7 +209,13 @@ export function SmallWidgetView(props: {
                 <Image
                   systemName="arrow.triangle.2.circlepath"
                   font={7.5}
-                  foregroundStyle={account.isUpdateWarning ? "systemOrange" : "tertiaryLabel"}
+                  foregroundStyle={
+                    account.updateStatusText === "正在刷新..."
+                      ? "systemBlue"
+                      : account.isUpdateWarning
+                        ? "systemOrange"
+                        : "tertiaryLabel"
+                  }
                 />
               </HStack>
             </Button>

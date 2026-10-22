@@ -1,4 +1,5 @@
 import {
+  AppEvents,
   Button,
   ContentUnavailableView,
   ForEach,
@@ -500,6 +501,20 @@ export function DashboardRootView() {
       }
     }
   }, [settings.autoRefreshOnLaunch, settings.isDemoMode])
+
+  // 应用退入后台时（用户滑回桌面），立即同步刷新一次桌面小组件
+  useEffect(() => {
+    if (typeof AppEvents === "undefined" || !AppEvents.scenePhase) return
+    const onScenePhase = (phase: string) => {
+      if (phase === "background" || phase === "inactive") {
+        requestWidgetReloadAfterStorage(200)
+      }
+    }
+    AppEvents.scenePhase.addListener(onScenePhase)
+    return () => {
+      AppEvents.scenePhase.removeListener(onScenePhase)
+    }
+  }, [])
 
   const handleDeleteAccount = (accountId: string) => {
     if (settings.isDemoMode) {

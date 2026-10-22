@@ -1,5 +1,5 @@
 import { Script, Widget } from "scripting"
-import "./services/app_intents"
+import "./app_intents"
 import { loadWidgetRenderData, WidgetRootView } from "./widgets"
 import {
   loadDashboardSettings,
@@ -22,13 +22,16 @@ async function run() {
       const currentSnapshots = loadStoredSnapshots()
       const now = Date.now()
 
+      // 只要展示卡片数据超过 3 分钟（或用户设定的更小间隔），即视为过期并在本轮生命周期中执行活刷新
+      const staleThresholdMs = Math.min(3 * 60_000, intervalMinutes * 60_000)
+
       const staleAccounts = data.accounts.filter((acc) => {
         const meta = getWidgetRefreshMetadata(acc.id)
         const snap = currentSnapshots[acc.id]
         const fetchedAtMs = snap?.collectedAt
           ? new Date(snap.collectedAt).getTime()
           : 0
-        const isStale = !fetchedAtMs || now - fetchedAtMs >= intervalMinutes * 60_000
+        const isStale = !fetchedAtMs || now - fetchedAtMs >= staleThresholdMs
         const isBackoff =
           meta.nextAutomaticAttemptAt &&
           new Date(meta.nextAutomaticAttemptAt).getTime() > now
