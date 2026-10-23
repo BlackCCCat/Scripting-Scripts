@@ -572,6 +572,66 @@ export async function beginDeviceOrPollLogin(
     }
   }
 
+  if (provider === "zhipu") {
+    // 智谱国内版 (BigModel / ZCode) 网页登录授权 (CLI OAuth Flow)
+    const pollToken = "Bearer " + randomHex(32)
+    const deviceMid = UUID.string().toLowerCase()
+    const resp = await fetch("https://zcode.z.ai/api/v1/oauth/cli/init", {
+      method: "POST",
+      headers: {
+        Authorization: pollToken,
+        "X-Device-Mid": deviceMid,
+        "Content-Type": "application/json",
+        "User-Agent": "ZCode/3.16.3",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ provider: "bigmodel" }),
+      timeout: 15,
+      handleRedirect: async () => null,
+    })
+    if (!resp.ok) {
+      throw new Error(`智谱授权初始化失败 (HTTP ${resp.status})`)
+    }
+    const json = (await resp.json()) as Record<string, unknown>
+    const data = (json.data && typeof json.data === "object"
+      ? json.data
+      : json) as Record<string, unknown>
+    const flowId = String(data.flow_id ?? "").trim()
+    const rawAuthUrl = String(data.authorize_url ?? "").trim()
+    const pollIntervalSec = Number(data.poll_interval_sec ?? 2)
+    const expiresAtSec = Number(data.expires_at ?? 0)
+
+    if (!flowId || !rawAuthUrl) {
+      throw new Error("智谱授权服务未返回有效的授权页面")
+    }
+
+    const u = new URL(rawAuthUrl)
+    const back =
+      "https://zcode.z.ai/app/oauth/login?" +
+      new URLSearchParams({
+        redirect: "zcode://oauth/callback",
+        app_version: "3.16.3",
+      }).toString()
+    u.searchParams.set("redirect", back)
+
+    return {
+      provider,
+      authorizationURL: u.toString(),
+      deviceCode: flowId,
+      pollingInterval: Math.max(pollIntervalSec, 2),
+      expiresAt: new Date(
+        expiresAtSec > 0 ? expiresAtSec * 1000 : now + 300 * 1000
+      ).toISOString(),
+      metadata: {
+        localAccountID,
+        pollToken,
+        deviceMid,
+        flowId,
+        site: "bigmodel",
+      },
+    }
+  }
+
   // SuperGrok / Nous Portal 通用浏览器授权跳转提示
   const fallbackURL =
     provider === "superGrok"
@@ -584,6 +644,151 @@ export async function beginDeviceOrPollLogin(
     pollingInterval: 5,
     expiresAt: new Date(now + 600 * 1000).toISOString(),
     metadata: { localAccountID },
+  }
+}
+
+/**
+ * 智谱 BigModel 网页登录后自动寻找或创建默认项目 API Key (id.secret)
+ */
+async function mintZhipuApiKey(token: string): Promise<string> {
+  try {
+    const infoResp = await fetch(
+      "https://bigmodel.cn/api/biz/customer/getCustomerInfo",
+      {
+        method: "GET",
+        headers: {
+          Authorization: token,
+          "User-Agent": "ZCode/3.16.3",
+          Accept: "application/json",
+        },
+        timeout: 10,
+        handleRedirect: async () => null,
+      }
+    )
+    if (!infoResp.ok) return ""
+    const infoJson = (await infoResp.json()) as Record<string, unknown>
+    const infoData = (infoJson.data && typeof infoJson.data === "object"
+      ? infoJson.data
+      : infoJson) as Record<string, unknown>
+
+    const orgs = Array.isArray(infoData.organizations)
+      ? infoData.organizations
+      : []
+    let orgId = ""
+    let projId = ""
+    for (const orgItem of orgs) {
+      if (!orgItem || typeof orgItem !== "object") continue
+      const o = orgItem as Record<string, unknown>
+      const oId = String(o.organizationId ?? "")
+      const oName = String(o.organizationName ?? "")
+      const projects = Array.isArray(o.projects) ? o.projects : []
+      const validProjects = projects.filter((p) => {
+        if (!p || typeof p !== "object") return false
+        const rec = p as Record<string, unknown>
+        return rec.projectId && String(rec.projectType ?? "") !== "2"
+      })
+      if (!oId || validProjects.length === 0) continue
+
+      const defProj =
+        validProjects.find((p) =>
+          String((p as Record<string, unknown>).projectName ?? "").includes(
+            "默认项目"
+          )
+        ) ?? validProjects[0]
+      const pId = String((defProj as Record<string, unknown>).projectId ?? "")
+
+      const isNamedDefOrg = oName.includes("默认机构")
+      if (!orgId || isNamedDefOrg) {
+        orgId = oId
+        projId = pId
+        if (isNamedDefOrg) break
+      }
+    }
+
+    if (!orgId || !projId) return ""
+
+    const keysUrl = `https://bigmodel.cn/api/biz/v1/organization/${encodeURIComponent(orgId)}/projects/${encodeURIComponent(projId)}/api_keys`
+    const listResp = await fetch(keysUrl, {
+      method: "GET",
+      headers: {
+        Authorization: token,
+        "User-Agent": "ZCode/3.16.3",
+        Accept: "application/json",
+      },
+      timeout: 10,
+      handleRedirect: async () => null,
+    })
+    if (!listResp.ok) return ""
+    const listJson = (await listResp.json()) as Record<string, unknown>
+    const listData = Array.isArray(listJson.data)
+      ? listJson.data
+      : Array.isArray(listJson)
+        ? listJson
+        : []
+
+    let keyId = ""
+    for (const kItem of listData) {
+      if (!kItem || typeof kItem !== "object") continue
+      const rec = kItem as Record<string, unknown>
+      if (
+        rec.name === "zcode-api-key" &&
+        typeof rec.apiKey === "string" &&
+        rec.apiKey.trim()
+      ) {
+        keyId = rec.apiKey.trim()
+        break
+      }
+    }
+
+    if (!keyId) {
+      const createResp = await fetch(keysUrl, {
+        method: "POST",
+        headers: {
+          Authorization: token,
+          "Content-Type": "application/json",
+          "User-Agent": "ZCode/3.16.3",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ name: "zcode-api-key" }),
+        timeout: 10,
+        handleRedirect: async () => null,
+      })
+      if (createResp.ok) {
+        const createJson = (await createResp.json()) as Record<string, unknown>
+        const createData = (createJson.data &&
+        typeof createJson.data === "object"
+          ? createJson.data
+          : createJson) as Record<string, unknown>
+        keyId = String(createData.apiKey ?? "").trim()
+      }
+    }
+
+    if (!keyId) return ""
+
+    const copyUrl = `${keysUrl}/copy/${encodeURIComponent(keyId)}`
+    const copyResp = await fetch(copyUrl, {
+      method: "GET",
+      headers: {
+        Authorization: token,
+        "User-Agent": "ZCode/3.16.3",
+        Accept: "application/json",
+      },
+      timeout: 10,
+      handleRedirect: async () => null,
+    })
+    if (!copyResp.ok) return ""
+    const copyJson = (await copyResp.json()) as Record<string, unknown>
+    const copyData = (copyJson.data && typeof copyJson.data === "object"
+      ? copyJson.data
+      : copyJson) as Record<string, unknown>
+    const secretKey = String(copyData.secretKey ?? "").trim()
+
+    if (keyId && secretKey) {
+      return `${keyId}.${secretKey}`
+    }
+    return ""
+  } catch {
+    return ""
   }
 }
 
@@ -953,6 +1158,98 @@ export async function pollDeviceOrPollLogin(
       expiresAt: new Date(
         Date.now() + (expiresIn > 0 ? expiresIn : 3600) * 1000
       ).toISOString(),
+      extraMetadata,
+    })
+    return { status: "completed", credential: JSON.stringify(envelope) }
+  }
+
+  if (provider === "zhipu") {
+    const flowId = session.metadata.flowId || session.deviceCode || ""
+    const pollToken = session.metadata.pollToken || ""
+    const deviceMid = session.metadata.deviceMid || ""
+    const resp = await fetch(
+      `https://zcode.z.ai/api/v1/oauth/cli/poll/${encodeURIComponent(flowId)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: pollToken,
+          "X-Device-Mid": deviceMid,
+          "User-Agent": "ZCode/3.16.3",
+          Accept: "application/json",
+        },
+        timeout: 15,
+        handleRedirect: async () => null,
+      }
+    )
+    if (resp.status === 404 || resp.status === 408 || resp.status === 429) {
+      return { status: "pending", retryAfter: session.pollingInterval || 2 }
+    }
+    if (!resp.ok) {
+      throw new Error(`智谱授权轮询失败 (HTTP ${resp.status})`)
+    }
+    const json = (await resp.json()) as Record<string, unknown>
+    const data = (json.data && typeof json.data === "object"
+      ? json.data
+      : json) as Record<string, unknown>
+    const status = String(data.status ?? "").toLowerCase()
+
+    if (status === "pending" || !status) {
+      return { status: "pending", retryAfter: session.pollingInterval || 2 }
+    }
+    if (status === "failed") {
+      throw new Error("智谱登录授权已被拒绝或取消")
+    }
+    if (status !== "ready") {
+      return { status: "pending", retryAfter: session.pollingInterval || 2 }
+    }
+
+    const bigmodelObj = (data.bigmodel && typeof data.bigmodel === "object"
+      ? data.bigmodel
+      : {}) as Record<string, unknown>
+    const bigmodelToken = String(
+      bigmodelObj.access_token ?? bigmodelObj.accessToken ?? ""
+    ).trim()
+    const zcodeJwt = String(data.token ?? "").trim()
+    const userObj = (data.user && typeof data.user === "object"
+      ? data.user
+      : {}) as Record<string, unknown>
+    const rawEmail = String(userObj.email ?? "").trim()
+    const cleanEmail = rawEmail.replace(/@phone\.local$/, "")
+    const nickname = String(userObj.name ?? userObj.user_id ?? "").trim()
+
+    let mintedApiKey = ""
+    if (bigmodelToken) {
+      mintedApiKey = await mintZhipuApiKey(bigmodelToken)
+    }
+
+    const primaryToken = mintedApiKey || zcodeJwt
+    if (!primaryToken) {
+      throw new Error("智谱授权服务未返回有效的凭证令牌")
+    }
+
+    const extraMetadata: Record<string, string> = {
+      authMode: "web",
+      deviceMid,
+    }
+    if (zcodeJwt) extraMetadata.zcodeJwt = zcodeJwt
+    if (mintedApiKey) extraMetadata.apiKey = mintedApiKey
+    if (bigmodelToken) extraMetadata.bigmodelToken = bigmodelToken
+    if (cleanEmail) extraMetadata.accountEmail = cleanEmail
+    if (nickname) extraMetadata.displayName = nickname
+
+    let expiresAt: string | undefined
+    if (zcodeJwt) {
+      const claims = parseJwtPayload(zcodeJwt)
+      if (claims && typeof claims.exp === "number" && claims.exp > 0) {
+        expiresAt = new Date(claims.exp * 1000).toISOString()
+      }
+    }
+
+    const envelope = buildCredentialEnvelope({
+      provider: "zhipu",
+      rawInput: primaryToken,
+      accountID: cleanEmail || nickname || undefined,
+      expiresAt,
       extraMetadata,
     })
     return { status: "completed", credential: JSON.stringify(envelope) }

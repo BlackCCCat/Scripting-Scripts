@@ -66,16 +66,18 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
   {
     id: "zhipu",
     displayName: "智谱国内版",
-    aliases: ["zhipu", "bigmodel", "glm", "智谱"],
+    aliases: ["zhipu", "bigmodel", "glm", "智谱", "zcode"],
     routeCategory: "direct_api",
     credentialKind: "apiKey",
     loginMethod: "apiKey",
     symbolName: "cpu.fill",
     credentialLabel: "智谱 BigModel API Key",
-    credentialPrompt: "粘贴 id.secret 格式密钥",
+    credentialPrompt: "支持网页登录授权，或粘贴 id.secret 密钥",
+    credentialHelp:
+      "支持点击上方进行智谱 ZCode 网页授权免密同步额度（含 Start Plan 与活动赠送包），亦可直接填入 BigModel API Key (id.secret)",
     endpointSummary:
-      "GET https://open.bigmodel.cn/api/monitor/usage/quota/limit",
-    authSummary: "Authorization: Bearer <API Key>",
+      "GET https://open.bigmodel.cn/api/monitor/usage/quota/limit / zcode.z.ai",
+    authSummary: "Authorization: Bearer <API Key> / ZCode JWT",
   },
   {
     id: "openCodeGo",

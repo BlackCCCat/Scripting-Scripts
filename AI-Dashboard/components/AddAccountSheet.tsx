@@ -162,7 +162,11 @@ export function AddAccountSheet(props: {
     const isWbGlobal =
       selectedProviderId === "workBuddy" && effectiveRegion === "global"
     const fallbackName = isWbGlobal ? "Workbuddy AI" : defaultDisplayName
-    const finalName = displayName.trim() || fallbackName
+    const finalName =
+      displayName.trim() ||
+      (envelope.metadata.displayName
+        ? `${fallbackName} (${envelope.metadata.displayName})`
+        : fallbackName)
     const saved = saveEnvelopeToKeychain(keychainKey, envelope, synchronizable)
     if (!saved) {
       setErrorMessage("写入系统钥匙串 (Keychain) 失败，请检查权限")
@@ -450,7 +454,8 @@ export function AddAccountSheet(props: {
     meta.id === "cursor" ||
     meta.id === "grokBot" ||
     meta.id === "workBuddy" ||
-    meta.id === "qoder"
+    meta.id === "qoder" ||
+    meta.id === "zhipu"
 
   const isTrueDeviceCode =
     selectedProviderId === "copilot" || selectedProviderId === "kimiCode"
