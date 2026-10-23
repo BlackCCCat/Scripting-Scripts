@@ -170,11 +170,13 @@ export function SmallWidgetView(props: {
             frame={{ maxWidth: "infinity" }}
           >
             <MultiQuotaAdaptiveList
-              quotas={account.quotas}
+              quotas={account.quotas.slice(0, 5)}
               compact={true}
               forceInline={false}
               showCountdown={true}
-              barHeight={quotaCount >= 5 ? 4 : 5.5}
+              barHeight={quotaCount >= 5 ? 3.5 : 5.5}
+              titleFont={quotaCount >= 5 ? 8.5 : 9.5}
+              valueFont={quotaCount >= 5 ? 8.5 : 9.5}
             />
           </VStack>
         )}

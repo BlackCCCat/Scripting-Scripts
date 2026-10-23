@@ -11,14 +11,11 @@ import {
 } from "scripting"
 import { RefreshAIDashboardAllIntent } from "../../app_intents"
 import { ProviderIconView } from "../../components/ProviderIconView"
-import { remainingQuotaColor } from "../../utils/theme"
-import { CircularQuotaRing } from "../components/CircularQuotaRing"
 import { MultiQuotaAdaptiveList } from "../components/MultiQuotaAdaptiveList"
 import { WidgetQuotaStatusDot } from "../components/WidgetQuotaStatusDot"
 import type { WidgetAccountData } from "../types"
 import {
   formatCurrencyAmount,
-  getProgressBarTrackColor,
   getQuotaStatusColor,
 } from "../utils"
 
@@ -205,14 +202,14 @@ export function MediumAccountCard(props: {
             </HStack>
             <Spacer />
           </VStack>
-        ) : quotaCount <= 5 ? (
+        ) : (
           <VStack
             alignment="leading"
             spacing={isCompact ? 2.5 : quotaCount <= 3 ? 3.5 : 2.5}
             frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
           >
             <MultiQuotaAdaptiveList
-              quotas={account.quotas}
+              quotas={account.quotas.slice(0, 5)}
               compact={isCompact || quotaCount >= 4}
               forceInline={false}
               showCountdown={true}
@@ -221,45 +218,6 @@ export function MediumAccountCard(props: {
               valueFont={valueFont}
             />
           </VStack>
-        ) : quotaCount <= 8 ? (
-          <HStack alignment="center" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-            <Spacer />
-            {account.quotas.map((q) => (
-              <CircularQuotaRing
-                key={q.id}
-                item={q}
-                size={isCompact ? 24 : 28}
-                strokeWidth={2.6}
-                showLabel={true}
-              />
-            ))}
-            <Spacer />
-          </HStack>
-        ) : (
-          /* 柱状图模式 */
-          <HStack alignment="bottom" spacing={3.5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-            <Spacer />
-            {account.quotas.map((q) => {
-              const remPct = Math.min(100, Math.max(0, q.remainingPercentage))
-              const barH = Math.max(4, Math.round((remPct / 100) * (isCompact ? 40 : 52)))
-              const colColor = remainingQuotaColor(remPct, q.isExhausted)
-              return (
-                <VStack key={q.id} alignment="center" spacing={2}>
-                  <Text font={6.5} fontWeight="heavy" foregroundStyle={colColor} monospaced={true}>
-                    {Math.round(remPct)}
-                  </Text>
-                  <ZStack alignment="bottom" frame={{ width: 12, height: isCompact ? 40 : 52 }}>
-                    <Capsule fill={getProgressBarTrackColor()} frame={{ width: 12, height: isCompact ? 40 : 52 }} />
-                    <Capsule fill={colColor} frame={{ width: 12, height: barH }} />
-                  </ZStack>
-                  <Text font={6} fontWeight="medium" foregroundStyle="label" lineLimit={1} frame={{ width: 20 }}>
-                    {q.name}
-                  </Text>
-                </VStack>
-              )
-            })}
-            <Spacer />
-          </HStack>
         )}
       </VStack>
     </ZStack>

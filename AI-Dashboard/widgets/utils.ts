@@ -105,6 +105,15 @@ export function shortenQuotaWindowName(
     if (/日|daily/i.test(trimmed)) return "日限额"
   }
 
+  // 智谱国内版 (ZCode / BigModel)
+  if (provider === "zhipu") {
+    return trimmed
+      .replace(/1024\s*Dev\s*Day|1024\s*程序员节/i, "1024节")
+      .replace(/GLM\s*Coding\s*·\s*/i, "")
+      .replace(/配额|使用量|限额|额度/g, "")
+      .trim() || trimmed
+  }
+
   return trimmed
     .replace(/配额|使用量|限额|额度/g, "")
     .replace(/Model\s*/i, "")

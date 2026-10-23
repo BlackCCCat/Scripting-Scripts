@@ -36,6 +36,62 @@ import {
 } from "./utils"
 
 /**
+ * 判定一个额度项是否产生了实际消耗
+ */
+function hasQuotaConsumption(q: WidgetQuotaItem): boolean {
+  if (q.isExhausted) return true
+  if (q.usedPercentage !== undefined && q.usedPercentage > 0) return true
+  if (q.remainingPercentage !== undefined && q.remainingPercentage < 100) return true
+  if (
+    q.totalCount !== undefined &&
+    q.remainingCount !== undefined &&
+    q.remainingCount < q.totalCount
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 当某个供应商配额项数量超过 5 个时：
+ * 1. 至多展示 5 个，保证各种尺寸小组件的正常显示；
+ * 2. 优先显示有消耗的进度条（有消耗排在最前，消耗比例更高更紧急的排在前面）；
+ * 3. 0 消耗的候补项按原顺序补充，超出 5 个的多余项被安全截断。
+ */
+export function selectTopWidgetQuotas(
+  quotas: WidgetQuotaItem[],
+  maxCount = 5
+): WidgetQuotaItem[] {
+  if (quotas.length <= maxCount) {
+    return quotas
+  }
+
+  const indexed = quotas.map((q, idx) => ({
+    q,
+    idx,
+    consumed: hasQuotaConsumption(q),
+    usedPct: q.usedPercentage ?? (q.isExhausted ? 100 : 0),
+  }))
+
+  indexed.sort((a, b) => {
+    // 优先有消耗的进度条排在前面
+    if (a.consumed !== b.consumed) {
+      return a.consumed ? -1 : 1
+    }
+    // 都有消耗时，消耗比例更高（更紧急/有变动）的排在前面
+    if (a.consumed && b.consumed) {
+      if (b.usedPct !== a.usedPct) {
+        return b.usedPct - a.usedPct
+      }
+    }
+    // 平局或都无消耗时，保持原顺序
+    return a.idx - b.idx
+  })
+
+  return indexed.slice(0, maxCount).map((item) => item.q)
+}
+
+/**
  * 转换单个账号快照为小组件结构
  */
 function buildWidgetAccountData(
@@ -59,7 +115,7 @@ function buildWidgetAccountData(
   let earliestResetMs: number | null = null
   let earliestResetISO: string | undefined = undefined
 
-  const quotas: WidgetQuotaItem[] = windows.map((w) => {
+  const rawQuotas: WidgetQuotaItem[] = windows.map((w) => {
     let usedPct = w.usedPercentage ?? 0
 
     // 优先根据精确计数计算真实的已用比例，杜绝使用积分后百分比仍然显示 100% 的不同步问题
@@ -88,14 +144,6 @@ function buildWidgetAccountData(
     if (w.isExhausted) usedPct = 100
     if (usedPct > 100) usedPct = 100
     if (usedPct < 0) usedPct = 0
-
-    if (w.resetsAt) {
-      const ms = new Date(w.resetsAt).getTime()
-      if (!Number.isNaN(ms) && (earliestResetMs === null || ms < earliestResetMs)) {
-        earliestResetMs = ms
-        earliestResetISO = w.resetsAt
-      }
-    }
 
     const isBalanceOnly =
       Boolean(w.wallet) ||
@@ -138,6 +186,19 @@ function buildWidgetAccountData(
     }
   })
 
+  // 当供应商指标数量超过 5 个时，至多显示 5 个并优先展示有消耗的进度条
+  const quotas = selectTopWidgetQuotas(rawQuotas, 5)
+
+  for (const q of quotas) {
+    if (q.resetsAt) {
+      const ms = new Date(q.resetsAt).getTime()
+      if (!Number.isNaN(ms) && (earliestResetMs === null || ms < earliestResetMs)) {
+        earliestResetMs = ms
+        earliestResetISO = q.resetsAt
+      }
+    }
+  }
+
   // 如果没有具体配额但有钱包数据
   const wallet = windows.find((w) => w.wallet)?.wallet
 
@@ -177,10 +238,20 @@ function buildWidgetAccountData(
             ? `预计重置率 ${chance}%`
             : dataNode.activeWatch?.text || undefined
 
+        let schedText: string | undefined = undefined
+        if (scheduled) {
+          const schedMs = Date.parse(scheduled)
+          if (!Number.isNaN(schedMs) && schedMs <= Date.now()) {
+            schedText = "已重置"
+          } else {
+            schedText = formatWidgetCountdown(scheduled)
+          }
+        } else {
+          schedText = dataNode.scheduledReset?.text || undefined
+        }
+
         codexResetForecast = {
-          scheduledText: scheduled
-            ? formatWidgetCountdown(scheduled)
-            : dataNode.scheduledReset?.text || undefined,
+          scheduledText: schedText,
           probabilityText: probText,
           status: codexFeedCached.isResetActive ? "active" : "forecast",
         }

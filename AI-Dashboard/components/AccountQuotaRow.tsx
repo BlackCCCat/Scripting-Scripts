@@ -585,7 +585,7 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
   if (scheduled) {
     const headline = formatScheduledResetHeadline(scheduled.scheduledFor)
     const localTimeText = scheduled.scheduledFor
-      ? `${formatCodexResetLocalTime(scheduled.scheduledFor)} · 本地时间`
+      ? `${formatCodexResetLocalTime(scheduled.scheduledFor)} · 北京时间`
       : null
 
     return (

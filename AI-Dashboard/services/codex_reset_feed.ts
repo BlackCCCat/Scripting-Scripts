@@ -184,7 +184,16 @@ export function hasVisibleCodexResetPreview(
   now = new Date()
 ): boolean {
   if (!status) return false
-  if (status.data.scheduledReset) return true
+  if (status.data.scheduledReset) {
+    const schedMs = status.data.scheduledReset.scheduledFor
+      ? Date.parse(status.data.scheduledReset.scheduledFor)
+      : NaN
+    // 超过预定时间 12 小时且社区仍未归档时，自动隐藏陈旧预告
+    if (!Number.isNaN(schedMs) && now.getTime() - schedMs > 12 * 3600 * 1000) {
+      return false
+    }
+    return true
+  }
   if (status.data.activeWatch) {
     const expiresMs = Date.parse(status.data.activeWatch.expiresAt)
     if (!Number.isNaN(expiresMs) && expiresMs > now.getTime()) {
@@ -203,7 +212,13 @@ export function formatScheduledResetHeadline(
   if (Number.isNaN(targetMs)) return "时间待定"
 
   const diffMs = targetMs - now.getTime()
-  if (diffMs <= 0) return "待确认执行"
+  if (diffMs <= 0) {
+    const passedMin = Math.round(Math.abs(diffMs) / 60000)
+    if (passedMin <= 120) {
+      return "已到达预定时间 (已重置)"
+    }
+    return "已完成重置"
+  }
 
   const diffSec = Math.round(diffMs / 1000)
   if (diffSec < 60) return `${diffSec} 秒后`
@@ -219,11 +234,34 @@ export function formatCodexResetLocalTime(isoString: string): string {
   const ms = Date.parse(isoString)
   if (Number.isNaN(ms)) return isoString
   const d = new Date(ms)
-  const month = d.getMonth() + 1
-  const day = d.getDate()
-  const hours = String(d.getHours()).padStart(2, "0")
-  const minutes = String(d.getMinutes()).padStart(2, "0")
-  return `${month}月${day}日 ${hours}:${minutes}`
+  try {
+    const formatter = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    const parts = formatter.formatToParts(d)
+    const month =
+      parts.find((p) => p.type === "month")?.value || String(d.getMonth() + 1)
+    const day =
+      parts.find((p) => p.type === "day")?.value || String(d.getDate())
+    const hour =
+      parts.find((p) => p.type === "hour")?.value ||
+      String(d.getHours()).padStart(2, "0")
+    const minute =
+      parts.find((p) => p.type === "minute")?.value ||
+      String(d.getMinutes()).padStart(2, "0")
+    return `${month}月${day}日 ${hour}:${minute}`
+  } catch {
+    const month = d.getMonth() + 1
+    const day = d.getDate()
+    const hours = String(d.getHours()).padStart(2, "0")
+    const minutes = String(d.getMinutes()).padStart(2, "0")
+    return `${month}月${day}日 ${hours}:${minutes}`
+  }
 }
 
 export function getSimulatedDemoCodexResetStatus(): CodexResetStatus {

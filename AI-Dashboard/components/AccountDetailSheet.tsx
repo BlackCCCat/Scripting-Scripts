@@ -573,7 +573,7 @@ export function AccountDetailSheet(props: {
                 title="预定重置时间"
                 value={
                   codexResetStatus.data.scheduledReset.scheduledFor
-                    ? `${formatCodexResetLocalTime(codexResetStatus.data.scheduledReset.scheduledFor)} (${formatScheduledResetHeadline(codexResetStatus.data.scheduledReset.scheduledFor)})`
+                    ? `${formatCodexResetLocalTime(codexResetStatus.data.scheduledReset.scheduledFor)} · 北京时间 (${formatScheduledResetHeadline(codexResetStatus.data.scheduledReset.scheduledFor)})`
                     : "时间待定"
                 }
               />
