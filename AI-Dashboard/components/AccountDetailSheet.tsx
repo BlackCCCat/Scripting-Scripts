@@ -12,6 +12,8 @@ import {
   TextField,
   Toggle,
   VStack,
+  VirtualNode,
+  ZStack,
   useEffect,
   useState,
 } from "scripting"
@@ -27,7 +29,15 @@ import {
   formatScheduledResetHeadline,
   hasVisibleCodexResetPreview,
 } from "../services/codex_reset_feed"
-import { extractWebSessionFromController } from "../services/provider_auth"
+import {
+  buildAntigravityAuthURL,
+  buildCodexWebAuthPlan,
+  buildTraeAuthURL,
+  exchangeAntigravityCode,
+  exchangeCodexWebOAuthCode,
+  exchangeTraeToken,
+  extractWebSessionFromController,
+} from "../services/provider_auth"
 import {
   buildCredentialEnvelope,
   loadEnvelopeFromKeychain,
@@ -43,11 +53,13 @@ import {
 } from "../utils/quota_formatting"
 import {
   adaptiveProminentButtonStyle,
+  adaptiveSecondaryButtonStyle,
   loginMethodBadgeText,
   remainingQuotaColor,
   routeCategoryTitle,
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
+import { DeviceCodeLoginSheet } from "./DeviceCodeLoginSheet"
 
 
 function getDemoApiKey(provider: ProviderId): string {
@@ -87,6 +99,27 @@ function maskApiKey(key: string): string {
   const prefix = trimmed.slice(0, 4)
   const suffix = trimmed.slice(-4)
   return `${prefix}${"•".repeat(12)}${suffix}`
+}
+
+/**
+ * 包装 Form / List 内的居中操作按钮行：
+ * SwiftUI Form 在计算行分割线（listRowSeparatorLeading）时，默认会依据行内首个文字／内容元素的 leading 对齐。
+ * 居中按钮若未在行首提供 leading 锚点，会导致分割线从屏幕中央甚至按钮文字处才开始绘制（左侧缺失一半）。
+ * 通过 ZStack leading 对齐并在行首放置尺寸为 0 的隐式锚点，使分割线恢复与表单标准间距一致的完整显示。
+ */
+function FormActionButtonRow(props: { children: VirtualNode }): JSX.Element {
+  return (
+    <ZStack
+      alignment="leading"
+      frame={{ maxWidth: "infinity" }}
+      alignmentGuide={{ alignment: "leading", value: 0 }}
+    >
+      <Text font="subheadline" opacity={0} frame={{ width: 0, height: 0 }}>
+        {" "}
+      </Text>
+      {props.children}
+    </ZStack>
+  )
 }
 
 export function AccountDetailSheet(props: {
@@ -145,6 +178,10 @@ export function AccountDetailSheet(props: {
   const [isDeleteConfirmPresented, setIsDeleteConfirmPresented] =
     useState<boolean>(false)
   const [isReauthenticating, setIsReauthenticating] = useState<boolean>(false)
+  const [isDeviceLoginPresented, setIsDeviceLoginPresented] =
+    useState<boolean>(false)
+  const [isPresentingBuiltInBrowser, setIsPresentingBuiltInBrowser] =
+    useState<boolean>(false)
   const [isApiKeyRevealed, setIsApiKeyRevealed] = useState<boolean>(false)
   const [isToastPresented, setIsToastPresented] = useState<boolean>(false)
   const [toastMessage, setToastMessage] = useState<string>(
@@ -164,6 +201,9 @@ export function AccountDetailSheet(props: {
     setIsDeleteConfirmPresented(false)
     setIsApiKeyRevealed(false)
     setIsToastPresented(false)
+    setIsDeviceLoginPresented(false)
+    setIsPresentingBuiltInBrowser(false)
+    setIsReauthenticating(false)
   }, [account.id, account.displayName, account.widgetOrder, account.isEnabled, account.serverAddress])
 
   const handleCopyApiKey = async () => {
@@ -230,6 +270,237 @@ export function AccountDetailSheet(props: {
     }
   }
 
+  const isGoogleOAuth =
+    account.provider === "antigravity" || account.provider === "gemini"
+  const isTraeAuth = account.provider === "trae"
+  const isCodexAuth = account.provider === "codex"
+  const supportsDeviceOrPollFlow =
+    meta.loginMethod === "deviceCode" ||
+    account.provider === "codex" ||
+    account.provider === "cursor" ||
+    account.provider === "grokBot" ||
+    account.provider === "workBuddy" ||
+    account.provider === "qoder" ||
+    account.provider === "zhipu"
+
+  const isTrueDeviceCode =
+    account.provider === "copilot" || account.provider === "kimiCode"
+
+  const supportsWebViewFlow = Boolean(meta.webSessionProfile)
+
+  const handleEnvelopeUpdated = (newEnvelope: ProviderCredentialEnvelope) => {
+    saveEnvelopeToKeychain(
+      account.credentialKeychainKey,
+      newEnvelope,
+      account.preferssynchronizableKeychain
+    )
+    HapticFeedback.notificationSuccess()
+    onUpdateAccount(account, newEnvelope)
+    onClose()
+  }
+
+  const handleGoogleOAuthRelogin = async () => {
+    if (isPresentingBuiltInBrowser) return
+    setIsPresentingBuiltInBrowser(true)
+    setErrorMessage(null)
+    const controller = new WebViewController({ ephemeral: false })
+    let capturedCode: string | null = null
+    controller.shouldAllowRequest = async (req) => {
+      if (
+        req.url.startsWith("http://localhost:51121/oauth-callback") ||
+        req.url.startsWith("http://127.0.0.1:51121/oauth-callback")
+      ) {
+        try {
+          const u = new URL(req.url)
+          const code = u.searchParams.get("code")
+          if (code) {
+            capturedCode = code
+          }
+        } catch {}
+        controller.dismiss()
+        return false
+      }
+      return true
+    }
+
+    try {
+      const authUrl = buildAntigravityAuthURL()
+      void controller.loadURL(authUrl)
+      await controller.present({
+        navigationTitle: "Google 授权登录",
+        fullscreen: false,
+      })
+      if (capturedCode) {
+        const tokenResult = await exchangeAntigravityCode(capturedCode)
+        const envelope: ProviderCredentialEnvelope = {
+          provider: account.provider,
+          kind: "oauth",
+          accessToken: tokenResult.accessToken,
+          refreshToken: tokenResult.refreshToken,
+          expiresAt: new Date(
+            Date.now() + tokenResult.expiresIn * 1000
+          ).toISOString(),
+          metadata: {
+            ...existingEnvelope?.metadata,
+            accountEmail: tokenResult.email,
+          },
+        }
+        handleEnvelopeUpdated(envelope)
+      }
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Google 授权登录未完成，请重试"
+      )
+      HapticFeedback.notificationError()
+    } finally {
+      controller.dispose()
+      setIsPresentingBuiltInBrowser(false)
+    }
+  }
+
+  const handleTraeRelogin = async () => {
+    if (isPresentingBuiltInBrowser) return
+    setIsPresentingBuiltInBrowser(true)
+    setErrorMessage(null)
+    const controller = new WebViewController({ ephemeral: false })
+    let capturedRefreshToken: string | null = null
+    let capturedUid = ""
+    controller.shouldAllowRequest = async (req) => {
+      if (
+        req.url.startsWith("http://127.0.0.1:18080/authorize") ||
+        req.url.startsWith("http://localhost:18080/authorize")
+      ) {
+        try {
+          const u = new URL(req.url)
+          const rt = u.searchParams.get("refreshToken")
+          let jwtRt = ""
+          try {
+            const userJwt = JSON.parse(u.searchParams.get("userJwt") || "{}")
+            jwtRt = userJwt.RefreshToken || ""
+          } catch {}
+          try {
+            const userInfo = JSON.parse(u.searchParams.get("userInfo") || "{}")
+            capturedUid = String(userInfo.UserID || "")
+          } catch {}
+          capturedRefreshToken = rt || jwtRt
+        } catch {}
+        controller.dismiss()
+        return false
+      }
+      return true
+    }
+
+    const region = (existingEnvelope?.metadata.region as "china" | "global") || "china"
+    const authPlan = buildTraeAuthURL(region)
+    try {
+      void controller.loadURL(authPlan.url)
+      await controller.present({
+        navigationTitle: `登录 TRAE (${region === "global" ? "国际站" : "中国站"})`,
+        fullscreen: false,
+      })
+      if (capturedRefreshToken) {
+        const exchanged = await exchangeTraeToken(
+          capturedRefreshToken,
+          region,
+          capturedUid,
+          authPlan.deviceId
+        )
+        const envelope: ProviderCredentialEnvelope = {
+          provider: "trae",
+          kind: "oauth",
+          accessToken: exchanged.accessToken,
+          refreshToken: exchanged.refreshToken,
+          expiresAt: exchanged.expiresAt,
+          metadata: {
+            ...existingEnvelope?.metadata,
+            region,
+            machineId: authPlan.machineId,
+            deviceId: authPlan.deviceId,
+            uid: capturedUid,
+          },
+        }
+        handleEnvelopeUpdated(envelope)
+      }
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Trae 授权登录未完成，请重试"
+      )
+      HapticFeedback.notificationError()
+    } finally {
+      controller.dispose()
+      setIsPresentingBuiltInBrowser(false)
+    }
+  }
+
+  const handleCodexWebRelogin = async () => {
+    if (isPresentingBuiltInBrowser) return
+    setIsPresentingBuiltInBrowser(true)
+    setErrorMessage(null)
+    const controller = new WebViewController({ ephemeral: false })
+    let capturedCode: string | null = null
+    controller.shouldAllowRequest = async (req) => {
+      if (
+        req.url.startsWith("http://localhost:1455/auth/callback") ||
+        req.url.startsWith("http://127.0.0.1:1455/auth/callback")
+      ) {
+        try {
+          const u = new URL(req.url)
+          const code = u.searchParams.get("code")
+          if (code) {
+            capturedCode = code
+          }
+        } catch {}
+        controller.dismiss()
+        return false
+      }
+      return true
+    }
+
+    const authPlan = buildCodexWebAuthPlan()
+    try {
+      void controller.loadURL(authPlan.url)
+      await controller.present({
+        navigationTitle: "OpenAI 授权登录",
+        fullscreen: false,
+      })
+      if (capturedCode) {
+        const tokenResult = await exchangeCodexWebOAuthCode(
+          capturedCode,
+          authPlan.codeVerifier
+        )
+        const extraMetadata: Record<string, string> = {
+          ...existingEnvelope?.metadata,
+        }
+        if (tokenResult.email) {
+          extraMetadata.accountEmail = tokenResult.email
+          extraMetadata.email = tokenResult.email
+        }
+        if (tokenResult.planType) {
+          extraMetadata.planType = tokenResult.planType
+        }
+        const envelope = buildCredentialEnvelope({
+          provider: "codex",
+          rawInput: tokenResult.accessToken,
+          refreshToken: tokenResult.refreshToken,
+          expiresAt: new Date(
+            Date.now() + tokenResult.expiresIn * 1000
+          ).toISOString(),
+          accountID: tokenResult.accountID,
+          extraMetadata,
+        })
+        handleEnvelopeUpdated(envelope)
+      }
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "OpenAI 授权登录未完成，请重试"
+      )
+      HapticFeedback.notificationError()
+    } finally {
+      controller.dispose()
+      setIsPresentingBuiltInBrowser(false)
+    }
+  }
+
   const handleBuiltInBrowserRelogin = async () => {
     if (!meta.webSessionProfile || isReauthenticating) return
     setIsReauthenticating(true)
@@ -245,14 +516,7 @@ export function AccountDetailSheet(props: {
         account.provider,
         controller
       )
-      saveEnvelopeToKeychain(
-        account.credentialKeychainKey,
-        updatedEnvelope,
-        account.preferssynchronizableKeychain
-      )
-      HapticFeedback.notificationSuccess()
-      onUpdateAccount(account, updatedEnvelope)
-      onClose()
+      handleEnvelopeUpdated(updatedEnvelope)
     } catch (err) {
       setErrorMessage(
         err instanceof Error
@@ -335,6 +599,21 @@ export function AccountDetailSheet(props: {
                 setIsDeleteConfirmPresented(false)
                 onDeleteAccount(account.id)
                 onClose()
+              }}
+            />
+          ),
+        }}
+        sheet={{
+          isPresented: isDeviceLoginPresented,
+          onChanged: setIsDeviceLoginPresented,
+          content: (
+            <DeviceCodeLoginSheet
+              provider={account.provider}
+              region={existingEnvelope?.metadata.region}
+              onCancel={() => setIsDeviceLoginPresented(false)}
+              onCompleted={(envelope) => {
+                setIsDeviceLoginPresented(false)
+                handleEnvelopeUpdated(envelope)
               }}
             />
           ),
@@ -503,30 +782,202 @@ export function AccountDetailSheet(props: {
             header={<Text>更新 / 重新获取凭证 (可选)</Text>}
             footer={<Text>留空则保留当前钥匙串中的原凭证不变</Text>}
           >
-            {meta.webSessionProfile ? (
-              <Button
-                buttonStyle={adaptiveProminentButtonStyle()}
-                frame={{ maxWidth: "infinity", alignment: "center" }}
-                disabled={isReauthenticating}
-                action={handleBuiltInBrowserRelogin}
-              >
-                <HStack
+            {isGoogleOAuth ? (
+              <FormActionButtonRow>
+                <Button
+                  buttonStyle={adaptiveProminentButtonStyle()}
                   frame={{ maxWidth: "infinity", alignment: "center" }}
-                  alignment="center"
-                  spacing={8}
-                  padding={{ vertical: 2 }}
+                  alignmentGuide={{ alignment: "leading", value: 0 }}
+                  disabled={isPresentingBuiltInBrowser}
+                  action={handleGoogleOAuthRelogin}
                 >
-                  <Image systemName="safari.fill" font="subheadline" />
-                  <Text
-                    font="subheadline"
-                    fontWeight="semibold"
-                    lineLimit={1}
-                    multilineTextAlignment="center"
+                  <HStack
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignment="center"
+                    spacing={8}
+                    padding={{ vertical: 2 }}
                   >
-                    {isReauthenticating ? "正在登录…" : "网页重新登录"}
-                  </Text>
-                </HStack>
-              </Button>
+                    <Image systemName="sparkles.tv.fill" font="subheadline" />
+                    <Text
+                      font="subheadline"
+                      fontWeight="semibold"
+                      lineLimit={1}
+                      multilineTextAlignment="center"
+                    >
+                      {isPresentingBuiltInBrowser
+                        ? "正在等待授权…"
+                        : "Google 重新登录授权"}
+                    </Text>
+                  </HStack>
+                </Button>
+              </FormActionButtonRow>
+            ) : null}
+
+            {isTraeAuth ? (
+              <FormActionButtonRow>
+                <Button
+                  buttonStyle={adaptiveProminentButtonStyle()}
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  alignmentGuide={{ alignment: "leading", value: 0 }}
+                  disabled={isPresentingBuiltInBrowser}
+                  action={handleTraeRelogin}
+                >
+                  <HStack
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignment="center"
+                    spacing={8}
+                    padding={{ vertical: 2 }}
+                  >
+                    <Image
+                      systemName="person.badge.key.fill"
+                      font="subheadline"
+                    />
+                    <Text
+                      font="subheadline"
+                      fontWeight="semibold"
+                      lineLimit={1}
+                      multilineTextAlignment="center"
+                    >
+                      {isPresentingBuiltInBrowser
+                        ? "正在等待登录…"
+                        : "Trae 重新登录授权"}
+                    </Text>
+                  </HStack>
+                </Button>
+              </FormActionButtonRow>
+            ) : null}
+
+            {isCodexAuth ? (
+              <>
+                <FormActionButtonRow>
+                  <Button
+                    buttonStyle={adaptiveProminentButtonStyle()}
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignmentGuide={{ alignment: "leading", value: 0 }}
+                    disabled={isPresentingBuiltInBrowser}
+                    action={handleCodexWebRelogin}
+                  >
+                    <HStack
+                      frame={{ maxWidth: "infinity", alignment: "center" }}
+                      alignment="center"
+                      spacing={8}
+                      padding={{ vertical: 2 }}
+                    >
+                      <Image
+                        systemName="person.crop.circle.badge.checkmark"
+                        font="subheadline"
+                      />
+                      <Text
+                        font="subheadline"
+                        fontWeight="semibold"
+                        lineLimit={1}
+                        multilineTextAlignment="center"
+                      >
+                        {isPresentingBuiltInBrowser
+                          ? "正在等待登录…"
+                          : "OpenAI 网页重新登录授权 (推荐)"}
+                      </Text>
+                    </HStack>
+                  </Button>
+                </FormActionButtonRow>
+
+                <FormActionButtonRow>
+                  <Button
+                    buttonStyle={adaptiveSecondaryButtonStyle()}
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignmentGuide={{ alignment: "leading", value: 0 }}
+                    action={() => setIsDeviceLoginPresented(true)}
+                  >
+                    <HStack
+                      frame={{ maxWidth: "infinity", alignment: "center" }}
+                      alignment="center"
+                      spacing={8}
+                      padding={{ vertical: 2 }}
+                    >
+                      <Image
+                        systemName="qrcode.viewfinder"
+                        font="subheadline"
+                      />
+                      <Text
+                        font="subheadline"
+                        fontWeight="medium"
+                        lineLimit={1}
+                        multilineTextAlignment="center"
+                      >
+                        设备码重新授权登录 (CLI 方式)
+                      </Text>
+                    </HStack>
+                  </Button>
+                </FormActionButtonRow>
+              </>
+            ) : null}
+
+            {!isCodexAuth && supportsDeviceOrPollFlow ? (
+              <FormActionButtonRow>
+                <Button
+                  buttonStyle={adaptiveProminentButtonStyle()}
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  alignmentGuide={{ alignment: "leading", value: 0 }}
+                  action={() => setIsDeviceLoginPresented(true)}
+                >
+                  <HStack
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignment="center"
+                    spacing={8}
+                    padding={{ vertical: 2 }}
+                  >
+                    <Image
+                      systemName={
+                        isTrueDeviceCode
+                          ? "qrcode.viewfinder"
+                          : "person.badge.key.fill"
+                      }
+                      font="subheadline"
+                    />
+                    <Text
+                      font="subheadline"
+                      fontWeight="semibold"
+                      lineLimit={1}
+                      multilineTextAlignment="center"
+                    >
+                      {isTrueDeviceCode ? "设备码重新授权登录" : "重新登录授权"}
+                    </Text>
+                  </HStack>
+                </Button>
+              </FormActionButtonRow>
+            ) : null}
+
+            {supportsWebViewFlow ? (
+              <FormActionButtonRow>
+                <Button
+                  buttonStyle={
+                    isCodexAuth || supportsDeviceOrPollFlow
+                      ? adaptiveSecondaryButtonStyle()
+                      : adaptiveProminentButtonStyle()
+                  }
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  alignmentGuide={{ alignment: "leading", value: 0 }}
+                  disabled={isReauthenticating}
+                  action={handleBuiltInBrowserRelogin}
+                >
+                  <HStack
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignment="center"
+                    spacing={8}
+                    padding={{ vertical: 2 }}
+                  >
+                    <Image systemName="safari.fill" font="subheadline" />
+                    <Text
+                      font="subheadline"
+                      fontWeight="semibold"
+                      lineLimit={1}
+                      multilineTextAlignment="center"
+                    >
+                      {isReauthenticating ? "正在登录…" : "网页重新登录授权"}
+                    </Text>
+                  </HStack>
+                </Button>
+              </FormActionButtonRow>
             ) : null}
 
             <TextField

@@ -241,6 +241,13 @@ async function postWithEndpoints(
   return { data: null, saw401 }
 }
 
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+}
+
 type ParsedBucket = {
   bucketId: string
   window: string
@@ -257,8 +264,12 @@ type ParsedModel = {
 }
 
 /**
- * 依据 lbjlaq/Antigravity-Manager (quota.rs 与 quotaDisplay.ts)
- * 提取 Gemini（5H + 周）、Claude/GPT（5H + 周）、Gemini 4 Argon（周）共 5 个独立配额进度条
+ * 依据 Google Cloud Code PA API (retrieveUserQuotaSummary 与 fetchAvailableModels)
+ * 动态提取账号实际开通/有权限的模型配额进度条：
+ * - 基础 Gemini（5H + 周）
+ * - Claude / GPT（5H + 周，仅在账号开通时展示）
+ * - 动态高级/未来模型（如 Gemini 4 Argon、Gemini 5 等，完全依据账号实际返回的配额分组动态自适应）
+ * 若账号未获得某个模型的可用权限，绝不无中生有，避免小组件与总消耗量被虚假数据污染。
  */
 export function extractFourQuotaWindows(
   summaryPayload: JsonObject | null,
@@ -267,13 +278,13 @@ export function extractFourQuotaWindows(
 ): QuotaWindow[] {
   const isFreeTier = tier === "free"
 
-  // 1. 解析 retrieveUserQuotaSummary 里的 groups
+  // 1. 解析 retrieveUserQuotaSummary 里的 groups（最权威的账号配额分组）
   const rawGroups = summaryPayload
     ? firstValue(summaryPayload, ["groups", "quotaGroups", "quota_groups"])
     : null
   const groups = Array.isArray(rawGroups) ? (rawGroups as JsonObject[]) : []
 
-  // 2. 解析 fetchAvailableModels 里的 models
+  // 2. 解析 fetchAvailableModels 里的 models（只收录明确具有 quotaInfo 与有效 fraction 的可用模型）
   const rawModels = modelsPayload
     ? asObject(modelsPayload.models) || modelsPayload
     : null
@@ -284,408 +295,381 @@ export function extractFourQuotaWindows(
       const obj = asObject(rawVal)
       if (!id || !obj || id.startsWith("chat_") || id.startsWith("tab_")) continue
       const q = asObject(firstValue(obj, ["quotaInfo", "quota_info"]))
+      if (!q) continue // 若无 quotaInfo，说明当前账号无权使用此模型，直接过滤
       const frac = parseFraction(
         firstValue(q, ["remainingFraction", "remaining_fraction", "remaining"])
       )
+      if (frac === null) continue // 若无有效配额数值，直接过滤
       const reset = parseDate(firstValue(q, ["resetTime", "reset_time"]))
       const disp =
         textValue(firstValue(obj, ["displayName", "display_name", "modelName"])) ||
         id
-      // 对应 Antigravity-Manager: 若缺失则 unwrap_or(0)，绝不默认 1.0 (100%)
-      const percentage = frac != null ? Math.round(frac * 100) : 0
+      const percentage = Math.round(frac * 100)
       models.push({
         id,
         displayName: disp,
-        remainingFraction: frac != null ? frac : 0,
+        remainingFraction: frac,
         percentage,
         resetTime: reset,
       })
     }
   }
 
-  // 3. [FIX #3426] Fuse real bucket quotas into models so UI doesn't show fake 100%
-  // 对应 Antigravity-Manager: 将 retrieveUserQuotaSummary 的真实分桶配额深度融合到 models 中
+  type ExtractedQuotaGroup = {
+    rawName: string
+    displayName: string
+    isBaseGemini: boolean
+    isClaudeOrGpt: boolean
+    isArgon: boolean
+    fiveHour?: ParsedBucket
+    weekly?: ParsedBucket
+  }
+
+  const extractedGroups: ExtractedQuotaGroup[] = []
+
+  // 3. 优先使用 retrieveUserQuotaSummary 的权威 groups 数据
   if (groups.length > 0) {
-    for (const model of models) {
-      const nameLower = model.id.toLowerCase()
-      const isArgon = /argon|gemini[\s_-]?4/i.test(nameLower)
+    for (const g of groups) {
+      const rawName =
+        textValue(firstValue(g, ["displayName", "display_name", "name", "id"])) ||
+        "配额"
+      const bList = Array.isArray(g.buckets) ? (g.buckets as JsonObject[]) : []
+      const parsedBuckets: ParsedBucket[] = bList.map((b) => ({
+        bucketId: textValue(firstValue(b, ["bucketId", "bucket_id", "id"])) || "",
+        window: textValue(b.window) || "",
+        remainingFraction:
+          parseFraction(
+            firstValue(b, [
+              "remainingFraction",
+              "remaining_fraction",
+              "remaining",
+            ])
+          ) ?? 0,
+        resetTime: parseDate(firstValue(b, ["resetTime", "reset_time"])),
+      }))
+
+      if (parsedBuckets.length === 0) continue
+
+      const fiveHourBucket = parsedBuckets
+        .filter((b) => /5h|hour/i.test(`${b.window} ${b.bucketId}`))
+        .reduce<ParsedBucket | undefined>(
+          (chosen, b) =>
+            !chosen || b.remainingFraction < chosen.remainingFraction
+              ? b
+              : chosen,
+          undefined
+        )
+
+      const weeklyBucket =
+        parsedBuckets
+          .filter((b) => /week|7d/i.test(`${b.window} ${b.bucketId}`))
+          .reduce<ParsedBucket | undefined>(
+            (chosen, b) =>
+              !chosen || b.remainingFraction < chosen.remainingFraction
+                ? b
+                : chosen,
+            undefined
+          ) ||
+        (!fiveHourBucket && parsedBuckets.length > 0 ? parsedBuckets[0] : undefined)
+
+      const nameLower = rawName.toLowerCase()
+      const has3pBucket = parsedBuckets.some((b) =>
+        b.bucketId.toLowerCase().includes("3p")
+      )
       const isClaudeOrGpt =
-        !isArgon && (/^claude/i.test(nameLower) || /^gpt/i.test(nameLower))
-      const isGemini = !isArgon && /^gemini/i.test(nameLower)
+        /claude|gpt|3p/i.test(nameLower) || has3pBucket
 
-      for (const group of groups) {
-        const gName = (
-          textValue(firstValue(group, ["displayName", "display_name"])) || ""
-        ).toLowerCase()
-        const bList = Array.isArray(group.buckets)
-          ? (group.buckets as JsonObject[])
-          : []
-        const hasArgonBucket = bList.some((b) =>
-          /argon|gemini[\s_-]?4/i.test(
-            `${textValue(firstValue(b, ["bucketId", "bucket_id"])) || ""} ${textValue(firstValue(b, ["displayName", "display_name"])) || ""}`
-          )
-        )
-        const isArgonGroup = /argon|gemini[\s_-]?4/i.test(gName) || hasArgonBucket
-        const isClaudeGroup =
-          !isArgonGroup &&
-          (/claude|gpt|3p/i.test(gName) ||
-            bList.some((b) =>
-              String(firstValue(b, ["bucketId", "bucket_id"]) || "")
-                .toLowerCase()
-                .includes("3p")
-            ))
-        const isGeminiGroup =
-          !isArgonGroup &&
-          !isClaudeGroup &&
-          (/gemini/i.test(gName) || !/claude|gpt|3p/i.test(gName))
-
-        const matchesGroup = isArgon
-          ? isArgonGroup
-          : isClaudeOrGpt
-            ? isClaudeGroup
-            : isGemini
-              ? isGeminiGroup
-              : false
-
-        if (matchesGroup && bList.length > 0) {
-          const parsedBuckets: ParsedBucket[] = bList.map((b) => ({
-            bucketId:
-              textValue(firstValue(b, ["bucketId", "bucket_id", "id"])) || "",
-            window: textValue(b.window) || "",
-            remainingFraction:
-              parseFraction(
-                firstValue(b, [
-                  "remainingFraction",
-                  "remaining_fraction",
-                  "remaining",
-                ])
-              ) ?? 0,
-            resetTime: parseDate(firstValue(b, ["resetTime", "reset_time"])),
-          }))
-
-          const b5h = parsedBuckets.find((b) =>
-            /5h|hour/i.test(`${b.window} ${b.bucketId}`)
-          )
-          const bWeekly = parsedBuckets.find((b) =>
-            /week|7d/i.test(`${b.window} ${b.bucketId}`)
-          )
-
-          const chosen =
-            bWeekly && bWeekly.remainingFraction <= 0.001
-              ? bWeekly
-              : b5h && bWeekly
-                ? b5h.remainingFraction <= bWeekly.remainingFraction
-                  ? b5h
-                  : bWeekly
-                : b5h || bWeekly || parsedBuckets[0]
-
-          if (chosen) {
-            model.remainingFraction = chosen.remainingFraction
-            model.percentage = Math.round(chosen.remainingFraction * 100)
-            if (chosen.resetTime) {
-              model.resetTime = chosen.resetTime
-            }
-            break
-          }
-        }
-      }
-    }
-  }
-
-  // 4. 实现 Antigravity-Manager 的 getGroupQuotaSummaries 纯函数
-  const findGroupBuckets = (
-    target: "gemini" | "claude" | "argon"
-  ): ParsedBucket[] => {
-    return groups
-      .filter((group) => {
-        const groupName = (
-          textValue(firstValue(group, ["displayName", "display_name"])) || ""
-        ).toLowerCase()
-        const bList = Array.isArray(group.buckets)
-          ? (group.buckets as JsonObject[])
-          : []
-        const hasArgonBucket = bList.some((b) =>
-          /argon|gemini[\s_-]?4/i.test(
-            `${textValue(firstValue(b, ["bucketId", "bucket_id"])) || ""} ${textValue(firstValue(b, ["displayName", "display_name"])) || ""}`
-          )
-        )
-        const isArgon = /argon|gemini[\s_-]?4/i.test(groupName) || hasArgonBucket
-        if (target === "argon") return isArgon
-        if (isArgon) return false
-
-        const isThirdParty =
-          /claude|gpt|3p/i.test(groupName) ||
-          bList.some((b) =>
-            String(
-              firstValue(b, ["bucketId", "bucket_id"]) || ""
-            )
-              .toLowerCase()
-              .includes("3p")
-          )
-        return target === "claude" ? isThirdParty : !isThirdParty
-      })
-      .flatMap((group) => {
-        const bList = Array.isArray(group.buckets)
-          ? (group.buckets as JsonObject[])
-          : []
-        return bList.map((b) => ({
-          bucketId:
-            textValue(firstValue(b, ["bucketId", "bucket_id", "id"])) || "",
-          window: textValue(b.window) || "",
-          remainingFraction:
-            parseFraction(
-              firstValue(b, [
-                "remainingFraction",
-                "remaining_fraction",
-                "remaining",
-              ])
-            ) ?? 0,
-          resetTime: parseDate(firstValue(b, ["resetTime", "reset_time"])),
-        }))
-      })
-  }
-
-  type GroupQuotaItem = {
-    percentage: number
-    resetTime?: string
-  }
-
-  type GroupQuotaSummary = {
-    key: "gemini" | "claude" | "argon"
-    label: string
-    fiveHour?: GroupQuotaItem
-    weekly?: GroupQuotaItem
-    isWeeklyConstrained: boolean
-    isWeeklyExhausted: boolean
-  }
-
-  const buildGroup = (key: "gemini" | "claude" | "argon"): GroupQuotaSummary => {
-    const buckets = findGroupBuckets(key)
-
-    const fiveHourBucket = buckets
-      .filter((b) => /5h|hour/i.test(`${b.window} ${b.bucketId}`))
-      .reduce<ParsedBucket | undefined>(
-        (chosen, b) =>
-          !chosen || b.remainingFraction < chosen.remainingFraction
-            ? b
-            : chosen,
-        undefined
+      const hasArgonBucket = parsedBuckets.some((b) =>
+        /argon|gemini[\s_-]?4/i.test(`${b.bucketId} ${b.window}`)
       )
+      const isArgon = /argon|gemini[\s_-]?4/i.test(nameLower) || hasArgonBucket
 
-    const weeklyBucket = buckets
-      .filter((b) => /week|7d/i.test(`${b.window} ${b.bucketId}`))
-      .reduce<ParsedBucket | undefined>(
-        (chosen, b) =>
-          !chosen || b.remainingFraction < chosen.remainingFraction
-            ? b
-            : chosen,
-        undefined
-      )
+      // 区分具体特化/高级模型（如 Gemini 4 Argon, Gemini 5, Gemini Ultra 等）与标准基础 Gemini
+      const isSpecificAdvancedGemini =
+        isArgon || /gemini[\s_-]?[0-9]|argon|ultra/i.test(nameLower)
 
-    let fallback5h: GroupQuotaItem | undefined = undefined
-    let fallbackWeekly: GroupQuotaItem | undefined = undefined
+      // 基础 Gemini 分组：仅指标准 Gemini 基础配额池
+      const isBaseGemini =
+        !isClaudeOrGpt &&
+        !isSpecificAdvancedGemini &&
+        (/gemini/i.test(nameLower) || !isClaudeOrGpt)
 
-    if (models.length > 0) {
-      const matched = models.filter((m) => {
-        const n = m.id.toLowerCase()
-        const isArgon =
-          /argon|gemini[\s_-]?4/i.test(n) ||
-          /argon|gemini[\s_-]?4/i.test(m.displayName)
-        if (key === "argon") return isArgon
-        if (isArgon) return false
-        return key === "claude"
-          ? n.startsWith("claude") || n.startsWith("gpt")
-          : n.startsWith("gemini")
-      })
-
-      if (matched.length > 0) {
-        const now = Date.now()
-        const fiveHourModels = matched.filter((m) => {
-          if (!m.resetTime) return false
-          const diffMs = Date.parse(m.resetTime) - now
-          return diffMs > 0 && diffMs <= 6 * 3600 * 1000
-        })
-        const weeklyModels = matched.filter((m) => {
-          if (!m.resetTime) return false
-          const diffMs = Date.parse(m.resetTime) - now
-          return diffMs > 6 * 3600 * 1000
-        })
-
-        if (fiveHourModels.length > 0) {
-          const min5h = fiveHourModels.reduce(
-            (prev, curr) => (curr.percentage < prev.percentage ? curr : prev),
-            fiveHourModels[0]
-          )
-          fallback5h = {
-            percentage: min5h.percentage,
-            resetTime: min5h.resetTime || undefined,
-          }
-        }
-
-        if (weeklyModels.length > 0) {
-          const minWeekly = weeklyModels.reduce(
-            (prev, curr) => (curr.percentage < prev.percentage ? curr : prev),
-            weeklyModels[0]
-          )
-          fallbackWeekly = {
-            percentage: minWeekly.percentage,
-            resetTime: minWeekly.resetTime || undefined,
-          }
-        } else if (matched.length > 0 && !fiveHourModels.length) {
-          const minModel = matched.reduce(
-            (prev, curr) => (curr.percentage < prev.percentage ? curr : prev),
-            matched[0]
-          )
-          if (isFreeTier || key === "argon") {
-            fallbackWeekly = {
-              percentage: minModel.percentage,
-              resetTime: minModel.resetTime || undefined,
-            }
-          } else {
-            fallback5h = {
-              percentage: minModel.percentage,
-              resetTime: minModel.resetTime || undefined,
-            }
-          }
-        }
-      }
-    }
-
-    // Free 账号在官方架构下只有周额度，没有 5H 额度
-    const raw5h =
-      !isFreeTier && fiveHourBucket
-        ? Math.round(fiveHourBucket.remainingFraction * 100)
-        : !isFreeTier && fallback5h
-          ? fallback5h.percentage
-          : undefined
-
-    const effectiveArgonBucket =
-      weeklyBucket ||
-      (key === "argon" && !fiveHourBucket && buckets.length > 0
-        ? buckets[0]
-        : undefined)
-
-    const rawWeekly = effectiveArgonBucket
-      ? Math.round(effectiveArgonBucket.remainingFraction * 100)
-      : fallbackWeekly
-        ? fallbackWeekly.percentage
-        : isFreeTier && fallback5h
-          ? fallback5h.percentage
-          : undefined
-
-    const weeklyResetTime =
-      effectiveArgonBucket?.resetTime ||
-      fallbackWeekly?.resetTime ||
-      (isFreeTier ? fallback5h?.resetTime : undefined)
-    const fiveHourResetTime = isFreeTier
-      ? undefined
-      : fiveHourBucket?.resetTime || fallback5h?.resetTime
-
-    const effectiveWeekly = rawWeekly
-    const effectiveWeeklyResetTime = weeklyResetTime
-
-    const isWeeklyExhausted =
-      effectiveWeekly !== undefined && effectiveWeekly <= 0
-    const isWeeklyConstrained =
-      isWeeklyExhausted ||
-      (effectiveWeekly !== undefined &&
-        raw5h !== undefined &&
-        effectiveWeekly < raw5h)
-
-    const defaultLabel =
-      key === "argon"
+      const dispName = isArgon
         ? "Gemini 4 Argon"
-        : key === "claude"
-          ? "Claude / GPT"
-          : "Gemini"
+        : isBaseGemini
+          ? "Gemini"
+          : isClaudeOrGpt
+            ? "Claude / GPT"
+            : rawName
 
-    return {
-      key,
-      label: defaultLabel,
-      fiveHour:
-        raw5h !== undefined
-          ? {
-              percentage: isWeeklyExhausted ? 0 : raw5h,
-              resetTime: isWeeklyExhausted
-                ? effectiveWeeklyResetTime
-                : fiveHourResetTime,
-            }
-          : undefined,
-      weekly:
-        effectiveWeekly !== undefined
-          ? {
-              percentage: effectiveWeekly,
-              resetTime: effectiveWeeklyResetTime,
-            }
-          : undefined,
-      isWeeklyConstrained,
-      isWeeklyExhausted,
+      extractedGroups.push({
+        rawName,
+        displayName: dispName,
+        isBaseGemini,
+        isClaudeOrGpt,
+        isArgon,
+        fiveHour: fiveHourBucket,
+        weekly: weeklyBucket,
+      })
+    }
+  } else if (models.length > 0) {
+    // 4. 只有当 retrieveUserQuotaSummary 完全未返回 groups 时，才允许从 models 列表兜底推导配额
+    const now = Date.now()
+
+    const buildFallbackGroup = (
+      matchedModels: ParsedModel[],
+      rawName: string,
+      displayName: string,
+      isBaseGemini: boolean,
+      isClaudeOrGpt: boolean,
+      isArgon: boolean
+    ) => {
+      if (matchedModels.length === 0) return
+
+      const fiveHourModels = matchedModels.filter((m) => {
+        if (!m.resetTime) return false
+        const diffMs = Date.parse(m.resetTime) - now
+        return diffMs > 0 && diffMs <= 6 * 3600 * 1000
+      })
+      const weeklyModels = matchedModels.filter((m) => {
+        if (!m.resetTime) return false
+        const diffMs = Date.parse(m.resetTime) - now
+        return diffMs > 6 * 3600 * 1000
+      })
+
+      let f5h: ParsedBucket | undefined
+      let fWeekly: ParsedBucket | undefined
+
+      if (fiveHourModels.length > 0) {
+        const min5h = fiveHourModels.reduce(
+          (prev, curr) => (curr.percentage < prev.percentage ? curr : prev),
+          fiveHourModels[0]
+        )
+        f5h = {
+          bucketId: min5h.id,
+          window: "5h",
+          remainingFraction: min5h.remainingFraction,
+          resetTime: min5h.resetTime,
+        }
+      }
+
+      if (weeklyModels.length > 0) {
+        const minWeekly = weeklyModels.reduce(
+          (prev, curr) => (curr.percentage < prev.percentage ? curr : prev),
+          weeklyModels[0]
+        )
+        fWeekly = {
+          bucketId: minWeekly.id,
+          window: "weekly",
+          remainingFraction: minWeekly.remainingFraction,
+          resetTime: minWeekly.resetTime,
+        }
+      } else if (matchedModels.length > 0 && !fiveHourModels.length) {
+        const minModel = matchedModels.reduce(
+          (prev, curr) => (curr.percentage < prev.percentage ? curr : prev),
+          matchedModels[0]
+        )
+        if (isFreeTier || isArgon) {
+          fWeekly = {
+            bucketId: minModel.id,
+            window: "weekly",
+            remainingFraction: minModel.remainingFraction,
+            resetTime: minModel.resetTime,
+          }
+        } else {
+          f5h = {
+            bucketId: minModel.id,
+            window: "5h",
+            remainingFraction: minModel.remainingFraction,
+            resetTime: minModel.resetTime,
+          }
+        }
+      }
+
+      extractedGroups.push({
+        rawName,
+        displayName,
+        isBaseGemini,
+        isClaudeOrGpt,
+        isArgon,
+        fiveHour: f5h,
+        weekly: fWeekly,
+      })
+    }
+
+    // Gemini
+    const geminiModels = models.filter((m) => {
+      const n = m.id.toLowerCase()
+      const isArgon =
+        /argon|gemini[\s_-]?4/i.test(n) ||
+        /argon|gemini[\s_-]?4/i.test(m.displayName)
+      return !isArgon && n.startsWith("gemini")
+    })
+    buildFallbackGroup(geminiModels, "Gemini", "Gemini", true, false, false)
+
+    // Claude / GPT
+    const claudeModels = models.filter((m) => {
+      const n = m.id.toLowerCase()
+      return n.startsWith("claude") || n.startsWith("gpt")
+    })
+    buildFallbackGroup(claudeModels, "Claude / GPT", "Claude / GPT", false, true, false)
+
+    // Argon
+    const argonModels = models.filter((m) => {
+      const n = m.id.toLowerCase()
+      return (
+        /argon|gemini[\s_-]?4/i.test(n) ||
+        /argon|gemini[\s_-]?4/i.test(m.displayName)
+      )
+    })
+    buildFallbackGroup(argonModels, "Gemini 4 Argon", "Gemini 4 Argon", false, false, true)
+
+    // 其他未来特化高级模型（如 Gemini 5 等，仅收录具有有效 quotaInfo 的模型）
+    const handledIds = new Set([
+      ...geminiModels.map((m) => m.id),
+      ...claudeModels.map((m) => m.id),
+      ...argonModels.map((m) => m.id),
+    ])
+    const futureModels = models.filter((m) => !handledIds.has(m.id))
+    for (const m of futureModels) {
+      buildFallbackGroup([m], m.displayName, m.displayName, false, false, false)
     }
   }
 
-  const geminiSummary = buildGroup("gemini")
-  const claudeSummary = buildGroup("claude")
-  const argonSummary = buildGroup("argon")
-
-  const formatWindowFromItem = (
+  const formatWindowFromBucket = (
     id: string,
     name: string,
     period: QuotaPeriod,
-    item: GroupQuotaItem | undefined,
-    isExhaustedFallback = false
+    bucket: ParsedBucket,
+    isWeeklyExhausted = false
   ): QuotaWindow => {
-    const remainingPct = item
-      ? Math.max(0, Math.min(100, Math.round(item.percentage)))
-      : 0
-    const usedPct = 100 - remainingPct
-    const isExhausted = isExhaustedFallback || remainingPct <= 0
+    const remainingPct = Math.max(
+      0,
+      Math.min(100, Math.round(bucket.remainingFraction * 100))
+    )
+    const effectiveRemaining = isWeeklyExhausted ? 0 : remainingPct
+    const usedPct = 100 - effectiveRemaining
+    const isExhausted = isWeeklyExhausted || remainingPct <= 0
     return {
       id,
       name,
       period,
       usedPercentage: usedPct,
-      resetsAt: item?.resetTime || undefined,
+      resetsAt: bucket.resetTime || undefined,
       isExhausted,
     }
   }
 
-  const resultWindows: QuotaWindow[] = [
-    formatWindowFromItem(
-      "antigravity:gemini_5h",
-      "Gemini 5小时",
-      "fiveHour",
-      geminiSummary.fiveHour,
-      geminiSummary.isWeeklyExhausted
-    ),
-    formatWindowFromItem(
-      "antigravity:gemini_weekly",
-      "Gemini 周配额",
-      "weekly",
-      geminiSummary.weekly,
-      geminiSummary.isWeeklyExhausted
-    ),
-    formatWindowFromItem(
-      "antigravity:claude_5h",
-      "Claude / GPT 5小时",
-      "fiveHour",
-      claudeSummary.fiveHour,
-      claudeSummary.isWeeklyExhausted
-    ),
-    formatWindowFromItem(
-      "antigravity:claude_weekly",
-      "Claude / GPT 周配额",
-      "weekly",
-      claudeSummary.weekly,
-      claudeSummary.isWeeklyExhausted
-    ),
-    formatWindowFromItem(
-      "antigravity:argon_weekly",
-      "Gemini 4 Argon",
-      "weekly",
-      argonSummary.weekly || argonSummary.fiveHour,
-      argonSummary.isWeeklyExhausted
-    ),
-  ]
+  const resultWindows: QuotaWindow[] = []
+
+  // 1. 基础 Gemini 配额
+  const geminiGroup = extractedGroups.find((g) => g.isBaseGemini)
+  if (geminiGroup) {
+    const isWeeklyExhausted =
+      geminiGroup.weekly !== undefined &&
+      geminiGroup.weekly.remainingFraction <= 0
+    if (!isFreeTier && geminiGroup.fiveHour) {
+      resultWindows.push(
+        formatWindowFromBucket(
+          "antigravity:gemini_5h",
+          "Gemini 5小时",
+          "fiveHour",
+          geminiGroup.fiveHour,
+          isWeeklyExhausted
+        )
+      )
+    }
+    if (geminiGroup.weekly) {
+      resultWindows.push(
+        formatWindowFromBucket(
+          "antigravity:gemini_weekly",
+          "Gemini 周配额",
+          "weekly",
+          geminiGroup.weekly,
+          isWeeklyExhausted
+        )
+      )
+    }
+  }
+
+  // 2. Claude / GPT 配额（仅当账号开通了 Claude/GPT 分组时展示）
+  const claudeGroup = extractedGroups.find((g) => g.isClaudeOrGpt)
+  if (claudeGroup) {
+    const isWeeklyExhausted =
+      claudeGroup.weekly !== undefined &&
+      claudeGroup.weekly.remainingFraction <= 0
+    if (!isFreeTier && claudeGroup.fiveHour) {
+      resultWindows.push(
+        formatWindowFromBucket(
+          "antigravity:claude_5h",
+          "Claude / GPT 5小时",
+          "fiveHour",
+          claudeGroup.fiveHour,
+          isWeeklyExhausted
+        )
+      )
+    }
+    if (claudeGroup.weekly) {
+      resultWindows.push(
+        formatWindowFromBucket(
+          "antigravity:claude_weekly",
+          "Claude / GPT 周配额",
+          "weekly",
+          claudeGroup.weekly,
+          isWeeklyExhausted
+        )
+      )
+    }
+  }
+
+  // 3. 所有其他特定/未来高级模型配额组（如 Gemini 4 Argon、未来的 Gemini 5 等，完全动态适配！）
+  const otherGroups = extractedGroups.filter(
+    (g) => !g.isBaseGemini && !g.isClaudeOrGpt
+  )
+  for (const group of otherGroups) {
+    const isWeeklyExhausted =
+      group.weekly !== undefined && group.weekly.remainingFraction <= 0
+    const slug = slugify(group.displayName)
+    if (!isFreeTier && group.fiveHour) {
+      resultWindows.push(
+        formatWindowFromBucket(
+          `antigravity:${slug}_5h`,
+          `${group.displayName} 5小时`,
+          "fiveHour",
+          group.fiveHour,
+          isWeeklyExhausted
+        )
+      )
+    }
+    if (group.weekly) {
+      const windowId = group.isArgon
+        ? "antigravity:argon_weekly"
+        : `antigravity:${slug}_weekly`
+      const windowName = group.fiveHour
+        ? `${group.displayName} 周配额`
+        : group.displayName
+      resultWindows.push(
+        formatWindowFromBucket(
+          windowId,
+          windowName,
+          "weekly",
+          group.weekly,
+          isWeeklyExhausted
+        )
+      )
+    }
+  }
+
+  // 兜底保护：若全部分组都未拿到，至少给一个 Gemini 周配额默认条以防界面白屏
+  if (resultWindows.length === 0) {
+    resultWindows.push({
+      id: "antigravity:gemini_weekly",
+      name: "Gemini 周配额",
+      period: "weekly",
+      usedPercentage: 0,
+      isExhausted: false,
+    })
+  }
 
   return resultWindows
 }
