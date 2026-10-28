@@ -5,7 +5,7 @@
   "description": "多平台 AI 订阅额度与 API 钱包余额直连监控看板，覆盖 5 大认证路径与 78 家 AI 供应商",
   "runInApp": true,
   "intentInputTypes": [],
-  "version": "2.1.8",
+  "version": "2.1.9",
   "remoteResource": {
     "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/AI-Dashboard",
     "hash": "",

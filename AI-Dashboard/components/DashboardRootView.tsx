@@ -37,6 +37,7 @@ import {
   loadEnvelopeFromKeychain,
   loadStoredAccounts,
   loadStoredSnapshots,
+  migrateLegacyAccountKeychainKeys,
   removeEnvelopeFromKeychain,
   saveDashboardSettings,
   saveEnvelopeToKeychain,
@@ -115,8 +116,12 @@ export function DashboardRootView() {
   const [settings, setSettings] = useState<DashboardSettings>(() =>
     loadDashboardSettings()
   )
-  const [realAccounts, setRealAccounts] = useState<SubscriptionAccount[]>(() =>
-    loadStoredAccounts()
+  const [realAccounts, setRealAccounts] = useState<SubscriptionAccount[]>(
+    () => {
+      const list = loadStoredAccounts()
+      migrateLegacyAccountKeychainKeys(list)
+      return list
+    }
   )
   const [demoAccounts, setDemoAccounts] = useState<SubscriptionAccount[]>(() =>
     createDefaultDemoAccounts()

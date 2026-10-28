@@ -313,6 +313,137 @@ export function removeEnvelopeFromKeychain(
   Keychain.remove(keychainKey, { synchronizable: !synchronizable })
 }
 
+/**
+ * 规范化生成账号的 Keychain Key（UID）：
+ * 格式：`ai_dashboard.cred.<provider>[.<accountInfo>]`
+ * - 增加供应商信息（provider）；
+ * - 当同一供应商存在多个账号（或指定了个性化别名/邮箱/身份）时，自动补充账号信息便于区分；
+ * - 确保唯一性与多脚本互通性，方便其他脚本按前缀识别或通过 Keychain.pick() 挑选使用。
+ */
+export function generateAccountKeychainKey(params: {
+  provider: ProviderId
+  accountId?: string
+  displayName?: string
+  envelope?: ProviderCredentialEnvelope
+  existingAccounts?: SubscriptionAccount[]
+}): string {
+  const { provider, accountId, displayName, envelope, existingAccounts = [] } = params
+
+  // 1. 基础前缀包含供应商信息
+  const prefix = `ai_dashboard.cred.${provider}`
+
+  // 2. 查找同一供应商下的其他账号（排除自身）
+  const otherSameProviderAccounts = existingAccounts.filter(
+    (a) => a.provider === provider && (!accountId || a.id !== accountId)
+  )
+
+  // 3. 提取可识别的账号信息 (displayName / email / accountID / username)
+  const meta = getProviderMeta(provider)
+  const defaultProviderName = meta?.displayName ?? provider
+  const candidateInfo = (
+    displayName?.trim() ||
+    envelope?.metadata?.displayName ||
+    envelope?.metadata?.accountEmail ||
+    envelope?.metadata?.username ||
+    envelope?.accountID ||
+    ""
+  ).trim()
+
+  // 判断是否为单纯的默认供应商名（如 "DeepSeek" 或 "deepSeek"）
+  const isDefaultName =
+    !candidateInfo ||
+    candidateInfo.toLowerCase() === defaultProviderName.toLowerCase() ||
+    candidateInfo.toLowerCase() === provider.toLowerCase()
+
+  // 过滤并规范化字符，替换特殊分隔符（保留中文、英文字母、数字）
+  const sanitize = (str: string) =>
+    str.replace(/[.:/\\#?&@\s]+/g, "_").replace(/^[._]+|[._]+$/g, "").trim()
+
+  let baseKey = prefix
+  if (otherSameProviderAccounts.length > 0) {
+    // 存在同供应商多个账号：必须携带区分后缀
+    if (!isDefaultName) {
+      baseKey = `${prefix}.${sanitize(candidateInfo)}`
+    } else {
+      // 默认名称则按序号补充（如 账号2）
+      const index = otherSameProviderAccounts.length + 1
+      baseKey = `${prefix}.账号${index}`
+    }
+  } else {
+    // 单一账号：如果用户显式指定了个性化别名/邮箱，附加以利识别；否则保留纯前缀
+    if (!isDefaultName) {
+      baseKey = `${prefix}.${sanitize(candidateInfo)}`
+    } else {
+      baseKey = prefix
+    }
+  }
+
+  // 4. 确保在全部已有账号中不发生键名冲突
+  let finalKey = baseKey
+  let counter = 2
+  const isKeyOccupied = (key: string) =>
+    existingAccounts.some(
+      (a) => a.credentialKeychainKey === key && (!accountId || a.id !== accountId)
+    )
+
+  while (isKeyOccupied(finalKey)) {
+    finalKey = `${baseKey}_${counter}`
+    counter++
+  }
+
+  return finalKey
+}
+
+/**
+ * 自动平滑升级旧版纯 UUID 的 Keychain Key（UID）：
+ * 将 `ai_dashboard.cred.<uuid>` 平滑迁移为包含供应商与账号信息的规范键名。
+ */
+export function migrateLegacyAccountKeychainKeys(
+  accounts: SubscriptionAccount[]
+): boolean {
+  let changed = false
+  for (const acc of accounts) {
+    const isOldUuidKey =
+      /^ai_dashboard\.cred\.[0-9a-fA-F-]{36}$/.test(acc.credentialKeychainKey) ||
+      acc.credentialKeychainKey === `ai_dashboard.cred.${acc.id}`
+
+    if (isOldUuidKey) {
+      const envelope = loadEnvelopeFromKeychain(
+        acc.credentialKeychainKey,
+        acc.preferssynchronizableKeychain
+      )
+      if (envelope) {
+        const newKey = generateAccountKeychainKey({
+          provider: acc.provider,
+          accountId: acc.id,
+          displayName: acc.displayName,
+          envelope,
+          existingAccounts: accounts,
+        })
+        if (newKey !== acc.credentialKeychainKey) {
+          const saved = saveEnvelopeToKeychain(
+            newKey,
+            envelope,
+            acc.preferssynchronizableKeychain
+          )
+          if (saved) {
+            removeEnvelopeFromKeychain(
+              acc.credentialKeychainKey,
+              acc.preferssynchronizableKeychain
+            )
+            acc.credentialKeychainKey = newKey
+            changed = true
+          }
+        }
+      }
+    }
+  }
+  if (changed) {
+    saveStoredAccounts(accounts)
+  }
+  return changed
+}
+
 export function loadStoredAccounts(): SubscriptionAccount[] {
   const list = Storage.get<SubscriptionAccount[]>(STORAGE_ACCOUNTS_KEY)
   if (!Array.isArray(list)) return []

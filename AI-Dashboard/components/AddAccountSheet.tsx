@@ -36,6 +36,8 @@ import {
 } from "../models/types"
 import {
   buildCredentialEnvelope,
+  generateAccountKeychainKey,
+  loadStoredAccounts,
   saveEnvelopeToKeychain,
 } from "../utils/credential_store"
 import {
@@ -147,11 +149,53 @@ export function AddAccountSheet(props: {
     }
   }
 
+  const handleImportFromKeychain = async () => {
+    try {
+      const picked = await Keychain.pick({
+        title: "从钥匙串导入",
+        prompt: `选择已保存在钥匙串中的 ${meta.displayName} 凭据或 API 密钥`,
+      })
+      if (!picked || !picked.trim()) return
+      const trimmed = picked.trim()
+
+      try {
+        const parsed = JSON.parse(trimmed) as Partial<ProviderCredentialEnvelope>
+        if (
+          parsed &&
+          typeof parsed.accessToken === "string" &&
+          parsed.accessToken.trim()
+        ) {
+          setRawCredential(parsed.accessToken.trim())
+          if (parsed.metadata?.serverAddress && meta.requiresGatewayAddress) {
+            setServerAddress(parsed.metadata.serverAddress)
+          }
+          if (parsed.metadata?.region && meta.requiresRegion) {
+            setSelectedRegion(parsed.metadata.region)
+          }
+          if (parsed.metadata?.displayName && !displayName.trim()) {
+            setDisplayName(parsed.metadata.displayName)
+          }
+          HapticFeedback.notificationSuccess()
+          setErrorMessage(null)
+          return
+        }
+      } catch {
+        // 非 JSON 格式，直接按原生 API Key / Token 填入
+      }
+
+      setRawCredential(trimmed)
+      HapticFeedback.notificationSuccess()
+      setErrorMessage(null)
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "从钥匙串导入失败")
+      HapticFeedback.notificationError()
+    }
+  }
+
   const finalizeAccountWithEnvelope = (
     envelope: ProviderCredentialEnvelope
   ) => {
     const accountId = UUID.string()
-    const keychainKey = `ai_dashboard.cred.${accountId}`
     const effectiveRegion = meta.requiresRegion
       ? selectedRegion
       : envelope.metadata.region
@@ -163,6 +207,16 @@ export function AddAccountSheet(props: {
       (envelope.metadata.displayName
         ? `${fallbackName} (${envelope.metadata.displayName})`
         : fallbackName)
+
+    const existingAccounts = loadStoredAccounts()
+    const keychainKey = generateAccountKeychainKey({
+      provider: selectedProviderId,
+      accountId,
+      displayName: finalName,
+      envelope,
+      existingAccounts,
+    })
+
     const saved = saveEnvelopeToKeychain(keychainKey, envelope, synchronizable)
     if (!saved) {
       setErrorMessage("写入系统钥匙串 (Keychain) 失败，请检查权限")
@@ -792,9 +846,66 @@ export function AddAccountSheet(props: {
                   </HStack>
                 </Button>
               ) : null}
+
+              <Divider />
+
+              <Button
+                buttonStyle={adaptiveSecondaryButtonStyle()}
+                frame={{ maxWidth: "infinity", alignment: "center" }}
+                action={handleImportFromKeychain}
+              >
+                <HStack
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  alignment="center"
+                  spacing={8}
+                  padding={{ vertical: 4 }}
+                >
+                  <Image systemName="key.fill" font="subheadline" />
+                  <Text
+                    font="subheadline"
+                    fontWeight="medium"
+                    lineLimit={1}
+                    multilineTextAlignment="center"
+                  >
+                    从钥匙串导入凭据
+                  </Text>
+                </HStack>
+              </Button>
             </VStack>
           </Section>
-        ) : null}
+        ) : (
+          <Section header={<Text>登录与凭据导入</Text>}>
+            <VStack
+              alignment="leading"
+              spacing={10}
+              listRowSeparator="hidden"
+              frame={{ maxWidth: "infinity", alignment: "leading" }}
+            >
+              <Button
+                buttonStyle={adaptiveSecondaryButtonStyle()}
+                frame={{ maxWidth: "infinity", alignment: "center" }}
+                action={handleImportFromKeychain}
+              >
+                <HStack
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  alignment="center"
+                  spacing={8}
+                  padding={{ vertical: 4 }}
+                >
+                  <Image systemName="key.fill" font="subheadline" />
+                  <Text
+                    font="subheadline"
+                    fontWeight="medium"
+                    lineLimit={1}
+                    multilineTextAlignment="center"
+                  >
+                    从钥匙串导入凭据
+                  </Text>
+                </HStack>
+              </Button>
+            </VStack>
+          </Section>
+        )}
 
         <Section
           header={<Text>{meta.credentialLabel}</Text>}

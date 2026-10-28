@@ -40,7 +40,10 @@ import {
 } from "../services/provider_auth"
 import {
   buildCredentialEnvelope,
+  generateAccountKeychainKey,
   loadEnvelopeFromKeychain,
+  loadStoredAccounts,
+  removeEnvelopeFromKeychain,
   saveEnvelopeToKeychain,
 } from "../utils/credential_store"
 import { getProviderMeta } from "../utils/providers_catalog"
@@ -217,6 +220,49 @@ export function AccountDetailSheet(props: {
     }, 2000)
   }
 
+  const handleImportFromKeychain = async () => {
+    try {
+      const picked = await Keychain.pick({
+        title: "从钥匙串导入",
+        prompt: `选择要更新到 ${meta.displayName} 的新凭据或 API 密钥`,
+      })
+      if (!picked || !picked.trim()) return
+      const trimmed = picked.trim()
+
+      try {
+        const parsed = JSON.parse(trimmed) as Partial<ProviderCredentialEnvelope>
+        if (
+          parsed &&
+          typeof parsed.accessToken === "string" &&
+          parsed.accessToken.trim()
+        ) {
+          setNewCredentialInput(parsed.accessToken.trim())
+          if (parsed.metadata?.serverAddress && meta.requiresGatewayAddress) {
+            setServerAddress(parsed.metadata.serverAddress)
+          }
+          HapticFeedback.notificationSuccess()
+          setToastMessage("已从钥匙串导入新凭证")
+          setIsToastPresented(true)
+          setTimeout(() => setIsToastPresented(false), 2000)
+          setErrorMessage(null)
+          return
+        }
+      } catch {
+        // 非 JSON
+      }
+
+      setNewCredentialInput(trimmed)
+      HapticFeedback.notificationSuccess()
+      setToastMessage("已从钥匙串导入新凭证")
+      setIsToastPresented(true)
+      setTimeout(() => setIsToastPresented(false), 2000)
+      setErrorMessage(null)
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "从钥匙串导入失败")
+      HapticFeedback.notificationError()
+    }
+  }
+
   const snapshot =
     state.type === "loaded"
       ? state.snapshot
@@ -243,17 +289,48 @@ export function AccountDetailSheet(props: {
           serverAddress: meta.requiresGatewayAddress ? serverAddress : undefined,
           region: existingEnvelope?.metadata.region,
         })
-        saveEnvelopeToKeychain(
-          account.credentialKeychainKey,
-          updatedEnvelope,
-          account.preferssynchronizableKeychain
-        )
+      }
+
+      const existingAccounts = loadStoredAccounts()
+      const newDisplayName = displayName.trim() || meta.displayName
+      const activeEnvelope = updatedEnvelope || existingEnvelope
+
+      let targetKey = account.credentialKeychainKey
+      if (!isDemoMode) {
+        targetKey = generateAccountKeychainKey({
+          provider: account.provider,
+          accountId: account.id,
+          displayName: newDisplayName,
+          envelope: activeEnvelope || undefined,
+          existingAccounts,
+        })
+
+        if (targetKey !== account.credentialKeychainKey) {
+          if (activeEnvelope) {
+            saveEnvelopeToKeychain(
+              targetKey,
+              activeEnvelope,
+              account.preferssynchronizableKeychain
+            )
+            removeEnvelopeFromKeychain(
+              account.credentialKeychainKey,
+              account.preferssynchronizableKeychain
+            )
+          }
+        } else if (updatedEnvelope) {
+          saveEnvelopeToKeychain(
+            targetKey,
+            updatedEnvelope,
+            account.preferssynchronizableKeychain
+          )
+        }
       }
 
       const parsedOrder = widgetOrder.trim() ? parseInt(widgetOrder.trim(), 10) : undefined
       const updatedAccount: SubscriptionAccount = {
         ...account,
-        displayName: displayName.trim() || meta.displayName,
+        displayName: newDisplayName,
+        credentialKeychainKey: targetKey,
         isEnabled,
         serverAddress: meta.requiresGatewayAddress
           ? serverAddress.trim()
@@ -762,6 +839,12 @@ export function AccountDetailSheet(props: {
                   : "本机钥匙串 (Keychain)"
             }
           />
+          {!isDemoMode ? (
+            <LabeledContent
+              title="钥匙串 UID (键名)"
+              value={account.credentialKeychainKey}
+            />
+          ) : null}
           <LabeledContent title="SHA-256 指纹前缀" value={fingerprintPreview} />
           {snapshot?.accountIdentity ? (
             <LabeledContent
@@ -980,6 +1063,32 @@ export function AccountDetailSheet(props: {
               </FormActionButtonRow>
             ) : null}
 
+            <FormActionButtonRow>
+              <Button
+                buttonStyle={adaptiveSecondaryButtonStyle()}
+                frame={{ maxWidth: "infinity", alignment: "center" }}
+                alignmentGuide={{ alignment: "leading", value: 0 }}
+                action={handleImportFromKeychain}
+              >
+                <HStack
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  alignment="center"
+                  spacing={8}
+                  padding={{ vertical: 2 }}
+                >
+                  <Image systemName="key.fill" font="subheadline" />
+                  <Text
+                    font="subheadline"
+                    fontWeight="medium"
+                    lineLimit={1}
+                    multilineTextAlignment="center"
+                  >
+                    从钥匙串导入新凭据
+                  </Text>
+                </HStack>
+              </Button>
+            </FormActionButtonRow>
+
             <TextField
               title={meta.credentialLabel}
               value={newCredentialInput}
@@ -990,21 +1099,18 @@ export function AccountDetailSheet(props: {
               onChanged={setNewCredentialInput}
             />
 
-            <HStack>
-              <Button
-                title="从剪贴板粘贴新凭证"
-                systemImage="doc.on.clipboard"
-                buttonStyle="borderless"
-                action={async () => {
-                  const clip = await Pasteboard.getString()
-                  if (clip && clip.trim()) {
-                    setNewCredentialInput(clip.trim())
-                    HapticFeedback.lightImpact()
-                  }
-                }}
-              />
-              <Spacer />
-            </HStack>
+            <Button
+              title="从剪贴板粘贴新凭证"
+              systemImage="doc.on.clipboard"
+              buttonStyle="borderless"
+              action={async () => {
+                const clip = await Pasteboard.getString()
+                if (clip && clip.trim()) {
+                  setNewCredentialInput(clip.trim())
+                  HapticFeedback.lightImpact()
+                }
+              }}
+            />
           </Section>
         ) : null}
 
