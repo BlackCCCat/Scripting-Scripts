@@ -85,4 +85,4 @@ AI用量看板 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scri
 - [WLOC-Helper](./WLOC-Helper) 修改自`scripting`群组中`@Waa404`的脚本，修改定位功能基于 [wloc项目](https://github.com/Yu9191/wloc) 实现
 - [Memory-Days](./Memory-Days) 人物及纪念日添加的操作逻辑复用`scripting`群组中`@Waa404`的脚本，重新设计的UI和小组件
 - [FileStore](./FileStore) 原版为 [Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore) 脚本，在此脚本基础上进行了二次修改
-- [AI-Dashboard](./AI-Dashboard) 参考自项目[TokenPulse](https://github.com/hqwuzhaoyi/TokenPulse)，[Antigravity Manager](https://github.com/lbjlaq/Antigravity-Manager)，[AI Usage](https://github.com/StarYunLee/Scripting/tree/main/AI%20Usage)
+- [AI-Dashboard](./AI-Dashboard) 接口访问等参考项目[TokenPulse](https://github.com/hqwuzhaoyi/TokenPulse)， Antigravity账号请求分析数据参考项目[Antigravity Manager](https://github.com/lbjlaq/Antigravity-Manager)，Codex账号部分数据获取方式参考项目[AI Usage](https://github.com/StarYunLee/Scripting/tree/main/AI%20Usage)
