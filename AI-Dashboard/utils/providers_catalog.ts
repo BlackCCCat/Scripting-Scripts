@@ -133,7 +133,7 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
   },
   {
     id: "moonshot",
-    displayName: "Moonshot API 钱包",
+    displayName: "Moonshot API",
     aliases: ["moonshot", "月之暗面", "kimi api"],
     routeCategory: "direct_api",
     credentialKind: "apiKey",
