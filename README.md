@@ -9,14 +9,8 @@ Surge模块本地化管理，导入、导出、下载、更新，支持分类、
 ## [日历番茄钟](./Calendar-Pomodoro/)
 自定义番茄钟，将记录同步到日历，支持正计时、倒计时、历史记录查看、编辑及统计，运行时灵动岛及通知中心计时，且可作为主页UI脚本运行 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Calendar-Pomodoro)
 
-## [Vision OCR](./Vision-OCR/)
-截屏识别图片文字内容，可选择进行单个或多个复制，已归档，配合快捷指令：[Vision OCR](https://www.icloud.com/shortcuts/1c7e7ed35e9f42eebb70ea4c0a9d2417)
-
 ## [PDFHelper](./PDFHelper/)
 简单的PDF工具，使用PDFKit API，支持图片转PDF，PDF合并、页面提取、页面顺序变更等简易功能 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/PDFHelper)
-
-## [API Manager](./API-Manager/)
-OpenAPI的API管理工具，主要识别API是否可用，检测可用模型，已归档
 
 ## [自定义闹钟](./Custom-Alarm/)
 使用系统闹钟注册API，轻松将自定义闹钟注册到系统，特色是支持中国节假日自动识别，也可快速查看节假日休班调整信息等 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Custom-Alarm)
@@ -33,8 +27,6 @@ OpenAPI的API管理工具，主要识别API是否可用，检测可用模型，�
 ## [快递助手](./Package-Helper/)
 配合快捷指令将短信转发给该脚本实现快递取件码自动提取 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Package-Helper)
 
-## [BiliFavor](./BiliFavor/)
-简易的哔哩哔哩脚本，仅显示动态视频、可额外使用内置的storage存储关注的up主（不记录至账号），支持扫码及网页登录、scripting内部播放或跳转到哔哩哔哩app播放 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/BiliFavor)
 
 ## [Sleep Tracker](./Sleep-Tracker/)
 睡眠数据的读取及展示，支持多尺寸、多种数据类型小组件 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Sleep-Tracker)
