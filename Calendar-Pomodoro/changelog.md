@@ -1,3 +1,6 @@
+## v3.0.2
+- improve:实时活动UI使用clear透明效果
+
 ## v3.0.1
 - 首页UI使用NavigationStack，并且使用zoom效果
 - 点击任务查看信息时，底部选择任务保持不变

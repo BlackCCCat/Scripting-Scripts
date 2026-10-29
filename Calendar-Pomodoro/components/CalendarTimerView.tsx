@@ -65,7 +65,13 @@ import {
   type AppSettings,
 } from "../utils/settings";
 // 时间格式化工具
-import { formatDateTime, formatDuration } from "../utils/time";
+import { formatDuration } from "../utils/time";
+import {
+  ACTIVITY_NAME,
+  activityState,
+  completedSession,
+  saveCompletedSession,
+} from "../utils/activityControl";
 // 任务新增/编辑页面
 import { TaskEditView } from "./TaskEditView";
 // 任务统计页面
@@ -79,7 +85,6 @@ import { useReleaseNotesSheet } from "./ReleaseNotesSheet";
 
 // Live Activity 创建器（用于 start/update/end）
 const createTimerActivity = PomodoroLiveActivity;
-const LIVE_ACTIVITY_NAME = "calendar-pomodoro";
 
 function NoteEditorPage(props: { title: string; content: string }) {
   const dismiss = Navigation.useDismiss();
@@ -269,47 +274,6 @@ function clearRepeatingTimer(id: number) {
   const nativeClearInterval = (globalThis as any).clearInterval;
   if (typeof nativeClearInterval === "function") {
     nativeClearInterval(id);
-  }
-}
-
-async function saveMindfulMinutesIfNeeded(
-  task: Task,
-  segments: TimerSessionSegment[],
-) {
-  if (!task.syncMindfulMinutes || !segments.length) return;
-
-  try {
-    const settings = await loadSettings();
-    if (!settings.linkAppleHealth) return;
-
-    const health = (globalThis as any).Health;
-    const sampleFactory = (globalThis as any).HealthCategorySample;
-    const presenceValue = (globalThis as any).HealthCategoryValuePresence?.present ?? 0;
-    if (health?.isHealthDataAvailable === false) return;
-    if (typeof health?.saveCategorySample !== "function") return;
-    if (typeof sampleFactory?.create !== "function") return;
-
-    for (const segment of segments) {
-      const duration = Math.max(0, segment.endAt - segment.startAt);
-      if (duration < 1000) continue;
-
-      const sample = sampleFactory.create({
-        type: "mindfulSession",
-        startDate: new Date(segment.startAt),
-        endDate: new Date(segment.endAt),
-        value: presenceValue,
-        metadata: {
-          source: "Calendar Pomodoro",
-          taskId: task.id,
-          taskName: task.name,
-        },
-      });
-      if (sample) {
-        await health.saveCategorySample(sample);
-      }
-    }
-  } catch (error) {
-    console.error("[Calendar Pomodoro] Apple Health 同步失败:", error);
   }
 }
 
@@ -711,8 +675,6 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     number | null
   >(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  // 当前关联日历（保存事件时使用）
-  const [activeCalendar, setActiveCalendar] = useState<Calendar | null>(null);
   // 会话开始时间（用于最终写入日历）
   const [sessionStartAt, setSessionStartAt] = useState<Date | null>(null);
   // 当前连续计时片段的起点（暂停后会重置）
@@ -754,6 +716,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
   const completedSegmentsRef = useRef<TimerSessionSegment[]>([]);
   const staleRefreshAtRef = useRef(0);
   const stoppingRef = useRef(false);
+  const noteDraftRef = useRef("");
   const noteSaveTimerRef = useRef<number | null>(null);
   const tasksLoadedRef = useRef(false);
   const restoreDoneRef = useRef(false);
@@ -870,7 +833,9 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
       setNoteDraft("");
       return;
     }
-    setNoteDraft(activeTask.noteDraft ?? "");
+    const nextNote = activeTask.noteDraft ?? "";
+    noteDraftRef.current = nextNote;
+    setNoteDraft(nextNote);
   }, [activeTaskId, tasks]);
 
   useEffect(() => {
@@ -1057,8 +1022,8 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
         return;
       }
       await saveSession(next);
-    } catch {
-      // ignore session persistence errors
+    } catch (error) {
+      console.warn("计时会话保存失败", error);
     }
   }
 
@@ -1155,7 +1120,8 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
   async function restoreSessionIfNeeded() {
     try {
-      const session = await loadSession();
+      const savedSession = await loadSession();
+      const session = savedSession;
       const activities = await collectLiveActivities();
 
       // 没有进行中的会话时，清理掉残留的 Live Activity，避免“幽灵计时”
@@ -1177,6 +1143,9 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
       const now = new Date();
       const sessionStart = new Date(session.sessionStartAt);
+      sessionStartAtRef.current = sessionStart;
+      activeTaskRef.current = task;
+      noteDraftRef.current = task.noteDraft ?? "";
       const segmentStart = session.segmentStartAt
         ? new Date(session.segmentStartAt)
         : null;
@@ -1204,9 +1173,6 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
       setFocusModeText(restoredCountdownSeconds > 0 ? "倒计时" : "正计时");
       setSelectedTaskId(task.id);
       setShowFocusPage(true);
-
-      const calendar = await resolveCalendar(task);
-      if (calendar) setActiveCalendar(calendar);
 
       // 保留当前会话对应的 Live Activity，其他残留的全部结束
       let keepActivity: LiveActivity<TimerActivityState> | null = null;
@@ -1264,7 +1230,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
       for (const id of ids) {
         const activity = await LiveActivity.from<TimerActivityState>(
           id,
-          LIVE_ACTIVITY_NAME,
+          ACTIVITY_NAME,
         );
         if (activity) list.push({ id, activity });
       }
@@ -1479,30 +1445,15 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     elapsed: number,
     pausedAt?: Date,
   ): TimerActivityState {
-    // 生成 Live Activity 的状态（正计时/倒计时两套）
-    const countdownSeconds =
-      runtimeCountdownSecondsRef.current ??
-      (task.useCountdown ? (task.countdownSeconds ?? 0) : 0);
-    if (countdownSeconds > 0) {
-      const remaining = Math.max(0, countdownSeconds * 1000 - elapsed);
-      const base: TimerActivityState = {
-        title: task.name,
-        calendarTitle: task.calendarTitle,
-        from: now.getTime(),
-        to: now.getTime() + remaining,
-        countsDown: true,
-      };
-      return pausedAt ? { ...base, pauseTime: pausedAt.getTime() } : base;
-    }
-    const from = now.getTime() - elapsed;
-    const base: TimerActivityState = {
-      title: task.name,
-      calendarTitle: task.calendarTitle,
-      from,
-      to: from + COUNT_UP_WINDOW_MS,
-      countsDown: false,
+    const session: TimerSession = {
+      taskId: task.id,
+      sessionStartAt: sessionStartAtRef.current?.getTime() ?? now.getTime() - elapsed,
+      accumulatedMs: elapsed,
+      running: false,
+      paused: Boolean(pausedAt),
+      countdownSeconds: sessionCountdownSecondsForTask(task),
     };
-    return pausedAt ? { ...base, pauseTime: pausedAt.getTime() } : base;
+    return activityState(task, session, now.getTime());
   }
 
   async function ensureLiveActivity(
@@ -1650,9 +1601,13 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
       }
     }
     if (!activity.started) return;
-    await activity.end(buildActivityState(task, now, elapsed), {
-      dismissTimeInterval: 0,
-    });
+    try {
+      await activity.end(buildActivityState(task, now, elapsed), {
+        dismissTimeInterval: 0,
+      });
+    } catch (error) {
+      console.warn("结束实时活动失败", error);
+    }
     if (activityListenerRef.current) {
       activity.removeUpdateListener(activityListenerRef.current);
       activityListenerRef.current = null;
@@ -1713,8 +1668,11 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     const now = new Date();
     const initialElapsedMs = Math.max(0, options?.initialElapsedMs ?? 0);
     const start = new Date(now.getTime() - initialElapsedMs);
+    sessionStartAtRef.current = start;
+    activeTaskRef.current = task;
+    noteDraftRef.current = task.noteDraft ?? "";
+    setNoteDraft(noteDraftRef.current);
     setActiveTaskId(task.id);
-    setActiveCalendar(calendar);
     setSessionStartAt(start);
     setSegmentStartAt(start);
     setAccumulatedMs(0);
@@ -1807,102 +1765,61 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     setNoteDraft("");
   }
 
-  async function stopTimer(options?: { auto?: boolean }) {
+  async function stopTimer(options?: { auto?: boolean }): Promise<boolean> {
     // 结束计时并写入日历
-    if (stoppingRef.current) return;
-    if (!activeTask || !sessionStartAt || !activeCalendar) return;
-    if (!running && !paused) return;
+    if (stoppingRef.current || !activeTask || !sessionStartAt || (!running && !paused)) return false;
 
     stoppingRef.current = true;
     const now = new Date();
     const nowMs = now.getTime();
-    const segmentElapsed =
-      running && segmentStartAt ? nowMs - segmentStartAt.getTime() : 0;
-    const rawTotal = accumulatedMs + Math.max(0, segmentElapsed);
-    let total = rawTotal;
-    if (isCountdown && countdownTotalMs > 0) {
-      total = Math.min(total, countdownTotalMs);
-    }
-    const overflowMs = Math.max(0, rawTotal - total);
-    let finalSegments = completedSegments;
-    if (running && segmentStartAt) {
-      const segmentEndMs = nowMs - overflowMs;
-      finalSegments = appendCompletedSegment(
-        completedSegments,
-        segmentStartAt.getTime(),
-        segmentEndMs,
-      );
-    }
-    if (!finalSegments.length && total > 0) {
-      finalSegments = appendCompletedSegment(
-        [],
-        sessionStartAt.getTime(),
-        sessionStartAt.getTime() + total,
-      );
-    }
+    const finishingSession: TimerSession = {
+      taskId: activeTask.id,
+      sessionStartAt: sessionStartAt.getTime(),
+      segmentStartAt: running ? segmentStartAt?.getTime() : undefined,
+      accumulatedMs,
+      segments: completedSegments,
+      running,
+      paused,
+      countdownSeconds: sessionCountdownSecondsForTask(activeTask),
+      activityId: activityRef.current?.activityId,
+    };
+    const { total } = completedSession(finishingSession, nowMs);
     setElapsedMs(total);
     setRunning(false);
     setPaused(false);
     clearTimer();
     await clearNotifications();
 
-    const overallStartAt =
-      finalSegments[0]?.startAt ?? sessionStartAt.getTime();
-    const overallEndAt = finalSegments.length
-      ? finalSegments[finalSegments.length - 1]!.endAt
-      : sessionStartAt.getTime() + total;
-
-    let finalNoteDraft = noteDraft;
+    let finalNoteDraft = noteDraftRef.current;
     try {
       finalNoteDraft = await editNote(finalNoteDraft, "完成笔记");
+      noteDraftRef.current = finalNoteDraft;
       setNoteDraft(finalNoteDraft);
     } catch {
-      // 若结束时无法弹出编辑器，则回退到当前草稿继续保存
+      // 编辑器无法打开时，仍使用现有笔记保存
     }
-
-    // 组合笔记内容：用户笔记 + 总结信息
-    const trimmedNote = finalNoteDraft.trim();
-    const summaryLines = [
-      `开始：${formatDateTime(new Date(overallStartAt))}`,
-      `结束：${formatDateTime(new Date(overallEndAt))}`,
-      `累计有效时长：${formatDuration(total)}`,
-    ];
-    const summaryText = summaryLines.join("\n");
-    const notePrefix = trimmedNote ? `${trimmedNote}\n\n` : "";
 
     let savedDurationMs = 0;
     setSaving(true);
     try {
-      // 按分段写入日历事件（暂停会切分为多段）
-      let savedCount = 0;
-      for (let i = 0; i < finalSegments.length; i += 1) {
-        const segment = finalSegments[i];
-        if (!segment) continue;
-        const startDate = new Date(segment.startAt);
-        const endDate = new Date(segment.endAt);
-        const segmentDuration = Math.max(0, segment.endAt - segment.startAt);
-        if (segmentDuration <= 0) continue;
-
-        const event = new CalendarEvent();
-        event.title = activeTask.name;
-        event.calendar = activeCalendar;
-        event.startDate = startDate;
-        event.endDate = endDate;
-        event.notes = `${notePrefix}分段：${i + 1}/${finalSegments.length}\n开始：${formatDateTime(startDate)}\n结束：${formatDateTime(endDate)}\n时长：${formatDuration(segmentDuration)}\n\n${summaryText}`;
-        await event.save();
-        savedCount += 1;
-        savedDurationMs += segmentDuration;
-      }
-      await saveMindfulMinutesIfNeeded(activeTask, finalSegments);
+      const saved = await saveCompletedSession(activeTask, finishingSession, finalNoteDraft, nowMs);
+      savedDurationMs = saved.savedDurationMs;
       if (!options?.auto) {
         const message =
-          savedCount > 0
-            ? `已保存到日历（共 ${savedCount} 段）`
+          saved.savedCount > 0
+            ? `已保存到日历（共 ${saved.savedCount} 段）`
             : "有效计时时长为 0，未写入日历";
         await Dialog.alert({ message });
       }
     } catch (e: any) {
-      await Dialog.alert({ message: String(e?.message ?? e) });
+      if (!options?.auto) await Dialog.alert({ message: String(e?.message ?? e) });
+      else console.error("保存计时失败", e);
+      setRunning(running);
+      setPaused(paused);
+      setElapsedMs(accumulatedMs);
+      if (running) await scheduleNotifications(activeTask);
+      stoppingRef.current = false;
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1932,6 +1849,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     setRuntimeCountdownSeconds(null);
     runtimeCountdownSecondsRef.current = null;
     stoppingRef.current = false;
+    return true;
   }
 
   async function editNote(content: string, title = "笔记"): Promise<string> {
@@ -1954,6 +1872,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
   async function openNoteEditor() {
     const next = await editNote(noteDraft, "笔记");
+    noteDraftRef.current = next;
     setNoteDraft(next);
   }
 
@@ -2129,7 +2048,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
   }
 
   async function stopFromFocusPage() {
-    await stopTimer();
+    if (!await stopTimer()) return;
     setShowFocusPage(false);
     resetTimelineToNow();
   }

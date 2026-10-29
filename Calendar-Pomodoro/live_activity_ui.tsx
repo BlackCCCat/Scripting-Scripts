@@ -9,6 +9,7 @@ import {
   Spacer,
   Text,
   TimerIntervalLabel,
+  VStack,
   type LiveActivityUIBuilder,
 } from "scripting"
 
@@ -84,19 +85,15 @@ export const liveActivityBuilder: LiveActivityUIBuilder<TimerActivityState> = (s
 
     // 锁屏/顶部横幅内容（单行）
     const lockScreenContent = (
-      <HStack spacing={8} padding={{ top: 6, bottom: 6, leading: 12, trailing: 12 }}>
-        {iconNode}
-        <Text font="headline" foregroundStyle={accentColor} lineLimit={1}>
-          {displayTitle}
-        </Text>
-        {timerNode}
-        <Spacer />
-        {calendarTitle ? (
-          <Text foregroundStyle="secondaryLabel" lineLimit={1}>
-            {calendarTitle}
-          </Text>
-        ) : null}
-      </HStack>
+      <VStack padding={{ top: 6, bottom: 8, leading: 12, trailing: 12 }} activityBackgroundTint={{ light: "clear", dark: "clear" }}>
+        <HStack spacing={8}>
+          {iconNode}
+          <Text font="headline" foregroundStyle={accentColor} lineLimit={1}>{displayTitle}</Text>
+          {timerNode}
+          <Spacer />
+          {calendarTitle ? <Text foregroundStyle="secondaryLabel" lineLimit={1}>{calendarTitle}</Text> : null}
+        </HStack>
+      </VStack>
     )
 
     // 灵动岛展开态（中间区域）
