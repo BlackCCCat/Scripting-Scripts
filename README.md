@@ -64,7 +64,10 @@ Telegram贴纸下载，需bot token，支持动图解析转换为GIF保存到相
 功能齐全的文件管理脚本 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/FileStore.zip)，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scripting/FileStore)
 
 ## [AI-Dashboard](./AI-Dashboard)
-AI用量看板 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/AI-Dashboard)
+AI用量看板，支持大量AI供应商数据接入，可展示账号额度、积分、余额等信息，支持多种登录方式（API Key、auth登录、钥匙串导入）；codex同时可显示重置卡数量、重置时间预测等信息 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/AI-Dashboard)
+
+## [Workbuddy2API](./Workbuddy2API)
+WorkBuddy反代API多账号管理，支持登录、钥匙串导入，查看及执行账号任务，提供本机或局域网HTTP API服务，账号轮询及用量统计等 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Workbuddy2API)
 
 **本项目由Codex、Gemini完成**
 
@@ -74,14 +77,15 @@ AI用量看板 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scri
 - [xream/scripts](https://github.com/xream/scripts) Vision OCR由该仓库中的`Vision`修改而来
 - [万象方案下载更新](./Rime-Wanxiang-Updater/)中的文档查看器复用了`Scripting`群组中分享的`Omni Text Viewer`脚本
 - [快递助手](./Package-Helper/) 修改自 [快递小助手](https://raw.githubusercontent.com/1085481057/Scripting/refs/heads/main/%E5%BF%AB%E9%80%92%E5%B0%8F%E5%8A%A9%E6%89%8B.scripting)
-- [BiliFavor](./BiliFavor/) 参考了哔哩哔哩相关API
-- [CAIS](./CAIS/) 参考了`CAIO`的键盘样式
-- [Scripting Rime Keyboard](./Scripting-Rime-Keyboard) 的全选功能由仓/元书开发者提供帮助实现，参考了开发者的 [Hamster](https://github.com/imfuxiao/Hamster) 项目
+- [BiliFavor](./BiliFavor/) 使用哔哩哔哩相关API
+- [CAIS](./CAIS/) 想法源于`CAIO`键盘，使用scripting实现
+- [Scripting Rime Keyboard](./Scripting-Rime-Keyboard) 的全选功能由仓/元书开发者提供思路帮助实现，参考了开发者的 [Hamster](https://github.com/imfuxiao/Hamster) 项目
 - [DouYin Downloader](./DouYin-Downloader)由`Scripting`开发者提供的脚本二次修改
 - [ZDict](./ZDict) 数据来源为[汉典](https://zdic.net)
-- [Gas Info](./ZDict) 数据来源为[汽油价格](http://www.qiyoujiage.com)，UI几乎照搬[今日油价](https://apps.apple.com/us/app/%E4%BB%8A%E6%97%A5%E6%B2%B9%E4%BB%B7-%E6%B2%B9%E4%BB%B7%E6%9F%A5%E8%AF%A2%E6%B1%BD%E6%B2%B9%E4%BB%B7%E6%A0%BC%E5%AE%9E%E6%97%B6%E5%8A%A0%E6%B2%B9%E8%A1%8C%E6%83%85%E6%9F%A5%E8%AF%A2/id6757325239)
-- [PhotoSlide](./PhotoSlide) 修改自`scripting`群组中开发者分享的`图片管理器`脚本
+- [Gas Info](./ZDict) 数据来源为[汽油价格](http://www.qiyoujiage.com)等多个油价查询网站，UI复刻iOS app：[今日油价](https://apps.apple.com/us/app/%E4%BB%8A%E6%97%A5%E6%B2%B9%E4%BB%B7-%E6%B2%B9%E4%BB%B7%E6%9F%A5%E8%AF%A2%E6%B1%BD%E6%B2%B9%E4%BB%B7%E6%A0%BC%E5%AE%9E%E6%97%B6%E5%8A%A0%E6%B2%B9%E8%A1%8C%E6%83%85%E6%9F%A5%E8%AF%A2/id6757325239)
+- [PhotoSlide](./PhotoSlide) 修改自`scripting`群组中开发者分享的`图片管理器`脚本，增加了更多功能，优化操作性能
 - [WLOC-Helper](./WLOC-Helper) 修改自`scripting`群组中`@Waa404`的脚本，修改定位功能基于 [wloc项目](https://github.com/Yu9191/wloc) 实现
 - [Memory-Days](./Memory-Days) 人物及纪念日添加的操作逻辑复用`scripting`群组中`@Waa404`的脚本，重新设计的UI和小组件
 - [FileStore](./FileStore) 原版为 [Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore) 脚本，在此脚本基础上进行了二次修改
 - [AI-Dashboard](./AI-Dashboard) 接口访问等参考项目[TokenPulse](https://github.com/hqwuzhaoyi/TokenPulse)， Antigravity账号请求分析数据参考项目[Antigravity Manager](https://github.com/lbjlaq/Antigravity-Manager)，Codex账号部分数据获取方式参考项目[AI Usage](https://github.com/StarYunLee/Scripting/tree/main/AI%20Usage)
+- [Workbuddy2API](./Workbuddy2API) 项目复刻自[wb2api-ios](https://github.com/chenyynx/wb2api-ios)，并直接将上游后端在scripting实现，无须登录面板，直接登录账号，任务执行同时合并[WorkBuddy-Daily](https://github.com/L0NE-6/WorkBuddy-Daily)项目中任务的领取和运行

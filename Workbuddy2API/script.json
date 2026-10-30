@@ -1,0 +1,49 @@
+{
+  "iconImage" : null,
+  "author" : {
+    "name" : "BlackCCCat",
+    "homepage" : "https:\/\/github.com\/BlackCCCat\/Scripting-Scripts",
+    "email" : null
+  },
+  "contributors" : [
+
+  ],
+  "remoteResource" : {
+    "url" : "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/WorkBuddy2API",
+    "autoUpdateInterval" : null
+  },
+  "remoteDefinitionId" : null,
+  "icon" : "slider.horizontal.3",
+  "entry" : "index.tsx",
+  "name" : "WorkBuddy2API",
+  "description" : null,
+  "localizedNames" : {
+    "pt" : "",
+    "zh" : "",
+    "ru" : "",
+    "es" : "",
+    "it" : "",
+    "en" : "",
+    "de" : "",
+    "ja" : "",
+    "fr" : ""
+  },
+  "localizedDescriptions" : {
+    "pt" : "",
+    "zh" : "",
+    "ru" : "",
+    "es" : "",
+    "it" : "",
+    "en" : "",
+    "de" : "",
+    "ja" : "",
+    "fr" : ""
+  },
+  "color" : "rgba(124, 92, 255, 1.00)",
+  "version" : "1.0.0",
+  "permissions" : null,
+  "intentInputTypes" : [
+
+  ],
+  "runInApp" : false
+}
