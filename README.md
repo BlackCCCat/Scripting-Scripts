@@ -21,6 +21,9 @@ Surge模块本地化管理，导入、导出、下载、更新，支持分类、
 ## [Regex Tester](./Regex-Tester/)
 正则表达式测试工具，提供常用模版导入、正则表达式解析流程图 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Regex-Tester)
 
+## [快递助手](./Package-Helper/)
+配合快捷指令将短信转发给该脚本实现快递取件码自动提取 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Package-Helper)
+
 ## [翻译器](./Translator/)
 翻译工具，提供脚本运行翻译界面、系统翻译界面（需在设置中将翻译默认app设置为 Scripting），支持Apple Intelligence翻译（需设备支持）、iOS系统翻译、Google翻译、Scripting内置AI助手翻译（需pro及提供相关API）、DeeplX翻译、自定义AI翻译等，支持语言自动检测，支持多种语言翻译，支持App Store翻译，支持文本通过ShareSheet分享翻译 [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Translator)
 
