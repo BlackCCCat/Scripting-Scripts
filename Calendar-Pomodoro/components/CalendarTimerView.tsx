@@ -72,6 +72,19 @@ import {
   completedSession,
   saveCompletedSession,
 } from "../utils/activityControl";
+import {
+  clearControlHandlerId,
+  controlWithoutMain,
+  finishControlSession,
+  markControlSaving,
+  checkpointControlSegment,
+  restoreControlAfterSaveFailure,
+  saveControlNote,
+  loadControlSnapshot,
+  publishControlSession,
+  saveControlHandlerId,
+  type LiveControlSnapshot,
+} from "../utils/liveActivityControls";
 // 任务新增/编辑页面
 import { TaskEditView } from "./TaskEditView";
 // 任务统计页面
@@ -720,6 +733,45 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
   const noteSaveTimerRef = useRef<number | null>(null);
   const tasksLoadedRef = useRef(false);
   const restoreDoneRef = useRef(false);
+  const controlSyncRef = useRef<() => Promise<void>>(async () => {});
+  const lastControlUpdateRef = useRef(0);
+  const backgroundSyncRef = useRef(Promise.resolve());
+  const backgroundWantedRef = useRef(false);
+  useEffect(() => {
+    if (Script.env !== "index" && Script.env !== "home_screen") return;
+    let id: string | null = null;
+    try {
+      id = ScriptSession.register(async message => {
+        const request = message as { action?: string; runId?: string } | null;
+        if (!request || !["pause", "resume", "stop", "cancel"].includes(request.action ?? "") || typeof request.runId !== "string") {
+          return { ok: false, message: "无效的实时活动操作" };
+        }
+        try {
+          console.log(`[Calendar Pomodoro][Control] ${request.action}:received`, request.runId);
+          await controlWithoutMain(request.action as "pause" | "resume" | "stop" | "cancel", request.runId);
+          await controlSyncRef.current();
+          console.log(`[Calendar Pomodoro][Control] ${request.action}:complete`, request.runId);
+          return { ok: true, message: null };
+        } catch (error: any) {
+          return { ok: false, message: String(error?.message ?? error) };
+        }
+      });
+      saveControlHandlerId(id);
+      console.log("[Calendar Pomodoro][Control] handler ready", Script.env);
+    } catch (error) {
+      if (id) ScriptSession.unregister(id);
+      id = null;
+      console.warn("实时活动控制通道不可用", error);
+    }
+    const poll = setRepeatingTimer(() => { void controlSyncRef.current(); }, 1000);
+    return () => {
+      clearRepeatingTimer(poll);
+      if (id) {
+        ScriptSession.unregister(id);
+        clearControlHandlerId(id);
+      }
+    };
+  }, []);
   useEffect(() => {
     // 首次进入：加载任务
     void refreshTasks();
@@ -860,21 +912,17 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
   }, [noteDraft, activeTask]);
 
   useEffect(() => {
-    // 根据运行状态控制后台保活
-    const syncBackground = async () => {
+    // 暂停和保存过程中仍保留会话，直到操作真正完成才释放后台保活。
+    backgroundWantedRef.current = running || paused || sessionStartAt !== null;
+    backgroundSyncRef.current = backgroundSyncRef.current.then(async () => {
       try {
-        // 仅在计时中保持脚本后台存活，避免额外耗电
-        if (running) {
-          await BackgroundKeeper.keepAlive();
-        } else {
-          await BackgroundKeeper.stopKeepAlive();
-        }
-      } catch {
-        // ignore keep-alive errors
+        if (backgroundWantedRef.current) await BackgroundKeeper.keepAlive();
+        else await BackgroundKeeper.stopKeepAlive();
+      } catch (error) {
+        console.warn("后台保活状态切换失败", error);
       }
-    };
-    void syncBackground();
-  }, [running]);
+    });
+  }, [running, paused, sessionStartAt]);
 
   useEffect(() => {
     // 计时器刷新逻辑：真实计时 + 整秒对齐刷新
@@ -961,10 +1009,11 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     // 最小化前后补一次状态同步，避免 UI 收起/恢复后会话与灵动岛漂移
     const removeMinimize = Script.onMinimize(() => {
       void (async () => {
+        await controlSyncRef.current();
         const task = activeTaskRef.current;
         const snapshot = buildCurrentSessionSnapshot();
         if (snapshot) {
-          await persistSessionState(snapshot);
+          if (!await persistSessionState(snapshot)) return;
         }
         if (!task || !snapshot) return;
         await updateLiveActivity(
@@ -979,11 +1028,12 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     const removeResume = Script.onResume((details) => {
       void (async () => {
         if (!details?.resumeFromMinimized) return;
+        await controlSyncRef.current();
 
         const task = activeTaskRef.current;
         const snapshot = buildCurrentSessionSnapshot();
         if (task && snapshot) {
-          await persistSessionState(snapshot);
+          if (!await persistSessionState(snapshot)) return;
           await updateLiveActivity(
             task,
             new Date(),
@@ -1015,15 +1065,22 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     return [...base, { startAt: startAtMs, endAt: endAtMs }];
   }
 
-  async function persistSessionState(next: TimerSession | null) {
+  async function persistSessionState(next: TimerSession | null, allowTransition = false): Promise<boolean> {
     try {
       if (!next) {
         await clearSession();
-        return;
+        return true;
+      }
+      const task = activeTaskRef.current;
+      if (task && task.id === next.taskId) {
+        if (!publishControlSession(task, next, noteDraftRef.current, allowTransition)) return false;
+        lastControlUpdateRef.current = loadControlSnapshot()?.updatedAt ?? 0;
       }
       await saveSession(next);
+      return true;
     } catch (error) {
       console.warn("计时会话保存失败", error);
+      return false;
     }
   }
 
@@ -1121,7 +1178,16 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
   async function restoreSessionIfNeeded() {
     try {
       const savedSession = await loadSession();
-      const session = savedSession;
+      const control = loadControlSnapshot();
+      if (control && (control.phase === "stopped" || control.phase === "cancelled") &&
+          savedSession?.sessionStartAt === Number(control.runId)) {
+        await syncControlSnapshot(control);
+        return;
+      }
+      const session = control && (control.phase === "running" || control.phase === "paused") &&
+        (!savedSession || savedSession.sessionStartAt === Number(control.runId))
+        ? control.session : savedSession;
+      if (control?.runId === String(session?.sessionStartAt)) lastControlUpdateRef.current = control.updatedAt;
       const activities = await collectLiveActivities();
 
       // 没有进行中的会话时，清理掉残留的 Live Activity，避免“幽灵计时”
@@ -1201,6 +1267,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
             elapsed,
             session.paused ? now : undefined,
           );
+          await persistSessionState({ ...session, activityId: activityRef.current?.activityId ?? keepId });
           return;
         }
         activityRef.current = null;
@@ -1209,9 +1276,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
       if (session.running || session.paused) {
         const activityId = await startLiveActivity(task, now, elapsed);
-        if (activityId) {
-          await saveSession({ ...session, activityId });
-        }
+        await persistSessionState({ ...session, activityId: activityId ?? undefined });
       }
     } catch {
       // ignore restore errors
@@ -1242,6 +1307,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
   function buildFallbackActivityState(now: Date): TimerActivityState {
     return {
+      runId: "ended",
       title: "已结束",
       calendarTitle: "",
       from: now.getTime(),
@@ -1652,7 +1718,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
         paused: false,
         countdownSeconds: sessionCountdownSecondsForTask(task),
         activityId: activityId ?? undefined,
-      });
+      }, true);
       return;
     }
 
@@ -1728,7 +1794,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
           paused: true,
           countdownSeconds: sessionCountdownSecondsForTask(activeTask),
           activityId: activityRef.current?.activityId,
-        });
+        }, true);
       }
     }
   }
@@ -1743,7 +1809,6 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     setRunning(false);
     setPaused(false);
     clearTimer();
-    setSessionStartAt(null);
     setSegmentStartAt(null);
     setAccumulatedMs(0);
     setElapsedMs(0);
@@ -1752,6 +1817,12 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     runtimeCountdownSecondsRef.current = null;
     await clearNotifications();
     await endLiveActivity(activeTask, now, total);
+    if (sessionStartAt) {
+      try {
+        finishControlSession(String(sessionStartAt.getTime()), "cancelled");
+        lastControlUpdateRef.current = loadControlSnapshot()?.updatedAt ?? 0;
+      } catch (error) { console.warn("取消状态同步失败", error); }
+    }
     await persistSessionState(null);
 
     // 取消后不应保留本次会话草稿，避免下次启动同任务时带出旧笔记。
@@ -1763,6 +1834,7 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
       return next;
     });
     setNoteDraft("");
+    setSessionStartAt(null);
   }
 
   async function stopTimer(options?: { auto?: boolean }): Promise<boolean> {
@@ -1801,8 +1873,13 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
     let savedDurationMs = 0;
     setSaving(true);
+    const runId = String(sessionStartAt.getTime());
     try {
-      const saved = await saveCompletedSession(activeTask, finishingSession, finalNoteDraft, nowMs);
+      const savedSegmentEnds = markControlSaving(runId);
+      const saved = await saveCompletedSession(activeTask, finishingSession, finalNoteDraft, nowMs, {
+        savedSegmentEnds,
+        onSegmentSaved: (index, endAt) => checkpointControlSegment(runId, index, endAt),
+      });
       savedDurationMs = saved.savedDurationMs;
       if (!options?.auto) {
         const message =
@@ -1812,6 +1889,8 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
         await Dialog.alert({ message });
       }
     } catch (e: any) {
+      try { restoreControlAfterSaveFailure(runId); }
+      catch (error) { console.warn("保存失败后恢复状态失败", error); }
       if (!options?.auto) await Dialog.alert({ message: String(e?.message ?? e) });
       else console.error("保存计时失败", e);
       setRunning(running);
@@ -1826,6 +1905,10 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
 
     // 清理 Live Activity，并刷新主页任务总时长。
     await endLiveActivity(activeTask, now, total);
+    try {
+      finishControlSession(String(sessionStartAt.getTime()), "stopped");
+      lastControlUpdateRef.current = loadControlSnapshot()?.updatedAt ?? 0;
+    } catch (error) { console.warn("停止状态同步失败", error); }
     await persistSessionState(null);
     const refreshedBase =
       addTaskDurationToCache(activeTask.id, savedDurationMs) ?? taskDurations;
@@ -1852,6 +1935,85 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     return true;
   }
 
+  async function syncControlSnapshot(snapshot?: LiveControlSnapshot): Promise<void> {
+    if (!tasksLoadedRef.current || !restoreDoneRef.current) return;
+    const current = snapshot ?? loadControlSnapshot();
+    if (!current || current.updatedAt <= lastControlUpdateRef.current) return;
+    if (current.phase === "saving") return;
+    const localRunId = sessionStartAtRef.current?.getTime();
+    if (localRunId && String(localRunId) !== current.runId) return;
+    lastControlUpdateRef.current = current.updatedAt;
+
+    if (current.phase === "stopped" || current.phase === "cancelled") {
+      activityRef.current = null;
+      activityReadyRef.current = false;
+      activeTaskRef.current = null;
+      sessionStartAtRef.current = null;
+      segmentStartAtRef.current = null;
+      accumulatedMsRef.current = 0;
+      completedSegmentsRef.current = [];
+      runningRef.current = false;
+      pausedRef.current = false;
+      runtimeCountdownSecondsRef.current = null;
+      noteDraftRef.current = "";
+      setActiveTaskId(null);
+      setSessionStartAt(null);
+      setSegmentStartAt(null);
+      setAccumulatedMs(0);
+      setElapsedMs(0);
+      setCompletedSegments([]);
+      setRunning(false);
+      setPaused(false);
+      setRuntimeCountdownSeconds(null);
+      setShowFocusPage(false);
+      setNoteDraft("");
+      const saved = await loadSession();
+      if (saved?.sessionStartAt === Number(current.runId)) await clearSession();
+      await clearNotifications();
+      const list = await loadTasks();
+      const next = list.map(task => task.id === current.task.id ? { ...task, noteDraft: "" } : task);
+      await saveTasks(next);
+      setTasks(next);
+      if (current.phase === "stopped") void refreshTasks({ waitForDurations: true });
+      return;
+    }
+
+    if (current.phase !== "running" && current.phase !== "paused") return;
+    const session = current.session;
+    const task = current.task;
+    const segmentStart = session.running && session.segmentStartAt ? new Date(session.segmentStartAt) : null;
+    const elapsed = session.accumulatedMs + (segmentStart ? Math.max(0, Date.now() - segmentStart.getTime()) : 0);
+    activeTaskRef.current = task;
+    sessionStartAtRef.current = new Date(session.sessionStartAt);
+    segmentStartAtRef.current = segmentStart;
+    accumulatedMsRef.current = session.accumulatedMs;
+    completedSegmentsRef.current = session.segments ?? [];
+    runningRef.current = session.running;
+    pausedRef.current = session.paused;
+    runtimeCountdownSecondsRef.current = session.countdownSeconds ?? null;
+    noteDraftRef.current = current.note;
+    setActiveTaskId(task.id);
+    setSessionStartAt(new Date(session.sessionStartAt));
+    setSegmentStartAt(segmentStart);
+    setAccumulatedMs(session.accumulatedMs);
+    setElapsedMs(elapsed);
+    setCompletedSegments(session.segments ?? []);
+    setRunning(session.running);
+    setPaused(session.paused);
+    setRuntimeCountdownSeconds(session.countdownSeconds ?? null);
+    setNoteDraft(current.note);
+    await saveSession(session);
+    if (session.activityId && activityRef.current?.activityId !== session.activityId) {
+      activityRef.current = await LiveActivity.from<TimerActivityState>(session.activityId, ACTIVITY_NAME);
+      activityReadyRef.current = Boolean(activityRef.current);
+    }
+  }
+
+  controlSyncRef.current = async () => {
+    try { await syncControlSnapshot(); }
+    catch (error) { console.warn("实时活动状态同步失败", error); }
+  };
+
   async function editNote(content: string, title = "笔记"): Promise<string> {
     let useEditorForNotes = true;
     try {
@@ -1874,6 +2036,12 @@ export function CalendarTimerView(props: { homeScreenMode?: boolean; zoomNamespa
     const next = await editNote(noteDraft, "笔记");
     noteDraftRef.current = next;
     setNoteDraft(next);
+    if (sessionStartAtRef.current) {
+      try { saveControlNote(String(sessionStartAtRef.current.getTime()), next); }
+      catch (error) { console.warn("实时活动笔记同步失败", error); }
+    }
+    const snapshot = buildCurrentSessionSnapshot();
+    if (snapshot) await persistSessionState(snapshot);
   }
 
   async function toggleSelectedTimer() {

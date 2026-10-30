@@ -24,6 +24,9 @@ export type Task = {
 
 // Live Activity 需要的状态结构
 export type TimerActivityState = {
+  // 本次计时标识，防止旧实时活动按钮影响新会话
+  runId: string
+  paused?: boolean
   // 任务标题
   title: string
   // 右侧显示的日历名称
