@@ -10,7 +10,7 @@
   ],
   "remoteResource" : {
     "url" : "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/WorkBuddy2API",
-    "autoUpdateInterval" : null
+    "autoUpdateInterval" : 86400
   },
   "remoteDefinitionId" : null,
   "icon" : "slider.horizontal.3",
