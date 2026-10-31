@@ -603,17 +603,27 @@ export function DashboardRootView(props: {
     }
   }
 
-  // 启动应用或首次挂载首页 UI 时自动刷新所有已添加供应商（静默后台拉取，不触发整页重置与震动，更新后广播小组件同步）
-  const hasAutoRefreshedOnLaunchRef = useRef<boolean>(false)
+  // 脚本运行模式：启动应用时自动刷新已启用账号（受用户设置控制，默认开启，显示加载状态）
+  const hasScriptAutoRefreshedRef = useRef<boolean>(false)
   useEffect(() => {
-    const shouldAutoRefresh = isHomeScreen || settings.autoRefreshOnLaunch
-    if (shouldAutoRefresh && !hasAutoRefreshedOnLaunchRef.current) {
-      hasAutoRefreshedOnLaunchRef.current = true
-      void refreshAllAccounts({ isManual: false })
+    if (isHomeScreen) return
+    if (settings.autoRefreshOnLaunch && !hasScriptAutoRefreshedRef.current) {
+      hasScriptAutoRefreshedRef.current = true
+      void refreshAllAccounts({ isManual: true })
     }
   }, [isHomeScreen, settings.autoRefreshOnLaunch, settings.isDemoMode])
 
-  // 首页 UI 常驻模式下，监听 Home Tab 切回事件（从其他系统 Tab 切回时自动静默刷新一次额度）
+  // 首页 UI 模式：常驻启动首次挂载时无条件自动刷新已添加供应商（后台静默拉取）
+  const hasHomeAutoRefreshedRef = useRef<boolean>(false)
+  useEffect(() => {
+    if (!isHomeScreen) return
+    if (!hasHomeAutoRefreshedRef.current) {
+      hasHomeAutoRefreshedRef.current = true
+      void refreshAllAccounts({ isManual: false })
+    }
+  }, [isHomeScreen, settings.isDemoMode])
+
+  // 首页 UI 模式：监听从其他系统 Tab 切回 Home Tab 事件，自动静默刷新一次额度
   useEffect(() => {
     if (!isHomeScreen) return
     if (typeof Script === "undefined" || typeof Script.onHomeTabEvent !== "function") return
