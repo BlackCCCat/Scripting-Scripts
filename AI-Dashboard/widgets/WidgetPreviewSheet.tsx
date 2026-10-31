@@ -1,6 +1,7 @@
 import {
   Button,
   Device,
+  HStack,
   NavigationStack,
   Picker,
   RoundedRectangle,
@@ -16,6 +17,8 @@ import { loadWidgetRenderData } from "./data_source"
 import { WidgetRootView } from "./WidgetRootView"
 
 export function WidgetPreviewSheet(props: {
+  embedded?: boolean
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onDismiss: () => void
 }) {
   const { onDismiss } = props
@@ -60,22 +63,21 @@ export function WidgetPreviewSheet(props: {
 
   const frame = frameForFamily(selectedFamily)
 
-  return (
-    <NavigationStack
-      presentationBackground={useGlassPresentation ? "clear" : undefined}
-    >
-      <ScrollView
-        navigationTitle="小组件效果预览"
-        navigationBarTitleDisplayMode="inline"
-        presentationDragIndicator="visible"
-        toolbar={{
-          topBarLeading: (
-            <Button
-              title="关闭"
-              action={onDismiss}
-            />
-          ),
-          topBarTrailing: (
+  const content = (
+    <ScrollView
+      navigationTitle="小组件效果预览"
+      navigationBarTitleDisplayMode="inline"
+      presentationDragIndicator="visible"
+      navigationTransition={props.navigationTransition}
+      toolbar={{
+        topBarLeading: props.embedded ? undefined : (
+          <Button
+            title="关闭"
+            action={onDismiss}
+          />
+        ),
+        topBarTrailing: (
+          <HStack spacing={12}>
             <Button
               title="系统预览"
               systemImage="arrow.up.forward.app"
@@ -83,9 +85,16 @@ export function WidgetPreviewSheet(props: {
                 void Widget.preview({ family: selectedFamily })
               }}
             />
-          ),
-        }}
-      >
+            {props.embedded ? (
+              <Button
+                title="完成"
+                action={onDismiss}
+              />
+            ) : null}
+          </HStack>
+        ),
+      }}
+    >
         <VStack alignment="center" spacing={16} padding={20}>
           <Picker
             title="小组件尺寸"
@@ -150,6 +159,17 @@ export function WidgetPreviewSheet(props: {
           </VStack>
         </VStack>
       </ScrollView>
+  )
+
+  if (props.embedded) {
+    return content
+  }
+
+  return (
+    <NavigationStack
+      presentationBackground={useGlassPresentation ? "clear" : undefined}
+    >
+      {content}
     </NavigationStack>
   )
 }

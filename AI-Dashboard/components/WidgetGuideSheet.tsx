@@ -119,42 +119,53 @@ const WIDGET_GUIDE_MARKDOWN = `
 export function WidgetGuideSheet(props: {
   theme?: MarkdownProps["theme"]
   detents?: PresentationDetent[]
+  embedded?: boolean
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onDismiss: () => void
 }) {
   const useGlassPresentation =
     Number.parseInt(Device.systemVersion, 10) >= 26
 
+  const content = (
+    <ScrollView
+      background="clear"
+      scrollContentBackground="hidden"
+      navigationTitle="小组件使用说明"
+      navigationBarTitleDisplayMode="inline"
+      toolbarBackgroundVisibility="hidden"
+      presentationDragIndicator="visible"
+      presentationDetents={props.detents ?? ["large"]}
+      presentationBackground={useGlassPresentation ? "clear" : undefined}
+      navigationTransition={props.navigationTransition}
+      padding={{ top: 20, leading: 18, bottom: 20, trailing: 18 }}
+      toolbar={{
+        topBarTrailing: (
+          <Button
+            title="完成"
+            action={props.onDismiss}
+          />
+        ),
+      }}
+    >
+      <Markdown
+        content={WIDGET_GUIDE_MARKDOWN.trim()}
+        theme={props.theme ?? "basic"}
+        useDefaultHighlighterTheme={true}
+        scrollable={false}
+        background="clear"
+      />
+    </ScrollView>
+  )
+
+  if (props.embedded) {
+    return content
+  }
+
   return (
     <NavigationStack
       presentationBackground={useGlassPresentation ? "clear" : undefined}
     >
-      <ScrollView
-        background="clear"
-        scrollContentBackground="hidden"
-        navigationTitle="小组件使用说明"
-        navigationBarTitleDisplayMode="inline"
-        toolbarBackgroundVisibility="hidden"
-        presentationDragIndicator="visible"
-        presentationDetents={props.detents ?? ["large"]}
-        presentationBackground={useGlassPresentation ? "clear" : undefined}
-        padding={{ top: 20, leading: 18, bottom: 20, trailing: 18 }}
-        toolbar={{
-          topBarTrailing: (
-            <Button
-              title="完成"
-              action={props.onDismiss}
-            />
-          ),
-        }}
-      >
-        <Markdown
-          content={WIDGET_GUIDE_MARKDOWN.trim()}
-          theme={props.theme ?? "basic"}
-          useDefaultHighlighterTheme={true}
-          scrollable={false}
-          background="clear"
-        />
-      </ScrollView>
+      {content}
     </NavigationStack>
   )
 }

@@ -39,6 +39,7 @@ export function DashboardOverviewSection(props: {
   accounts: SubscriptionAccount[]
   accountStates: Record<string, AccountQuotaState>
   isDemoMode: boolean
+  zoomNamespace?: any
   onToggleDemoMode: (val: boolean) => void
   onSelectAccount: (acc: SubscriptionAccount) => void
   onOpenEditSheet?: () => void
@@ -207,6 +208,14 @@ export function DashboardOverviewSection(props: {
           <Button
             buttonStyle="plain"
             frame={{ maxWidth: "infinity" }}
+            matchedTransitionSource={
+              props.zoomNamespace
+                ? {
+                    id: "overview-edit-accounts",
+                    namespace: props.zoomNamespace,
+                  }
+                : undefined
+            }
             action={() => {
               if (onOpenEditSheet) onOpenEditSheet()
             }}
@@ -450,6 +459,14 @@ export function DashboardOverviewSection(props: {
                         key={item.accountId}
                         buttonStyle="borderless"
                         frame={{ maxWidth: "infinity" }}
+                        matchedTransitionSource={
+                          props.zoomNamespace
+                            ? {
+                                id: `overview-account-${item.accountId}`,
+                                namespace: props.zoomNamespace,
+                              }
+                            : undefined
+                        }
                         action={() => {
                           if (targetAcc) onSelectAccount(targetAcc)
                         }}

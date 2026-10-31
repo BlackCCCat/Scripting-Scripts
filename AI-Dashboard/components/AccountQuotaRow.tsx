@@ -48,6 +48,7 @@ export function AccountQuotaRow(props: {
   state: AccountQuotaState
   protectAccountIdentity?: boolean
   codexResetStatus?: CodexResetStatus | null
+  zoomSource?: { id: string | number; namespace: any }
   onRefresh: () => void
   onOpenDetail: () => void
 }) {
@@ -116,6 +117,7 @@ export function AccountQuotaRow(props: {
       spacing={12}
       padding={{ vertical: 6 }}
       frame={{ maxWidth: "infinity", alignment: "leading" }}
+      matchedTransitionSource={props.zoomSource}
     >
       {/* 卡片头部：品牌图标 + [供应商名称 + 区域胶囊 + 账户类型胶囊] + 次行仅展示钱包/余量状态 */}
       <HStack alignment="center" spacing={12}>

@@ -17,6 +17,9 @@ import { ProviderIconView } from "./ProviderIconView"
 
 export type AccountOrderEditSheetProps = {
   accounts: SubscriptionAccount[]
+  embedded?: boolean
+  zoomNamespace?: any
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onMoveAccounts?: (indices: number[], newOffset: number) => void
   onReorderAccounts?: (reordered: SubscriptionAccount[]) => void
   onDeleteAccount: (accountId: string) => void
@@ -84,30 +87,30 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
     idsToDelete.forEach((id) => onDeleteAccount(id))
   }
 
-  return (
-    <NavigationStack>
-      <List
-        navigationTitle="编辑账号卡片"
-        listStyle="insetGroup"
-        environments={{
-          editMode,
-        }}
-        toolbar={{
-          topBarLeading: (
-            <Button
-              title="取消"
-              action={onCancel}
-            />
-          ),
-          topBarTrailing: (
-            <Button
-              title="完成"
-              fontWeight="semibold"
-              action={onDismiss}
-            />
-          ),
-        }}
-      >
+  const content = (
+    <List
+      navigationTitle="编辑账号卡片"
+      listStyle="insetGroup"
+      navigationTransition={props.navigationTransition}
+      environments={{
+        editMode,
+      }}
+      toolbar={{
+        topBarLeading: props.embedded ? undefined : (
+          <Button
+            title="取消"
+            action={onCancel}
+          />
+        ),
+        topBarTrailing: (
+          <Button
+            title="完成"
+            fontWeight="semibold"
+            action={onDismiss}
+          />
+        ),
+      }}
+    >
         {accountsObservable.value.length === 0 ? (
           <Section>
             <ContentUnavailableView
@@ -167,6 +170,11 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
           </Section>
         )}
       </List>
-    </NavigationStack>
   )
+
+  if (props.embedded) {
+    return content
+  }
+
+  return <NavigationStack>{content}</NavigationStack>
 }

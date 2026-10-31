@@ -165,6 +165,7 @@ export function useReleaseNotesSheet(config: ReleaseNotesSheetConfig = {}) {
     setIsPresented,
     onChanged: handlePresentedChange,
     show: showManually,
+    rawContent: content,
     content: (
       <ReleaseNotesSheet
         content={content}

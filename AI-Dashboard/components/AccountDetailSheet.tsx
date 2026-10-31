@@ -130,6 +130,9 @@ export function AccountDetailSheet(props: {
   state: AccountQuotaState
   isDemoMode: boolean
   codexResetStatus?: CodexResetStatus | null
+  embedded?: boolean
+  zoomNamespace?: any
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onClose: () => void
   onUpdateAccount: (
     updated: SubscriptionAccount,
@@ -607,95 +610,91 @@ export function AccountDetailSheet(props: {
     }
   }
 
-  return (
-    <NavigationStack
-      overlay={
-        isToastPresented ? (
-          <VStack
-            frame={{
-              maxWidth: "infinity",
-              maxHeight: "infinity",
-              alignment: "bottom",
+  const formContent = (
+    <Form
+      navigationTitle="账号详情与设置"
+      navigationBarTitleDisplayMode="inline"
+      navigationTransition={props.navigationTransition}
+      toast={{
+        isPresented: isToastPresented,
+        onChanged: setIsToastPresented,
+        message: toastMessage,
+        duration: 2,
+        position: "bottom",
+      }}
+      toolbar={{
+        cancellationAction: props.embedded ? undefined : <Button title="关闭" action={onClose} />,
+        confirmationAction: (
+          <Button title="保存" action={handleSaveChanges} />
+        ),
+      }}
+      confirmationDialog={{
+        title: `确认删除「${account.displayName}」？`,
+        titleVisibility: "visible",
+        isPresented: isDeleteConfirmPresented,
+        onChanged: setIsDeleteConfirmPresented,
+        message: <Text>删除后将同时清除钥匙串中的凭证与本地缓存快照。</Text>,
+        actions: (
+          <Button
+            title="删除账号"
+            role="destructive"
+            action={() => {
+              setIsDeleteConfirmPresented(false)
+              onDeleteAccount(account.id)
+              onClose()
             }}
-            padding={{ bottom: 28 }}
-          >
-            <HStack
-              alignment="center"
-              spacing={8}
-              padding={{ horizontal: 16, vertical: 10 }}
-              background={{
-                style: "regularMaterial",
-                shape: { type: "capsule", style: "continuous" },
-              }}
-              shadow={{ color: "black", radius: 8, y: 2 }}
-            >
-              <Image
-                systemName="checkmark.circle.fill"
-                font="subheadline"
-                foregroundStyle="systemGreen"
-              />
-              <Text
-                font="subheadline"
-                fontWeight="medium"
-                foregroundStyle="label"
-              >
-                {toastMessage}
-              </Text>
-            </HStack>
-          </VStack>
-        ) : undefined
+          />
+        ),
+      }}
+      navigationDestination={
+        props.embedded
+          ? {
+              isPresented: isDeviceLoginPresented,
+              onChanged: setIsDeviceLoginPresented,
+              content: (
+                <DeviceCodeLoginSheet
+                  provider={account.provider}
+                  region={existingEnvelope?.metadata.region}
+                  embedded={true}
+                  navigationTransition={
+                    props.zoomNamespace
+                      ? {
+                          type: "zoom",
+                          sourceID: `account-reauth-${account.id}`,
+                          namespace: props.zoomNamespace,
+                        }
+                      : undefined
+                  }
+                  onCancel={() => setIsDeviceLoginPresented(false)}
+                  onCompleted={(envelope) => {
+                    setIsDeviceLoginPresented(false)
+                    handleEnvelopeUpdated(envelope)
+                  }}
+                />
+              ),
+            }
+          : undefined
+      }
+      sheet={
+        props.embedded
+          ? undefined
+          : {
+              isPresented: isDeviceLoginPresented,
+              onChanged: setIsDeviceLoginPresented,
+              content: (
+                <DeviceCodeLoginSheet
+                  provider={account.provider}
+                  region={existingEnvelope?.metadata.region}
+                  onCancel={() => setIsDeviceLoginPresented(false)}
+                  onCompleted={(envelope) => {
+                    setIsDeviceLoginPresented(false)
+                    handleEnvelopeUpdated(envelope)
+                  }}
+                />
+              ),
+            }
       }
     >
-      <Form
-        navigationTitle="账号详情与设置"
-        navigationBarTitleDisplayMode="inline"
-        toast={{
-          isPresented: isToastPresented,
-          onChanged: setIsToastPresented,
-          message: toastMessage,
-          duration: 2,
-          position: "bottom",
-        }}
-        toolbar={{
-          cancellationAction: <Button title="关闭" action={onClose} />,
-          confirmationAction: (
-            <Button title="保存" action={handleSaveChanges} />
-          ),
-        }}
-        confirmationDialog={{
-          title: `确认删除「${account.displayName}」？`,
-          titleVisibility: "visible",
-          isPresented: isDeleteConfirmPresented,
-          onChanged: setIsDeleteConfirmPresented,
-          message: <Text>删除后将同时清除钥匙串中的凭证与本地缓存快照。</Text>,
-          actions: (
-            <Button
-              title="删除账号"
-              role="destructive"
-              action={() => {
-                setIsDeleteConfirmPresented(false)
-                onDeleteAccount(account.id)
-                onClose()
-              }}
-            />
-          ),
-        }}
-        sheet={{
-          isPresented: isDeviceLoginPresented,
-          onChanged: setIsDeviceLoginPresented,
-          content: (
-            <DeviceCodeLoginSheet
-              provider={account.provider}
-              region={existingEnvelope?.metadata.region}
-              onCancel={() => setIsDeviceLoginPresented(false)}
-              onCompleted={(envelope) => {
-                setIsDeviceLoginPresented(false)
-                handleEnvelopeUpdated(envelope)
-              }}
-            />
-          ),
-        }}
-      >
         <Section header={<Text>基本资料</Text>}>
           <HStack alignment="center" spacing={12}>
             <ProviderIconView provider={account.provider} size={42} />
@@ -969,6 +968,14 @@ export function AccountDetailSheet(props: {
                     buttonStyle={adaptiveSecondaryButtonStyle()}
                     frame={{ maxWidth: "infinity", alignment: "center" }}
                     alignmentGuide={{ alignment: "leading", value: 0 }}
+                    matchedTransitionSource={
+                      props.zoomNamespace
+                        ? {
+                            id: `account-reauth-${account.id}`,
+                            namespace: props.zoomNamespace,
+                          }
+                        : undefined
+                    }
                     action={() => setIsDeviceLoginPresented(true)}
                   >
                     <HStack
@@ -1001,6 +1008,14 @@ export function AccountDetailSheet(props: {
                   buttonStyle={adaptiveProminentButtonStyle()}
                   frame={{ maxWidth: "infinity", alignment: "center" }}
                   alignmentGuide={{ alignment: "leading", value: 0 }}
+                  matchedTransitionSource={
+                    props.zoomNamespace
+                      ? {
+                          id: `account-reauth-${account.id}`,
+                          namespace: props.zoomNamespace,
+                        }
+                      : undefined
+                  }
                   action={() => setIsDeviceLoginPresented(true)}
                 >
                   <HStack
@@ -1249,6 +1264,52 @@ export function AccountDetailSheet(props: {
           />
         </Section>
       </Form>
+  )
+
+  if (props.embedded) {
+    return formContent
+  }
+
+  return (
+    <NavigationStack
+      overlay={
+        isToastPresented ? (
+          <VStack
+            frame={{
+              maxWidth: "infinity",
+              maxHeight: "infinity",
+              alignment: "bottom",
+            }}
+            padding={{ bottom: 28 }}
+          >
+            <HStack
+              alignment="center"
+              spacing={8}
+              padding={{ horizontal: 16, vertical: 10 }}
+              background={{
+                style: "regularMaterial",
+                shape: { type: "capsule", style: "continuous" },
+              }}
+              shadow={{ color: "black", radius: 8, y: 2 }}
+            >
+              <Image
+                systemName="checkmark.circle.fill"
+                font="subheadline"
+                foregroundStyle="systemGreen"
+              />
+              <Text
+                font="subheadline"
+                fontWeight="medium"
+                foregroundStyle="label"
+              >
+                {toastMessage}
+              </Text>
+            </HStack>
+          </VStack>
+        ) : undefined
+      }
+    >
+      {formContent}
     </NavigationStack>
   )
 }

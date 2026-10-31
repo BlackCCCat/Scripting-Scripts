@@ -11,18 +11,23 @@ import {
   Text,
   Toggle,
   VStack,
+  VirtualNode,
   useState,
 } from "scripting"
 import { DashboardSettings } from "../models/types"
 import { PROVIDERS_CATALOG } from "../utils/providers_catalog"
 import { WidgetPreviewSheet } from "../widgets"
 import { WidgetGuideSheet } from "./WidgetGuideSheet"
-
+import { ReleaseNotesSheet } from "./ReleaseNotesSheet"
 
 export function SettingsView(props: {
   settings: DashboardSettings
   realAccountCount: number
   demoAccountCount: number
+  isHomeScreen?: boolean
+  zoomNamespace?: any
+  tabSwitchMenu?: VirtualNode
+  changelogContent?: string
   onUpdateSettings: (next: DashboardSettings) => void
   onResetDemoAccounts: () => void
   onClearSnapshotCache: () => void
@@ -33,6 +38,10 @@ export function SettingsView(props: {
     settings,
     realAccountCount,
     demoAccountCount,
+    isHomeScreen = false,
+    zoomNamespace,
+    tabSwitchMenu,
+    changelogContent,
     onUpdateSettings,
     onResetDemoAccounts,
     onClearSnapshotCache,
@@ -46,6 +55,11 @@ export function SettingsView(props: {
     useState<boolean>(false)
   const [isWidgetGuidePresented, setIsWidgetGuidePresented] =
     useState<boolean>(false)
+  const [settingsRoute, setSettingsRoute] = useState<
+    "preview" | "guide" | null
+  >(null)
+  const [isChangelogPresented, setIsChangelogPresented] =
+    useState<boolean>(false)
 
   const handleOpenTokenPulseRepo = async () => {
     await Safari.present("https://github.com/hqwuzhaoyi/TokenPulse", false)
@@ -55,39 +69,95 @@ export function SettingsView(props: {
     await Safari.present("https://github.com/lbjlaq/Antigravity-Manager", false)
   }
 
-  return (
-    <NavigationStack>
-      <Form
-        navigationTitle="设置"
-        sheet={[
-          {
-            isPresented: isWidgetPreviewPresented,
-            onChanged: setIsWidgetPreviewPresented,
-            content: (
-              <WidgetPreviewSheet
-                onDismiss={() => setIsWidgetPreviewPresented(false)}
-              />
-            ),
-          },
-          {
-            isPresented: isWidgetGuidePresented,
-            onChanged: setIsWidgetGuidePresented,
-            content: (
-              <WidgetGuideSheet
-                onDismiss={() => setIsWidgetGuidePresented(false)}
-              />
-            ),
-          },
-        ]}
-        toolbar={{
-          topBarLeading: (
+  const formContent = (
+    <Form
+      navigationTitle="设置"
+      sheet={
+        isHomeScreen
+          ? {
+              isPresented: isChangelogPresented,
+              onChanged: setIsChangelogPresented,
+              content: (
+                <ReleaseNotesSheet
+                  content={changelogContent ?? ""}
+                  onDismiss={() => setIsChangelogPresented(false)}
+                />
+              ),
+            }
+          : [
+              {
+                isPresented: isWidgetPreviewPresented,
+                onChanged: setIsWidgetPreviewPresented,
+                content: (
+                  <WidgetPreviewSheet
+                    onDismiss={() => setIsWidgetPreviewPresented(false)}
+                  />
+                ),
+              },
+              {
+                isPresented: isWidgetGuidePresented,
+                onChanged: setIsWidgetGuidePresented,
+                content: (
+                  <WidgetGuideSheet
+                    onDismiss={() => setIsWidgetGuidePresented(false)}
+                  />
+                ),
+              },
+            ]
+      }
+      navigationDestination={
+        isHomeScreen
+          ? {
+              isPresented: Boolean(settingsRoute),
+              onChanged: (open) => {
+                if (!open) setSettingsRoute(null)
+              },
+              content:
+                settingsRoute === "preview" ? (
+                  <WidgetPreviewSheet
+                    embedded={true}
+                    navigationTransition={
+                      zoomNamespace
+                        ? {
+                            type: "zoom",
+                            sourceID: "settings-widget-preview",
+                            namespace: zoomNamespace,
+                          }
+                        : undefined
+                    }
+                    onDismiss={() => setSettingsRoute(null)}
+                  />
+                ) : settingsRoute === "guide" ? (
+                  <WidgetGuideSheet
+                    embedded={true}
+                    navigationTransition={
+                      zoomNamespace
+                        ? {
+                            type: "zoom",
+                            sourceID: "settings-widget-guide",
+                            namespace: zoomNamespace,
+                          }
+                        : undefined
+                    }
+                    onDismiss={() => setSettingsRoute(null)}
+                  />
+                ) : (
+                  <Text> </Text>
+                ),
+            }
+          : undefined
+      }
+      toolbar={{
+        topBarLeading: isHomeScreen
+          ? tabSwitchMenu
+          : (
             <Button
               title="退出"
               systemImage="xmark"
               action={onDismiss}
             />
           ),
-        }}
+      }}
         confirmationDialog={{
           title: "确认清理本地额度快照缓存？",
           titleVisibility: "visible",
@@ -204,11 +274,17 @@ export function SettingsView(props: {
             value={`${demoAccountCount} 个`}
           />
 
-          {onOpenChangelog ? (
+          {onOpenChangelog || isHomeScreen ? (
             <Button
               title="查看更新说明 (Changelog)"
               systemImage="newspaper"
-              action={onOpenChangelog}
+              action={() => {
+                if (isHomeScreen) {
+                  setIsChangelogPresented(true)
+                } else {
+                  onOpenChangelog?.()
+                }
+              }}
             />
           ) : null}
         </Section>
@@ -255,13 +331,41 @@ export function SettingsView(props: {
           <Button
             title="小组件使用说明"
             systemImage="questionmark.circle"
-            action={() => setIsWidgetGuidePresented(true)}
+            matchedTransitionSource={
+              zoomNamespace
+                ? {
+                    id: "settings-widget-guide",
+                    namespace: zoomNamespace,
+                  }
+                : undefined
+            }
+            action={() => {
+              if (isHomeScreen) {
+                setSettingsRoute("guide")
+              } else {
+                setIsWidgetGuidePresented(true)
+              }
+            }}
           />
 
           <Button
             title="预览桌面小组件样式 (小/中/大/特大)"
             systemImage="rectangle.3.group"
-            action={() => setIsWidgetPreviewPresented(true)}
+            matchedTransitionSource={
+              zoomNamespace
+                ? {
+                    id: "settings-widget-preview",
+                    namespace: zoomNamespace,
+                  }
+                : undefined
+            }
+            action={() => {
+              if (isHomeScreen) {
+                setSettingsRoute("preview")
+              } else {
+                setIsWidgetPreviewPresented(true)
+              }
+            }}
           />
         </Section>
 
@@ -334,6 +438,11 @@ export function SettingsView(props: {
           />
         </Section>
       </Form>
-    </NavigationStack>
   )
+
+  if (isHomeScreen) {
+    return formContent
+  }
+
+  return <NavigationStack>{formContent}</NavigationStack>
 }

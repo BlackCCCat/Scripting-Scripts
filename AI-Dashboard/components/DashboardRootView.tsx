@@ -2,12 +2,15 @@ import {
   AppEvents,
   Button,
   ContentUnavailableView,
+  Device,
   ForEach,
   HStack,
   Image,
   List,
+  Menu,
   Navigation,
   NavigationStack,
+  Script,
   Section,
   Spacer,
   Tab,
@@ -81,6 +84,24 @@ const ROUTE_ORDER: ProviderRouteCategory[] = [
   "web_session",
 ]
 
+const TAB_ITEMS = [
+  { id: 0, title: "额度看板", icon: "chart.bar.doc.horizontal.fill" },
+  { id: 1, title: "供应商目录", icon: "square.grid.2x2.fill" },
+  { id: 2, title: "设置", icon: "gearshape.fill" },
+] as const
+
+type DashboardHomeRoute =
+  | { kind: "detail"; account: SubscriptionAccount; zoomSourceID: string }
+  | {
+      kind: "add"
+      provider?: ProviderId
+      startWithPicker: boolean
+      nonce: number
+      zoomSourceID: string
+    }
+  | { kind: "edit"; zoomSourceID: string }
+  | null
+
 function reorderSublistInMaster(
   master: SubscriptionAccount[],
   sublist: SubscriptionAccount[],
@@ -109,8 +130,25 @@ function reorderSublistInMaster(
   })
 }
 
-export function DashboardRootView() {
+export function DashboardRootView(props: {
+  isHomeScreen?: boolean
+  zoomNamespace?: any
+} = {}) {
+  const isHomeScreen = props.isHomeScreen ?? false
+  const supportsZoom = Number.parseInt(Device.systemVersion, 10) >= 18
+  const homeZoomNamespace =
+    isHomeScreen && supportsZoom ? props.zoomNamespace : undefined
+  const homeZoomTransition = (sourceID: string) =>
+    homeZoomNamespace
+      ? { type: "zoom" as const, sourceID, namespace: homeZoomNamespace }
+      : undefined
+  const homeZoomSource = (sourceID: string) =>
+    homeZoomNamespace
+      ? { id: sourceID, namespace: homeZoomNamespace }
+      : undefined
+
   const dismiss = Navigation.useDismiss()
+  const [homeRoute, setHomeRoute] = useState<DashboardHomeRoute>(null)
 
   const [activeTab, setActiveTab] = useState<number>(0)
   const [settings, setSettings] = useState<DashboardSettings>(() =>
@@ -171,17 +209,86 @@ export function DashboardRootView() {
   const [codexResetStatus, setCodexResetStatus] =
     useState<CodexResetStatus | null>(null)
 
-  const openAddAccountFlow = (provider?: ProviderId) => {
+  const openAddAccountFlow = (
+    provider?: ProviderId,
+    sourceID: string = "dashboard-add-account"
+  ) => {
+    if (isHomeScreen) {
+      setHomeRoute({
+        kind: "add",
+        provider,
+        startWithPicker: !provider,
+        nonce: Date.now(),
+        zoomSourceID: sourceID,
+      })
+      return
+    }
     setPreselectedProviderForAdd(provider)
     setStartAddWithPicker(!provider)
     setAddSheetNonce((n) => n + 1)
     setIsAddSheetPresented(true)
   }
 
-  const openEditAccountsSheet = () => {
+  const openEditAccountsSheet = (
+    sourceID: string = "dashboard-edit-accounts"
+  ) => {
     const list = settings.isDemoMode ? demoAccounts : realAccounts
     setAccountsBeforeEdit([...list])
+    if (isHomeScreen) {
+      setHomeRoute({
+        kind: "edit",
+        zoomSourceID: sourceID,
+      })
+      return
+    }
     setIsEditSheetPresented(true)
+  }
+
+  const openAccountDetail = (
+    account: SubscriptionAccount,
+    sourceID?: string
+  ) => {
+    if (isHomeScreen) {
+      setHomeRoute({
+        kind: "detail",
+        account,
+        zoomSourceID: sourceID ?? `account-card-${account.id}`,
+      })
+      return
+    }
+    setSelectedAccountForDetail(account)
+  }
+
+  const openChangelog = () => {
+    releaseNotes.show()
+  }
+
+  const renderTabSwitchMenu = () => {
+    const currentTab = TAB_ITEMS[activeTab] ?? TAB_ITEMS[0]
+    return (
+      <Menu
+        menuIndicator="hidden"
+        label={
+          <Image
+            systemName={currentTab.icon}
+            font="body"
+            foregroundStyle="accentColor"
+          />
+        }
+      >
+        {TAB_ITEMS.map((item) => (
+          <Button
+            key={item.id}
+            title={item.title}
+            systemImage={item.icon}
+            action={() => {
+              setActiveTab(item.id)
+              HapticFeedback.lightImpact()
+            }}
+          />
+        ))}
+      </Menu>
+    )
   }
 
   const cancelEditAccountsSheet = () => {
@@ -496,16 +603,30 @@ export function DashboardRootView() {
     }
   }
 
-  // 启动应用时自动刷新已启用账号（静默后台拉取，不触发整页重置与震动，更新后广播小组件同步）
+  // 启动应用或首次挂载首页 UI 时自动刷新所有已添加供应商（静默后台拉取，不触发整页重置与震动，更新后广播小组件同步）
   const hasAutoRefreshedOnLaunchRef = useRef<boolean>(false)
   useEffect(() => {
-    if (settings.autoRefreshOnLaunch) {
-      if (!hasAutoRefreshedOnLaunchRef.current) {
-        hasAutoRefreshedOnLaunchRef.current = true
+    const shouldAutoRefresh = isHomeScreen || settings.autoRefreshOnLaunch
+    if (shouldAutoRefresh && !hasAutoRefreshedOnLaunchRef.current) {
+      hasAutoRefreshedOnLaunchRef.current = true
+      void refreshAllAccounts({ isManual: false })
+    }
+  }, [isHomeScreen, settings.autoRefreshOnLaunch, settings.isDemoMode])
+
+  // 首页 UI 常驻模式下，监听 Home Tab 切回事件（从其他系统 Tab 切回时自动静默刷新一次额度）
+  useEffect(() => {
+    if (!isHomeScreen) return
+    if (typeof Script === "undefined" || typeof Script.onHomeTabEvent !== "function") return
+
+    const unsubscribe = Script.onHomeTabEvent((event) => {
+      if (event === "selected") {
         void refreshAllAccounts({ isManual: false })
       }
+    })
+    return () => {
+      unsubscribe?.()
     }
-  }, [settings.autoRefreshOnLaunch, settings.isDemoMode])
+  }, [isHomeScreen])
 
   // 应用退入后台时（用户滑回桌面），立即同步刷新一次桌面小组件
   useEffect(() => {
@@ -599,6 +720,7 @@ export function DashboardRootView() {
     _envelope: ProviderCredentialEnvelope
   ) => {
     setIsAddSheetPresented(false)
+    setHomeRoute(null)
     if (settings.isDemoMode) {
       // 如果用户在演示模式保存了真实账号，自动切换到真实模式并立即刷新该账号
       updateSettings({ ...settings, isDemoMode: false })
@@ -638,7 +760,18 @@ export function DashboardRootView() {
       setActiveTab(0)
       return
     }
-    openAddAccountFlow(provider)
+    if (isHomeScreen) {
+      setHomeRoute({
+        kind: "add",
+        provider,
+        startWithPicker: false,
+        nonce: Date.now(),
+        zoomSourceID: `catalog-add-${provider}`,
+      })
+      setActiveTab(0)
+      return
+    }
+    openAddAccountFlow(provider, `catalog-add-${provider}`)
   }
 
   const renderAccountRowWithSwipe = (acc: SubscriptionAccount) => {
@@ -662,7 +795,7 @@ export function DashboardRootView() {
               title="设置"
               systemImage="slider.horizontal.3"
               tint="systemBlue"
-              action={() => setSelectedAccountForDetail(acc)}
+              action={() => openAccountDetail(acc, `account-card-${acc.id}`)}
             />,
             <Button
               title="刷新"
@@ -678,83 +811,148 @@ export function DashboardRootView() {
           state={state}
           protectAccountIdentity={settings.protectAccountIdentity}
           codexResetStatus={codexResetStatus}
+          zoomSource={homeZoomSource(`account-card-${acc.id}`)}
           onRefresh={() => refreshSingleAccount(acc)}
-          onOpenDetail={() => setSelectedAccountForDetail(acc)}
+          onOpenDetail={() => openAccountDetail(acc, `account-card-${acc.id}`)}
         />
       </VStack>
     )
   }
 
-  return (
-    <TabView
-      tabIndex={activeTab}
-      onTabIndexChanged={setActiveTab}
-      tint="accentColor"
-      sheet={[
-        {
-          isPresented: isAddSheetPresented,
-          onChanged: setIsAddSheetPresented,
-          content: (
-            <AddAccountSheet
-              key={`add-sheet-${addSheetNonce}`}
-              initialProviderId={preselectedProviderForAdd}
-              defaultSynchronizable={settings.prefersICloudKeychain}
-              startWithPicker={startAddWithPicker}
-              onCancel={() => setIsAddSheetPresented(false)}
-              onAccountCreated={handleAccountCreated}
+  const renderHomeRouteContent = () => {
+    if (!homeRoute) return <Text> </Text>
+    if (homeRoute.kind === "detail") {
+      const acc = homeRoute.account
+      return (
+        <AccountDetailSheet
+          key={acc.id}
+          account={acc}
+          state={accountStates[acc.id] ?? { type: "idle" }}
+          isDemoMode={settings.isDemoMode}
+          codexResetStatus={codexResetStatus}
+          embedded={true}
+          zoomNamespace={homeZoomNamespace}
+          navigationTransition={homeZoomTransition(homeRoute.zoomSourceID)}
+          onClose={() => setHomeRoute(null)}
+          onUpdateAccount={(updated) => {
+            if (settings.isDemoMode) {
+              setDemoAccounts((prev) =>
+                prev.map((a) => (a.id === updated.id ? updated : a))
+              )
+            } else {
+              const next = realAccounts.map((a) =>
+                a.id === updated.id ? updated : a
+              )
+              setRealAccounts(next)
+              saveStoredAccounts(next)
+              refreshSingleAccount(updated)
+            }
+          }}
+          onDeleteAccount={handleDeleteAccount}
+          onRefreshAccount={refreshSingleAccount}
+        />
+      )
+    }
+    if (homeRoute.kind === "add") {
+      return (
+        <AddAccountSheet
+          key={homeRoute.nonce}
+          initialProviderId={homeRoute.provider}
+          defaultSynchronizable={settings.prefersICloudKeychain}
+          startWithPicker={homeRoute.startWithPicker}
+          embedded={true}
+          zoomNamespace={homeZoomNamespace}
+          navigationTransition={homeZoomTransition(homeRoute.zoomSourceID)}
+          onCancel={() => setHomeRoute(null)}
+          onAccountCreated={handleAccountCreated}
+        />
+      )
+    }
+    if (homeRoute.kind === "edit") {
+      return (
+        <AccountOrderEditSheet
+          accounts={currentAccounts}
+          embedded={true}
+          zoomNamespace={homeZoomNamespace}
+          navigationTransition={homeZoomTransition(homeRoute.zoomSourceID)}
+          onReorderAccounts={(reordered) => {
+            if (settings.isDemoMode) {
+              setDemoAccounts(reordered)
+            } else {
+              setRealAccounts(reordered)
+              saveStoredAccounts(reordered)
+            }
+            HapticFeedback.lightImpact()
+            reloadAllWidgets()
+          }}
+          onMoveAccounts={handleMoveAccountsInEdit}
+          onDeleteAccount={handleDeleteAccount}
+          onDismiss={() => setHomeRoute(null)}
+          onCancel={() => {
+            cancelEditAccountsSheet()
+            setHomeRoute(null)
+          }}
+        />
+      )
+    }
+    return <Text> </Text>
+  }
+
+  const dashboardList = (
+    <List
+      navigationTitle="AI 额度看板"
+      listStyle="insetGroup"
+      searchable={{
+        value: searchQuery,
+        onChanged: setSearchQuery,
+        prompt: "筛选账号名称或 AI 供应商",
+      }}
+      refreshable={() => refreshAllAccounts({ isManual: true })}
+      toolbar={{
+        topBarLeading: (
+          <HStack spacing={12}>
+            {isHomeScreen ? (
+              renderTabSwitchMenu()
+            ) : (
+              <Button
+                title="退出"
+                systemImage="xmark"
+                action={() => dismiss()}
+              />
+            )}
+            <Button
+              title="编辑"
+              systemImage="pencil"
+              matchedTransitionSource={homeZoomSource("dashboard-edit-accounts")}
+              action={() => openEditAccountsSheet("dashboard-edit-accounts")}
             />
-          ),
-        },
-        {
-          isPresented: releaseNotes.isPresented,
-          onChanged: releaseNotes.onChanged,
-          content: releaseNotes.content,
-        },
-      ]}
-    >
-      <Tab title="额度看板" systemImage="chart.bar.doc.horizontal.fill" value={0}>
-        <NavigationStack>
-          <List
-            navigationTitle="AI 额度看板"
-            listStyle="insetGroup"
-            searchable={{
-              value: searchQuery,
-              onChanged: setSearchQuery,
-              prompt: "筛选账号名称或 AI 供应商",
-            }}
-            refreshable={() => refreshAllAccounts({ isManual: true })}
-            toolbar={{
-              topBarLeading: (
-                <HStack spacing={12}>
-                  <Button
-                    title="退出"
-                    systemImage="xmark"
-                    action={() => dismiss()}
-                  />
-                  <Button
-                    title="编辑"
-                    systemImage="pencil"
-                    action={openEditAccountsSheet}
-                  />
-                </HStack>
-              ),
-              topBarTrailing: (
-                <HStack spacing={12}>
-                  <Button
-                    title="全部刷新"
-                    systemImage="arrow.clockwise"
-                    disabled={isRefreshingAll || currentAccounts.length === 0}
-                    action={() => refreshAllAccounts({ isManual: true })}
-                  />
-                  <Button
-                    title="添加账号"
-                    systemImage="plus"
-                    action={() => openAddAccountFlow()}
-                  />
-                </HStack>
-              ),
-            }}
-            sheet={[
+          </HStack>
+        ),
+        topBarTrailing: (
+          <HStack spacing={12}>
+            <Button
+              title="全部刷新"
+              systemImage="arrow.clockwise"
+              disabled={isRefreshingAll || currentAccounts.length === 0}
+              action={() => refreshAllAccounts({ isManual: true })}
+            />
+            <Button
+              title="添加账号"
+              systemImage="plus"
+              matchedTransitionSource={homeZoomSource("dashboard-add-account")}
+              action={() => openAddAccountFlow(undefined, "dashboard-add-account")}
+            />
+          </HStack>
+        ),
+      }}
+      sheet={
+        isHomeScreen
+          ? {
+              isPresented: releaseNotes.isPresented,
+              onChanged: releaseNotes.onChanged,
+              content: releaseNotes.content,
+            }
+          : [
               {
                 isPresented: isEditSheetPresented,
                 onChanged: setIsEditSheetPresented,
@@ -816,129 +1014,237 @@ export function DashboardRootView() {
                   <Text>未选择账号</Text>
                 ),
               },
-            ]}
-          >
-            <DashboardOverviewSection
-              accounts={displayedAccounts}
-              accountStates={accountStates}
-              isDemoMode={settings.isDemoMode}
-              onToggleDemoMode={(val) =>
-                updateSettings({ ...settings, isDemoMode: val })
-              }
-              onSelectAccount={(acc) => setSelectedAccountForDetail(acc)}
-              onOpenEditSheet={openEditAccountsSheet}
-            />
-
-            {filteredAccounts.length === 0 ? (
-              <Section>
-                <VStack
-                  alignment="center"
-                  spacing={12}
-                  listRowSeparator="hidden"
-                  frame={{ maxWidth: "infinity", alignment: "center" }}
-                >
-                  <ContentUnavailableView
-                    title={
-                      searchQuery.trim()
-                        ? "没有匹配的供应商账号"
-                        : "尚未添加 AI 供应商账号"
-                    }
-                    systemImage="sparkles.rectangle.stack"
-                    description={
-                      searchQuery.trim()
-                        ? "请尝试更换搜索关键词，或在「供应商目录」中添加新平台"
-                        : "支持 DeepSeek、OpenAI Codex、Claude、WorkBuddy、火山方舟、MiniMax、New API 等 78 家 AI 平台"
-                    }
-                  />
-                  <Button
-                    buttonStyle={adaptiveProminentButtonStyle()}
-                    frame={{ maxWidth: "infinity", alignment: "center" }}
-                    action={() => openAddAccountFlow()}
-                  >
-                    <HStack
-                      frame={{ maxWidth: "infinity", alignment: "center" }}
-                      alignment="center"
-                      spacing={6}
-                      padding={{ vertical: 4 }}
-                    >
-                      <Image systemName="plus.circle.fill" font="subheadline" />
-                      <Text
-                        font="subheadline"
-                        fontWeight="semibold"
-                        lineLimit={1}
-                        multilineTextAlignment="center"
-                      >
-                        添加第一个 AI 供应商账号
-                      </Text>
-                    </HStack>
-                  </Button>
-                </VStack>
-              </Section>
-            ) : settings.groupByRouteCategory ? (
-              ROUTE_ORDER.map((category) => {
-                const groupItems = filteredAccounts.filter(
-                  (acc) =>
-                    getProviderMeta(acc.provider).routeCategory === category
-                )
-                if (groupItems.length === 0) return null
-                return (
-                  <Section
-                    key={category}
-                    header={
-                      <HStack spacing={6}>
-                        <Image
-                          systemName={routeCategorySymbol(category)}
-                          font="caption"
-                          foregroundStyle="accentColor"
-                        />
-                        <Text>{`${routeCategoryTitle(category)} (${groupItems.length})`}</Text>
-                        <Spacer />
-                        <Text font="caption2" foregroundStyle="secondaryLabel">
-                          长按拖动排序
-                        </Text>
-                      </HStack>
-                    }
-                  >
-                    <ForEach
-                      count={groupItems.length}
-                      onMove={(indices, newOffset) =>
-                        handleMoveSublist(groupItems, indices, newOffset)
-                      }
-                      itemBuilder={(idx) => {
-                        const acc = groupItems[idx]
-                        if (!acc) return <VStack />
-                        return renderAccountRowWithSwipe(acc)
-                      }}
-                    />
-                  </Section>
-                )
-              })
-            ) : (
-              <Section
-                header={
-                  <HStack>
-                    <Text>订阅额度与 API 钱包</Text>
-                    <Spacer />
-                    <Text font="caption2" foregroundStyle="secondaryLabel">
-                      长按卡片拖动排序
-                    </Text>
-                  </HStack>
-                }
-              >
-                <ForEach
-                  count={filteredAccounts.length}
-                  onMove={(indices, newOffset) =>
-                    handleMoveSublist(filteredAccounts, indices, newOffset)
+            ]
+      }
+      navigationDestination={
+        isHomeScreen
+          ? {
+              isPresented: Boolean(homeRoute),
+              onChanged: (open) => {
+                if (!open) {
+                  if (homeRoute?.kind === "edit") {
+                    cancelEditAccountsSheet()
                   }
-                  itemBuilder={(idx) => {
-                    const acc = filteredAccounts[idx]
-                    if (!acc) return <VStack />
-                    return renderAccountRowWithSwipe(acc)
-                  }}
-                />
-              </Section>
-            )}
-          </List>
+                  setHomeRoute(null)
+                }
+              },
+              content: renderHomeRouteContent(),
+            }
+          : undefined
+      }
+    >
+      <DashboardOverviewSection
+        accounts={displayedAccounts}
+        accountStates={accountStates}
+        isDemoMode={settings.isDemoMode}
+        zoomNamespace={homeZoomNamespace}
+        onToggleDemoMode={(val) =>
+          updateSettings({ ...settings, isDemoMode: val })
+        }
+        onSelectAccount={(acc) => openAccountDetail(acc, `overview-account-${acc.id}`)}
+        onOpenEditSheet={() => openEditAccountsSheet("overview-edit-accounts")}
+      />
+
+      {filteredAccounts.length === 0 ? (
+        <Section>
+          <VStack
+            alignment="center"
+            spacing={12}
+            listRowSeparator="hidden"
+            frame={{ maxWidth: "infinity", alignment: "center" }}
+          >
+            <ContentUnavailableView
+              title={
+                searchQuery.trim()
+                  ? "没有匹配的供应商账号"
+                  : "尚未添加 AI 供应商账号"
+              }
+              systemImage="sparkles.rectangle.stack"
+              description={
+                searchQuery.trim()
+                  ? "请尝试更换搜索关键词，或在「供应商目录」中添加新平台"
+                  : "支持 DeepSeek、OpenAI Codex、Claude、WorkBuddy、火山方舟、MiniMax、New API 等 78 家 AI 平台"
+              }
+            />
+            <Button
+              buttonStyle={adaptiveProminentButtonStyle()}
+              frame={{ maxWidth: "infinity", alignment: "center" }}
+              matchedTransitionSource={homeZoomSource("dashboard-empty-add-account")}
+              action={() => openAddAccountFlow(undefined, "dashboard-empty-add-account")}
+            >
+              <HStack
+                frame={{ maxWidth: "infinity", alignment: "center" }}
+                alignment="center"
+                spacing={6}
+                padding={{ vertical: 4 }}
+              >
+                <Image systemName="plus.circle.fill" font="subheadline" />
+                <Text
+                  font="subheadline"
+                  fontWeight="semibold"
+                  lineLimit={1}
+                  multilineTextAlignment="center"
+                >
+                  添加第一个 AI 供应商账号
+                </Text>
+              </HStack>
+            </Button>
+          </VStack>
+        </Section>
+      ) : settings.groupByRouteCategory ? (
+        ROUTE_ORDER.map((category) => {
+          const groupItems = filteredAccounts.filter(
+            (acc) =>
+              getProviderMeta(acc.provider).routeCategory === category
+          )
+          if (groupItems.length === 0) return null
+          return (
+            <Section
+              key={category}
+              header={
+                <HStack spacing={6}>
+                  <Image
+                    systemName={routeCategorySymbol(category)}
+                    font="caption"
+                    foregroundStyle="accentColor"
+                  />
+                  <Text>{`${routeCategoryTitle(category)} (${groupItems.length})`}</Text>
+                  <Spacer />
+                  <Text font="caption2" foregroundStyle="secondaryLabel">
+                    长按拖动排序
+                  </Text>
+                </HStack>
+              }
+            >
+              <ForEach
+                count={groupItems.length}
+                onMove={(indices, newOffset) =>
+                  handleMoveSublist(groupItems, indices, newOffset)
+                }
+                itemBuilder={(idx) => {
+                  const acc = groupItems[idx]
+                  if (!acc) return <VStack />
+                  return renderAccountRowWithSwipe(acc)
+                }}
+              />
+            </Section>
+          )
+        })
+      ) : (
+        <Section
+          header={
+            <HStack>
+              <Text>订阅额度与 API 钱包</Text>
+              <Spacer />
+              <Text font="caption2" foregroundStyle="secondaryLabel">
+                长按卡片拖动排序
+              </Text>
+            </HStack>
+          }
+        >
+          <ForEach
+            count={filteredAccounts.length}
+            onMove={(indices, newOffset) =>
+              handleMoveSublist(filteredAccounts, indices, newOffset)
+            }
+            itemBuilder={(idx) => {
+              const acc = filteredAccounts[idx]
+              if (!acc) return <VStack />
+              return renderAccountRowWithSwipe(acc)
+            }}
+          />
+        </Section>
+      )}
+    </List>
+  )
+
+  if (isHomeScreen) {
+    if (activeTab === 0) {
+      return dashboardList
+    }
+    if (activeTab === 1) {
+      return (
+        <ProviderCatalogView
+          isDemoMode={settings.isDemoMode}
+          isHomeScreen={true}
+          zoomNamespace={homeZoomNamespace}
+          tabSwitchMenu={renderTabSwitchMenu()}
+          onQuickAddAccount={handleQuickAddFromCatalog}
+          onAccountCreated={handleAccountCreated}
+          onDismiss={() => {}}
+        />
+      )
+    }
+    return (
+      <SettingsView
+        settings={settings}
+        realAccountCount={realAccounts.length}
+        demoAccountCount={demoAccounts.length}
+        isHomeScreen={true}
+        zoomNamespace={homeZoomNamespace}
+        tabSwitchMenu={renderTabSwitchMenu()}
+        changelogContent={releaseNotes.rawContent}
+        onUpdateSettings={updateSettings}
+        onResetDemoAccounts={() => {
+          const defaults = createDefaultDemoAccounts()
+          setDemoAccounts(defaults)
+          setAccountStates((prev) => {
+            const next = { ...prev }
+            for (const acc of defaults) {
+              next[acc.id] = {
+                type: "loaded",
+                snapshot: generateDemoSnapshot(
+                  acc.id,
+                  acc.provider,
+                  acc.region
+                ),
+              }
+            }
+            return next
+          })
+          HapticFeedback.notificationSuccess()
+        }}
+        onClearSnapshotCache={() => {
+          cachedSnapshotsRef.current = {}
+          saveStoredSnapshots({})
+          setAccountStates({})
+        }}
+        onOpenChangelog={openChangelog}
+        onDismiss={() => {}}
+      />
+    )
+  }
+
+  return (
+    <TabView
+      tabIndex={activeTab}
+      onTabIndexChanged={setActiveTab}
+      tint="accentColor"
+      sheet={[
+        {
+          isPresented: isAddSheetPresented,
+          onChanged: setIsAddSheetPresented,
+          content: (
+            <AddAccountSheet
+              key={`add-sheet-${addSheetNonce}`}
+              initialProviderId={preselectedProviderForAdd}
+              defaultSynchronizable={settings.prefersICloudKeychain}
+              startWithPicker={startAddWithPicker}
+              onCancel={() => setIsAddSheetPresented(false)}
+              onAccountCreated={handleAccountCreated}
+            />
+          ),
+        },
+        {
+          isPresented: releaseNotes.isPresented,
+          onChanged: releaseNotes.onChanged,
+          content: releaseNotes.content,
+        },
+      ]}
+    >
+      <Tab title="额度看板" systemImage="chart.bar.doc.horizontal.fill" value={0}>
+        <NavigationStack>
+          {dashboardList}
         </NavigationStack>
       </Tab>
 
@@ -955,6 +1261,7 @@ export function DashboardRootView() {
           settings={settings}
           realAccountCount={realAccounts.length}
           demoAccountCount={demoAccounts.length}
+          changelogContent={releaseNotes.rawContent}
           onUpdateSettings={updateSettings}
           onResetDemoAccounts={() => {
             const defaults = createDefaultDemoAccounts()

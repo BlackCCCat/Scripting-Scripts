@@ -1,9 +1,12 @@
 import {
   Button,
+  Capsule,
+  DisclosureGroup,
   Divider,
   Form,
   HStack,
   Image,
+  LabeledContent,
   List,
   NavigationStack,
   Picker,
@@ -59,6 +62,10 @@ export function AddAccountSheet(props: {
   initialProviderId?: ProviderId
   defaultSynchronizable: boolean
   startWithPicker?: boolean
+  embedded?: boolean
+  isPushed?: boolean
+  zoomNamespace?: any
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onCancel: () => void
   onAccountCreated: (
     account: SubscriptionAccount,
@@ -101,6 +108,7 @@ export function AddAccountSheet(props: {
   // 子 Sheet 控制：设备码登录
   const [isDeviceLoginPresented, setIsDeviceLoginPresented] =
     useState<boolean>(false)
+  const isEmbeddedPickerFlow = Boolean(props.embedded && startWithPicker)
 
   useEffect(() => {
     if (initialProviderId) {
@@ -518,90 +526,113 @@ export function AddAccountSheet(props: {
     supportsDeviceOrPollFlow ||
     supportsWebViewFlow
 
-  if (isPickingProvider) {
-    return (
-      <ProviderPickerSheet
-        selectedId={hasUserSelectedProvider ? selectedProviderId : null}
-        onSelect={handleSelectProvider}
-        onClose={onCancel}
-      />
-    )
-  }
-
-  return (
-    <NavigationStack>
-      <Form
-        navigationTitle="添加 AI 供应商"
-        navigationBarTitleDisplayMode="inline"
-        toolbar={{
-          cancellationAction: (
-            <Button
-              title={startWithPicker ? "选择供应商" : "取消"}
-              systemImage={startWithPicker ? "chevron.left" : undefined}
-              action={
-                startWithPicker
-                  ? () => {
-                      setIsPickingProvider(true)
-                      setHasUserSelectedProvider(false)
-                    }
-                  : onCancel
-              }
-            />
-          ),
-          confirmationAction: (
-            <Button
-              title="保存"
-              disabled={!rawCredential.trim()}
-              action={handleSaveManual}
-            />
-          ),
-        }}
-        sheet={{
-          isPresented: isDeviceLoginPresented,
-          onChanged: setIsDeviceLoginPresented,
-          content: (
-            <DeviceCodeLoginSheet
-              provider={selectedProviderId}
-              region={selectedRegion}
-              onCancel={() => setIsDeviceLoginPresented(false)}
-              onCompleted={(envelope) => {
-                setIsDeviceLoginPresented(false)
-                finalizeAccountWithEnvelope(envelope)
-              }}
-            />
-          ),
-        }}
-      >
-        <Section header={<Text>服务提供商</Text>}>
+  const formContent = (
+    <Form
+      navigationTitle="添加 AI 供应商"
+      navigationBarTitleDisplayMode="inline"
+      navigationTransition={props.navigationTransition}
+      toolbar={{
+        cancellationAction: (props.embedded || props.isPushed) ? undefined : (
           <Button
-            buttonStyle="plain"
-            action={() => setIsPickingProvider(true)}
-          >
-            <HStack alignment="center" spacing={12}>
-              <ProviderIconView provider={selectedProviderId} size={40} />
-              <VStack alignment="leading" spacing={2}>
-                <Text font="headline" foregroundStyle="label" lineLimit={1}>
-                  {meta.displayName}
-                </Text>
-                <Text
-                  font="caption"
-                  foregroundStyle="secondaryLabel"
-                  lineLimit={1}
-                >
-                  {`${routeCategoryTitle(meta.routeCategory)} · ${loginMethodBadgeText(meta.loginMethod)}`}
-                </Text>
-              </VStack>
-              <Spacer />
-              <Text font="subheadline" foregroundStyle="accentColor">
-                更换
+            title={startWithPicker ? "选择供应商" : "取消"}
+            systemImage={startWithPicker ? "chevron.left" : undefined}
+            action={
+              startWithPicker
+                ? () => {
+                    setIsPickingProvider(true)
+                    setHasUserSelectedProvider(false)
+                  }
+                : onCancel
+            }
+          />
+        ),
+        confirmationAction: (
+          <Button
+            title="保存"
+            disabled={!rawCredential.trim()}
+            action={handleSaveManual}
+          />
+        ),
+      }}
+      navigationDestination={
+        props.embedded
+          ? {
+              isPresented: isDeviceLoginPresented,
+              onChanged: setIsDeviceLoginPresented,
+              content: (
+                <DeviceCodeLoginSheet
+                  provider={selectedProviderId}
+                  region={selectedRegion}
+                  embedded={true}
+                  navigationTransition={
+                    props.zoomNamespace
+                      ? {
+                          type: "zoom",
+                          sourceID: "add-account-device-oauth",
+                          namespace: props.zoomNamespace,
+                        }
+                      : undefined
+                  }
+                  onCancel={() => setIsDeviceLoginPresented(false)}
+                  onCompleted={(envelope) => {
+                    setIsDeviceLoginPresented(false)
+                    finalizeAccountWithEnvelope(envelope)
+                  }}
+                />
+              ),
+            }
+          : undefined
+      }
+      sheet={
+        props.embedded
+          ? undefined
+          : {
+              isPresented: isDeviceLoginPresented,
+              onChanged: setIsDeviceLoginPresented,
+              content: (
+                <DeviceCodeLoginSheet
+                  provider={selectedProviderId}
+                  region={selectedRegion}
+                  onCancel={() => setIsDeviceLoginPresented(false)}
+                  onCompleted={(envelope) => {
+                    setIsDeviceLoginPresented(false)
+                    finalizeAccountWithEnvelope(envelope)
+                  }}
+                />
+              ),
+            }
+      }
+    >
+        <Section header={<Text>服务提供商</Text>}>
+          <HStack alignment="center" spacing={12}>
+            <ProviderIconView provider={selectedProviderId} size={40} />
+            <VStack alignment="leading" spacing={2}>
+              <Text font="headline" foregroundStyle="label" lineLimit={1}>
+                {meta.displayName}
               </Text>
-              <Image
-                systemName="chevron.right"
+              <Text
                 font="caption"
-                foregroundStyle="tertiaryLabel"
-              />
-            </HStack>
-          </Button>
+                foregroundStyle="secondaryLabel"
+                lineLimit={1}
+              >
+                {`${routeCategoryTitle(meta.routeCategory)} · ${loginMethodBadgeText(meta.loginMethod)}`}
+              </Text>
+            </VStack>
+            <Spacer />
+            {!props.embedded ? (
+              <Button
+                buttonStyle="plain"
+                action={() => setIsPickingProvider(true)}
+              >
+                <HStack spacing={4}>
+                  <Text font="subheadline" foregroundStyle="secondaryLabel">
+                    更换
+                  </Text>
+                  <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
+                </HStack>
+              </Button>
+            ) : null}
+          </HStack>
 
           <TextField
             title="备注名称"
@@ -751,6 +782,14 @@ export function AddAccountSheet(props: {
                   <Button
                     buttonStyle={adaptiveSecondaryButtonStyle()}
                     frame={{ maxWidth: "infinity", alignment: "center" }}
+                    matchedTransitionSource={
+                      props.zoomNamespace
+                        ? {
+                            id: "add-account-device-oauth",
+                            namespace: props.zoomNamespace,
+                          }
+                        : undefined
+                    }
                     action={() => setIsDeviceLoginPresented(true)}
                   >
                     <HStack
@@ -780,6 +819,14 @@ export function AddAccountSheet(props: {
                 <Button
                   buttonStyle={adaptiveProminentButtonStyle()}
                   frame={{ maxWidth: "infinity", alignment: "center" }}
+                  matchedTransitionSource={
+                    props.zoomNamespace
+                      ? {
+                          id: "add-account-device-oauth",
+                          namespace: props.zoomNamespace,
+                        }
+                      : undefined
+                  }
                   action={() => setIsDeviceLoginPresented(true)}
                 >
                   <HStack
@@ -962,20 +1009,63 @@ export function AddAccountSheet(props: {
           </Section>
         ) : null}
       </Form>
-    </NavigationStack>
   )
+
+  if (isEmbeddedPickerFlow) {
+    return (
+      <ProviderPickerSheet
+        selectedId={selectedProviderId}
+        embedded={true}
+        zoomNamespace={props.zoomNamespace}
+        navigationTransition={props.navigationTransition}
+        onAccountCreated={onAccountCreated}
+        onSelect={handleSelectProvider}
+        onClose={onCancel}
+      />
+    )
+  }
+
+  if (isPickingProvider) {
+    return (
+      <ProviderPickerSheet
+        selectedId={hasUserSelectedProvider ? selectedProviderId : null}
+        embedded={props.embedded}
+        zoomNamespace={props.zoomNamespace}
+        navigationTransition={props.navigationTransition}
+        onSelect={handleSelectProvider}
+        onClose={onCancel}
+      />
+    )
+  }
+
+  if (props.embedded || props.isPushed) {
+    return formContent
+  }
+
+  return <NavigationStack>{formContent}</NavigationStack>
 }
 
 export function ProviderPickerSheet(props: {
   selectedId?: ProviderId | null
+  embedded?: boolean
+  zoomNamespace?: any
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
+  onAccountCreated?: (
+    account: SubscriptionAccount,
+    envelope: ProviderCredentialEnvelope
+  ) => void
   onSelect: (id: ProviderId) => void
   onClose: () => void
 }) {
-  const { selectedId, onSelect, onClose } = props
+  const { selectedId, onSelect, onClose, onAccountCreated, embedded = false } = props
   const [searchText, setSearchText] = useState<string>("")
   const [routeFilter, setRouteFilter] = useState<
     ProviderRouteCategory | "all"
   >("all")
+  const [selectedProviderForForm, setSelectedProviderForForm] = useState<{
+    provider: ProviderId
+    nonce: number
+  } | null>(null)
 
   const filteredProviders = useMemo(
     () => searchProviders(searchText, routeFilter),
@@ -986,63 +1076,115 @@ export function ProviderPickerSheet(props: {
     [filteredProviders]
   )
 
-  return (
-    <NavigationStack>
-      <List
-        navigationTitle={`选择供应商 (${filteredProviders.length})`}
-        navigationBarTitleDisplayMode="inline"
-        listStyle="insetGroup"
-        listSectionIndexVisibility="automatic"
-        searchable={{
-          value: searchText,
-          onChanged: setSearchText,
-          prompt: "搜索 78 家 AI 供应商名称或域名",
-        }}
-        toolbar={{
-          cancellationAction: <Button title="关闭" action={onClose} />,
-        }}
-      >
-        <Section>
-          <Picker
-            title="接入路径筛选"
-            value={routeFilter}
-            onChanged={(v: string) =>
-              setRouteFilter(v as ProviderRouteCategory | "all")
-            }
-          >
-            <Text tag="all">全部路径 (78)</Text>
-            <Text tag="direct_api">直连 API 密钥 (39)</Text>
-            <Text tag="gateway">自建/聚合网关 (5)</Text>
-            <Text tag="device_oauth">OAuth 设备码与轮询 (7)</Text>
-            <Text tag="google_oauth">Google 原生 OAuth (2)</Text>
-            <Text tag="web_session">Web 会话与工作台 (25)</Text>
-          </Picker>
-        </Section>
+  const handleAddProvider = (providerId: ProviderId) => {
+    setSelectedProviderForForm({
+      provider: providerId,
+      nonce: Date.now(),
+    })
+  }
 
-        {grouped.map((group) => (
-          <Section
-            key={group.letter}
-            header={<Text>{group.letter}</Text>}
-            sectionIndexLabel={group.letter}
-          >
-            {group.items.map((item: ProviderMeta) => (
-              <Button
-                key={item.id}
-                buttonStyle="plain"
-                action={() => onSelect(item.id)}
-              >
+  const listContent = (
+    <List
+      navigationTitle={`选择供应商 (${filteredProviders.length})`}
+      navigationBarTitleDisplayMode="inline"
+      navigationTransition={embedded ? props.navigationTransition : undefined}
+      listStyle="insetGroup"
+      listSectionIndexVisibility="automatic"
+      searchable={{
+        value: searchText,
+        onChanged: setSearchText,
+        prompt: "搜索 78 家 AI 供应商名称或域名",
+      }}
+      toolbar={{
+        cancellationAction: embedded ? undefined : (
+          <Button title="关闭" action={onClose} />
+        ),
+      }}
+      navigationDestination={{
+        isPresented: Boolean(selectedProviderForForm),
+        onChanged: (open) => {
+          if (!open) setSelectedProviderForForm(null)
+        },
+        content: selectedProviderForForm ? (
+          <AddAccountSheet
+            key={`add-form-${selectedProviderForForm.provider}-${selectedProviderForForm.nonce}`}
+            initialProviderId={selectedProviderForForm.provider}
+            defaultSynchronizable={false}
+            startWithPicker={false}
+            embedded={embedded}
+            isPushed={true}
+            zoomNamespace={props.zoomNamespace}
+            navigationTransition={
+              embedded && props.zoomNamespace
+                ? {
+                    type: "zoom",
+                    sourceID: `picker-add-${selectedProviderForForm.provider}`,
+                    namespace: props.zoomNamespace,
+                  }
+                : undefined
+            }
+            onCancel={() => setSelectedProviderForForm(null)}
+            onAccountCreated={(account, envelope) => {
+              setSelectedProviderForForm(null)
+              onAccountCreated?.(account, envelope)
+            }}
+          />
+        ) : (
+          <Text> </Text>
+        ),
+      }}
+    >
+      <Section>
+        <Picker
+          title="接入路径筛选"
+          value={routeFilter}
+          onChanged={(v: string) =>
+            setRouteFilter(v as ProviderRouteCategory | "all")
+          }
+        >
+          <Text tag="all">全部路径 (78)</Text>
+          <Text tag="direct_api">直连 API 密钥 (39)</Text>
+          <Text tag="gateway">自建/聚合网关 (5)</Text>
+          <Text tag="device_oauth">OAuth 设备码与轮询 (7)</Text>
+          <Text tag="google_oauth">Google 原生 OAuth (2)</Text>
+          <Text tag="web_session">Web 会话与工作台 (25)</Text>
+        </Picker>
+      </Section>
+
+      {grouped.map((group) => (
+        <Section
+          key={group.letter}
+          header={<Text>{group.letter}</Text>}
+          sectionIndexLabel={group.letter}
+        >
+          {group.items.map((item: ProviderMeta) => (
+            <DisclosureGroup
+              key={item.id}
+              label={
                 <HStack alignment="center" spacing={12}>
-                  <ProviderIconView provider={item.id} size={34} />
-                  <VStack alignment="leading" spacing={2}>
-                    <Text font="body" foregroundStyle="label" lineLimit={1}>
-                      {item.displayName}
-                    </Text>
+                  <ProviderIconView provider={item.id} size={38} />
+                  <VStack alignment="leading" spacing={3}>
+                    <HStack spacing={6} alignment="center">
+                      <Text font="headline" lineLimit={1}>
+                        {item.displayName}
+                      </Text>
+                      <Text
+                        font="caption2"
+                        fontWeight="medium"
+                        foregroundStyle="secondaryLabel"
+                        padding={{ horizontal: 6, vertical: 1 }}
+                        background={<Capsule fill="quaternarySystemFill" />}
+                        lineLimit={1}
+                      >
+                        {loginMethodBadgeText(item.loginMethod)}
+                      </Text>
+                    </HStack>
                     <Text
-                      font="caption2"
+                      font="caption"
                       foregroundStyle="secondaryLabel"
                       lineLimit={1}
                     >
-                      {`${loginMethodBadgeText(item.loginMethod)} · ${item.endpointSummary}`}
+                      {item.endpointSummary}
                     </Text>
                   </VStack>
                   <Spacer />
@@ -1053,19 +1195,81 @@ export function ProviderPickerSheet(props: {
                       fontWeight="semibold"
                       foregroundStyle="accentColor"
                     />
-                  ) : (
-                    <Image
-                      systemName="chevron.right"
-                      font="caption"
-                      foregroundStyle="tertiaryLabel"
-                    />
-                  )}
+                  ) : null}
                 </HStack>
-              </Button>
-            ))}
-          </Section>
-        ))}
-      </List>
-    </NavigationStack>
+              }
+            >
+              <VStack
+                alignment="leading"
+                spacing={10}
+                padding={{ top: 8, bottom: 4 }}
+                frame={{ maxWidth: "infinity", alignment: "leading" }}
+              >
+                <LabeledContent
+                  title="接入分类"
+                  value={routeCategoryTitle(item.routeCategory)}
+                />
+                <LabeledContent
+                  title="凭证类型"
+                  value={item.credentialLabel}
+                />
+                <LabeledContent
+                  title="认证机制"
+                  value={item.authSummary}
+                />
+                <LabeledContent
+                  title="直连端点"
+                  value={item.endpointSummary}
+                />
+
+                {item.webSessionProfile ? (
+                  <LabeledContent
+                    title="Cookie 白名单"
+                    value={item.webSessionProfile.cookieNames.join(", ")}
+                  />
+                ) : null}
+
+                <Button
+                  buttonStyle={adaptiveProminentButtonStyle()}
+                  frame={{ maxWidth: "infinity", alignment: "center" }}
+                  matchedTransitionSource={
+                    embedded && props.zoomNamespace
+                      ? {
+                          id: `picker-add-${item.id}`,
+                          namespace: props.zoomNamespace,
+                        }
+                      : undefined
+                  }
+                  action={() => handleAddProvider(item.id)}
+                >
+                  <HStack
+                    frame={{ maxWidth: "infinity", alignment: "center" }}
+                    alignment="center"
+                    spacing={6}
+                    padding={{ vertical: 2 }}
+                  >
+                    <Image systemName="plus.circle.fill" font="subheadline" />
+                    <Text
+                      font="subheadline"
+                      fontWeight="semibold"
+                      lineLimit={1}
+                      multilineTextAlignment="center"
+                    >
+                      {`添加 ${item.displayName} 账号`}
+                    </Text>
+                  </HStack>
+                </Button>
+              </VStack>
+            </DisclosureGroup>
+          ))}
+        </Section>
+      ))}
+    </List>
   )
+
+  if (embedded) {
+    return listContent
+  }
+
+  return <NavigationStack>{listContent}</NavigationStack>
 }

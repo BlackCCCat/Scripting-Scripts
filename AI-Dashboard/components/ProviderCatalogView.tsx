@@ -11,13 +11,16 @@ import {
   Section,
   Text,
   VStack,
+  VirtualNode,
   useMemo,
   useState,
 } from "scripting"
 import {
+  ProviderCredentialEnvelope,
   ProviderId,
   ProviderMeta,
   ProviderRouteCategory,
+  SubscriptionAccount,
 } from "../models/types"
 import {
   PROVIDERS_CATALOG,
@@ -31,6 +34,7 @@ import {
   routeCategoryTitle,
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
+import { AddAccountSheet } from "./AddAccountSheet"
 
 const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
   "direct_api",
@@ -42,10 +46,25 @@ const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
 
 export function ProviderCatalogView(props: {
   isDemoMode: boolean
+  isHomeScreen?: boolean
+  zoomNamespace?: any
+  tabSwitchMenu?: VirtualNode
   onQuickAddAccount: (provider: ProviderId) => void
+  onAccountCreated?: (
+    account: SubscriptionAccount,
+    envelope: ProviderCredentialEnvelope
+  ) => void
   onDismiss: () => void
 }) {
-  const { isDemoMode, onQuickAddAccount, onDismiss } = props
+  const {
+    isDemoMode,
+    isHomeScreen = false,
+    zoomNamespace,
+    tabSwitchMenu,
+    onQuickAddAccount,
+    onAccountCreated,
+    onDismiss,
+  } = props
   const [searchText, setSearchText] = useState<string>("")
   const [selectedCategory, setSelectedCategory] = useState<
     ProviderRouteCategory | "all"
@@ -53,6 +72,10 @@ export function ProviderCatalogView(props: {
   const [sortGroupingMode, setSortGroupingMode] = useState<
     "alphabet" | "category"
   >("alphabet")
+  const [addingProvider, setAddingProvider] = useState<{
+    provider: ProviderId
+    nonce: number
+  } | null>(null)
 
   const filtered = useMemo(
     () => searchProviders(searchText, selectedCategory),
@@ -75,27 +98,76 @@ export function ProviderCatalogView(props: {
       .filter((group) => group.items.length > 0)
   }, [filtered, selectedCategory])
 
-  return (
-    <NavigationStack>
-      <List
-        navigationTitle={`供应商目录 (${filtered.length})`}
-        listStyle="insetGroup"
-        listSectionIndexVisibility="automatic"
-        searchable={{
-          value: searchText,
-          onChanged: setSearchText,
-          prompt: "搜索供应商、认证协议或 API 端点",
-        }}
-        toolbar={{
-          topBarLeading: (
+  const handleAdd = (provider: ProviderId) => {
+    if (isHomeScreen) {
+      setAddingProvider({ provider, nonce: Date.now() })
+    } else {
+      onQuickAddAccount(provider)
+    }
+  }
+
+  const listContent = (
+    <List
+      navigationTitle={`供应商目录 (${filtered.length})`}
+      listStyle="insetGroup"
+      listSectionIndexVisibility="automatic"
+      searchable={{
+        value: searchText,
+        onChanged: setSearchText,
+        prompt: "搜索供应商、认证协议或 API 端点",
+      }}
+      toolbar={{
+        topBarLeading: isHomeScreen
+          ? tabSwitchMenu
+          : (
             <Button
               title="退出"
               systemImage="xmark"
               action={onDismiss}
             />
           ),
-        }}
-      >
+      }}
+      navigationDestination={
+        isHomeScreen
+          ? {
+              isPresented: Boolean(addingProvider),
+              onChanged: (open) => {
+                if (!open) setAddingProvider(null)
+              },
+              content: addingProvider ? (
+                <AddAccountSheet
+                  key={addingProvider.nonce}
+                  initialProviderId={addingProvider.provider}
+                  defaultSynchronizable={false}
+                  startWithPicker={false}
+                  embedded={true}
+                  zoomNamespace={zoomNamespace}
+                  navigationTransition={
+                    zoomNamespace
+                      ? {
+                          type: "zoom",
+                          sourceID: `catalog-add-${addingProvider.provider}`,
+                          namespace: zoomNamespace,
+                        }
+                      : undefined
+                  }
+                  onCancel={() => setAddingProvider(null)}
+                  onAccountCreated={(account, envelope) => {
+                    setAddingProvider(null)
+                    if (onAccountCreated) {
+                      onAccountCreated(account, envelope)
+                    } else {
+                      onQuickAddAccount(account.provider)
+                    }
+                  }}
+                />
+              ) : (
+                <Text> </Text>
+              ),
+            }
+          : undefined
+      }
+    >
         <Section
           header={<Text>分类与排序</Text>}
           footer={
@@ -143,7 +215,15 @@ export function ProviderCatalogView(props: {
                     key={item.id}
                     meta={item}
                     isDemoMode={isDemoMode}
-                    onAdd={() => onQuickAddAccount(item.id)}
+                    zoomSource={
+                      zoomNamespace
+                        ? {
+                            id: `catalog-add-${item.id}`,
+                            namespace: zoomNamespace,
+                          }
+                        : undefined
+                    }
+                    onAdd={() => handleAdd(item.id)}
                   />
                 ))}
               </Section>
@@ -167,22 +247,36 @@ export function ProviderCatalogView(props: {
                     key={item.id}
                     meta={item}
                     isDemoMode={isDemoMode}
-                    onAdd={() => onQuickAddAccount(item.id)}
+                    zoomSource={
+                      zoomNamespace
+                        ? {
+                            id: `catalog-add-${item.id}`,
+                            namespace: zoomNamespace,
+                          }
+                        : undefined
+                    }
+                    onAdd={() => handleAdd(item.id)}
                   />
                 ))}
               </Section>
             ))}
       </List>
-    </NavigationStack>
   )
+
+  if (isHomeScreen) {
+    return listContent
+  }
+
+  return <NavigationStack>{listContent}</NavigationStack>
 }
 
 function ProviderCatalogRow(props: {
   meta: ProviderMeta
   isDemoMode: boolean
+  zoomSource?: { id: string | number; namespace: any }
   onAdd: () => void
 }) {
-  const { meta, isDemoMode, onAdd } = props
+  const { meta, isDemoMode, zoomSource, onAdd } = props
 
   return (
     <DisclosureGroup
@@ -240,6 +334,7 @@ function ProviderCatalogRow(props: {
         <Button
           buttonStyle={adaptiveProminentButtonStyle()}
           frame={{ maxWidth: "infinity", alignment: "center" }}
+          matchedTransitionSource={zoomSource}
           action={onAdd}
         >
           <HStack

@@ -32,6 +32,8 @@ import {
 export function DeviceCodeLoginSheet(props: {
   provider: ProviderId
   region?: string
+  embedded?: boolean
+  navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onCancel: () => void
   onCompleted: (envelope: ProviderCredentialEnvelope) => void
 }) {
@@ -124,15 +126,17 @@ export function DeviceCodeLoginSheet(props: {
     await handlePollOnce(session)
   }
 
-  return (
-    <NavigationStack>
-      <Form
-        navigationTitle={`${meta.displayName} ${session?.userCode || isTrueDevice ? "设备码授权" : "网页授权"}`}
-        navigationBarTitleDisplayMode="inline"
-        toolbar={{
-          cancellationAction: <Button title="关闭" action={onCancel} />,
-        }}
-      >
+  const content = (
+    <Form
+      navigationTransition={props.navigationTransition}
+      navigationTitle={`${meta.displayName} ${session?.userCode || isTrueDevice ? "设备码授权" : "网页授权"}`}
+      navigationBarTitleDisplayMode="inline"
+      toolbar={{
+        cancellationAction: props.embedded ? undefined : (
+          <Button title="关闭" action={onCancel} />
+        ),
+      }}
+    >
         <Section>
           <HStack alignment="center" spacing={12}>
             <ProviderIconView provider={provider} size={40} />
@@ -260,6 +264,11 @@ export function DeviceCodeLoginSheet(props: {
           </Section>
         ) : null}
       </Form>
-    </NavigationStack>
   )
+
+  if (props.embedded) {
+    return content
+  }
+
+  return <NavigationStack>{content}</NavigationStack>
 }
