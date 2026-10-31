@@ -25,6 +25,11 @@ const DEMO_DEFAULT_PROVIDERS: {
     displayName: "OpenAI Codex",
   },
   {
+    id: "demo-codex-02",
+    provider: "codex",
+    displayName: "OpenAI Codex",
+  },
+  {
     id: "demo-claude-01",
     provider: "claude",
     displayName: "Claude",
@@ -199,24 +204,55 @@ function getProviderDemoWindows(
         ],
       }
 
-    case "codex":
+    case "codex": {
+      const isPro = accountId === "demo-codex-02" || accountId?.includes("pro")
+      if (isPro) {
+        return {
+          planName: "Pro",
+          identity: "pro_dev@example.com",
+          codexResetCards: {
+            availableCount: 2,
+          },
+          windows: [
+            {
+              id: "codex.weekly.pro",
+              name: "周度窗口",
+              period: "weekly",
+              usedPercentage: 24,
+              resetsAt: in5Days,
+            },
+            {
+              id: "codex.credits.pro",
+              name: "Credits 余额",
+              unit: "Credits",
+              wallet: {
+                currency: "Credits",
+                total: 1850,
+                isMonetary: false,
+              },
+            },
+          ],
+        }
+      }
+
+      // Plus 套餐演示账号：具备 5 小时主窗口与周度窗口双重限流
       return {
-        planName: "Pro",
-        identity: "dev@example.com",
+        planName: "Plus",
+        identity: "plus_dev@example.com",
         codexResetCards: {
-          availableCount: 2,
+          availableCount: 1,
         },
         windows: [
           {
             id: "codex.5h",
-            name: "5 小时限流",
+            name: "5 小时主窗口",
             period: "fiveHour",
-            usedPercentage: 34,
+            usedPercentage: 35,
             resetsAt: in3Hours,
           },
           {
             id: "codex.weekly",
-            name: "7 天配额",
+            name: "周度窗口",
             period: "weekly",
             usedPercentage: 18,
             resetsAt: in5Days,
@@ -233,6 +269,7 @@ function getProviderDemoWindows(
           },
         ],
       }
+    }
 
     case "claude":
       return {

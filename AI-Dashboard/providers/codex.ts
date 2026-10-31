@@ -23,32 +23,100 @@ export const queryCodexQuota: ProviderQuotaHandler = async (
     "https://chatgpt.com/backend-api/wham/usage",
     { headers }
   )
+
+  const rawPlanType =
+    typeof json.plan_type === "string" && json.plan_type.trim()
+      ? json.plan_type.trim()
+      : envelope.metadata.planType || "Pro"
+
+  const planTypeLower = rawPlanType.toLowerCase()
+
+  // 判定是否属于 Pro 系列套餐（涵盖 Pro, Pro Lite, Pro 100/200/500 等全部 Pro 级别套餐）
+  const isProPlan =
+    planTypeLower.includes("pro") ||
+    planTypeLower.includes("专业") ||
+    planTypeLower.includes("旗舰") ||
+    planTypeLower.includes("尊享")
+
   const windows: QuotaWindow[] = []
   const rateLimit = json.rate_limit as Record<string, unknown> | undefined
   if (rateLimit) {
     const primary = rateLimit.primary_window as
       | Record<string, unknown>
       | undefined
-    if (primary) {
-      windows.push({
-        id: "codex.primary",
-        name: "5 小时主窗口",
-        period: "fiveHour",
-        usedPercentage: toFiniteNumber(primary.used_percent),
-        resetsAt: normalizeEpochDate(primary.reset_at),
-      })
-    }
     const secondary = rateLimit.secondary_window as
       | Record<string, unknown>
       | undefined
-    if (secondary) {
-      windows.push({
-        id: "codex.secondary",
-        name: "周度窗口",
-        period: "weekly",
-        usedPercentage: toFiniteNumber(secondary.used_percent),
-        resetsAt: normalizeEpochDate(secondary.reset_at),
-      })
+
+    const primarySeconds = toFiniteNumber(
+      primary?.limit_window_seconds ?? primary?.limitWindowSeconds
+    )
+    const secondarySeconds = toFiniteNumber(
+      secondary?.limit_window_seconds ?? secondary?.limitWindowSeconds
+    )
+
+    if (isProPlan) {
+      // =========================================================================
+      // Pro 系列套餐：官方特性只有周额度，绝无 5 小时额度。
+      // 1. 若 OpenAI 返回 secondary_window，其通常为周度配额 (604800s)；
+      // 2. 若 OpenAI 仅返回 primary_window（无 secondary），在 Pro 套餐中该窗口即为周额度 (limit_window_seconds=604800)；
+      // 3. 无论接口是单窗口还是双窗口，Pro 套餐都严格只输出周度额度，过滤掉 5 小时限流。
+      // =========================================================================
+      const weeklyWindowObj =
+        (secondary && (secondarySeconds === undefined || secondarySeconds >= 86400 * 3))
+          ? secondary
+          : (primary && (primarySeconds === undefined || primarySeconds >= 86400 * 3))
+            ? primary
+            : (secondary || primary)
+
+      if (weeklyWindowObj) {
+        windows.push({
+          id: "codex.weekly",
+          name: "周度窗口",
+          period: "weekly",
+          usedPercentage: toFiniteNumber(weeklyWindowObj.used_percent),
+          resetsAt: normalizeEpochDate(weeklyWindowObj.reset_at),
+        })
+      }
+    } else {
+      // =========================================================================
+      // Plus / 其他套餐：同时包含 5 小时额度与周度额度
+      // =========================================================================
+      if (primary) {
+        // 如果 primary 窗口自身显式标明为 7 天 (>= 3 天)，且无 secondary，则作为周配额
+        const isPrimaryActuallyWeekly =
+          primarySeconds !== undefined &&
+          primarySeconds >= 86400 * 3 &&
+          !secondary
+
+        if (isPrimaryActuallyWeekly) {
+          windows.push({
+            id: "codex.weekly",
+            name: "周度窗口",
+            period: "weekly",
+            usedPercentage: toFiniteNumber(primary.used_percent),
+            resetsAt: normalizeEpochDate(primary.reset_at),
+          })
+        } else {
+          windows.push({
+            id: "codex.primary",
+            name: "5 小时主窗口",
+            period: "fiveHour",
+            usedPercentage: toFiniteNumber(primary.used_percent),
+            resetsAt: normalizeEpochDate(primary.reset_at),
+          })
+        }
+      }
+
+      if (secondary) {
+        windows.push({
+          id: "codex.secondary",
+          name: "周度窗口",
+          period: "weekly",
+          usedPercentage: toFiniteNumber(secondary.used_percent),
+          resetsAt: normalizeEpochDate(secondary.reset_at),
+        })
+      }
     }
   }
   const credits = json.credits as Record<string, unknown> | undefined
@@ -175,10 +243,11 @@ export const queryCodexQuota: ProviderQuotaHandler = async (
   return {
     accountID,
     collectedAt,
-    providerPlanName:
-      typeof json.plan_type === "string" && json.plan_type.trim()
-        ? json.plan_type.trim()
-        : envelope.metadata.planType || "Pro",
+    providerPlanName: isProPlan
+      ? "Pro"
+      : planTypeLower.includes("plus")
+        ? "Plus"
+        : rawPlanType || "Pro",
     accountIdentity,
     windows,
     codexResetCards:

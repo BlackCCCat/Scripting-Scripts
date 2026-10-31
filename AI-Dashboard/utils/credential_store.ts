@@ -454,10 +454,66 @@ export function saveStoredAccounts(accounts: SubscriptionAccount[]): void {
   Storage.set(STORAGE_ACCOUNTS_KEY, accounts)
 }
 
+/**
+ * 规整 Codex 历史快照中的配额窗口：
+ * 对于所有 Pro 系列套餐，确保仅展示周度窗口，消除历史遗留的 5 小时限流窗口
+ */
+export function normalizeCodexSnapshot(snapshot: QuotaSnapshot): QuotaSnapshot {
+  const isCodexSnapshot =
+    Boolean(snapshot.codexResetCards) ||
+    snapshot.windows.some((w) => w.id.startsWith("codex."))
+  if (!isCodexSnapshot) return snapshot
+
+  const plan = (snapshot.providerPlanName || "").toLowerCase()
+  const isPro =
+    plan.includes("pro") ||
+    plan.includes("专业") ||
+    plan.includes("旗舰") ||
+    plan.includes("尊享")
+  if (!isPro) return snapshot
+
+  const nonWallet = snapshot.windows.filter((w) => !w.wallet)
+  const has5h = nonWallet.some(
+    (w) => w.period === "fiveHour" || /5|five/i.test(w.name)
+  )
+  if (!has5h) return snapshot
+
+  // 如果只有一个非钱包窗口且被历史逻辑误标为 5 小时，直接纠正为周度窗口
+  if (nonWallet.length === 1) {
+    const correctedWindows = snapshot.windows.map((w) => {
+      if (!w.wallet && (w.period === "fiveHour" || /5|five/i.test(w.name))) {
+        return {
+          ...w,
+          id: "codex.weekly",
+          name: "周度窗口",
+          period: "weekly" as const,
+        }
+      }
+      return w
+    })
+    return { ...snapshot, windows: correctedWindows }
+  }
+
+  // 如果同时存在 5 小时与周度窗口，过滤掉 5 小时窗口
+  const filteredWindows = snapshot.windows.filter((w) => {
+    if (w.wallet) return true
+    return w.period !== "fiveHour" && !/5|five/i.test(w.name)
+  })
+  return { ...snapshot, windows: filteredWindows }
+}
+
 export function loadStoredSnapshots(): Record<string, QuotaSnapshot> {
   const map = Storage.get<Record<string, QuotaSnapshot>>(STORAGE_SNAPSHOTS_KEY)
   if (!map || typeof map !== "object") return {}
-  return map
+  const normalized: Record<string, QuotaSnapshot> = {}
+  for (const [key, snap] of Object.entries(map)) {
+    if (snap && typeof snap === "object" && Array.isArray(snap.windows)) {
+      normalized[key] = normalizeCodexSnapshot(snap)
+    } else {
+      normalized[key] = snap
+    }
+  }
+  return normalized
 }
 
 export function saveStoredSnapshots(snapshots: Record<string, QuotaSnapshot>): void {

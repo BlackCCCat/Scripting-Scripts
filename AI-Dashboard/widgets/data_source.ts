@@ -110,6 +110,10 @@ function buildWidgetAccountData(
   let planName = snapshot?.providerPlanName || (isWallet ? "PayG" : "Active")
   if (acc.provider === "workBuddy") planName = "Free"
   if (acc.provider === "antigravity") planName = "Pro"
+  if (acc.provider === "codex" && snapshot?.providerPlanName) {
+    if (/pro/i.test(snapshot.providerPlanName)) planName = "Pro"
+    else if (/plus/i.test(snapshot.providerPlanName)) planName = "Plus"
+  }
 
   const windows = snapshot?.windows ?? []
   let earliestResetMs: number | null = null
