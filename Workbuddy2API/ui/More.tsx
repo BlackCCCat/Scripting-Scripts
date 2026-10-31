@@ -83,6 +83,7 @@ export function MorePage() {
       {(host !== addressHost("") || portText !== String(listenPort())) && <Button title="保存地址和端口" systemImage="checkmark" disabled={busy} action={() => void saveEndpoint()} />}
       <Hint>地址留空时自动使用当前网络地址；自定义地址用于复制，监听范围由局域网开关控制。端口固定，保存后若服务运行会自动重启。</Hint>
       <Hint>接口：GET /v1/models、POST /v1/chat/completions。无需鉴权头，客户端任意填写或留空 API Key 均可。</Hint>
+      <Hint>流式请求会在上游完成后一次性返回 SSE；当前 Scripting HTTP 服务不能逐块输出。</Hint>
       <Button title={busy ? "处理中…" : state.running ? "停止服务" : "启动服务"} systemImage={state.running ? "stop.fill" : "play.fill"} disabled={busy} action={() => void toggle()} />
       <Toggle title="允许局域网访问" systemImage="wifi" value={state.lan} disabled={busy} onChanged={value => void changeLan(value)} />
       {state.running && Script.supportsMinimization() && <Button title="收起界面，保持服务" systemImage="rectangle.compress.vertical" action={() => { void Script.minimize() }} />}
@@ -101,9 +102,10 @@ function AboutPage() {
       <Link url="https://github.com/L0NE-6/WorkBuddy-Daily"><HStack spacing={9}><Image systemName="checklist" foregroundStyle="systemOrange" /><Text>WorkBuddy-Daily · 任务自动化参考</Text></HStack></Link>
     </Section>
     <Section title="同步参考">
-      <Hint>iOS 界面最初参考 42cd9651。以下为 2026-10-28 核对的上游最新提交，用于后续比对更新，并不表示已逐项同步。</Hint>
-      <Link url="https://github.com/chenyynx/wb2api-ios/commit/f29f9a66312acf2d3f177b1ec2cb205d0aefe182"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemBlue" /><Text>iOS 最新提交 · f29f9a66312a</Text></HStack></Link>
-      <Link url="https://github.com/misakano7545/workbuddy2api-panel/commit/47f1ed61ee83434d275d9379dfd17fada4f86f26"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemGreen" /><Text>后端最新提交 · 47f1ed61ee83</Text></HStack></Link>
+      <Hint>iOS 界面最初参考 42cd9651。以下为 2026-10-31 核对的上游最新提交；本脚本仅同步适用功能。</Hint>
+      <Link url="https://github.com/chenyynx/wb2api-ios/commit/5c809a055d9a417370843abf8aa855c7eb755b97"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemBlue" /><Text>iOS 最新提交 · 5c809a055d9a</Text></HStack></Link>
+      <Link url="https://github.com/misakano7545/workbuddy2api-panel/commit/8ab87d4e5178318fcbee9f611c48d3316749edc2"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemGreen" /><Text>后端最新提交 · 8ab87d4e5178</Text></HStack></Link>
+      <Link url="https://github.com/L0NE-6/WorkBuddy-Daily/commit/8687e9a6c431616e5a62db86e36aeece11e2fadc"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemOrange" /><Text>任务最新提交 · 8687e9a6c431</Text></HStack></Link>
     </Section>
   </List>
 }

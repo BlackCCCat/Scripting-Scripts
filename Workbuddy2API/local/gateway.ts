@@ -1,5 +1,5 @@
 import { ChatUpstreamError, completeChat, type ChatRequest } from "./chat"
-import { listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
+import { accounts, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
 import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
 import { clearPendingStop, markServiceHttpStopped, pendingStopId } from "./serviceControl"
@@ -110,7 +110,7 @@ async function openGateway(): Promise<void> {
   next.registerAsyncHandler("/v1/models", async request => {
     if (request.method !== "GET") return apiError(405, "仅支持 GET")
     try {
-      if (modelCatalogNeedsRefresh()) await refreshModelCatalog()
+      if (accounts().some(item => item.enabled !== false) && modelCatalogNeedsRefresh()) await refreshModelCatalog()
       return json(200, { object: "list", data: modelIds().map(id => ({ id, object: "model", owned_by: id.startsWith("cn:") ? "Workbuddy" : "Workbuddy AI" })) })
     } catch (error) { return apiError(502, error instanceof Error ? error.message : String(error)) }
   })

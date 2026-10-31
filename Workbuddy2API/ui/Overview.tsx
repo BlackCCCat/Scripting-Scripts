@@ -41,7 +41,9 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
   const recent = records()
   const today = new Date().toDateString()
   const todayTokens = recent.filter(item => new Date(item.at).toDateString() === today).reduce((sum, item) => sum + item.tokens, 0)
-  const available = items.filter(item => !item.error).length
+  const servingItems = items.filter(item => item.enabled !== false)
+  const available = servingItems.filter(item => !item.error).length
+  const disabled = items.length - servingItems.length
   const credits = items.reduce((sum, item) => sum + Math.max(0, item.credits ?? 0), 0)
   const successes = recent.filter(item => item.ok).length
   const cacheHit = recent.reduce((sum, item) => sum + (item.cacheHitTokens ?? 0), 0)
@@ -57,20 +59,23 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
     : uncertain ? `${uncertain} 个状态待确认 · 轻点签到`
     : pendingCheckins.length ? `今日 ${checked}/${eligible.length} 已签 · 轻点签到`
     : "签到活动未开启"
-  const lockRows = [...new Map(locks.map(lock => {
-    const site = items.find(item => item.uid === lock.uid)?.site
+  const lockRows = [...new Map(locks.filter(lock => servingItems.some(item => item.uid === lock.uid)).map(lock => {
+    const site = servingItems.find(item => item.uid === lock.uid)?.site
     return [`${site === "cn" ? "cn" : "global"}:${lock.model}`, { realm: site === "cn" ? "国内版" : "国际版", model: lock.model }]
   })).values()].map(row => {
-    const sameRealm = items.filter(item => (item.site === "cn" ? "国内版" : "国际版") === row.realm)
+    const sameRealm = servingItems.filter(item => (item.site === "cn" ? "国内版" : "国际版") === row.realm)
     const affected = locks.filter(lock => lock.model === row.model && sameRealm.some(item => item.uid === lock.uid)).sort((a, b) => a.until - b.until)
     return { ...row, total: sameRealm.length, locked: affected.length, until: affected[0].until, reason: affected[0].reason, estimated: affected[0].estimated }
   })
   const lastUpdated = Math.max(0, ...items.map(item => item.updatedAt ?? 0))
-  const firstHour = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 23 * 3_600_000
-  const trend = Array.from({ length: 8 }, (_, index) => {
-    const from = firstHour + index * 3 * 3_600_000
-    return { label: new Date(from).getHours().toString().padStart(2, "0"), value: recent.filter(item => item.at >= from && item.at < from + 3 * 3_600_000).reduce((sum, item) => sum + item.tokens, 0) }
-  })
+  const hour = 3_600_000
+  const firstHour = Math.floor(Date.now() / hour) * hour - 23 * hour
+  const hourlyTokens = Array<number>(24).fill(0)
+  for (const item of recent) {
+    const index = Math.floor((item.at - firstHour) / hour)
+    if (index >= 0 && index < 24) hourlyTokens[index] += item.tokens
+  }
+  const trend = hourlyTokens.map((value, index) => ({ label: new Date(firstHour + index * hour), value, unit: "hour" as const, foregroundStyle: "systemPurple" as const }))
 
   async function run(kind: "balance" | "checkin") {
     if (busy) return
@@ -102,15 +107,15 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
   }
   return <ScrollView navigationTitle="概览" navigationBarTitleDisplayMode="large" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void run("balance").catch(alertError)} /> }}>
     <VStack alignment="leading" spacing={16} padding={{ horizontal: 16, top: 12, bottom: 28 }}>
-      <Hint>{`${items.length} 个账号 · ${available} 个可用`}</Hint>
+      <Hint>{`${items.length} 个账号 · ${available} 个参与服务${disabled ? ` · ${disabled} 个已停用` : ""}`}</Hint>
       <Hint>{lastUpdated ? `余额更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}` : "尚未刷新余额"}</Hint>
       <VStack alignment="leading" spacing={8} padding={{ horizontal: 18, top: 14, bottom: 12 }} frame={{ maxWidth: "infinity", alignment: "leading" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 20 } }}>
         <Button buttonStyle="plain" action={tapCheckin}>
           <HStack spacing={16} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-            <Gauge value={available} max={Math.max(1, items.length)} label={<Text>健康</Text>} currentValueLabel={<Text>{`${available}/${items.length}`}</Text>} gaugeStyle="accessoryCircularCapacity" tint="systemPurple" scaleEffect={1.2} frame={{ width: 120, height: 120 }} />
+            <Gauge value={available} max={Math.max(1, servingItems.length)} label={<Text>健康</Text>} currentValueLabel={<Text>{`${available}/${servingItems.length}`}</Text>} gaugeStyle="accessoryCircularCapacity" tint="systemPurple" scaleEffect={1.2} frame={{ width: 120, height: 120 }} />
             <VStack alignment="leading" spacing={7} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-              <Text font="headline">{!items.length ? "等待添加账号" : available === items.length ? "池子状态良好" : "部分账号需检查"}</Text>
-              <Hint>{`${available} 个账号可用 · ${items.length - available} 个需检查`}</Hint>
+              <Text font="headline">{!items.length ? "等待添加账号" : !servingItems.length ? "账号均已停用" : available === servingItems.length ? "池子状态良好" : "部分账号需检查"}</Text>
+              <Hint>{`${available} 个参与服务 · ${servingItems.length - available} 个需检查${disabled ? ` · ${disabled} 个已停用` : ""}`}</Hint>
               <Hint>{recent.length ? `最近 ${recent.length} 次请求成功率 ${Math.round(successes / recent.length * 100)}%` : "暂无本机请求记录"}</Hint>
             </VStack>
           </HStack>
@@ -148,9 +153,12 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
         </HStack>)}
       </VStack>
       <VStack alignment="leading" spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-        <Text font="headline">用量趋势</Text><Hint>最近 24 小时 · 每 3 小时</Hint>
+        <Text font="headline">用量趋势</Text><Hint>最近 24 小时 · 每小时 · 左右滑动查看</Hint>
         <VStack padding={12} frame={{ maxWidth: "infinity" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}>
-          {trend.some(item => item.value > 0) ? <Chart frame={{ height: 170 }} chartYAxis={{ values: { type: "automatic", desiredCount: 3 } }}><BarChart marks={trend.map(item => ({ ...item, foregroundStyle: "systemPurple" }))} /></Chart> : <Hint>暂无本机 Token 用量</Hint>}
+          {trend.some(item => item.value > 0) ? <Chart frame={{ height: 170 }} chartScrollableAxes="horizontal" chartXVisibleDomain={10 * 3600}
+            chartScrollPositionX={trend[14].label} chartScrollTargetBehavior={{ matching: new DateComponents({ hour: 1 }) }}
+            chartXAxis={{ values: { type: "strideDate", by: "hour", count: 2 }, valueLabel: { format: "time" } }}
+            chartYAxis={{ values: { type: "automatic", desiredCount: 3 } }}><BarChart marks={trend} /></Chart> : <Hint>暂无本机 Token 用量</Hint>}
         </VStack>
       </VStack>
     </VStack>

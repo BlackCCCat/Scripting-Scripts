@@ -55,7 +55,10 @@ export function DataPage({ revision }: { revision: number }) {
   const [days, setDays] = useState(0)
   const [group, setGroup] = useState<Group>("account")
   useEffect(() => { setEntries(records()) }, [revision])
-  const filtered = days ? entries.filter(item => item.at >= Date.now() - days * 86_400_000) : entries
+  const now = Date.now()
+  const todayStart = new Date(now).setHours(0, 0, 0, 0)
+  const filtered = days === -1 ? entries.filter(item => item.at >= todayStart)
+    : days ? entries.filter(item => item.at >= now - days * 86_400_000) : entries
   const successes = filtered.filter(item => item.ok)
   const tokens = successes.reduce((sum, item) => sum + item.tokens, 0)
   const spentSamples = filtered.filter(item => item.creditsSpent != null)
@@ -65,7 +68,8 @@ export function DataPage({ revision }: { revision: number }) {
   const failures = filtered.length - successes.length
   const timed = filtered.filter(item => item.durationMs != null)
   const averageLatency = timed.length ? `${(timed.reduce((sum, item) => sum + (item.durationMs ?? 0), 0) / timed.length / 1000).toFixed(1)}s` : "—"
-  const span = days || Math.max(1, Math.ceil((Date.now() - Math.min(Date.now(), ...filtered.map(item => item.at))) / 86_400_000))
+  const span = days > 0 ? days : days === -1 ? 1 : Math.max(1, Math.ceil((now - Math.min(now, ...filtered.map(item => item.at))) / 86_400_000))
+  const averageTokens = days === -1 ? tokens / Math.max(1, (now - todayStart) / 3_600_000) : tokens / span
   const known = new Map(accounts().map(account => [account.uid, account]))
   const nameCount = new Map<string, number>()
   for (const account of known.values()) nameCount.set(account.nickname, (nameCount.get(account.nickname) ?? 0) + 1)
@@ -91,14 +95,14 @@ export function DataPage({ revision }: { revision: number }) {
   return <ScrollView navigationTitle="数据" navigationBarTitleDisplayMode="large" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" action={() => setEntries(records())} /> }}>
     <VStack alignment="leading" spacing={18} padding={{ horizontal: 16, top: 16, bottom: 30 }}>
       <Picker title="时间区间" pickerStyle="segmented" value={days} onChanged={setDays}>
-        <Text tag={3}>3 天</Text><Text tag={7}>7 天</Text><Text tag={30}>30 天</Text><Text tag={0}>总计</Text>
+        <Text tag={3}>3天</Text><Text tag={7}>7天</Text><Text tag={30}>30天</Text><Text tag={-1}>今天</Text><Text tag={0}>总计</Text>
       </Picker>
       <VStack alignment="leading" spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
         <Text font="headline">区间消耗</Text>
-        <Hint>{days ? `最近 ${days} 天 · 仅统计本机保留的请求` : "有记录以来 · 本机最多保留 200 次请求"}</Hint>
+        <Hint>{days === -1 ? "今天 00:00 至今 · 仅统计本机保留的请求" : days ? `最近 ${days} 天 · 仅统计本机保留的请求` : "有记录以来 · 本机最多保留 200 次请求"}</Hint>
         <VStack alignment="leading" spacing={14} padding={18} frame={{ maxWidth: "infinity", alignment: "leading" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}>
           <HStack spacing={5}><Text font="largeTitle" fontWeight="bold" monospacedDigit>{compact(tokens)}</Text><Hint>tokens</Hint></HStack>
-          <HStack spacing={18}><VStack alignment="leading"><Text font="headline" monospacedDigit>{compact(filtered.length)}</Text><Hint>请求</Hint></VStack><VStack alignment="leading"><Text font="headline" monospacedDigit>{spentSamples.length ? creditsSpent.toFixed(1) : "—"}</Text><Hint>积分</Hint></VStack><VStack alignment="leading"><Text font="headline" monospacedDigit>{compact(Math.round(tokens / span))}</Text><Hint>日均 Token</Hint></VStack></HStack>
+          <HStack spacing={18}><VStack alignment="leading"><Text font="headline" monospacedDigit>{compact(filtered.length)}</Text><Hint>请求</Hint></VStack><VStack alignment="leading"><Text font="headline" monospacedDigit>{spentSamples.length ? creditsSpent.toFixed(1) : "—"}</Text><Hint>积分</Hint></VStack><VStack alignment="leading"><Text font="headline" monospacedDigit>{compact(Math.round(averageTokens))}</Text><Hint>{days === -1 ? "小时均 Token" : "日均 Token"}</Hint></VStack></HStack>
         </VStack>
       </VStack>
       <Picker title="分组方式" pickerStyle="segmented" value={group} onChanged={(value: string) => setGroup(value as Group)}>

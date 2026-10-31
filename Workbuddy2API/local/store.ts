@@ -12,6 +12,7 @@ export type Credential = {
 }
 
 export type Account = Pick<Credential, "uid" | "nickname" | "site" | "enterpriseId"> & {
+  enabled?: boolean
   credits?: number
   total?: number
   checkedIn?: string
@@ -225,7 +226,7 @@ export function setModelHidden(id: string, hidden: boolean) {
 export function modelIds(): string[] {
   const catalog = modelCatalog()
   const hidden = new Set(hiddenModelIds())
-  const active = new Set(accounts().map(item => `${item.uid}:${item.site === "cn" ? "cn" : "global"}`))
+  const active = new Set(accounts().filter(item => item.enabled !== false).map(item => `${item.uid}:${item.site === "cn" ? "cn" : "global"}`))
   return catalog.filter(item => item.uids.some(uid => active.has(`${uid}:${item.realm}`))).map(item => `${item.realm}:${item.id}`).filter(id => !hidden.has(id))
 }
 

@@ -368,7 +368,7 @@ function parseTasks(data: any, miniprogram: boolean): GrowthTask[] {
     const claimed = raw.claimed === true || raw.claimed === "true" || raw.accept_status === "claimed"
     const status = String(raw.accept_status || raw.status || "未接受")
     const completedAt = typeof raw.completed_at === "string" ? Date.parse(raw.completed_at) : NaN
-    return [{ task_code: code, title: String(raw.title || code), task_desc: String(raw.task_desc || ""),
+    return [{ task_code: code, title: String(raw.title || raw.task_title || raw.task_name || code), task_desc: String(raw.task_desc || ""),
       description: String(raw.description || ""), current, target, accept_status: status,
       claimed, claimable: !claimed && ((target != null && target > 0 && current != null && current >= target) || ((target == null || target === 0) && status === "completed")),
       has_reward: raw.has_reward === true, locked: raw.locked === true || raw.locked === "true", miniprogram,
@@ -396,15 +396,23 @@ function growthHeaders(miniprogram = false): Record<string, string> {
 export async function listTasks(uid: string, onWarning?: (message: string) => void): Promise<GrowthTask[]> {
   const account = await freshCredential(uid)
   if (account.enterpriseId) throw new Error("企业账号没有个人成长任务")
-  const main = parseTasks(await accountJSON(uid, "/v2/activity/growth/tasks", "GET", undefined, account.site === "cn" ? growthHeaders() : undefined), false)
-  if (account.site !== "cn") return withClaimTimes(uid, main)
-  try {
-    const extra = parseTasks(await accountJSON(uid, "/v2/activity/growth/tasks", "GET", undefined, growthHeaders(true)), true)
-    return withClaimTimes(uid, mergeTaskSources(main, extra))
-  } catch (error) {
-    onWarning?.(`小程序任务读取失败：${error instanceof Error ? error.message : String(error)}`)
-    return withClaimTimes(uid, main)
+  const sources = account.site === "cn" ? [
+    { name: "桌面", path: "/v2/activity/growth/tasks", headers: growthHeaders(), miniprogram: false },
+    { name: "小程序", path: "/v2/activity/growth/tasks", headers: growthHeaders(true), miniprogram: true },
+    { name: "等级", path: "/activity/growth/tasks", headers: undefined, miniprogram: false },
+  ] : [{ name: "国际", path: "/v2/activity/growth/tasks", headers: undefined, miniprogram: false }]
+  let merged: GrowthTask[] = [], succeeded = 0
+  const failures: string[] = []
+  for (const source of sources) {
+    try {
+      const data = await accountJSON(uid, source.path, "GET", undefined, source.headers)
+      merged = mergeTaskSources(merged, parseTasks(data, source.miniprogram))
+      succeeded++
+    } catch (error) { failures.push(`${source.name}任务读取失败：${error instanceof Error ? error.message : String(error)}`) }
   }
+  if (!succeeded) throw new Error(failures.join("；"))
+  if (failures.length) onWarning?.(failures.join("；"))
+  return withClaimTimes(uid, merged)
 }
 
 function withClaimTimes(uid: string, tasks: GrowthTask[]): GrowthTask[] {

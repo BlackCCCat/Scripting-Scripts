@@ -95,7 +95,9 @@ function candidates(model: string, onlyUid?: string): string[] {
   const locked = new Set(modelLocks().filter(item => item.model === bareModel).map(item => item.uid))
   const listed = modelCatalog().filter(item => item.id === bareModel && (!realm || item.realm === realm))
   const eligible = listed.length ? new Set(listed.flatMap(item => item.uids)) : null
-  const pool = accounts().filter(item => (!realm || realm === "cn" && item.site === "cn" || realm === "global" && item.site !== "cn") && (!eligible || eligible.has(item.uid)))
+  const pool = accounts().filter(item => (onlyUid || item.enabled !== false) &&
+    (!realm || realm === "cn" && item.site === "cn" || realm === "global" && item.site !== "cn") &&
+    (!eligible || eligible.has(item.uid)))
   const start = pool.findIndex(item => item.uid === lastPicked.get(model)) + 1
   return [...pool.slice(start), ...pool.slice(0, start)].filter(item => {
     const exhausted = exhaustedUntil.get(item.uid)
@@ -111,7 +113,7 @@ export async function completeChat(request: ChatRequest, onlyUid?: string, agent
   }
   const bareModel = request.model.replace(/^(cn|global):/, "")
   const uids = candidates(request.model, onlyUid)
-  if (!uids.length) throw new Error("没有可用账号，请先登录并检查账号状态")
+  if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
   let lastError: Error | null = null
   for (const uid of uids) {
     if (!onlyUid) lastPicked.set(request.model, uid)
