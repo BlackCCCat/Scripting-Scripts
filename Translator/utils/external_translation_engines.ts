@@ -9,8 +9,10 @@ import type {
 } from "../types"
 import { translateChunkedText } from "./translation_chunking"
 import { AI_PROVIDERS, aiProvider } from "./ai_providers"
+import { isLikelyUntranslated } from "./translation_validation"
 
 const GOOGLE_WEB_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
+let googleRetryAfter = 0
 const DEEPLX_DEFAULT_ENDPOINT = "http://localhost:1188/translate"
 const SUCCESSFUL_AI_ENDPOINT_CACHE = new Map<string, string>()
 const AI_TRANSLATION_TIMEOUT_SECONDS = 60
@@ -259,25 +261,6 @@ function normalizeAiTranslatedText(value: string) {
 
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
-}
-
-function normalizeComparableText(value: string) {
-  return String(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase()
-}
-
-function isLikelyUntranslated(request: TranslationRequest, translatedText: string) {
-  const source = normalizeComparableText(request.sourceText)
-  const translated = normalizeComparableText(translatedText)
-  if (!source || !translated) return false
-  if (source !== translated) return false
-  if (request.sourceLanguageCode !== AUTO_LANGUAGE.code && request.sourceLanguageCode === request.targetLanguageCode) {
-    return false
-  }
-
-  return source.length >= 12 || /\s/.test(source)
 }
 
 function aiEndpointCacheKey(mode: AiApiCompatibilityMode, baseUrl: string) {
@@ -746,6 +729,9 @@ function parseAiResponseText(raw: string) {
 }
 
 async function translateWithGoogleWeb(request: TranslationRequest): Promise<TranslationResult> {
+  if (Date.now() < googleRetryAfter) {
+    throw new Error("Google 网页翻译请求受到限流，请稍后重试或切换其他引擎。")
+  }
   const params = [
     "client=gtx",
     `sl=${encodeURIComponent(mapGoogleLanguage(request.sourceLanguageCode, true))}`,
@@ -761,26 +747,21 @@ async function translateWithGoogleWeb(request: TranslationRequest): Promise<Tran
       "Accept-Encoding": "identity",
     },
   }
-  let response = await fetch(url, options)
-
-  for (let retry = 0; response.status === 429 && retry < 2; retry += 1) {
+  const response = await fetch(url, options)
+  if (response.status === 429) {
     const retryAfter = response.headers.get("retry-after")
     const retryAfterMs = retryAfter
       ? /^\d+$/.test(retryAfter)
         ? Number(retryAfter) * 1000
         : Date.parse(retryAfter) - Date.now()
       : NaN
-    if (retryAfterMs > 15000) break
-    await new Promise<void>((resolve) => setTimeout(resolve,
-      Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? retryAfterMs : 1500 * (retry + 1)
-    ))
-    response = await fetch(url, options)
+    googleRetryAfter = Date.now() + Math.max(30000,
+      Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? retryAfterMs : 0
+    )
+    throw new Error("Google 网页翻译请求过于频繁（HTTP 429），请稍后重试或切换其他引擎。")
   }
 
   if (!response.ok) {
-    if (response.status === 429) {
-      throw new Error("Google 网页翻译请求过于频繁（HTTP 429），请稍后重试或切换其他引擎。")
-    }
     throw new Error(normalizeErrorMessage(response, "Google 网页翻译请求失败"))
   }
 
@@ -924,7 +905,7 @@ async function translateWithAiApiSingle(
         continue
       }
       translatedText = await readAiStreamResponse(response, callbacks)
-      if (translatedText && isLikelyUntranslated(request, translatedText)) {
+      if (translatedText && isLikelyUntranslated(request, translatedText, 12)) {
         translatedText = ""
         sawUntranslatedResponse = true
         continue

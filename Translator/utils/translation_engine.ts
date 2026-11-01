@@ -9,6 +9,7 @@ import {
   splitTranslationText,
   translateChunkedText,
 } from "./translation_chunking"
+import { isLikelyUntranslated } from "./translation_validation"
 
 const SESSION_INSTRUCTIONS = [
   "You are a translation engine for an iOS translation panel.",
@@ -51,7 +52,7 @@ function normalizeDetectedLanguageCode(raw: string) {
   return ""
 }
 
-function buildPrompt(request: TranslationRequest) {
+function buildPrompt(request: TranslationRequest, retryUntranslated = false) {
   const sourceLanguageName = request.sourceLanguageCode === AUTO_LANGUAGE.code
     ? AUTO_LANGUAGE.promptName
     : findLanguage(request.sourceLanguageCode).promptName
@@ -66,6 +67,9 @@ function buildPrompt(request: TranslationRequest) {
     "3. Keep all formatting and content intact.",
     "4. Output translated text only.",
     "5. Do not include the <text> or </text> tags in the output.",
+    ...(retryUntranslated ? [
+      "6. The previous response copied the source. Translate it into the target language; do not repeat the source text.",
+    ] : []),
     "",
     "<text>",
     request.sourceText,
@@ -233,49 +237,54 @@ export function createTranslationEngine() {
     callbacks?: TranslationProgressCallbacks,
     allowRecursiveSplit = true
   ): Promise<TranslationResult> {
-    const prompt = buildPrompt(request)
-    const session = new LanguageModelSession({
-      instructions: SESSION_INSTRUCTIONS,
-    })
-
-    try {
-      const stream = await session.streamResponse(prompt, {
-        temperature: 0.1,
-        maxResponseTokens: responseTokenBudget(request.sourceText),
-      })
-      const translatedText = await readStreamText(stream, callbacks)
-
-      if (!translatedText) {
-        throw new Error("模型没有返回可用译文。")
+    let translatedText = ""
+    let lastError: unknown
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = new LanguageModelSession({ instructions: SESSION_INSTRUCTIONS })
+      try {
+        const stream = await session.streamResponse(buildPrompt(request, attempt > 0), {
+          temperature: 0.1,
+          maxResponseTokens: responseTokenBudget(request.sourceText),
+        })
+        translatedText = await readStreamText(stream, callbacks)
+        if (translatedText && !isLikelyUntranslated(request, translatedText)) break
+      } catch (error) {
+        lastError = error
+      } finally {
+        session.dispose()
       }
-
-      if (
-        allowRecursiveSplit &&
-        request.sourceText.length > 360 &&
-        isSuspiciouslyShort(request.sourceText, translatedText)
-      ) {
-        const maxChunkLength = Math.max(260, Math.floor(request.sourceText.length / 2))
-        if (splitTranslationText(request.sourceText, maxChunkLength).length > 1) {
-          return await translateChunkedText(
-            request,
-            {
-              maxChunkLength,
-              concurrency: 1,
-              translateChunk: async (chunkRequest, chunkCallbacks) => (
-                await translateSingle(chunkRequest, chunkCallbacks, false)
-              ),
-            },
-            callbacks
-          )
-        }
-      }
-
-      return {
-        translatedText,
-      }
-    } finally {
-      session.dispose()
     }
+
+    if (!translatedText) {
+      if (lastError) throw lastError
+      throw new Error("模型没有返回可用译文。")
+    }
+    if (isLikelyUntranslated(request, translatedText)) {
+      throw new Error("Apple Intelligence 未执行翻译，请重试或更换引擎。")
+    }
+
+    if (
+      allowRecursiveSplit &&
+      request.sourceText.length > 360 &&
+      isSuspiciouslyShort(request.sourceText, translatedText)
+    ) {
+      const maxChunkLength = Math.max(260, Math.floor(request.sourceText.length / 2))
+      if (splitTranslationText(request.sourceText, maxChunkLength).length > 1) {
+        return await translateChunkedText(
+          request,
+          {
+            maxChunkLength,
+            concurrency: 1,
+            translateChunk: async (chunkRequest, chunkCallbacks) => (
+              await translateSingle(chunkRequest, chunkCallbacks, false)
+            ),
+          },
+          callbacks
+        )
+      }
+    }
+
+    return { translatedText }
   }
 
   return {
@@ -298,7 +307,7 @@ export function createTranslationEngine() {
           {
             maxChunkLength: 700,
             concurrency: 1,
-            maxRetries: 1,
+            maxRetries: 0,
             translateChunk: async (chunkRequest, chunkCallbacks) => (
               await translateSingle(chunkRequest, chunkCallbacks)
             ),

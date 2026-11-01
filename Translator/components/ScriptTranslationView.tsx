@@ -27,6 +27,7 @@ import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
 import type {
   EngineTranslationState,
   LanguageOption,
+  TranslationRequest,
   TranslatorEngineEntry,
 } from "../types"
 import {
@@ -371,24 +372,28 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
     engine: typeof visibleEngines[number],
     options?: {
       onPartialText?: (text: string) => void | Promise<void>
-    }
+    },
+    requestOverride?: TranslationRequest
   ) {
-    const request = {
+    const request = requestOverride ?? {
       sourceText,
       sourceLanguageCode,
       targetLanguageCode,
     }
     const detectedSource = await resolveTranslationSourceLanguage(request)
+    const aiRequest = detectedSource
+      ? { ...request, sourceLanguageCode: detectedSource }
+      : request
 
     const result = engine.kind === "apple_intelligence"
-      ? await appleEngine.translate(request, options)
+      ? await appleEngine.translate(aiRequest, options)
       : engine.kind === "assistant"
-        ? await createAssistantTranslationEngine(assistantConfig).translate(request, options)
+        ? await createAssistantTranslationEngine(assistantConfig).translate(aiRequest, options)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
           : engine.kind === "system_translation_offline"
             ? await installedSystemEngine.translate({ ...request, sourceLanguageCode: detectedSource ?? sourceLanguageCode })
-          : await translateWithExternalEngine(engine, request, options)
+          : await translateWithExternalEngine(engine, engine.kind === "ai_api" ? aiRequest : request, options)
 
     return {
       engineId: engine.id,
@@ -449,16 +454,36 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       return
     }
 
+    let effectiveTargetLanguageCode = targetLanguageCode
+    if (
+      sourceLanguageCode === AUTO_LANGUAGE.code &&
+      !targetTouchedRef.current &&
+      settings.defaultTargetLanguageCode === "zh-Hans"
+    ) {
+      const pendingRequestId = ++requestIdRef.current
+      const detected = await detectSourceLanguageCode(sourceText)
+      if (pendingRequestId !== requestIdRef.current || targetTouchedRef.current) return
+      if (detected === "zh-Hans" || detected === "zh-Hant") {
+        effectiveTargetLanguageCode = "en"
+      } else if (detected === "en") {
+        effectiveTargetLanguageCode = "zh-Hans"
+      }
+      if (effectiveTargetLanguageCode !== targetLanguageCode) {
+        setTargetLanguageCode(effectiveTargetLanguageCode)
+      }
+    }
+    const activeRequest = { sourceText, sourceLanguageCode, targetLanguageCode: effectiveTargetLanguageCode }
+
     if (!visibleEngines.length) {
       requestIdRef.current += 1
-      translatedRequestRef.current = { sourceText, sourceLanguageCode, targetLanguageCode }
+      translatedRequestRef.current = activeRequest
       historyIdRef.current = null
       historyWriteRef.current = null
       pendingHistoryResultsRef.current.clear()
       fullTranslationPendingRef.current = false
       logTranslationEvent("没有可执行的翻译引擎", {
         sourceLanguageCode,
-        targetLanguageCode,
+        targetLanguageCode: effectiveTargetLanguageCode,
       })
       setEngineResults([])
       setErrorText("没有启用且可用的翻译引擎。")
@@ -467,7 +492,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
 
     if (
       sourceLanguageCode !== AUTO_LANGUAGE.code &&
-      sourceLanguageCode === targetLanguageCode
+      sourceLanguageCode === effectiveTargetLanguageCode
     ) {
       requestIdRef.current += 1
       translatedRequestRef.current = null
@@ -488,7 +513,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
-    translatedRequestRef.current = { sourceText, sourceLanguageCode, targetLanguageCode }
+    translatedRequestRef.current = activeRequest
     historyIdRef.current = null
     historyWriteRef.current = null
     pendingHistoryResultsRef.current.clear()
@@ -502,7 +527,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
       sourceLength: sourceText.length,
       sourcePreview: summarizeText(sourceText),
       sourceLanguageCode,
-      targetLanguageCode,
+      targetLanguageCode: effectiveTargetLanguageCode,
       engines: visibleEngines.map((engine) => ({
         engineName: engine.label,
         ...assistantLogOptions(engine),
@@ -521,7 +546,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
                 if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engine.id]) return
                 updatePartialEngineResult(engine.id, text)
               },
-            })
+            }, activeRequest)
             if (requestId !== requestIdRef.current || runVersion !== engineRunVersionsRef.current[engine.id]) return null
 
             logTranslationEvent("脚本内引擎翻译成功", {
@@ -575,7 +600,7 @@ export function ScriptTranslationView(props: ScriptTranslationViewProps) {
         createdAt: startedAt,
         sourceText,
         sourceLanguageCode,
-        targetLanguageCode,
+        targetLanguageCode: effectiveTargetLanguageCode,
         results: historyResults(visibleEngines, settled),
       }).catch((error) => {
         console.error("[Translator] 保存翻译历史失败", error)

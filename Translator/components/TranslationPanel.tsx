@@ -336,16 +336,24 @@ export function TranslationPanel(props: TranslationPanelProps) {
       targetLanguageCode,
     }
     const detectedSource = await resolveTranslationSourceLanguage(request)
+    const aiRequest = detectedSource
+      ? { ...request, sourceLanguageCode: detectedSource }
+      : request
 
     const result = engine.kind === "apple_intelligence"
-      ? await appleEngine.translate(request, options)
+      ? await appleEngine.translate(aiRequest, options)
       : engine.kind === "assistant"
-        ? await createAssistantTranslationEngine(assistantConfig).translate(request, options, hasLongInput ? 1 : 2)
+        ? await createAssistantTranslationEngine(assistantConfig).translate(aiRequest, options, hasLongInput ? 1 : 2)
         : engine.kind === "system_translation"
           ? await systemEngine.translate(request)
           : engine.kind === "system_translation_offline"
             ? await installedSystemEngine.translate({ ...request, sourceLanguageCode: detectedSource ?? sourceLanguageCode })
-          : await translateWithExternalEngine(engine, request, options, hasLongInput ? 1 : 2)
+          : await translateWithExternalEngine(
+            engine,
+            engine.kind === "ai_api" ? aiRequest : request,
+            options,
+            hasLongInput ? 1 : 2
+          )
 
     return {
       engineId: engine.id,
@@ -375,6 +383,29 @@ export function TranslationPanel(props: TranslationPanelProps) {
 
   const runTranslation = useEffectEvent(async () => {
     if (!hasInput) return
+
+    if (
+      sourceLanguageCode === AUTO_LANGUAGE.code &&
+      !targetTouchedRef.current &&
+      settings.defaultTargetLanguageCode === "zh-Hans"
+    ) {
+      const pendingRequestId = ++requestIdRef.current
+      const detected = await detectSourceLanguageCode(sourceText)
+      if (pendingRequestId !== requestIdRef.current || targetTouchedRef.current) return
+      const nextTarget = detected === "zh-Hans" || detected === "zh-Hant"
+        ? "en"
+        : detected === "en"
+          ? "zh-Hans"
+          : targetLanguageCode
+      if (nextTarget !== targetLanguageCode) {
+        logTranslationEvent("自动切换默认目标语言", {
+          detectedSourceLanguageCode: detected,
+          nextTargetLanguageCode: nextTarget,
+        })
+        setTargetLanguageCode(nextTarget)
+        return
+      }
+    }
 
     if (!visibleEngines.length) {
       logTranslationEvent("没有可执行的翻译引擎", {
@@ -538,41 +569,6 @@ export function TranslationPanel(props: TranslationPanelProps) {
     targetTouchedRef.current = false
     setIsSourceExpanded(false)
   }, [sourceText])
-
-  useEffect(() => {
-    if (!hasInput) return
-    if (sourceLanguageCode !== AUTO_LANGUAGE.code) return
-    if (targetTouchedRef.current) return
-    if (settings.defaultTargetLanguageCode !== "zh-Hans") return
-
-    let cancelled = false
-
-    void (async () => {
-      const detected = await detectSourceLanguageCode(sourceText)
-      if (cancelled || !detected) return
-
-      if ((detected === "zh-Hans" || detected === "zh-Hant") && targetLanguageCode !== "en") {
-        logTranslationEvent("自动切换默认目标语言", {
-          detectedSourceLanguageCode: detected,
-          nextTargetLanguageCode: "en",
-        })
-        setTargetLanguageCode("en")
-        return
-      }
-
-      if (detected === "en" && targetLanguageCode !== "zh-Hans") {
-        logTranslationEvent("自动切换默认目标语言", {
-          detectedSourceLanguageCode: detected,
-          nextTargetLanguageCode: "zh-Hans",
-        })
-        setTargetLanguageCode("zh-Hans")
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [hasInput, settings.defaultTargetLanguageCode, sourceLanguageCode, sourceText, targetLanguageCode])
 
   const selectSourceLanguage = useEffectEvent((code: string) => {
     setSourceLanguageCode(code)

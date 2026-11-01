@@ -5,6 +5,7 @@ import type {
   TranslationResult,
 } from "../types"
 import { translateChunkedText } from "./translation_chunking"
+import { isLikelyUntranslated } from "./translation_validation"
 
 const ASSISTANT_TRANSLATION_SYSTEM_PROMPT = [
   "You are a translation engine for an iOS translation panel.",
@@ -65,46 +66,54 @@ export function createAssistantTranslationEngine(config?: TranslationEngineConfi
     request: TranslationRequest,
     callbacks?: TranslationProgressCallbacks
   ): Promise<TranslationResult> {
-    const stream = await Assistant.requestStreaming({
-      systemPrompt: ASSISTANT_TRANSLATION_SYSTEM_PROMPT,
-      provider,
-      modelId: modelId || undefined,
-      messages: {
-        role: "user",
-        content: [
-          `Source language: ${request.sourceLanguageCode}`,
-          `Target language: ${request.targetLanguageCode}`,
-          "Translate the following text:",
-          "",
-          "<text>",
-          request.sourceText,
-          "</text>",
-        ].join("\n"),
-      },
-    })
-
     let translatedText = ""
-    let lastPartialText = ""
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const stream = await Assistant.requestStreaming({
+        systemPrompt: ASSISTANT_TRANSLATION_SYSTEM_PROMPT,
+        provider,
+        modelId: modelId || undefined,
+        messages: {
+          role: "user",
+          content: [
+            `Source language: ${request.sourceLanguageCode}`,
+            `Target language: ${request.targetLanguageCode}`,
+            "Translate the following text:",
+            ...(attempt > 0 ? [
+              "The previous response repeated the source. Return a translation in the target language.",
+            ] : []),
+            "",
+            "<text>",
+            request.sourceText,
+            "</text>",
+          ].join("\n"),
+        },
+      })
 
-    for await (const chunk of stream as any) {
-      if (chunk?.type !== "text") continue
-      translatedText += String(chunk.content ?? "")
+      translatedText = ""
+      let lastPartialText = ""
+      for await (const chunk of stream as any) {
+        if (chunk?.type !== "text") continue
+        translatedText += String(chunk.content ?? "")
 
-      const partialText = normalizeAssistantTranslation(translatedText)
-      if (partialText && partialText !== lastPartialText) {
-        lastPartialText = partialText
-        await callbacks?.onPartialText?.(partialText)
+        const partialText = normalizeAssistantTranslation(translatedText)
+        if (partialText && partialText !== lastPartialText) {
+          lastPartialText = partialText
+          await callbacks?.onPartialText?.(partialText)
+        }
       }
+
+      translatedText = normalizeAssistantTranslation(translatedText)
+      if (!isLikelyUntranslated(request, translatedText)) break
     }
 
-    const normalized = normalizeAssistantTranslation(translatedText)
-    if (!normalized) {
+    if (!translatedText) {
       throw new Error("Assistant 没有返回可用译文。")
     }
-
-    return {
-      translatedText: normalized,
+    if (isLikelyUntranslated(request, translatedText)) {
+      throw new Error("Assistant 未执行翻译，请重试或更换引擎。")
     }
+
+    return { translatedText }
   }
 
   return {
