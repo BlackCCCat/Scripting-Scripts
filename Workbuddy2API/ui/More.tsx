@@ -102,10 +102,10 @@ function AboutPage() {
       <Link url="https://github.com/L0NE-6/WorkBuddy-Daily"><HStack spacing={9}><Image systemName="checklist" foregroundStyle="systemOrange" /><Text>WorkBuddy-Daily · 任务自动化参考</Text></HStack></Link>
     </Section>
     <Section title="同步参考">
-      <Hint>iOS 界面最初参考 42cd9651。以下为 2026-10-31 核对的上游最新提交；本脚本仅同步适用功能。</Hint>
+      <Hint>iOS 界面最初参考 42cd9651。iOS 与后端提交于 2026-10-31 核对，任务项目于 2026-11-01 核对；本脚本仅同步适用功能。</Hint>
       <Link url="https://github.com/chenyynx/wb2api-ios/commit/5c809a055d9a417370843abf8aa855c7eb755b97"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemBlue" /><Text>iOS 最新提交 · 5c809a055d9a</Text></HStack></Link>
       <Link url="https://github.com/misakano7545/workbuddy2api-panel/commit/8ab87d4e5178318fcbee9f611c48d3316749edc2"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemGreen" /><Text>后端最新提交 · 8ab87d4e5178</Text></HStack></Link>
-      <Link url="https://github.com/L0NE-6/WorkBuddy-Daily/commit/8687e9a6c431616e5a62db86e36aeece11e2fadc"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemOrange" /><Text>任务最新提交 · 8687e9a6c431</Text></HStack></Link>
+      <Link url="https://github.com/L0NE-6/WorkBuddy-Daily/commit/c442bab4d356e3450433df83de9c2dabe3248239"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemOrange" /><Text>任务最新提交 · c442bab4d356</Text></HStack></Link>
     </Section>
   </List>
 }

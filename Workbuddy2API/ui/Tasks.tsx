@@ -6,7 +6,9 @@ import { Busy, Failure, glass, Hint, primaryButton } from "./Shared"
 
 type Row = GrowthTask & { uid: string; nickname: string; canWrite: boolean; site: Account["site"] }
 type RunLine = TaskRunEntry & { nickname: string }
+type CreditChange = { uid: string; nickname: string; before: number; after: number }
 const actionSymbol = (task: GrowthTask) => task.claimable ? "gift" : taskAction(task) === "推进并领奖" ? "bolt.fill" : "checkmark.circle"
+const formatCredit = (value: number) => value.toLocaleString("zh-CN", { maximumFractionDigits: 2 })
 
 function ClaimedTask({ task, title }: { task: GrowthTask; title: string }) {
   const completedToday = task.completedAt && new Date(task.completedAt).toDateString() === new Date().toDateString()
@@ -26,6 +28,7 @@ export function TasksPage({ revision }: { revision: number }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [runEntries, setRunEntries] = useState<RunLine[]>([])
+  const [creditChanges, setCreditChanges] = useState<CreditChange[]>([])
   const [hasRun, setHasRun] = useState(false)
   const [day, setDay] = useState(new Date().toDateString())
   const [activeSince, setActiveSince] = useState<number | null>(null)
@@ -63,7 +66,7 @@ export function TasksPage({ revision }: { revision: number }) {
   async function runAll() {
     if (busy || running.current) return
     running.current = true
-    setBusy(true); setActiveSince(Date.now()); setError(""); setRunEntries([]); setHasRun(true)
+    setBusy(true); setActiveSince(Date.now()); setError(""); setRunEntries([]); setCreditChanges([]); setHasRun(true)
     const entries: RunLine[] = []
     const push = (entry: TaskRunEntry) => {
       const nickname = accounts().find(item => item.uid === entry.uid)?.nickname ?? entry.uid
@@ -79,14 +82,22 @@ export function TasksPage({ revision }: { revision: number }) {
           push({ uid: account.uid, code: "", title: "账号任务", status: message.startsWith("任务读取失败") ? "failed" : "skipped", message })
           continue
         }
-        try {
-          await runTaskBatch(account.uid, own, push)
-          if (entries.some(entry => entry.uid === account.uid && entry.status === "done")) {
-            try { await refreshBalance(account.uid) }
-            catch (cause) { push({ uid: account.uid, code: "", title: "余额刷新", status: "failed", message: cause instanceof Error ? cause.message : String(cause) }) }
-          }
-        } catch (cause) {
+        const hasActions = account.site === "cn" && own.some(task => canAutoProcessTask(task, true))
+        let before: number | undefined
+        if (hasActions) {
+          try { before = (await refreshBalance(account.uid)).credits }
+          catch { /* Task execution can continue when the initial balance is unavailable. */ }
+        }
+        try { await runTaskBatch(account.uid, own, push) }
+        catch (cause) {
           push({ uid: account.uid, code: "", title: "账号任务", status: "failed", message: cause instanceof Error ? cause.message : String(cause) })
+        }
+        if (hasActions) {
+          try {
+            const after = (await refreshBalance(account.uid)).credits
+            if (before != null && before >= 0 && after != null && after >= 0)
+              setCreditChanges(current => [...current, { uid: account.uid, nickname: account.nickname, before, after }])
+          } catch (cause) { push({ uid: account.uid, code: "", title: "余额刷新", status: "failed", message: cause instanceof Error ? cause.message : String(cause) }) }
         }
       }
       const refreshed = await loadRows()
@@ -143,6 +154,7 @@ export function TasksPage({ revision }: { revision: number }) {
     </Section>
     {hasRun && <Section title="本轮结果">
       <Hint>{`${doneCount} 项已处理 · ${pendingCount} 项待上游确认 · ${failedCount} 项失败 · ${skipped.length} 项跳过`}</Hint>
+      {creditChanges.map(item => <Hint key={item.uid}>{`${item.nickname} · 积分 ${formatCredit(item.before)} → ${formatCredit(item.after)}（执行期间净变化 ${item.after > item.before ? "+" : ""}${formatCredit(item.after - item.before)}）`}</Hint>)}
       {!busy && !runEntries.length && !error && <Hint>本轮没有待执行的任务。</Hint>}
       {runEntries.filter(entry => entry.status !== "skipped").map((entry, index) => <HStack key={`${entry.uid}:${entry.code}:${index}`} spacing={8}>
         <Image systemName={entry.status === "done" ? "checkmark.circle.fill" : entry.status === "failed" ? "xmark.circle.fill" : "clock.fill"}
