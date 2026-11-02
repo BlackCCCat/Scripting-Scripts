@@ -3,6 +3,7 @@ import {
   Button,
   ContentUnavailableView,
   Device,
+  EmptyView,
   ForEach,
   HStack,
   Image,
@@ -10,6 +11,7 @@ import {
   Menu,
   Navigation,
   NavigationStack,
+  RoundedRectangle,
   Script,
   Section,
   Spacer,
@@ -789,8 +791,23 @@ export function DashboardRootView(props: {
     return (
       <VStack
         key={acc.id}
+        alignment="leading"
         frame={{ maxWidth: "infinity", alignment: "leading" }}
+        listRowInsets={0}
         listRowSeparator="hidden"
+        listRowBackground={<EmptyView />}
+        padding={{ horizontal: 16, vertical: 10 }}
+        background={
+          <RoundedRectangle
+            cornerRadius={16}
+            style="continuous"
+            fill="secondarySystemGroupedBackground"
+          />
+        }
+        contentShape={{
+          kind: "dragPreview",
+          shape: { type: "rect", cornerRadius: 16, style: "continuous" },
+        }}
         trailingSwipeActions={{
           allowsFullSwipe: true,
           actions: [
@@ -912,6 +929,8 @@ export function DashboardRootView(props: {
     <List
       navigationTitle="AI 额度看板"
       listStyle="insetGroup"
+      listRowSpacing={10}
+      listRowSeparator="hidden"
       searchable={{
         value: searchQuery,
         onChanged: setSearchQuery,
@@ -1048,9 +1067,6 @@ export function DashboardRootView(props: {
         accountStates={accountStates}
         isDemoMode={settings.isDemoMode}
         zoomNamespace={homeZoomNamespace}
-        onToggleDemoMode={(val) =>
-          updateSettings({ ...settings, isDemoMode: val })
-        }
         onSelectAccount={(acc) => openAccountDetail(acc, `overview-account-${acc.id}`)}
         onOpenEditSheet={() => openEditAccountsSheet("overview-edit-accounts")}
       />
@@ -1143,7 +1159,12 @@ export function DashboardRootView(props: {
       ) : (
         <Section
           header={
-            <HStack>
+            <HStack spacing={6}>
+              <Image
+                systemName="wallet.bifold"
+                font="caption"
+                foregroundStyle="accentColor"
+              />
               <Text>订阅额度与 API 钱包</Text>
               <Spacer />
               <Text font="caption2" foregroundStyle="secondaryLabel">

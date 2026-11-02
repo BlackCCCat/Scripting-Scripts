@@ -21,7 +21,6 @@ import {
   formatMoney,
 } from "../utils/quota_formatting"
 import {
-  adaptiveSecondaryButtonStyle,
   computeAccountOverallQuota,
   remainingQuotaColor,
 } from "../utils/theme"
@@ -40,7 +39,7 @@ export function DashboardOverviewSection(props: {
   accountStates: Record<string, AccountQuotaState>
   isDemoMode: boolean
   zoomNamespace?: any
-  onToggleDemoMode: (val: boolean) => void
+  onToggleDemoMode?: (val: boolean) => void
   onSelectAccount: (acc: SubscriptionAccount) => void
   onOpenEditSheet?: () => void
 }) {
@@ -48,7 +47,6 @@ export function DashboardOverviewSection(props: {
     accounts,
     accountStates,
     isDemoMode,
-    onToggleDemoMode,
     onSelectAccount,
     onOpenEditSheet,
   } = props
@@ -155,47 +153,6 @@ export function DashboardOverviewSection(props: {
       }
     >
       <VStack alignment="leading" spacing={14} padding={{ vertical: 4 }}>
-        {/* 顶部模式说明与快速切换栏 */}
-        <HStack
-          alignment="center"
-          spacing={10}
-          padding={{ horizontal: 12, vertical: 10 }}
-          background={
-            <RoundedRectangle
-              cornerRadius={12}
-              style="continuous"
-              fill="quaternarySystemFill"
-            />
-          }
-        >
-          <Image
-            systemName={
-              isDemoMode
-                ? "sparkles.rectangle.stack.fill"
-                : "lock.shield.fill"
-            }
-            font="title3"
-            foregroundStyle={isDemoMode ? "systemOrange" : "systemGreen"}
-          />
-          <VStack alignment="leading" spacing={2}>
-            <Text font="subheadline" fontWeight="semibold">
-              {isDemoMode ? "演示数据模式" : "真实直连模式"}
-            </Text>
-            <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-              {isDemoMode
-                ? "展示订阅配额进度与钱包余额样例"
-                : "本机钥匙串直连各平台官方接口"}
-            </Text>
-          </VStack>
-          <Spacer />
-          <Button
-            title={isDemoMode ? "切换真实" : "查看演示"}
-            buttonStyle={adaptiveSecondaryButtonStyle()}
-            controlSize="small"
-            action={() => onToggleDemoMode(!isDemoMode)}
-          />
-        </HStack>
-
         {/* 2x2 核心 KPI 指标卡片网格 */}
         <LazyVGrid
           columns={[
