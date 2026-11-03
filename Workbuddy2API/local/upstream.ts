@@ -251,11 +251,19 @@ async function accountJSON(uid: string, path: string, method = "GET", body?: unk
 }
 
 function amount(value: unknown): number { const n = Number(value); return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0 }
+function capacity(precise: unknown, plain?: unknown): number | undefined {
+  const parse = (value: unknown) => {
+    if (value == null || value === "") return undefined
+    const number = Number(value)
+    return Number.isFinite(number) ? Math.max(0, number) : undefined
+  }
+  return parse(precise) ?? parse(plain)
+}
 
 export async function refreshBalance(uid: string): Promise<Account> {
   const account = await freshCredential(uid)
   try {
-    let remain = 0, total = 0
+    let remain = 0, total = 0, totalKnown = true
     if (account.enterpriseId) {
       const data = await accountJSON(uid, "/v2/billing/meter/get-enterprise-user-usage", "POST", {}, undefined, "billing")
       const limit = Number(data?.limitNum ?? data?.limit_num)
@@ -267,8 +275,11 @@ export async function refreshBalance(uid: string): Promise<Account> {
       const data = await accountJSON(uid, "/billing/meter/get-user-resource-summary", "POST", {}, undefined, "billing")
       if (!Array.isArray(data?.Packages)) throw new Error("国际版额度格式异常")
       for (const item of data.Packages) {
-        total += amount(item.CycleTotalCapacity)
-        remain += amount(item.CycleRemainCapacity)
+        const size = capacity(item.CycleTotalCapacity) ?? 0
+        const left = capacity(item.CycleRemainCapacity) ?? 0
+        if (!size && left) totalKnown = false
+        total += size
+        remain += size ? Math.min(size, left) : left
       }
     } else {
       const now = new Date()
@@ -280,12 +291,25 @@ export async function refreshBalance(uid: string): Promise<Account> {
       const data = await accountJSON(uid, "/v2/billing/meter/get-user-resource", "POST", body, undefined, "billing")
       if (!Array.isArray(data?.Response?.Data?.Accounts)) throw new Error("国内版额度格式异常")
       for (const item of data.Response.Data.Accounts) {
-        const size = amount(item.CycleCapacitySize || item.CapacitySize)
-        const left = amount(item.CycleCapacitySize ? item.CycleCapacityRemain : item.CapacityRemain)
-        total += size; remain += Math.min(size, left)
+        const cycleSize = capacity(item.CycleCapacitySizePrecise, item.CycleCapacitySize) ?? 0
+        const cycle = cycleSize > 0
+        const size = cycle ? cycleSize : capacity(item.CapacitySizePrecise, item.CapacitySize) ?? 0
+        const reported = cycle ? capacity(item.CycleCapacityRemainPrecise, item.CycleCapacityRemain)
+          : capacity(item.CapacityRemainPrecise, item.CapacityRemain)
+        const used = cycle ? capacity(item.CycleCapacityUsedPrecise, item.CycleCapacityUsed)
+          : capacity(item.CapacityUsedPrecise, item.CapacityUsed)
+        const leftFromUsed = size > 0 && used != null ? size - used : Infinity
+        const left = Math.max(0, Math.min(
+          reported ?? (Number.isFinite(leftFromUsed) ? leftFromUsed : 0),
+          leftFromUsed,
+          size || Infinity,
+        ))
+        if (!size && left) totalKnown = false
+        total += size
+        remain += left
       }
     }
-    updateAccount(uid, { credits: remain, total, updatedAt: Date.now(), error: undefined })
+    updateAccount(uid, { credits: remain, total: totalKnown ? total : undefined, updatedAt: Date.now(), error: undefined })
   } catch (error) { updateAccount(uid, { error: error instanceof Error ? error.message : String(error) }); throw error }
   return accounts().find(item => item.uid === uid)!
 }

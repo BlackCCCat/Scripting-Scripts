@@ -1,10 +1,24 @@
-import { Button, HStack, Image, List, Menu, Navigation, NavigationLink, Picker, ProgressView, RoundedRectangle, ScrollView, Section, Spacer, Text, TextField, VStack, useEffect, useRef, useState } from "scripting"
+import { Button, Capsule, HStack, Image, List, Menu, Navigation, NavigationLink, Picker, RoundedRectangle, ScrollView, Section, Spacer, Text, TextField, VStack, ZStack, useEffect, useRef, useState } from "scripting"
 import { accounts, checkinStatusNeedsRefresh, removeAccount, saveCredential, todayInChina, updateAccount, type Account, type Site } from "../local/store"
 import { beginLogin, checkin, parseKeychainWorkBuddy, pollLogin, refreshBalance, refreshCheckinStatus, type LoginSession } from "../local/upstream"
 import { alertError, Busy, Failure, glass, Hint, primaryButton } from "./Shared"
 import { AccountTasksPage } from "./Tasks"
 
 const credits = (value?: number) => value == null ? "—" : value < 0 ? "不限量" : value.toLocaleString("zh-CN")
+const CREDIT_BAR_WIDTH = 94
+
+function CreditBar({ remaining, total }: { remaining: number; total: number }) {
+  const filled = CREDIT_BAR_WIDTH * Math.max(0, Math.min(1, remaining / total))
+  return <VStack alignment="trailing" spacing={3}>
+    <ZStack alignment="leading" frame={{ width: CREDIT_BAR_WIDTH, height: 6 }}>
+      <Capsule fill="systemGray4" frame={{ width: CREDIT_BAR_WIDTH, height: 6 }} />
+      {filled > 0 && <Capsule fill="systemPurple" frame={{ width: filled, height: 6 }} />}
+    </ZStack>
+    <Text font="caption" fontWeight="medium" monospacedDigit lineLimit={1}>
+      {`已用 ${credits(Math.max(0, total - remaining))}`}
+    </Text>
+  </VStack>
+}
 
 export function AccountsPage({ revision, onChanged }: { revision: number; onChanged: () => void }) {
   const [items, setItems] = useState<Account[]>(accounts)
@@ -62,9 +76,11 @@ export function AccountsPage({ revision, onChanged }: { revision: number; onChan
             <Hint>{`${item.enabled === false ? "已停用 · 不参与 HTTP API" : item.error ? "需检查" : "可用"} · ${item.updatedAt ? new Date(item.updatedAt).toLocaleString("zh-CN") : "尚未更新"}`}</Hint>
             <Hint>{item.site === "cn" ? "国内版" : "国际版"}</Hint>
           </VStack>
-          <VStack alignment="trailing" spacing={6} frame={{ width: 85 }}>
+          <VStack alignment="trailing" spacing={4} frame={{ width: 100 }}>
             <Text font="headline" monospacedDigit>{credits(item.credits)}</Text>
-            {item.total != null && item.total > 0 && item.credits != null && item.credits >= 0 && <ProgressView value={Math.min(item.credits, item.total)} total={item.total} progressViewStyle="linear" tint="systemPurple" frame={{ width: 72 }} />}
+            {item.total != null && item.total > 0 && item.credits != null && item.credits >= 0 &&
+              <CreditBar remaining={item.credits} total={item.total} />}
+            {item.credits != null && item.credits >= 0 && item.total == null && <Hint>总额未知</Hint>}
           </VStack>
         </HStack>
       </NavigationLink>)}
