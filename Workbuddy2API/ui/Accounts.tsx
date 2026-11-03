@@ -1,4 +1,4 @@
-import { Button, HStack, Image, List, Menu, Navigation, NavigationLink, Picker, ProgressView, RoundedRectangle, ScrollView, Section, Spacer, Text, TextField, VStack, useEffect, useState } from "scripting"
+import { Button, HStack, Image, List, Menu, Navigation, NavigationLink, Picker, ProgressView, RoundedRectangle, ScrollView, Section, Spacer, Text, TextField, VStack, useEffect, useRef, useState } from "scripting"
 import { accounts, checkinStatusNeedsRefresh, removeAccount, saveCredential, todayInChina, updateAccount, type Account, type Site } from "../local/store"
 import { beginLogin, checkin, parseKeychainWorkBuddy, pollLogin, refreshBalance, refreshCheckinStatus, type LoginSession } from "../local/upstream"
 import { alertError, Busy, Failure, glass, Hint, primaryButton } from "./Shared"
@@ -123,6 +123,7 @@ export function LoginPage({ site = "cn", expectedUid, onChanged }: { site?: Site
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState("")
   const [error, setError] = useState("")
+  const picking = useRef(false)
   async function start() {
     if (busy) return
     if (session) { try { await Safari.present(session.url, false) } catch (cause) { await alertError(cause) }; return }
@@ -143,11 +144,20 @@ export function LoginPage({ site = "cn", expectedUid, onChanged }: { site?: Site
     finally { setBusy(false) }
   }
   async function importFromKeychain() {
-    if (busy) return
+    if (busy || picking.current) return
+    picking.current = true
     setBusy(true); setResult(""); setError("")
     try {
-      const raw = await Keychain.pick({ title: "选择 WorkBuddy 凭据", prompt: "请选择一条 WorkBuddy 登录凭据。" })
+      const options = { title: "选择 WorkBuddy 凭据", prompt: "请选择一条 WorkBuddy 登录凭据。" }
+      let raw: string | null
+      try { raw = await Keychain.pick(options) }
+      catch (cause) {
+        if (!String(cause).includes("picker host")) throw cause
+        await new Promise<void>(resolve => setTimeout(resolve, 500))
+        raw = await Keychain.pick(options)
+      }
       if (raw === null) return
+      await new Promise<void>(resolve => setTimeout(resolve, 350))
       const value = parseKeychainWorkBuddy(raw, region)
       if (!value) { setResult("所选记录不是可识别的 WorkBuddy 登录凭据，已跳过。"); return }
       if (expectedUid && value.uid !== expectedUid) throw new Error("所选凭据与当前账号 UID 不一致")
@@ -158,8 +168,14 @@ export function LoginPage({ site = "cn", expectedUid, onChanged }: { site?: Site
       onChanged()
       try { await refreshBalance(value.uid); onChanged() }
       catch { setResult(`已导入：${value.nickname}；余额暂未更新，请在账号页检查凭据。`) }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
-    finally { setBusy(false) }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setError(message.includes("picker host") ? "钥匙串选择窗口未恢复，请返回脚本列表重新运行后再试。" : message)
+    } finally {
+      await new Promise<void>(resolve => setTimeout(resolve, 400))
+      picking.current = false
+      setBusy(false)
+    }
   }
   useEffect(() => {
     if (!session) return
