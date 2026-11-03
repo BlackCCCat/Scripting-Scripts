@@ -136,7 +136,7 @@ function authorizedToken(token: string): boolean {
 }
 
 function isPublicAsset(path: string): boolean {
-  return path === "/" || path === "/assets/app.css" || path === "/assets/app.js" || path === "/favicon.ico"
+  return path === "/" || path === "/assets/app.css" || path === "/assets/app.js" || path === "/assets/cais-icon.svg" || path === "/favicon.ico"
 }
 
 function rateLimitResponse(request: HttpRequest): HttpResponse | null {
@@ -379,7 +379,14 @@ function registerRoutes(nextServer: HttpServer): void {
     const invalid = requireMethod(request, "GET")
     return invalid ?? assetResponse("lan_share.js", "text/javascript; charset=utf-8")
   })
-  nextServer.registerAsyncHandler("/favicon.ico", async () => HttpResponse.raw(204, "No Content"))
+  nextServer.registerAsyncHandler("/assets/cais-icon.svg", async (request) => {
+    const invalid = requireMethod(request, "GET")
+    return invalid ?? assetResponse("cais-icon.svg", "image/svg+xml")
+  })
+  nextServer.registerAsyncHandler("/favicon.ico", async (request) => {
+    const invalid = requireMethod(request, "GET")
+    return invalid ?? assetResponse("cais-icon.svg", "image/svg+xml")
+  })
 
   nextServer.registerAsyncHandler("/api/health", async (request) => {
     const invalid = requireMethod(request, "GET")
@@ -635,7 +642,7 @@ async function applyDesiredState(settings: CaisSettings, verifyRunning: boolean)
   let nextServer: HttpServer
   let error: string | null
   try {
-    if (!assetData("lan_share.html") || !assetData("lan_share.css") || !assetData("lan_share.js")) {
+    if (!assetData("lan_share.html") || !assetData("lan_share.css") || !assetData("lan_share.js") || !assetData("cais-icon.svg")) {
       return setRuntimeStatus(statusFor("error", port, "启动失败：局域网页面文件不完整"))
     }
     await initializeDatabase()

@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>CAIS 局域网共享</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/cais-icon.svg">
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
   <section id="authScreen" class="auth-screen hidden" aria-labelledby="authTitle">
     <form id="authForm" class="auth-card">
-      <div class="brand-icon">C</div>
+      <img class="brand-icon" src="/assets/cais-icon.svg" alt="">
       <div><h1 id="authTitle">连接 CAIS</h1><p>输入 CAIS 局域网共享页面显示的 8 位访问码。</p></div>
       <label><span>访问码</span><input id="accessCodeInput" type="text" inputmode="text" maxlength="8" autocomplete="one-time-code" placeholder="XXXXXXXX" autocapitalize="characters" spellcheck="false"></label>
       <p id="authError" class="auth-error hidden"></p>
@@ -21,7 +22,7 @@
   <div id="appShell" class="shell hidden">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon">C</div>
+        <img class="brand-icon" src="/assets/cais-icon.svg" alt="">
         <div><strong>CAIS</strong><span>局域网共享</span></div>
       </div>
       <nav class="scope-nav" aria-label="内容分类">
@@ -33,7 +34,7 @@
 
     <main>
       <header class="topbar">
-        <div class="mobile-brand"><strong>CAIS</strong><span id="connectionState">正在连接</span></div>
+        <div class="mobile-brand"><div class="mobile-brand-title"><img class="brand-icon" src="/assets/cais-icon.svg" alt=""><strong>CAIS</strong></div><span id="connectionState">正在连接</span></div>
         <div class="search-wrap">
           <span aria-hidden="true">⌕</span>
           <input id="searchInput" type="search" placeholder="搜索标题或内容" autocomplete="off">

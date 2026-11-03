@@ -34,7 +34,7 @@ button { color: inherit; }
 .shell { min-height: 100vh; display: grid; grid-template-columns: 236px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; padding: 22px 16px; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
 .brand { display: flex; gap: 12px; align-items: center; padding: 4px 8px 24px; }
-.brand-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: var(--accent); color: white; font-weight: 750; font-size: 20px; }
+.brand-icon { width: 38px; height: 38px; display: block; border-radius: 10px; }
 .brand strong, .brand span { display: block; }
 .brand strong { font-size: 17px; }
 .brand span { color: var(--muted); font-size: 12px; margin-top: 1px; }
@@ -130,7 +130,9 @@ dialog::backdrop { background: rgba(11, 13, 18, 0.46); backdrop-filter: blur(3px
   .shell { display: block; }
   .sidebar { display: none; }
   .topbar { height: auto; padding: max(12px, env(safe-area-inset-top)) 14px 11px; flex-wrap: wrap; }
-  .mobile-brand { width: 100%; display: flex; align-items: baseline; justify-content: space-between; }
+  .mobile-brand { width: 100%; display: flex; align-items: center; justify-content: space-between; }
+  .mobile-brand-title { display: flex; align-items: center; gap: 9px; }
+  .mobile-brand-title .brand-icon { width: 30px; height: 30px; border-radius: 8px; }
   .mobile-brand strong { font-size: 18px; }
   .mobile-brand span { color: var(--muted); font-size: 11px; }
   .search-wrap { order: 2; max-width: none; }
