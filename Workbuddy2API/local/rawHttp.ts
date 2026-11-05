@@ -8,6 +8,7 @@ export type HttpInput = { method: string; path: string; body: string }
 export class HttpReply {
   private sent = false
   private ended = false
+  private writing: Promise<void> = Promise.resolve()
   readonly controller = new AbortController()
 
   constructor(private readonly socket: Socket) {
@@ -17,14 +18,18 @@ export class HttpReply {
   get headersSent() { return this.sent }
   get signal() { return this.controller.signal }
 
-  private async write(data: string) {
-    const bytes = new TextEncoder().encode(data)
-    for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
-      if (this.socket.destroyed) throw new Error("客户端连接已关闭")
-      await new Promise<void>((resolve, reject) => {
-        this.socket.write(bytes.subarray(offset, offset + 64 * 1024), error => error ? reject(error) : resolve())
-      })
-    }
+  private write(data: string): Promise<void> {
+    const action = this.writing.then(async () => {
+      const bytes = new TextEncoder().encode(data)
+      for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
+        if (this.socket.destroyed) throw new Error("客户端连接已关闭")
+        await new Promise<void>((resolve, reject) => {
+          this.socket.write(bytes.subarray(offset, offset + 64 * 1024), error => error ? reject(error) : resolve())
+        })
+      }
+    })
+    this.writing = action.catch(() => {})
+    return action
   }
 
   async json(status: number, value: unknown) {
@@ -45,6 +50,8 @@ export class HttpReply {
   async event(value: unknown) {
     await this.chunk(`data: ${typeof value === "string" ? value : JSON.stringify(value)}\n\n`)
   }
+
+  async comment() { await this.chunk(": keep-alive\n\n") }
 
   private async chunk(body: string) {
     if (!this.sent || this.ended) throw new Error("事件流已结束")
@@ -122,7 +129,7 @@ export class RawHttpServer {
     this.peers.add(socket)
     socket.on("close", () => this.peers.delete(socket))
     socket.on("error", () => {})
-    socket.setTimeout(190_000, () => socket.destroy())
+    socket.setTimeout(610_000, () => socket.destroy())
     const reply = new HttpReply(socket)
     let bytes = Buffer.alloc(0)
     let headersEnd = -1

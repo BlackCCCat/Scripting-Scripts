@@ -1,5 +1,5 @@
 import { ChatUpstreamError, completeChat, streamChat, type ChatRequest } from "./chat"
-import { accounts, addressHost, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
+import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
 import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
 import { clearPendingStop, pendingStopId } from "./serviceControl"
@@ -84,7 +84,7 @@ async function handleApi(request: HttpInput, reply: HttpReply): Promise<void> {
     if (request.method !== "GET") return reply.json(405, errorBody(405, "仅支持 GET"))
     try {
       if (accounts().some(item => item.enabled !== false) && modelCatalogNeedsRefresh()) await refreshModelCatalog()
-      return reply.json(200, { object: "list", data: modelIds().map(id => ({ id, object: "model", owned_by: id.startsWith("cn:") ? "Workbuddy" : "Workbuddy AI" })) })
+      return reply.json(200, { object: "list", data: modelIds(accountRotationEnabled() ? undefined : fixedAccountUid()).map(id => ({ id, object: "model", owned_by: id.startsWith("cn:") ? "Workbuddy" : "Workbuddy AI" })) })
     } catch (error) { return reply.json(502, errorBody(502, error instanceof Error ? error.message : String(error))) }
   }
   if (request.path !== "/v1/chat/completions") return reply.json(404, errorBody(404, "路径不存在"))
@@ -94,7 +94,10 @@ async function handleApi(request: HttpInput, reply: HttpReply): Promise<void> {
   catch { return reply.json(400, errorBody(400, "请求体不是有效 JSON")) }
   try {
     if (payload.stream === true) {
-      await streamChat(payload, async event => { await reply.startEvents(); await reply.event(event) }, reply.signal)
+      await reply.startEvents()
+      const heartbeat = setInterval(() => { if (!reply.signal.aborted) void reply.comment().catch(() => {}) }, 15_000)
+      try { await streamChat(payload, event => reply.event(event), reply.signal) }
+      finally { clearInterval(heartbeat) }
       await reply.endEvents()
     } else await reply.json(200, await completeChat(payload))
   } catch (error) {

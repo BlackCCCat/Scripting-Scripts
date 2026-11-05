@@ -1,6 +1,6 @@
-import { Button, HStack, Image, Link, List, NavigationLink, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
+import { Button, HStack, Image, Link, List, NavigationLink, Picker, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
 import { Script } from "scripting"
-import { accounts, addressHost, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, records, setAddressHost, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
+import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, records, setAccountRotationEnabled, setAddressHost, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
 import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, type GiftStatus, type Voucher } from "../local/upstream"
 import { gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
 import { alertError, Busy, Failure, Hint } from "./Shared"
@@ -10,6 +10,8 @@ export function MorePage() {
   const [busy, setBusy] = useState(false)
   const [host, setHost] = useState(() => addressHost(""))
   const [portText, setPortText] = useState(() => String(listenPort()))
+  const [rotation, setRotation] = useState(accountRotationEnabled)
+  const [fixedUid, setFixedUid] = useState(fixedAccountUid)
   useEffect(() => subscribeGateway(() => setState(gatewayState())), [])
   const autoHost = serviceDefaultHost
   async function toggle() {
@@ -51,6 +53,19 @@ export function MorePage() {
       await Dialog.alert({ title: "已复制", message: url })
     } catch (error) { await alertError(error) }
   }
+  async function changeRotation(value: boolean) {
+    try {
+      if (!value && !fixedUid) {
+        const first = accounts().find(account => account.enabled !== false) ?? accounts()[0]
+        if (!first) throw new Error("请先添加账号")
+        setFixedAccountUid(first.uid)
+        setFixedUid(first.uid)
+      }
+      setAccountRotationEnabled(value)
+      setRotation(value)
+    } catch (error) { await alertError(error) }
+  }
+  const accountChoices = accounts()
   return <List navigationTitle="更多">
     <Section title="模型与日志">
       <NavigationLink destination={<ModelsPage />}><HStack spacing={12}><Image systemName="square.stack.3d.up" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>模型</Text><Hint>模型目录与展示控制</Hint></VStack></HStack></NavigationLink>
@@ -80,6 +95,16 @@ export function MorePage() {
       <Hint>流式请求会逐块转发上游 SSE；客户端断开时会取消上游请求。</Hint>
       <Button title={busy ? "处理中…" : state.running ? "停止服务" : "启动服务"} systemImage={state.running ? "stop.fill" : "play.fill"} disabled={busy} action={() => void toggle()} />
       <Toggle title="允许局域网访问" systemImage="wifi" value={state.lan} disabled={busy} onChanged={value => void changeLan(value)} />
+      <Toggle title="账号轮询" systemImage="arrow.triangle.2.circlepath" value={rotation} disabled={!accountChoices.length} onChanged={value => void changeRotation(value)} />
+      {!rotation && !!accountChoices.length && <>
+        <Picker title="固定账号" pickerStyle="navigationLink" value={fixedUid} onChanged={(uid: string) => { try { setFixedAccountUid(uid); setFixedUid(uid) } catch (error) { void alertError(error) } }}>
+          {!!fixedUid && !accountChoices.some(item => item.uid === fixedUid) && <Text tag={fixedUid}>原账号已移除</Text>}
+          {accountChoices.map(item => <Text key={item.uid} tag={item.uid}>{item.nickname || item.uid}</Text>)}
+        </Picker>
+        <Hint>关闭轮询后仅使用固定账号；该账号停用、额度耗尽、模型受限或请求失败时直接返回错误。</Hint>
+      </>}
+      {!rotation && !accountChoices.length && <Hint>请先添加账号，再选择固定账号。</Hint>}
+      {rotation && <Hint>新会话轮流分配账号，同一会话优先复用原账号；不可用时才尝试其他账号。</Hint>}
       {state.running && Script.supportsMinimization() && <Button title="收起界面，保持服务" systemImage="rectangle.compress.vertical" action={() => { void Script.minimize() }} />}
       {!!state.lastError && <Text foregroundStyle="systemRed">{state.lastError}</Text>}
       <Hint>局域网使用明文 HTTP 且无鉴权，请仅在可信网络中开启。后台保活使用系统音频资源；iOS 仍可能挂起或终止脚本。</Hint>

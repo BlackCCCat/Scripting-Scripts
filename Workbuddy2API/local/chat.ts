@@ -1,6 +1,7 @@
-import { accounts, modelCatalog, modelLocks, recordRequest, setModelLock, type Credential } from "./store"
+import { accountRotationEnabled, accounts, fixedAccountUid, modelCatalog, modelLocks, recordRequest, setModelLock, type Credential } from "./store"
 import { accountBase, chatHeaders, freshCredential, timeOrderedId } from "./upstream"
 import { prepareReasoning } from "./reasoning"
+import { bindAccount, boundAccount, chatSession, generatedCacheKey, generatedConversationId, unbindAccount, type ChatSession } from "./chatRouting"
 
 export type ChatRequest = { model: string; messages: unknown[]; stream?: boolean; [key: string]: unknown }
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } }
@@ -89,7 +90,7 @@ function markExhausted(uid: string) {
   exhaustedUntil.set(uid, { until, at: now })
 }
 
-function candidates(model: string, onlyUid?: string): string[] {
+function candidates(model: string, onlyUid?: string, preferredUid = ""): string[] {
   const realm = model.startsWith("global:") ? "global" : model.startsWith("cn:") ? "cn" : ""
   const bareModel = model.replace(/^(cn|global):/, "")
   const now = Date.now()
@@ -99,13 +100,28 @@ function candidates(model: string, onlyUid?: string): string[] {
   const pool = accounts().filter(item => (onlyUid || item.enabled !== false) &&
     (!realm || realm === "cn" && item.site === "cn" || realm === "global" && item.site !== "cn") &&
     (!eligible || eligible.has(item.uid)))
+  if (!onlyUid && !accountRotationEnabled()) {
+    const fixed = fixedAccountUid()
+    const account = accounts().find(item => item.uid === fixed)
+    if (!account) throw new Error("固定账号不存在，请在更多页面重新选择")
+    if (account.enabled === false) throw new Error("固定账号已停用，请在账号页面启用")
+    if (!pool.some(item => item.uid === fixed)) throw new Error("固定账号不支持该模型或账号区域")
+    const exhausted = exhaustedUntil.get(fixed)
+    if (exhausted && (exhausted.until <= now || (account.updatedAt ?? 0) > exhausted.at && (account.credits ?? 0) > 0)) exhaustedUntil.delete(fixed)
+    if (account.credits === 0 || exhaustedUntil.has(fixed)) throw new Error("固定账号额度已用尽")
+    if (locked.has(fixed)) throw new Error("固定账号的该模型正在限流")
+    if ((coolUntil.get(fixed) ?? 0) >= now) throw new Error("固定账号暂时受到上游限流")
+    return [fixed]
+  }
   const start = pool.findIndex(item => item.uid === lastPicked.get(model)) + 1
-  return [...pool.slice(start), ...pool.slice(0, start)].filter(item => {
+  const available = [...pool.slice(start), ...pool.slice(0, start)].filter(item => {
     const exhausted = exhaustedUntil.get(item.uid)
     if (exhausted && (exhausted.until <= now || (item.updatedAt ?? 0) > exhausted.at && (item.credits ?? 0) > 0)) exhaustedUntil.delete(item.uid)
     return (!onlyUid || item.uid === onlyUid) && (onlyUid || item.credits !== 0 && !exhaustedUntil.has(item.uid))
       && (coolUntil.get(item.uid) ?? 0) < now && !locked.has(item.uid)
   }).map(item => item.uid)
+  if (preferredUid && available.includes(preferredUid)) return [preferredUid, ...available.filter(uid => uid !== preferredUid)]
+  return available
 }
 
 function validateChat(request: ChatRequest): string {
@@ -114,14 +130,16 @@ function validateChat(request: ChatRequest): string {
   return request.model.replace(/^(cn|global):/, "")
 }
 
-async function requestChat(uid: string, request: ChatRequest, bareModel: string, agentType: "main" | "auxiliary", signal?: AbortSignal): Promise<Response> {
+async function requestChat(uid: string, request: ChatRequest, bareModel: string, session: ChatSession, agentType: "main" | "auxiliary", signal?: AbortSignal): Promise<Response> {
   const account: Credential = await freshCredential(uid)
-  const conversationId = typeof request.conversation_id === "string" && request.conversation_id ? request.conversation_id : timeOrderedId()
+  const conversationId = session.cacheSource ? generatedConversationId(uid, session.cacheSource) : timeOrderedId()
   const body: Record<string, unknown> = { ...request, model: bareModel, stream: true, stream_options: request.stream_options ?? { include_usage: true } }
   if (body.max_completion_tokens != null && body.max_tokens == null) { body.max_tokens = body.max_completion_tokens; delete body.max_completion_tokens }
+  if (!(typeof body.prompt_cache_key === "string" && body.prompt_cache_key.trim()) && session.cacheSource)
+    body.prompt_cache_key = await generatedCacheKey(uid, session.cacheSource)
   const outgoing = prepareReasoning(body)
   const response = await fetch(`${accountBase(uid)}/v2/chat/completions`, {
-    method: "POST", timeout: 180, signal, headers: chatHeaders(account, conversationId, agentType), body: JSON.stringify(outgoing),
+    method: "POST", timeout: 600, signal, headers: chatHeaders(account, conversationId, agentType), body: JSON.stringify(outgoing),
   })
   if (!response.ok) {
     const detail = await response.text()
@@ -153,26 +171,31 @@ function retryAfterError(uid: string, bareModel: string, error: unknown): boolea
 
 export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main"): Promise<Record<string, unknown>> {
   const bareModel = validateChat(request)
-  const uids = candidates(request.model, onlyUid)
+  const session = await chatSession(request)
+  const routeKey = session.routeKey ? `${request.model.startsWith("global:") ? "global" : "cn"}:${session.routeKey}` : ""
+  const preferredUid = !onlyUid && accountRotationEnabled() && routeKey ? boundAccount(routeKey) : ""
+  const uids = candidates(request.model, onlyUid, preferredUid)
   if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
   let lastError: Error | null = null
   for (const uid of uids) {
-    if (!onlyUid) lastPicked.set(request.model, uid)
+    if (!onlyUid && accountRotationEnabled() && uid !== preferredUid) lastPicked.set(request.model, uid)
     const startedAt = Date.now()
     try {
-      const response = await requestChat(uid, request, bareModel, agentType)
+      const response = await requestChat(uid, request, bareModel, session, agentType)
       const text = await response.text()
       if (text.length > 12 * 1024 * 1024) throw new ChatUpstreamError("上游响应超过 12 MB")
       if (modelLimit(text) && !text.includes("data:")) throw new ChatUpstreamError("上游模型限流", text)
       const result = aggregateSSE(text, bareModel)
       recordSuccess(uid, bareModel, startedAt, result)
+      if (routeKey && !onlyUid && accountRotationEnabled()) bindAccount(routeKey, uid)
       return result
     } catch (error) {
       const retryable = retryAfterError(uid, bareModel, error)
+      if (retryable && routeKey) unbindAccount(routeKey, uid)
       lastError = error instanceof ChatUpstreamError ? error : new ChatUpstreamError(error instanceof Error ? error.message : String(error))
       recordRequest({ at: Date.now(), uid, model: bareModel, ok: false, tokens: 0, durationMs: Date.now() - startedAt })
       // shortcut: 已发出的请求不换号重试，除明确的限流或服务端错误；需要跨号重试时先确认上游幂等语义。
-      if (!retryable) break
+      if (!retryable || !accountRotationEnabled()) break
     }
   }
   throw lastError ?? new Error("请求失败")
@@ -234,25 +257,30 @@ async function forwardEvents(response: Response, bareModel: string, includeUsage
 
 export async function streamChat(request: ChatRequest, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal): Promise<void> {
   const bareModel = validateChat(request)
-  const uids = candidates(request.model)
+  const session = await chatSession(request)
+  const routeKey = session.routeKey ? `${request.model.startsWith("global:") ? "global" : "cn"}:${session.routeKey}` : ""
+  const preferredUid = accountRotationEnabled() && routeKey ? boundAccount(routeKey) : ""
+  const uids = candidates(request.model, undefined, preferredUid)
   if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
   const includeUsage = (request.stream_options as { include_usage?: boolean } | undefined)?.include_usage === true
   let lastError: Error | null = null
   for (const uid of uids) {
     if (signal.aborted) throw new Error("客户端连接已关闭")
-    lastPicked.set(request.model, uid)
+    if (accountRotationEnabled() && uid !== preferredUid) lastPicked.set(request.model, uid)
     const startedAt = Date.now()
     let emitted = false
     try {
-      const response = await requestChat(uid, request, bareModel, "main", signal)
+      const response = await requestChat(uid, request, bareModel, session, "main", signal)
       const result = await forwardEvents(response, bareModel, includeUsage, async event => { await onEvent(event); emitted = true }, signal)
       recordSuccess(uid, bareModel, startedAt, result)
+      if (routeKey && accountRotationEnabled()) bindAccount(routeKey, uid)
       return
     } catch (error) {
       const retryable = retryAfterError(uid, bareModel, error)
+      if (retryable && routeKey) unbindAccount(routeKey, uid)
       lastError = error instanceof Error ? error : new Error(String(error))
       recordRequest({ at: Date.now(), uid, model: bareModel, ok: false, tokens: 0, durationMs: Date.now() - startedAt })
-      if (emitted || signal.aborted || !retryable) break
+      if (emitted || signal.aborted || !retryable || !accountRotationEnabled()) break
     }
   }
   throw lastError ?? new Error("请求失败")

@@ -49,6 +49,8 @@ const CLAIMED_LOCAL = "wb2api.local.claimed-local"
 const RELEASE_NOTES = "wb2api.local.release-notes-hash"
 const MODEL_LOCKS = "wb2api.local.model-locks"
 const CHECKIN_STATUS = "wb2api.local.checkin-status"
+const ACCOUNT_ROTATION = "wb2api.local.account-rotation"
+const FIXED_ACCOUNT = "wb2api.local.fixed-account"
 
 export function accounts(): Account[] { return Storage.get<Account[]>(ACCOUNTS) ?? [] }
 
@@ -177,6 +179,16 @@ export function setServiceEnabled(enabled: boolean) {
   if (!Storage.set(SERVICE, enabled)) throw new Error("服务设置保存失败")
 }
 
+export function accountRotationEnabled(): boolean { return Storage.get<boolean>(ACCOUNT_ROTATION) !== false }
+export function setAccountRotationEnabled(enabled: boolean) {
+  if (!Storage.set(ACCOUNT_ROTATION, enabled)) throw new Error("账号轮询设置保存失败")
+}
+export function fixedAccountUid(): string { return Storage.get<string>(FIXED_ACCOUNT) ?? "" }
+export function setFixedAccountUid(uid: string) {
+  if (!accounts().some(account => account.uid === uid)) throw new Error("请选择已有账号")
+  if (!Storage.set(FIXED_ACCOUNT, uid)) throw new Error("固定账号设置保存失败")
+}
+
 const catalogAccounts = () => accounts().map(item => `${item.uid}:${item.site}`).sort().join("\n")
 
 export function modelCatalog(): ModelEntry[] {
@@ -223,10 +235,10 @@ export function setModelHidden(id: string, hidden: boolean) {
   if (!Storage.set(HIDDEN_MODELS, next)) throw new Error("模型开关保存失败")
 }
 
-export function modelIds(): string[] {
+export function modelIds(onlyUid?: string): string[] {
   const catalog = modelCatalog()
   const hidden = new Set(hiddenModelIds())
-  const active = new Set(accounts().filter(item => item.enabled !== false).map(item => `${item.uid}:${item.site === "cn" ? "cn" : "global"}`))
+  const active = new Set(accounts().filter(item => item.enabled !== false && (onlyUid === undefined || item.uid === onlyUid)).map(item => `${item.uid}:${item.site === "cn" ? "cn" : "global"}`))
   return catalog.filter(item => item.uids.some(uid => active.has(`${uid}:${item.realm}`))).map(item => `${item.realm}:${item.id}`).filter(id => !hidden.has(id))
 }
 
