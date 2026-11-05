@@ -1,5 +1,6 @@
 import { accounts, modelCatalog, modelLocks, recordRequest, setModelLock, type Credential } from "./store"
 import { accountBase, chatHeaders, freshCredential, timeOrderedId } from "./upstream"
+import { prepareReasoning } from "./reasoning"
 
 export type ChatRequest = { model: string; messages: unknown[]; stream?: boolean; [key: string]: unknown }
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } }
@@ -118,8 +119,9 @@ async function requestChat(uid: string, request: ChatRequest, bareModel: string,
   const conversationId = typeof request.conversation_id === "string" && request.conversation_id ? request.conversation_id : timeOrderedId()
   const body: Record<string, unknown> = { ...request, model: bareModel, stream: true, stream_options: request.stream_options ?? { include_usage: true } }
   if (body.max_completion_tokens != null && body.max_tokens == null) { body.max_tokens = body.max_completion_tokens; delete body.max_completion_tokens }
+  const outgoing = prepareReasoning(body)
   const response = await fetch(`${accountBase(uid)}/v2/chat/completions`, {
-    method: "POST", timeout: 180, signal, headers: chatHeaders(account, conversationId, agentType), body: JSON.stringify(body),
+    method: "POST", timeout: 180, signal, headers: chatHeaders(account, conversationId, agentType), body: JSON.stringify(outgoing),
   })
   if (!response.ok) {
     const detail = await response.text()

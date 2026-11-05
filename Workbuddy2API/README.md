@@ -19,7 +19,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
   -d '{"model":"cn:glm-5.2","messages":[{"role":"user","content":"你好"}],"stream":false}'
 ```
 
-`GET /v1/models` 列出“更多 → 模型”中启用、且至少有一个未停用账号提供的模型。模型目录从上游账号自动拉取（`/v3/config` 与企业端点并集，过滤非对话模型和 auto/fast-model/balanced-model 路由项）；旧目录在首次打开模型页或请求 `/v1/models` 时自动刷新。国内账号的模型以 `cn:` 前缀、`owned_by: "Workbuddy"` 提供；国际与旧国际账号的模型以 `global:` 前缀、`owned_by: "Workbuddy AI"` 提供。客户端使用返回的完整模型 ID 请求聊天，前缀不会传给上游；目录已记录的模型只路由到实际返回该模型的账号。模型开关只控制列表展示，不验证账号的实时使用权限。`stream: true` 使用逐块 HTTP 响应转发上游 SSE，`stream: false` 返回完整 JSON；可用 `curl -N` 检查增量输出。上游模型、计费及任务接口可能变化，应以实际账号联调结果为准。
+`GET /v1/models` 列出“更多 → 模型”中启用、且至少有一个未停用账号提供的模型。模型目录从上游账号自动拉取（`/v3/config` 与企业端点并集，过滤非对话模型和 auto/fast-model/balanced-model 路由项）；旧目录在首次打开模型页或请求 `/v1/models` 时自动刷新。国内账号的模型以 `cn:` 前缀、`owned_by: "Workbuddy"` 提供；国际与旧国际账号的模型以 `global:` 前缀、`owned_by: "Workbuddy AI"` 提供。客户端使用返回的完整模型 ID 请求聊天，前缀不会传给上游；目录已记录的模型只路由到实际返回该模型的账号。模型开关只控制列表展示，不验证账号的实时使用权限。`stream: true` 使用逐块 HTTP 响应转发上游 SSE，`stream: false` 返回完整 JSON；可用 `curl -N` 检查增量输出。DeepSeek 模型默认发送 `thinking: {"type":"enabled"}` 与 `reasoning_effort: "high"`；客户端可指定档位，或以 `thinking.type: "disabled"`、`reasoning_effort: "off"` 关闭推理。推理内容在流式事件的 `delta.reasoning_content` 或非流式消息的 `reasoning_content` 中返回。上游模型、计费及任务接口可能变化，应以实际账号联调结果为准。
 
 聊天接口按请求模型在可用账号间轮流分配；国内与国际模型各用自己的账号池。已知余额为零的账号会被跳过；上游明确报告额度耗尽或模型限流时，本次请求尝试下一个可用账号。流式响应开始发送后无法换号重试，后续上游错误会作为 SSE 错误事件返回。普通 429 限流按短时冷却处理。余额刷新显示恢复后，额度耗尽的账号可再次参与轮询。轮询状态只保存在当前脚本实例中，脚本重新运行后从账号列表开头重新计数。
 
