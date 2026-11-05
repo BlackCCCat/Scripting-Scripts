@@ -1,5 +1,5 @@
 import { ChatUpstreamError, completeChat, streamChat, type ChatRequest } from "./chat"
-import { accounts, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
+import { accounts, addressHost, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
 import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
 import { clearPendingStop, markServiceHttpStopped, pendingStopId } from "./serviceControl"
@@ -28,6 +28,17 @@ export function lanEnabled(): boolean { return Storage.get<boolean>(LAN) === tru
 export function setLanEnabled(value: boolean) {
   if (!Storage.set(LAN, value)) throw new Error("局域网设置保存失败")
   notify()
+}
+
+export function serviceDefaultHost(): string {
+  if (!lanEnabled()) return "127.0.0.1"
+  const interfaces = Device.networkInterfaces()
+  const addresses = Object.entries(interfaces).flatMap(([name, items]) => items.filter(item => item.family === "IPv4" && !item.isInternal).map(item => ({ name, address: item.address })))
+  return addresses.find(item => item.name === "en0")?.address ?? addresses[0]?.address ?? "<本机局域网 IP>"
+}
+
+export function serviceAddress(): string {
+  return `http://${addressHost(serviceDefaultHost())}:${gatewayState().port}`
 }
 
 export function gatewayState() {

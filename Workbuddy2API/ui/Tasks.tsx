@@ -1,4 +1,4 @@
-import { Button, DisclosureGroup, HStack, Image, Label, List, Section, Text, VStack, useEffect, useRef, useState } from "scripting"
+import { Button, DisclosureGroup, HStack, Image, Label, List, Section, Spacer, Text, VStack, useEffect, useRef, useState } from "scripting"
 import { accounts, type Account } from "../local/store"
 import { listTasks, refreshBalance, type GrowthTask } from "../local/upstream"
 import { canAutoProcessTask, canProcessTask, processTask, runTaskBatch, showInTodayTasks, taskAction, taskUnavailableReason, type TaskRunEntry } from "../local/tasks"
@@ -7,7 +7,7 @@ import { Busy, Failure, glass, Hint, primaryButton } from "./Shared"
 type Row = GrowthTask & { uid: string; nickname: string; canWrite: boolean; site: Account["site"] }
 type RunLine = TaskRunEntry & { nickname: string }
 type CreditChange = { uid: string; nickname: string; before: number; after: number }
-const actionSymbol = (task: GrowthTask) => task.claimable ? "gift" : taskAction(task) === "推进并领奖" ? "bolt.fill" : "checkmark.circle"
+const actionSymbol = (task: GrowthTask) => task.claimable ? "gift" : taskAction(task) === "推进并领奖" ? "bolt.fill" : "plus.circle.fill"
 const formatCredit = (value: number) => value.toLocaleString("zh-CN", { maximumFractionDigits: 2 })
 
 function ClaimedTask({ task, title }: { task: GrowthTask; title: string }) {
@@ -239,7 +239,9 @@ export function AccountTasksPage({ account }: { account: Account }) {
       <Hint>{task.task_desc || task.description || task.task_code}</Hint>
       <Text>{`${task.accept_status} · ${task.current == null || task.target == null ? "进度未知" : `${task.current}/${task.target}`}`}</Text>
       {canProcessTask(task, account.site === "cn" && !account.enterpriseId) &&
-        <Button title={taskAction(task)} systemImage={actionSymbol(task)} buttonStyle={primaryButton} disabled={busy} action={() => void action(task)} />}
+        <HStack><Spacer /><Button buttonStyle={primaryButton} disabled={busy} action={() => void action(task)}>
+          <HStack spacing={7}><Image systemName={actionSymbol(task)} /><Text>{taskAction(task)}</Text></HStack>
+        </Button><Spacer /></HStack>}
       {!canProcessTask(task, account.site === "cn" && !account.enterpriseId) && <Hint>{taskUnavailableReason(task, account.site === "cn" && !account.enterpriseId)}</Hint>}
     </Section>)}
   </List>

@@ -1,8 +1,8 @@
 import { BarChart, Button, Chart, Circle, Gauge, HStack, Image, ScrollView, Text, Toggle, VStack, useEffect, useState, Script } from "scripting"
 import { accounts, checkinStatusNeedsRefresh, modelLocks, records, todayInChina, type Account } from "../local/store"
 import { checkin, refreshBalance, refreshCheckinStatus } from "../local/upstream"
-import { gatewayState, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
-import { alertError, Hint } from "./Shared"
+import { gatewayState, serviceAddress, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
+import { alertError, glass, Hint } from "./Shared"
 
 const compact = (value: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value)
 
@@ -105,6 +105,13 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
       setServiceBusy(false)
     }
   }
+  async function showServiceAddress() {
+    try {
+      const url = serviceAddress()
+      const copy = await Dialog.confirm({ title: "HTTP API 地址", message: `服务地址：${url}\n端口：${gatewayState().port}`, confirmLabel: "复制地址", cancelLabel: "关闭" })
+      if (copy) await Pasteboard.setString(url)
+    } catch (error) { await alertError(error) }
+  }
   return <ScrollView navigationTitle="概览" navigationBarTitleDisplayMode="large" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void run("balance").catch(alertError)} /> }}>
     <VStack alignment="leading" spacing={16} padding={{ horizontal: 16, top: 12, bottom: 28 }}>
       <Hint>{`${items.length} 个账号 · ${available} 个参与服务${disabled ? ` · ${disabled} 个已停用` : ""}`}</Hint>
@@ -127,8 +134,9 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
               <Circle fill={checkinColor} frame={{ width: 10, height: 10 }} />
             </HStack>
           </Button>
-          <HStack spacing={0} fixedSize={{ horizontal: true, vertical: false }}>
-            <Text font="caption" lineLimit={1} fixedSize={{ horizontal: true, vertical: false }} padding={{ trailing: 12 }}>HTTP API</Text>
+          <HStack spacing={8} fixedSize={{ horizontal: true, vertical: false }}>
+            <Text font="caption" lineLimit={1} fixedSize={{ horizontal: true, vertical: false }}>HTTP API</Text>
+            <Button title="查看服务地址" systemImage="info.circle" labelStyle="iconOnly" buttonStyle={glass ? "glass" : "bordered"} controlSize="small" action={() => void showServiceAddress()} />
             <Toggle title="HTTP API 服务" labelsHidden value={service.running} disabled={serviceBusy} onChanged={value => void toggleService(value)} toggleStyle="switch" tint="systemPurple" frame={{ width: 52 }} />
           </HStack>
         </HStack>

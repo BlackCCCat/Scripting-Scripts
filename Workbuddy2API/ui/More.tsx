@@ -2,14 +2,8 @@ import { Button, HStack, Image, Link, List, NavigationLink, Section, Text, TextF
 import { Script } from "scripting"
 import { accounts, addressHost, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, records, setAddressHost, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
 import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, type GiftStatus, type Voucher } from "../local/upstream"
-import { gatewayState, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
+import { gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
 import { alertError, Busy, Failure, Hint } from "./Shared"
-
-function localAddress(): string {
-  const interfaces = Device.networkInterfaces()
-  const addresses = Object.entries(interfaces).flatMap(([name, items]) => items.filter(item => item.family === "IPv4" && !item.isInternal).map(item => ({ name, address: item.address })))
-  return addresses.find(item => item.name === "en0")?.address ?? addresses[0]?.address ?? "<本机局域网 IP>"
-}
 
 export function MorePage() {
   const [state, setState] = useState(gatewayState)
@@ -17,7 +11,7 @@ export function MorePage() {
   const [host, setHost] = useState(() => addressHost(""))
   const [portText, setPortText] = useState(() => String(listenPort()))
   useEffect(() => subscribeGateway(() => setState(gatewayState())), [])
-  const autoHost = () => state.lan ? localAddress() : "127.0.0.1"
+  const autoHost = serviceDefaultHost
   async function toggle() {
     if (busy) return
     setBusy(true)
@@ -52,7 +46,7 @@ export function MorePage() {
   }
   async function copyAddress() {
     try {
-      const url = `http://${addressHost(autoHost())}:${state.running ? state.port : listenPort()}`
+      const url = serviceAddress()
       await Pasteboard.setString(url)
       await Dialog.alert({ title: "已复制", message: url })
     } catch (error) { await alertError(error) }
