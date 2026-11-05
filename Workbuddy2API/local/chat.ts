@@ -107,56 +107,150 @@ function candidates(model: string, onlyUid?: string): string[] {
   }).map(item => item.uid)
 }
 
-export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main"): Promise<Record<string, unknown>> {
-  if (!request || typeof request.model !== "string" || !request.model.trim() || !Array.isArray(request.messages) || !request.messages.length) {
+function validateChat(request: ChatRequest): string {
+  if (!request || typeof request.model !== "string" || !request.model.trim() || !Array.isArray(request.messages) || !request.messages.length)
     throw new Error("需要 model 和非空 messages 数组")
+  return request.model.replace(/^(cn|global):/, "")
+}
+
+async function requestChat(uid: string, request: ChatRequest, bareModel: string, agentType: "main" | "auxiliary", signal?: AbortSignal): Promise<Response> {
+  const account: Credential = await freshCredential(uid)
+  const conversationId = typeof request.conversation_id === "string" && request.conversation_id ? request.conversation_id : timeOrderedId()
+  const body: Record<string, unknown> = { ...request, model: bareModel, stream: true, stream_options: request.stream_options ?? { include_usage: true } }
+  if (body.max_completion_tokens != null && body.max_tokens == null) { body.max_tokens = body.max_completion_tokens; delete body.max_completion_tokens }
+  const response = await fetch(`${accountBase(uid)}/v2/chat/completions`, {
+    method: "POST", timeout: 180, signal, headers: chatHeaders(account, conversationId, agentType), body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new ChatUpstreamError(`上游 HTTP ${response.status}：${detail.slice(0, 220)}`, detail, response.status)
   }
-  const bareModel = request.model.replace(/^(cn|global):/, "")
+  return response
+}
+
+function recordSuccess(uid: string, bareModel: string, startedAt: number, result: Record<string, unknown>) {
+  const usage = result.usage as Usage | undefined
+  const hitValues = [usage?.prompt_tokens_details?.cached_tokens, usage?.prompt_cache_hit_tokens, usage?.cache_read_input_tokens, usage?.cached_tokens]
+  const hit = hitValues.find(value => typeof value === "number" && value > 0) ?? hitValues.find(value => Number.isFinite(value))
+  const miss = usage?.prompt_cache_miss_tokens ?? (hit != null && usage?.prompt_tokens != null ? Math.max(0, usage.prompt_tokens - hit) : undefined)
+  recordRequest({ at: Date.now(), uid, model: bareModel, ok: true,
+    tokens: Number.isFinite(usage?.total_tokens) ? usage!.total_tokens! : 0, durationMs: Date.now() - startedAt,
+    ...(Number.isFinite(usage?.credit) ? { creditsSpent: usage!.credit! } : {}),
+    ...(Number.isFinite(hit) && Number.isFinite(miss) ? { cacheHitTokens: hit!, cacheMissTokens: miss! } : {}),
+  })
+}
+
+function retryAfterError(uid: string, bareModel: string, error: unknown): boolean {
+  if (!(error instanceof ChatUpstreamError)) return false
+  const lock = modelLimit(error.detail)
+  if (lock) { setModelLock(uid, bareModel, lock.until, lock.reason, lock.estimated); return true }
+  if (hardCredit(error.status, error.detail)) { markExhausted(uid); return true }
+  if (error.status === 429 || error.status >= 500) { coolUntil.set(uid, Date.now() + 60_000); return true }
+  return false
+}
+
+export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main"): Promise<Record<string, unknown>> {
+  const bareModel = validateChat(request)
   const uids = candidates(request.model, onlyUid)
   if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
   let lastError: Error | null = null
   for (const uid of uids) {
     if (!onlyUid) lastPicked.set(request.model, uid)
-    let retryable = false
     const startedAt = Date.now()
     try {
-      const account: Credential = await freshCredential(uid)
-      const conversationId = typeof request.conversation_id === "string" && request.conversation_id ? request.conversation_id : timeOrderedId()
-      const body: Record<string, unknown> = { ...request, model: bareModel, stream: true, stream_options: request.stream_options ?? { include_usage: true } }
-      if (body.max_completion_tokens != null && body.max_tokens == null) { body.max_tokens = body.max_completion_tokens; delete body.max_completion_tokens }
-      const headers = chatHeaders(account, conversationId, agentType)
-      const response = await fetch(`${accountBase(uid)}/v2/chat/completions`, {
-        method: "POST", timeout: 180, headers, body: JSON.stringify(body),
-      })
-      if (!response.ok) {
-        const detail = await response.text()
-        throw new ChatUpstreamError(`上游 HTTP ${response.status}：${detail.slice(0, 220)}`, detail, response.status)
-      }
+      const response = await requestChat(uid, request, bareModel, agentType)
       const text = await response.text()
       if (text.length > 12 * 1024 * 1024) throw new ChatUpstreamError("上游响应超过 12 MB")
       if (modelLimit(text) && !text.includes("data:")) throw new ChatUpstreamError("上游模型限流", text)
       const result = aggregateSSE(text, bareModel)
-      const usage = result.usage as Usage | undefined
-      const hitValues = [usage?.prompt_tokens_details?.cached_tokens, usage?.prompt_cache_hit_tokens, usage?.cache_read_input_tokens, usage?.cached_tokens]
-      const hit = hitValues.find(value => typeof value === "number" && value > 0) ?? hitValues.find(value => Number.isFinite(value))
-      const miss = usage?.prompt_cache_miss_tokens ?? (hit != null && usage?.prompt_tokens != null ? Math.max(0, usage.prompt_tokens - hit) : undefined)
-      recordRequest({ at: Date.now(), uid, model: bareModel, ok: true,
-        tokens: Number.isFinite(usage?.total_tokens) ? usage!.total_tokens! : 0, durationMs: Date.now() - startedAt,
-        ...(Number.isFinite(usage?.credit) ? { creditsSpent: usage!.credit! } : {}),
-        ...(Number.isFinite(hit) && Number.isFinite(miss) ? { cacheHitTokens: hit!, cacheMissTokens: miss! } : {}),
-      })
+      recordSuccess(uid, bareModel, startedAt, result)
       return result
     } catch (error) {
-      if (error instanceof ChatUpstreamError) {
-        const lock = modelLimit(error.detail)
-        if (lock) { setModelLock(uid, bareModel, lock.until, lock.reason, lock.estimated); retryable = true }
-        else if (hardCredit(error.status, error.detail)) { markExhausted(uid); retryable = true }
-        else if (error.status === 429 || error.status >= 500) { coolUntil.set(uid, Date.now() + 60_000); retryable = true }
-      }
+      const retryable = retryAfterError(uid, bareModel, error)
       lastError = error instanceof ChatUpstreamError ? error : new ChatUpstreamError(error instanceof Error ? error.message : String(error))
       recordRequest({ at: Date.now(), uid, model: bareModel, ok: false, tokens: 0, durationMs: Date.now() - startedAt })
       // shortcut: 已发出的请求不换号重试，除明确的限流或服务端错误；需要跨号重试时先确认上游幂等语义。
       if (!retryable) break
+    }
+  }
+  throw lastError ?? new Error("请求失败")
+}
+
+async function forwardEvents(response: Response, bareModel: string, includeUsage: boolean, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal): Promise<Record<string, unknown>> {
+  const reader = response.dataStream.getReader()
+  const decoder = new TextDecoder("utf-8")
+  let pending = "", frames = "", eventData: string[] = [], done = false, eof = false, bytesRead = 0
+  const dispatch = async () => {
+    if (!eventData.length) return
+    const payload = eventData.join("\n").trim()
+    eventData = []
+    if (payload === "[DONE]") { done = true; return }
+    let event: any
+    try { event = JSON.parse(payload) } catch { throw new ChatUpstreamError("上游事件流格式错误") }
+    if (event.error || event.code && event.code !== 0)
+      throw new ChatUpstreamError(String(event.error?.message || event.error || event.msg || "上游生成失败"), JSON.stringify(event))
+    frames += `data: ${payload}\n\n`
+    if (!Array.isArray(event.choices) || !event.choices.length) {
+      if (includeUsage && event.usage) await onEvent(event)
+      return
+    }
+    if (!includeUsage && event.usage) { event = { ...event }; delete event.usage }
+    await onEvent(event)
+  }
+  const consume = async (text: string) => {
+    pending += text
+    while (true) {
+      const end = pending.indexOf("\n")
+      if (end < 0) break
+      const line = pending.slice(0, end).replace(/\r$/, "")
+      pending = pending.slice(end + 1)
+      if (!line) await dispatch()
+      else if (line.startsWith("data:")) eventData.push(line.slice(5).trimStart())
+    }
+  }
+  try {
+    while (!done) {
+      if (signal.aborted) throw new Error("客户端连接已关闭")
+      const chunk = await reader.read()
+      if (chunk.done) { eof = true; break }
+      const bytes = chunk.value.toUint8Array()
+      if (!bytes) throw new ChatUpstreamError("上游响应解码失败")
+      bytesRead += bytes.length
+      if (bytesRead > 12 * 1024 * 1024) throw new ChatUpstreamError("上游响应超过 12 MB")
+      await consume(decoder.decode(bytes, { stream: true }))
+    }
+    await consume(decoder.decode())
+    if (pending) await consume("\n")
+    await dispatch()
+    if (done) frames += "data: [DONE]\n\n"
+    return aggregateSSE(frames, bareModel)
+  } finally {
+    if (!eof) try { await reader.cancel() } catch { }
+    reader.releaseLock()
+  }
+}
+
+export async function streamChat(request: ChatRequest, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal): Promise<void> {
+  const bareModel = validateChat(request)
+  const uids = candidates(request.model)
+  if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
+  const includeUsage = (request.stream_options as { include_usage?: boolean } | undefined)?.include_usage === true
+  let lastError: Error | null = null
+  for (const uid of uids) {
+    if (signal.aborted) throw new Error("客户端连接已关闭")
+    lastPicked.set(request.model, uid)
+    const startedAt = Date.now()
+    let emitted = false
+    try {
+      const response = await requestChat(uid, request, bareModel, "main", signal)
+      const result = await forwardEvents(response, bareModel, includeUsage, async event => { await onEvent(event); emitted = true }, signal)
+      recordSuccess(uid, bareModel, startedAt, result)
+      return
+    } catch (error) {
+      const retryable = retryAfterError(uid, bareModel, error)
+      lastError = error instanceof Error ? error : new Error(String(error))
+      recordRequest({ at: Date.now(), uid, model: bareModel, ok: false, tokens: 0, durationMs: Date.now() - startedAt })
+      if (emitted || signal.aborted || !retryable) break
     }
   }
   throw lastError ?? new Error("请求失败")

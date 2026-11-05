@@ -83,7 +83,7 @@ export function MorePage() {
       {(host !== addressHost("") || portText !== String(listenPort())) && <Button title="保存地址和端口" systemImage="checkmark" disabled={busy} action={() => void saveEndpoint()} />}
       <Hint>地址留空时自动使用当前网络地址；自定义地址用于复制，监听范围由局域网开关控制。端口固定，保存后若服务运行会自动重启。</Hint>
       <Hint>接口：GET /v1/models、POST /v1/chat/completions。无需鉴权头，客户端任意填写或留空 API Key 均可。</Hint>
-      <Hint>流式请求会在上游完成后一次性返回 SSE；当前 Scripting HTTP 服务不能逐块输出。</Hint>
+      <Hint>流式请求会逐块转发上游 SSE；客户端断开时会取消上游请求。</Hint>
       <Button title={busy ? "处理中…" : state.running ? "停止服务" : "启动服务"} systemImage={state.running ? "stop.fill" : "play.fill"} disabled={busy} action={() => void toggle()} />
       <Toggle title="允许局域网访问" systemImage="wifi" value={state.lan} disabled={busy} onChanged={value => void changeLan(value)} />
       {state.running && Script.supportsMinimization() && <Button title="收起界面，保持服务" systemImage="rectangle.compress.vertical" action={() => { void Script.minimize() }} />}
