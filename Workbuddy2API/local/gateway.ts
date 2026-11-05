@@ -2,7 +2,7 @@ import { ChatUpstreamError, completeChat, streamChat, type ChatRequest } from ".
 import { accounts, addressHost, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
 import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
-import { clearPendingStop, markServiceHttpStopped, pendingStopId } from "./serviceControl"
+import { clearPendingStop, pendingStopId } from "./serviceControl"
 import { HttpReply, RawHttpServer, type HttpInput } from "./rawHttp"
 
 const LAN = "wb2api.local.lan"
@@ -154,7 +154,6 @@ async function closeGateway(): Promise<void> {
   try { await server?.stop() }
   finally {
     server = null
-    if (runId) markServiceHttpStopped(runId)
     try {
       activityIssue = await endServiceActivity(finalState) ? "" : "实时活动未能结束，重新打开脚本时会重试"
     } catch (error) { activityIssue = error instanceof Error ? error.message : String(error) }

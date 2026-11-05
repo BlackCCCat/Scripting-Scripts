@@ -1,38 +1,57 @@
-import { Navigation, Script } from "scripting"
+import { LiveActivity, Navigation, Script } from "scripting"
 import { currentServiceRunId, gatewayState, restoreGateway, stopGateway } from "./local/gateway"
-import { clearMainSessionId, saveMainSessionId, serviceActivityRef } from "./local/serviceControl"
+import { forgetEndedServiceActivity } from "./local/serviceActivity"
+import { clearPendingStop, pendingStopId, serviceActivityRef } from "./local/serviceControl"
 import { migrateCredentialKeys } from "./local/store"
 import { App } from "./ui/App"
 
 async function run() {
-  let stopping = false
-  const handlerId = ScriptSession.register(async message => {
-    const command = message as { command?: string; runId?: string } | null
-    if (!command || command.command !== "stop" || typeof command.runId !== "string" || !command.runId)
-      return { ok: false, message: "无效的服务控制命令" }
-    if (stopping) return { ok: false, message: "HTTP 服务正在关闭" }
-    if (command.runId !== currentServiceRunId() && (gatewayState().running || serviceActivityRef()?.state.runId !== command.runId))
-      return { ok: false, message: "这次 HTTP 服务已经结束" }
-    stopping = true
+  let exiting = false
+  const exitAfterActivityEnds = async (runId: string, activityId: string) => {
+    const currentRun = currentServiceRunId()
+    if (exiting || pendingStopId() !== runId || currentRun && currentRun !== runId) return
+    exiting = true
     try {
+      forgetEndedServiceActivity(activityId)
       await stopGateway()
-      if (Script.supportsMinimization()) Script.enableMinimize(false)
-      return { ok: true, message: null }
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) }
-    } finally { stopping = false }
-  })
+      clearPendingStop(runId)
+    } catch (error) { console.error("HTTP 服务停止时清理失败", error) }
+    finally {
+      LiveActivity.removeActivityUpdateListener(onActivityUpdate)
+      Script.exit()
+    }
+  }
+  const onActivityUpdate = (detail: { id: string; state: string }) => {
+    const ref = serviceActivityRef()
+    if (ref?.activityId === detail.id && pendingStopId() === ref.state.runId &&
+      (detail.state === "ended" || detail.state === "dismissed"))
+      void exitAfterActivityEnds(ref.state.runId, detail.id)
+  }
+  const checkPendingStop = async (): Promise<boolean> => {
+    const pending = pendingStopId()
+    const ref = serviceActivityRef()
+    const currentRun = currentServiceRunId()
+    if (!pending || ref?.state.runId !== pending || currentRun && currentRun !== pending) return false
+    const state = await LiveActivity.getActivityState(ref.activityId)
+    if (state === "ended" || state === "dismissed") await exitAfterActivityEnds(pending, ref.activityId)
+    return true
+  }
+  LiveActivity.addActivityUpdateListener(onActivityUpdate)
   try {
-    saveMainSessionId(handlerId)
     const migration = migrateCredentialKeys()
     if (migration.failed) await Dialog.alert({ title: "钥匙串迁移未完成", message: `${migration.failed} 条旧凭据未能清理，请检查 Scripting 的钥匙串权限。` })
-    Script.onResume(() => { void restoreGateway().then(() => { if (Script.supportsMinimization()) Script.enableMinimize(gatewayState().running) }) })
-    await restoreGateway()
+    Script.onResume(() => { void (async () => {
+      if (await checkPendingStop()) return
+      await restoreGateway()
+      if (Script.supportsMinimization()) Script.enableMinimize(gatewayState().running)
+    })() })
+    if (!await checkPendingStop()) await restoreGateway()
     if (Script.supportsMinimization()) Script.enableMinimize(gatewayState().running)
     await Navigation.present(<App />)
   } finally {
+    LiveActivity.removeActivityUpdateListener(onActivityUpdate)
     try { await stopGateway() }
-    finally { ScriptSession.unregister(handlerId); clearMainSessionId(handlerId); Script.exit() }
+    finally { Script.exit() }
   }
 }
 

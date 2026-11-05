@@ -4,7 +4,7 @@ import { clearServiceActivityRef, saveServiceActivityRef, serviceActivityRef } f
 
 const ACTIVITY_ID = "wb2api.local.service-activity-id"
 const RENDERER_VERSION = "wb2api.local.service-activity-renderer"
-const CURRENT_RENDERER_VERSION = 10
+const CURRENT_RENDERER_VERSION = 11
 let activity: LiveActivity<ServiceActivityState> | null = null
 let dismissed = false
 
@@ -89,5 +89,11 @@ export async function endServiceActivity(finalState: ServiceActivityState): Prom
   Storage.remove(ACTIVITY_ID)
   clearServiceActivityRef(id)
   return true
+}
+
+export function forgetEndedServiceActivity(id: string): void {
+  if (Storage.get<string>(ACTIVITY_ID) === id) Storage.remove(ACTIVITY_ID)
+  if (activity?.activityId === id) activity = null
+  clearServiceActivityRef(id)
 }
 
