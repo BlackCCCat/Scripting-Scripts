@@ -1,6 +1,7 @@
 import { Button, HStack, Image, Link, List, NavigationLink, Picker, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
 import { Script } from "scripting"
-import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, records, setAccountRotationEnabled, setAddressHost, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
+import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, setAccountRotationEnabled, setAddressHost, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
+import { clearDiagnosticRun, diagnosticFailure, diagnosticFieldsText, diagnosticLocalTime, diagnosticOutcomeName, diagnosticSnapshot, diagnosticStageName, diagnosticsEnabled, exportDiagnosticFile, readDiagnosticLog, setDiagnosticsEnabled, subscribeDiagnostics, type DiagnosticRequest } from "../local/diagnostics"
 import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, type GiftStatus, type Voucher } from "../local/upstream"
 import { gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
 import { alertError, Busy, Failure, Hint } from "./Shared"
@@ -12,6 +13,7 @@ export function MorePage() {
   const [portText, setPortText] = useState(() => String(listenPort()))
   const [rotation, setRotation] = useState(accountRotationEnabled)
   const [fixedUid, setFixedUid] = useState(fixedAccountUid)
+  const [logging, setLogging] = useState(diagnosticsEnabled)
   useEffect(() => subscribeGateway(() => setState(gatewayState())), [])
   const autoHost = serviceDefaultHost
   async function toggle() {
@@ -69,7 +71,7 @@ export function MorePage() {
   return <List navigationTitle="更多">
     <Section title="模型与日志">
       <NavigationLink destination={<ModelsPage />}><HStack spacing={12}><Image systemName="square.stack.3d.up" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>模型</Text><Hint>模型目录与展示控制</Hint></VStack></HStack></NavigationLink>
-      <NavigationLink destination={<LogsPage />}><HStack spacing={12}><Image systemName="text.alignleft" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>日志</Text><Hint>本机请求记录与结果</Hint></VStack></HStack></NavigationLink>
+      <NavigationLink destination={<LogsPage />}><HStack spacing={12}><Image systemName="text.alignleft" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>日志</Text><Hint>本次服务的请求过程与错误</Hint></VStack></HStack></NavigationLink>
     </Section>
     <Section title="资源">
       <NavigationLink destination={<GiftPage />}><HStack spacing={12}><Image systemName="gift" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>礼包</Text><Hint>按账号查看与领取</Hint></VStack></HStack></NavigationLink>
@@ -96,6 +98,10 @@ export function MorePage() {
       <Button title={busy ? "处理中…" : state.running ? "停止服务" : "启动服务"} systemImage={state.running ? "stop.fill" : "play.fill"} disabled={busy} action={() => void toggle()} />
       <Toggle title="允许局域网访问" systemImage="wifi" value={state.lan} disabled={busy} onChanged={value => void changeLan(value)} />
       <Toggle title="账号轮询" systemImage="arrow.triangle.2.circlepath" value={rotation} disabled={!accountChoices.length} onChanged={value => void changeRotation(value)} />
+      <Toggle title="请求诊断日志" systemImage="waveform.path.ecg" value={logging} onChanged={value => {
+        try { setDiagnosticsEnabled(value); setLogging(value) } catch (error) { void alertError(error) }
+      }} />
+      <Hint>默认开启；只保留最近一次 HTTP 服务运行的日志。记录阶段、状态与大小，不保存请求正文、思考文字或密钥。</Hint>
       {!rotation && !!accountChoices.length && <>
         <Picker title="固定账号" pickerStyle="navigationLink" value={fixedUid} onChanged={(uid: string) => { try { setFixedAccountUid(uid); setFixedUid(uid) } catch (error) { void alertError(error) } }}>
           {!!fixedUid && !accountChoices.some(item => item.uid === fixedUid) && <Text tag={fixedUid}>原账号已移除</Text>}
@@ -129,17 +135,107 @@ function AboutPage() {
   </List>
 }
 
-function LogsPage() {
-  const [items, setItems] = useState(records)
-  return <List navigationTitle="日志" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" action={() => setItems(records())} /> }}>
-    <Section title="本机请求"><Hint>{`最近 ${items.length} 次 · 成功 ${items.filter(item => item.ok).length} 次`}</Hint>
-      {!items.length && <Hint>暂无本机请求记录</Hint>}
-      {[...items].reverse().map(item => <HStack key={`${item.at}:${item.uid}:${item.model}`} spacing={10}>
-        <Image systemName={item.ok ? "checkmark.circle.fill" : "xmark.circle.fill"} foregroundStyle={item.ok ? "systemGreen" : "systemRed"} />
-        <Text lineLimit={1} frame={{ maxWidth: "infinity", alignment: "leading" }}>{item.model}</Text>
-        <Text font="caption" foregroundStyle="secondaryLabel">{`${new Date(item.at).toLocaleString("zh-CN")} · ${item.tokens} Token`}</Text>
-      </HStack>)}
+function lastAccount(request: DiagnosticRequest): string {
+  const fields = request.events.findLast(event => event.stage === "route.selected")?.fields
+  if (!fields?.account) return ""
+  return fields.uidSuffix ? `${fields.account} · ${fields.site} · UID 尾号 ${fields.uidSuffix}` : `UID 尾号 ${fields.account}`
+}
+
+function DiagnosticDetailPage({ id }: { id: string }) {
+  const [request, setRequest] = useState(() => diagnosticSnapshot()?.requests.find(item => item.id === id))
+  useEffect(() => subscribeDiagnostics(() => setRequest(diagnosticSnapshot()?.requests.find(item => item.id === id))), [id])
+  if (!request) return <List navigationTitle={`请求 ${id}`}><Section><Hint>这条记录已被清理或由新的服务运行替换</Hint></Section></List>
+  return <List navigationTitle={`请求 ${request.id}`}>
+    <Section title="请求"><Text>{`${request.method ?? "未知"} ${request.path ?? "未识别路径"}`}</Text>
+      {!!request.model && <Text>{`模型：${request.model}`}</Text>}
+      {!!lastAccount(request) && <Text>{`最后尝试账号：${lastAccount(request)}`}</Text>}
+      <Hint>{`${diagnosticLocalTime(request.at)} · ${request.stream ? "流式" : "非流式"} · ${diagnosticOutcomeName(request.outcome)} · ${((request.events.at(-1)?.at ?? Date.now()) - request.at)} ms${request.status ? ` · HTTP ${request.status}` : ""}`}</Hint>
+      {!!diagnosticFailure(request) && <Text foregroundStyle="systemRed">{diagnosticFailure(request)}</Text>}
     </Section>
+    <Section title="过程">
+      {request.events.map((event, index) => <VStack key={`${event.at}:${index}`} alignment="leading" spacing={3}>
+        <Text>{diagnosticStageName(event.stage)}</Text>
+        <Hint>{`${diagnosticLocalTime(event.at).slice(11, 19)} · +${event.at - request.at} ms`}</Hint>
+        {!!event.fields && <Text font="caption" foregroundStyle="secondaryLabel">{diagnosticFieldsText(event.fields)}</Text>}
+      </VStack>)}
+      {!!request.droppedEvents && <Hint>{`已省略 ${request.droppedEvents} 条较早的过程记录`}</Hint>}
+    </Section>
+  </List>
+}
+
+function DiagnosticLogTextPage() {
+  const [lines, setLines] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  async function load() {
+    setLoading(true)
+    try {
+      const content = await readDiagnosticLog()
+      setLines(content.trimEnd().split("\n").filter(Boolean))
+      setError("")
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [])
+  return <List navigationTitle="查看完整日志" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" disabled={loading} action={() => void load()} /> }}>
+    {loading && <Section><Hint>正在读取日志…</Hint></Section>}
+    {!!error && <Section><Text foregroundStyle="systemRed">{error}</Text></Section>}
+    {!loading && !error && <>
+      <Section title={`完整日志 · ${lines.length} 行`}>
+        {!lines.length && <Hint>当前没有日志内容</Hint>}
+        {lines.map((line, index) => <Text key={index} font="caption2" fontDesign="monospaced" foregroundStyle="label">{line}</Text>)}
+      </Section>
+    </>}
+  </List>
+}
+
+function LogsPage() {
+  const [run, setRun] = useState(diagnosticSnapshot)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => subscribeDiagnostics(() => setRun(diagnosticSnapshot())), [])
+  async function clear() {
+    if (!await Dialog.confirm({ title: "清理请求日志", message: "清理当前日志？服务运行时的新请求仍会继续记录。", confirmLabel: "清理", cancelLabel: "取消" })) return
+    try { await clearDiagnosticRun(); setRun(diagnosticSnapshot()) }
+    catch (error) { await alertError(error) }
+  }
+  async function exportLog() {
+    if (!diagnosticSnapshot() || busy) return
+    setBusy(true)
+    let path: string | null = null
+    try {
+      path = await exportDiagnosticFile()
+      await ShareSheet.present([path])
+    } catch (error) { await alertError(error) }
+    finally { if (path) try { await FileManager.remove(path) } catch { }; setBusy(false) }
+  }
+  return <List navigationTitle="请求诊断日志" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" action={() => setRun(diagnosticSnapshot())} /> }}>
+    <Section title="本次服务">
+      {!run && <Hint>暂无日志。开启 HTTP 服务后开始记录；下次启动会替换上一份。</Hint>}
+      {!!run && <>
+        <Text>{`${diagnosticLocalTime(run.startedAt)} 启动 · ${run.endedAt ? "已关闭" : "运行中或上次异常结束"}`}</Text>
+        <Hint>{`${run.lan ? "局域网" : "本机"} · 端口 ${run.port} · ${run.requests.length} 条请求${run.droppedRequests ? ` · 已裁掉较早的 ${run.droppedRequests} 条` : ""}`}</Hint>
+        {run.saveFailed && <Text foregroundStyle="systemOrange">部分日志未能写入设备存储</Text>}
+      </>}
+      <Hint>按请求查看连接、账号换号、思考生成、写出和断开阶段。页面显示最近 200 条请求、每条最多 80 个事件；导出的文本日志包含本次运行全部已记录事件。</Hint>
+    </Section>
+    {!!run && <Section title="操作">
+      <NavigationLink destination={<DiagnosticLogTextPage />}><HStack spacing={10}><Image systemName="doc.text" /><Text>查看日志</Text></HStack></NavigationLink>
+      <Button title="导出完整日志" systemImage="square.and.arrow.up" disabled={busy} action={() => void exportLog()} />
+      <Button title="清理日志" systemImage="trash" disabled={busy} action={() => void clear()} />
+    </Section>}
+    {!!run?.requests.length && <Section title="请求记录">
+      {[...run.requests].reverse().map(request => <NavigationLink key={request.id} destination={<DiagnosticDetailPage id={request.id} />}>
+        <HStack spacing={10}>
+          <Image systemName={request.outcome === "ok" ? "checkmark.circle.fill" : request.outcome ? "exclamationmark.circle.fill" : "clock"} foregroundStyle={request.outcome === "ok" ? "systemGreen" : request.outcome === "error" ? "systemRed" : "systemOrange"} />
+          <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+            <Text lineLimit={1}>{request.model || `${request.method ?? "连接"} ${request.path ?? ""}`}</Text>
+            <Hint>{`${request.stream ? "流式" : "非流式"} · ${diagnosticOutcomeName(request.outcome)} · ${((request.events.at(-1)?.at ?? Date.now()) - request.at)} ms · ${diagnosticLocalTime(request.at).slice(11, 19)}`}</Hint>
+            {!!lastAccount(request) && <Hint>{`账号：${lastAccount(request)}`}</Hint>}
+            {!!diagnosticFailure(request) && <Text font="caption" foregroundStyle="systemRed" lineLimit={2}>{diagnosticFailure(request)}</Text>}
+          </VStack>
+        </HStack>
+      </NavigationLink>)}
+    </Section>}
   </List>
 }
 

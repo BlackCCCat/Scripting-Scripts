@@ -1,4 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net"
+import { newDiagnosticTrace, type DiagnosticTrace } from "./diagnostics"
 
 const MAX_BODY = 8 * 1024 * 1024
 const MAX_HEADERS = 16 * 1024
@@ -10,9 +11,15 @@ export class HttpReply {
   private ended = false
   private writing: Promise<void> = Promise.resolve()
   readonly controller = new AbortController()
+  private bytesWritten = 0
 
-  constructor(private readonly socket: Socket) {
-    socket.on("close", () => this.controller.abort())
+  constructor(private readonly socket: Socket, readonly trace: DiagnosticTrace | null = null) {
+    socket.on("close", () => {
+      this.controller.abort()
+      if (!this.ended) trace?.mark("socket.closed", { bytesWritten: this.bytesWritten })
+      trace?.finish("closed")
+    })
+    socket.on("error", error => trace?.fail("socket.error", error))
   }
 
   get headersSent() { return this.sent }
@@ -26,9 +33,11 @@ export class HttpReply {
         await new Promise<void>((resolve, reject) => {
           this.socket.write(bytes.subarray(offset, offset + 64 * 1024), error => error ? reject(error) : resolve())
         })
+        this.bytesWritten += Math.min(64 * 1024, bytes.length - offset)
       }
     })
     this.writing = action.catch(() => {})
+    void action.catch(error => this.trace?.fail("downstream.write", error))
     return action
   }
 
@@ -36,14 +45,18 @@ export class HttpReply {
     if (this.sent) return
     const body = JSON.stringify(value)
     this.sent = true
+    this.trace?.mark("downstream.headers", { status, bodyBytes: Buffer.byteLength(body) })
     await this.write(`HTTP/1.1 ${status} ${status === 200 ? "OK" : "Error"}\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`)
     this.ended = true
+    this.trace?.mark("downstream.completed", { bytesWritten: this.bytesWritten })
+    this.trace?.finish(status < 400 ? "ok" : "error", status)
     this.socket.end()
   }
 
   async startEvents() {
     if (this.sent) return
     this.sent = true
+    this.trace?.mark("downstream.headers", { status: 200, stream: true })
     await this.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
   }
 
@@ -58,11 +71,13 @@ export class HttpReply {
     await this.write(`${Buffer.byteLength(body).toString(16)}\r\n${body}\r\n`)
   }
 
-  async endEvents() {
+  async endEvents(outcome: "ok" | "error" = "ok") {
     if (this.ended || this.socket.destroyed) return
     await this.event("[DONE]")
-    await this.write("0\r\n\r\n")
     this.ended = true
+    await this.write("0\r\n\r\n")
+    this.trace?.mark("downstream.completed", { bytesWritten: this.bytesWritten })
+    this.trace?.finish(outcome, 200)
     this.socket.end()
   }
 }
@@ -129,8 +144,8 @@ export class RawHttpServer {
     this.peers.add(socket)
     socket.on("close", () => this.peers.delete(socket))
     socket.on("error", () => {})
-    socket.setTimeout(610_000, () => socket.destroy())
-    const reply = new HttpReply(socket)
+    const reply = new HttpReply(socket, newDiagnosticTrace())
+    socket.setTimeout(610_000, () => { reply.trace?.mark("socket.idle_timeout"); socket.destroy() })
     let bytes = Buffer.alloc(0)
     let headersEnd = -1
     let bodyLength = 0
@@ -156,6 +171,7 @@ export class RawHttpServer {
           if (!match) throw new Error("仅支持 HTTP/1.0 或 HTTP/1.1 GET/POST")
           method = match[1]
           path = match[2].split("?", 1)[0]
+          reply.trace?.setRequest(method, path)
           const headers = new Map<string, string>()
           for (const line of lines) {
             const colon = line.indexOf(":")
@@ -178,14 +194,17 @@ export class RawHttpServer {
         if (!complete) return
         received = true
         bytes = Buffer.alloc(0)
+        reply.trace?.mark("http.body", { bytes: complete.length })
         void this.handler({ method, path, body: complete.toString("utf8") }, reply).catch(async error => {
+          reply.trace?.fail("gateway.unhandled", error)
           try {
-            if (reply.headersSent) { await reply.event({ error: { message: error instanceof Error ? error.message : String(error), type: "api_error" } }); await reply.endEvents() }
+            if (reply.headersSent) { await reply.event({ error: { message: error instanceof Error ? error.message : String(error), type: "api_error" } }); await reply.endEvents("error") }
             else await reply.json(500, { error: { message: "服务内部错误", type: "api_error" } })
           } catch { socket.destroy() }
         })
       } catch (error) {
         received = true
+        reply.trace?.fail("http.parse", error)
         void reply.json(400, { error: { message: error instanceof Error ? error.message : String(error), type: "invalid_request_error" } }).catch(() => socket.destroy())
       }
     })

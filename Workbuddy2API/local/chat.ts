@@ -2,6 +2,7 @@ import { accountRotationEnabled, accounts, fixedAccountUid, modelCatalog, modelL
 import { accountBase, chatHeaders, freshCredential, timeOrderedId } from "./upstream"
 import { prepareReasoning } from "./reasoning"
 import { bindAccount, boundAccount, chatSession, generatedCacheKey, generatedConversationId, unbindAccount, type ChatSession } from "./chatRouting"
+import type { DiagnosticTrace } from "./diagnostics"
 
 export type ChatRequest = { model: string; messages: unknown[]; stream?: boolean; [key: string]: unknown }
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } }
@@ -77,6 +78,15 @@ const coolUntil = new Map<string, number>()
 const exhaustedUntil = new Map<string, { until: number; at: number }>()
 const lastPicked = new Map<string, string>()
 
+function diagnosticAccount(uid: string) {
+  const pool = accounts()
+  const index = pool.findIndex(item => item.uid === uid)
+  const account = pool[index]
+  const chars = Array.from(account?.nickname ?? "").filter(char => /[\p{L}\p{N}]/u.test(char))
+  const masked = chars.length ? `${chars[0]}***${chars.length > 1 ? chars.at(-1) : ""}` : "未命名"
+  return { account: index >= 0 ? `#${index + 1} ${masked}` : "已删除账号", site: account?.site === "cn" ? "国内" : "国际", uidSuffix: uid.length > 4 ? uid.slice(-4) : "****" }
+}
+
 function hardCredit(status: number, detail: string): boolean {
   if (status === 402 || /"code"\s*:\s*"?14018"?(?=\s*[,}])/i.test(detail)) return true
   return status !== 429 && /insufficient credits?|no credits?|credits? exhausted|out of credits?|quota (?:exceeded|exhausted)|payment required|积分不足|额度不足|余额不足|积分用完|额度用尽|没有积分/i.test(detail)
@@ -130,29 +140,45 @@ function validateChat(request: ChatRequest): string {
   return request.model.replace(/^(cn|global):/, "")
 }
 
-async function requestChat(uid: string, request: ChatRequest, bareModel: string, session: ChatSession, agentType: "main" | "auxiliary", signal?: AbortSignal): Promise<Response> {
+async function requestChat(uid: string, request: ChatRequest, bareModel: string, session: ChatSession, agentType: "main" | "auxiliary", signal?: AbortSignal, trace?: DiagnosticTrace | null): Promise<Response> {
+  trace?.mark("credential.check")
   const account: Credential = await freshCredential(uid)
+  trace?.mark("credential.ready")
   const conversationId = session.cacheSource ? generatedConversationId(uid, session.cacheSource) : timeOrderedId()
   const body: Record<string, unknown> = { ...request, model: bareModel, stream: true, stream_options: request.stream_options ?? { include_usage: true } }
   if (body.max_completion_tokens != null && body.max_tokens == null) { body.max_tokens = body.max_completion_tokens; delete body.max_completion_tokens }
   if (!(typeof body.prompt_cache_key === "string" && body.prompt_cache_key.trim()) && session.cacheSource)
     body.prompt_cache_key = await generatedCacheKey(uid, session.cacheSource)
   const outgoing = prepareReasoning(body)
-  const response = await fetch(`${accountBase(uid)}/v2/chat/completions`, {
-    method: "POST", timeout: 600, signal, headers: chatHeaders(account, conversationId, agentType), body: JSON.stringify(outgoing),
-  })
+  const requestBody = JSON.stringify(outgoing)
+  trace?.mark("upstream.send", { requestBytes: new TextEncoder().encode(requestBody).length, thinking: (outgoing.thinking as { type?: string } | undefined)?.type === "enabled" })
+  let response: Response
+  try {
+    response = await fetch(`${accountBase(uid)}/v2/chat/completions`, {
+      method: "POST", timeout: 600, signal, headers: chatHeaders(account, conversationId, agentType), body: requestBody,
+    })
+  } catch (error) { trace?.fail("upstream.connect", error); throw error }
+  trace?.mark("upstream.headers", { status: response.status })
   if (!response.ok) {
-    const detail = await response.text()
+    let detail: string
+    try { detail = await response.text() }
+    catch (error) { trace?.fail("upstream.error_body", error); throw error }
     throw new ChatUpstreamError(`上游 HTTP ${response.status}：${detail.slice(0, 220)}`, detail, response.status)
   }
   return response
 }
 
-function recordSuccess(uid: string, bareModel: string, startedAt: number, result: Record<string, unknown>) {
+function recordSuccess(uid: string, bareModel: string, startedAt: number, result: Record<string, unknown>, trace?: DiagnosticTrace | null) {
   const usage = result.usage as Usage | undefined
   const hitValues = [usage?.prompt_tokens_details?.cached_tokens, usage?.prompt_cache_hit_tokens, usage?.cache_read_input_tokens, usage?.cached_tokens]
   const hit = hitValues.find(value => typeof value === "number" && value > 0) ?? hitValues.find(value => Number.isFinite(value))
   const miss = usage?.prompt_cache_miss_tokens ?? (hit != null && usage?.prompt_tokens != null ? Math.max(0, usage.prompt_tokens - hit) : undefined)
+  if (usage) trace?.mark("upstream.usage", {
+    totalTokens: Number.isFinite(usage.total_tokens) ? usage.total_tokens! : 0,
+    promptTokens: Number.isFinite(usage.prompt_tokens) ? usage.prompt_tokens! : 0,
+    completionTokens: Number.isFinite(usage.completion_tokens) ? usage.completion_tokens! : 0,
+    cacheHitTokens: Number.isFinite(hit) ? hit! : 0,
+  })
   recordRequest({ at: Date.now(), uid, model: bareModel, ok: true,
     tokens: Number.isFinite(usage?.total_tokens) ? usage!.total_tokens! : 0, durationMs: Date.now() - startedAt,
     ...(Number.isFinite(usage?.credit) ? { creditsSpent: usage!.credit! } : {}),
@@ -169,29 +195,38 @@ function retryAfterError(uid: string, bareModel: string, error: unknown): boolea
   return false
 }
 
-export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main"): Promise<Record<string, unknown>> {
+export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main", trace?: DiagnosticTrace | null): Promise<Record<string, unknown>> {
   const bareModel = validateChat(request)
   const session = await chatSession(request)
   const routeKey = session.routeKey ? `${request.model.startsWith("global:") ? "global" : "cn"}:${session.routeKey}` : ""
   const preferredUid = !onlyUid && accountRotationEnabled() && routeKey ? boundAccount(routeKey) : ""
   const uids = candidates(request.model, onlyUid, preferredUid)
+  trace?.mark("route.candidates", { count: uids.length, bound: !!preferredUid, rotation: accountRotationEnabled() })
   if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
   let lastError: Error | null = null
   for (const uid of uids) {
+    trace?.mark("route.selected", { ...diagnosticAccount(uid), attempt: uids.indexOf(uid) + 1 })
     if (!onlyUid && accountRotationEnabled() && uid !== preferredUid) lastPicked.set(request.model, uid)
     const startedAt = Date.now()
     try {
-      const response = await requestChat(uid, request, bareModel, session, agentType)
-      const text = await response.text()
+      const response = await requestChat(uid, request, bareModel, session, agentType, undefined, trace)
+      let text: string
+      try { text = await response.text() }
+      catch (error) { trace?.fail("upstream.read", error); throw error }
+      trace?.mark("upstream.body", { bytes: new TextEncoder().encode(text).length })
       if (text.length > 12 * 1024 * 1024) throw new ChatUpstreamError("上游响应超过 12 MB")
       if (modelLimit(text) && !text.includes("data:")) throw new ChatUpstreamError("上游模型限流", text)
       const result = aggregateSSE(text, bareModel)
-      recordSuccess(uid, bareModel, startedAt, result)
+      const message = (result.choices as Array<{ message?: { content?: string; reasoning_content?: string } }>)[0]?.message
+      trace?.mark("upstream.completed", { reasoningChars: message?.reasoning_content?.length ?? 0, answerChars: message?.content?.length ?? 0 })
+      recordSuccess(uid, bareModel, startedAt, result, trace)
       if (routeKey && !onlyUid && accountRotationEnabled()) bindAccount(routeKey, uid)
       return result
     } catch (error) {
+      trace?.fail("chat.attempt_failed", error)
       const retryable = retryAfterError(uid, bareModel, error)
       if (retryable && routeKey) unbindAccount(routeKey, uid)
+      trace?.mark("route.failure", { retryable, willRetry: retryable && accountRotationEnabled() && uids.indexOf(uid) < uids.length - 1 })
       lastError = error instanceof ChatUpstreamError ? error : new ChatUpstreamError(error instanceof Error ? error.message : String(error))
       recordRequest({ at: Date.now(), uid, model: bareModel, ok: false, tokens: 0, durationMs: Date.now() - startedAt })
       // shortcut: 已发出的请求不换号重试，除明确的限流或服务端错误；需要跨号重试时先确认上游幂等语义。
@@ -201,26 +236,66 @@ export async function completeChat(request: ChatRequest, onlyUid?: string, agent
   throw lastError ?? new Error("请求失败")
 }
 
-async function forwardEvents(response: Response, bareModel: string, includeUsage: boolean, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal): Promise<Record<string, unknown>> {
+async function forwardEvents(response: Response, bareModel: string, includeUsage: boolean, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal, trace?: DiagnosticTrace | null): Promise<Record<string, unknown>> {
   const reader = response.dataStream.getReader()
   const decoder = new TextDecoder("utf-8")
   let pending = "", frames = "", eventData: string[] = [], done = false, eof = false, bytesRead = 0
+  let eventCount = 0, reasoningChars = 0, answerChars = 0, lastProgressAt = Date.now(), lastProgressBytes = 0
+  const startedAt = Date.now()
+  let lastChunkAt = startedAt, firstReasoningAt = 0, firstAnswerAt = 0, writingClient = false
+  let failureStage = "upstream.read"
+  const waitingTimer = trace ? setInterval(() => {
+    if (done || writingClient) return
+    const now = Date.now()
+    if (now - lastChunkAt < 10_000) return
+    trace.mark("upstream.waiting", { phase: firstAnswerAt ? "回答" : firstReasoningAt ? "思考" : "等待首个事件",
+      elapsedMs: now - startedAt, idleMs: now - lastChunkAt, events: eventCount, bytesRead, reasoningChars, answerChars })
+  }, 15_000) : null
   const dispatch = async () => {
     if (!eventData.length) return
     const payload = eventData.join("\n").trim()
     eventData = []
     if (payload === "[DONE]") { done = true; return }
     let event: any
-    try { event = JSON.parse(payload) } catch { throw new ChatUpstreamError("上游事件流格式错误") }
-    if (event.error || event.code && event.code !== 0)
+    try { event = JSON.parse(payload) } catch { failureStage = "upstream.parse"; throw new ChatUpstreamError("上游事件流格式错误") }
+    if (event.error || event.code && event.code !== 0) {
+      failureStage = "upstream.event_error"
       throw new ChatUpstreamError(String(event.error?.message || event.error || event.msg || "上游生成失败"), JSON.stringify(event))
+    }
+    eventCount++
+    const delta = event.choices?.[0]?.delta ?? event.choices?.[0]?.message
+    if (typeof delta?.reasoning_content === "string" && delta.reasoning_content.length) {
+      reasoningChars += delta.reasoning_content.length
+      if (!firstReasoningAt) {
+        firstReasoningAt = Date.now()
+        trace?.mark("upstream.thinking_started", { elapsedMs: Date.now() - startedAt, bytesRead })
+      }
+    }
+    if (typeof delta?.content === "string" && delta.content.length) {
+      answerChars += delta.content.length
+      if (!firstAnswerAt) {
+        firstAnswerAt = Date.now()
+        trace?.mark("upstream.answer_started", { elapsedMs: firstAnswerAt - startedAt,
+          ...(firstReasoningAt ? { thinkingDurationMs: firstAnswerAt - firstReasoningAt } : {}), reasoningChars, bytesRead })
+      }
+    }
+    if (eventCount === 1) trace?.mark("upstream.first_event", { bytesRead })
+    if (Date.now() - lastProgressAt >= 2_000 || bytesRead - lastProgressBytes >= 32 * 1024) {
+      trace?.mark("upstream.progress", { phase: firstAnswerAt ? "回答" : firstReasoningAt ? "思考" : "等待生成", elapsedMs: Date.now() - startedAt,
+        events: eventCount, bytesRead, reasoningChars, answerChars })
+      lastProgressAt = Date.now(); lastProgressBytes = bytesRead
+    }
     frames += `data: ${payload}\n\n`
     if (!Array.isArray(event.choices) || !event.choices.length) {
-      if (includeUsage && event.usage) await onEvent(event)
+      if (includeUsage && event.usage) try { await onEvent(event) }
+      catch (error) { failureStage = "downstream.event"; throw error }
       return
     }
     if (!includeUsage && event.usage) { event = { ...event }; delete event.usage }
-    await onEvent(event)
+    writingClient = true
+    try { await onEvent(event) }
+    catch (error) { failureStage = "downstream.event"; throw error }
+    finally { writingClient = false }
   }
   const consume = async (text: string) => {
     pending += text
@@ -238,8 +313,9 @@ async function forwardEvents(response: Response, bareModel: string, includeUsage
       if (signal.aborted) throw new Error("客户端连接已关闭")
       const chunk = await reader.read()
       if (chunk.done) { eof = true; break }
+      lastChunkAt = Date.now()
       const bytes = chunk.value.toUint8Array()
-      if (!bytes) throw new ChatUpstreamError("上游响应解码失败")
+      if (!bytes) { failureStage = "upstream.decode"; throw new ChatUpstreamError("上游响应解码失败") }
       bytesRead += bytes.length
       if (bytesRead > 12 * 1024 * 1024) throw new ChatUpstreamError("上游响应超过 12 MB")
       await consume(decoder.decode(bytes, { stream: true }))
@@ -248,36 +324,49 @@ async function forwardEvents(response: Response, bareModel: string, includeUsage
     if (pending) await consume("\n")
     await dispatch()
     if (done) frames += "data: [DONE]\n\n"
+    trace?.mark(done ? "upstream.done" : "upstream.missing_done", { events: eventCount, bytesRead, reasoningChars, answerChars,
+      ...(firstReasoningAt ? { thinkingDurationMs: (firstAnswerAt || Date.now()) - firstReasoningAt } : {}) })
+    failureStage = "upstream.aggregate"
     return aggregateSSE(frames, bareModel)
+  } catch (error) {
+    trace?.mark("upstream.interrupted", { events: eventCount, bytesRead, reasoningChars, answerChars,
+      ...(firstReasoningAt ? { thinkingDurationMs: (firstAnswerAt || Date.now()) - firstReasoningAt } : {}) })
+    trace?.fail(signal.aborted ? "client.aborted" : failureStage, error)
+    throw error
   } finally {
+    if (waitingTimer) clearInterval(waitingTimer)
     if (!eof) try { await reader.cancel() } catch { }
     reader.releaseLock()
   }
 }
 
-export async function streamChat(request: ChatRequest, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal): Promise<void> {
+export async function streamChat(request: ChatRequest, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal, trace?: DiagnosticTrace | null): Promise<void> {
   const bareModel = validateChat(request)
   const session = await chatSession(request)
   const routeKey = session.routeKey ? `${request.model.startsWith("global:") ? "global" : "cn"}:${session.routeKey}` : ""
   const preferredUid = accountRotationEnabled() && routeKey ? boundAccount(routeKey) : ""
   const uids = candidates(request.model, undefined, preferredUid)
+  trace?.mark("route.candidates", { count: uids.length, bound: !!preferredUid, rotation: accountRotationEnabled() })
   if (!uids.length) throw new Error("没有可用账号，请检查账号启用状态、额度和模型权限")
   const includeUsage = (request.stream_options as { include_usage?: boolean } | undefined)?.include_usage === true
   let lastError: Error | null = null
   for (const uid of uids) {
     if (signal.aborted) throw new Error("客户端连接已关闭")
+    trace?.mark("route.selected", { ...diagnosticAccount(uid), attempt: uids.indexOf(uid) + 1 })
     if (accountRotationEnabled() && uid !== preferredUid) lastPicked.set(request.model, uid)
     const startedAt = Date.now()
     let emitted = false
     try {
-      const response = await requestChat(uid, request, bareModel, session, "main", signal)
-      const result = await forwardEvents(response, bareModel, includeUsage, async event => { await onEvent(event); emitted = true }, signal)
-      recordSuccess(uid, bareModel, startedAt, result)
+      const response = await requestChat(uid, request, bareModel, session, "main", signal, trace)
+      const result = await forwardEvents(response, bareModel, includeUsage, async event => { await onEvent(event); emitted = true }, signal, trace)
+      recordSuccess(uid, bareModel, startedAt, result, trace)
       if (routeKey && accountRotationEnabled()) bindAccount(routeKey, uid)
       return
     } catch (error) {
+      trace?.fail("chat.attempt_failed", error)
       const retryable = retryAfterError(uid, bareModel, error)
       if (retryable && routeKey) unbindAccount(routeKey, uid)
+      trace?.mark("route.failure", { retryable, emitted, aborted: signal.aborted, willRetry: !emitted && !signal.aborted && retryable && accountRotationEnabled() && uids.indexOf(uid) < uids.length - 1 })
       lastError = error instanceof Error ? error : new Error(String(error))
       recordRequest({ at: Date.now(), uid, model: bareModel, ok: false, tokens: 0, durationMs: Date.now() - startedAt })
       if (emitted || signal.aborted || !retryable || !accountRotationEnabled()) break

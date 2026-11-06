@@ -4,6 +4,7 @@ import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
 import { clearPendingStop, pendingStopId } from "./serviceControl"
 import { HttpReply, RawHttpServer, type HttpInput } from "./rawHttp"
+import { beginDiagnosticRun, endDiagnosticRun } from "./diagnostics"
 
 const LAN = "wb2api.local.lan"
 let server: RawHttpServer | null = null
@@ -80,32 +81,43 @@ async function updateBackgroundService(): Promise<void> {
 const errorBody = (status: number, message: string) => ({ error: { message, type: status === 401 ? "authentication_error" : status >= 500 ? "api_error" : "invalid_request_error" } })
 
 async function handleApi(request: HttpInput, reply: HttpReply): Promise<void> {
+  const trace = reply.trace
   if (request.path === "/v1/models") {
     if (request.method !== "GET") return reply.json(405, errorBody(405, "仅支持 GET"))
     try {
+      trace?.mark("models.lookup")
       if (accounts().some(item => item.enabled !== false) && modelCatalogNeedsRefresh()) await refreshModelCatalog()
-      return reply.json(200, { object: "list", data: modelIds(accountRotationEnabled() ? undefined : fixedAccountUid()).map(id => ({ id, object: "model", owned_by: id.startsWith("cn:") ? "Workbuddy" : "Workbuddy AI" })) })
-    } catch (error) { return reply.json(502, errorBody(502, error instanceof Error ? error.message : String(error))) }
+      const ids = modelIds(accountRotationEnabled() ? undefined : fixedAccountUid())
+      trace?.mark("models.ready", { count: ids.length })
+      return reply.json(200, { object: "list", data: ids.map(id => ({ id, object: "model", owned_by: id.startsWith("cn:") ? "Workbuddy" : "Workbuddy AI" })) })
+    } catch (error) { trace?.fail("models.error", error); return reply.json(502, errorBody(502, error instanceof Error ? error.message : String(error))) }
   }
   if (request.path !== "/v1/chat/completions") return reply.json(404, errorBody(404, "路径不存在"))
   if (request.method !== "POST") return reply.json(405, errorBody(405, "仅支持 POST"))
   let payload: ChatRequest
   try { payload = JSON.parse(request.body) as ChatRequest }
-  catch { return reply.json(400, errorBody(400, "请求体不是有效 JSON")) }
+  catch (error) { trace?.fail("chat.invalid_json", error); return reply.json(400, errorBody(400, "请求体不是有效 JSON")) }
+  trace?.setChat(typeof payload?.model === "string" ? payload.model : "", payload?.stream === true)
   try {
     if (payload.stream === true) {
       await reply.startEvents()
-      const heartbeat = setInterval(() => { if (!reply.signal.aborted) void reply.comment().catch(() => {}) }, 15_000)
-      try { await streamChat(payload, event => reply.event(event), reply.signal) }
+      let heartbeatCount = 0
+      const heartbeat = setInterval(() => {
+        if (!reply.signal.aborted) void reply.comment()
+          .then(() => trace?.mark("downstream.heartbeat", { count: ++heartbeatCount }))
+          .catch(error => { if (!(error instanceof Error) || error.message !== "事件流已结束") trace?.fail("downstream.heartbeat", error) })
+      }, 15_000)
+      try { await streamChat(payload, event => reply.event(event), reply.signal, trace) }
       finally { clearInterval(heartbeat) }
       await reply.endEvents()
-    } else await reply.json(200, await completeChat(payload))
+    } else await reply.json(200, await completeChat(payload, undefined, "main", trace))
   } catch (error) {
+    trace?.fail("gateway.error", error)
     if (reply.signal.aborted) return
     const message = error instanceof Error ? error.message : String(error)
     if (reply.headersSent) {
       await reply.event(errorBody(502, message))
-      await reply.endEvents()
+      await reply.endEvents("error")
     } else {
       const status = message.includes("没有可用账号") ? 503 : error instanceof ChatUpstreamError ? 502 : 400
       await reply.json(status, errorBody(status, message))
@@ -137,6 +149,7 @@ async function openGateway(): Promise<void> {
   catch (error) { await next.stop(); throw error }
   server = next
   runId = timeOrderedId()
+  await beginDiagnosticRun(port, lanEnabled())
   lastError = ""
   await refreshBackgroundService()
 }
@@ -156,6 +169,7 @@ async function closeGateway(): Promise<void> {
   const finalState = serviceActivityState(false)
   try { await server?.stop() }
   finally {
+    await endDiagnosticRun()
     server = null
     try {
       activityIssue = await endServiceActivity(finalState) ? "" : "实时活动未能结束，重新打开脚本时会重试"
