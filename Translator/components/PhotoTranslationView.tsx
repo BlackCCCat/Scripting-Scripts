@@ -1,5 +1,5 @@
 import {
-  Button, CaptureVideoPreviewView, GeometryReader, HStack, Image, Menu,
+  Button, CaptureVideoPreviewView, GeometryReader, HStack, Image, MagnifyGesture, Menu,
   Navigation, NavigationStack, ProgressView, Rectangle, Script, Spacer, Text, VStack, ZStack,
   useEffect, useEffectEvent, useRef, useState,
 } from "scripting"
@@ -110,6 +110,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   const [busy, setBusy] = useState(false)
   const [translationHost] = useState(() => new Translation())
   const cameraRef = useRef<Camera | null>(null)
+  const pinchStartZoomRef = useRef<number | null>(null)
   const stoppingRef = useRef<Promise<void>>(Promise.resolve())
   const revisionRef = useRef(0)
   const workingRef = useRef(false)
@@ -156,6 +157,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   async function stopCamera() {
     const current = cameraRef.current
     cameraRef.current = null
+    pinchStartZoomRef.current = null
     const previous = stoppingRef.current
     const stopping = current
       ? current.session.stopRunning().finally(() => current.session.dispose())
@@ -523,6 +525,21 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
       onCameraCaptureEvent={{
         isEnabled: viewingCamera && !busy,
         primaryAction: (event) => { if (event.phase === "ended") void capture() },
+      }}
+      simultaneousGesture={{
+        gesture: MagnifyGesture()
+          .onChanged(({ magnification }) => {
+            const current = cameraRef.current
+            if (!current || image || !Number.isFinite(magnification) || magnification <= 0) return
+            const device = current.device
+            const startZoom = pinchStartZoomRef.current ?? device.videoZoomFactor
+            pinchStartZoomRef.current = startZoom
+            const zoom = Math.max(device.minAvailableVideoZoomFactor,
+              Math.min(device.maxAvailableVideoZoomFactor, startZoom * magnification))
+            if (zoom !== device.videoZoomFactor) device.setVideoZoomFactor(zoom)
+          })
+          .onEnded(() => { pinchStartZoomRef.current = null }),
+        isEnabled: viewingCamera && !busy,
       }}
     >
       {camera ? (
