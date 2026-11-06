@@ -70,6 +70,7 @@ export type TranslationRequest = {
   sourceText: string
   sourceLanguageCode: string
   targetLanguageCode: string
+  photoContext?: { before?: string; after?: string }
 }
 
 export type TranslationResult = {

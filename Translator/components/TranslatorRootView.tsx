@@ -3,6 +3,7 @@ import { Tab, TabView, useColorScheme, useEffect, useEffectEvent, useObservable,
 import { LivePipView } from "./LivePipView"
 import { LiveTranslationView } from "./LiveTranslationView"
 import { ScriptTranslationView } from "./ScriptTranslationView"
+import { PhotoTranslationView } from "./PhotoTranslationView"
 import { TranslatorSettingsView } from "./TranslatorSettingsView"
 import { createTranslationEngine } from "../utils/translation_engine"
 import { createInstalledSystemTranslationEngine, createSystemTranslationEngine } from "../utils/system_translation_engine"
@@ -13,10 +14,12 @@ import { getExecutableEngines, loadTranslatorSettings } from "../utils/translato
 const TRANSLATE_TAB = 0
 const LIVE_TAB = 1
 const SETTINGS_TAB = 2
+const CAMERA_TAB = 3
 
 export function TranslatorRootView() {
   const colorScheme = useColorScheme()
   const selection = useObservable<number>(() => TRANSLATE_TAB)
+  const lastContentTab = useRef(TRANSLATE_TAB)
   const pipPresented = useObservable(false)
   const preview = useObservable("复制文本后，译文将在这里显示。")
   const [settingsRefreshKey, setSettingsRefreshKey] = useState(0)
@@ -43,6 +46,40 @@ export function TranslatorRootView() {
   })
   const engines = getExecutableEngines(settings).filter(isLiveEngineAvailable)
   const selectedEngine = engines.find((engine) => engine.id === engineId) ?? engines[0]
+
+  useEffect(() => {
+    const originalOrientations = Device.isiPhone ? Device.supportedInterfaceOrientations : null
+    let cameraSelected = selection.value === CAMERA_TAB
+    let restoreOnRotation: ((orientation: Device.Orientation) => void) | null = null
+    const stopWaiting = () => {
+      if (restoreOnRotation) Device.removeOrientationListener(restoreOnRotation)
+      restoreOnRotation = null
+    }
+    const onSelectionChanged = (next: number) => {
+      if (next !== CAMERA_TAB) lastContentTab.current = next
+      if (!originalOrientations) return
+      if (next === CAMERA_TAB) {
+        cameraSelected = true
+        stopWaiting()
+      } else if (cameraSelected) {
+        cameraSelected = false
+        Device.supportedInterfaceOrientations = ["portrait"]
+        const orientationAtExit = Device.orientation
+        restoreOnRotation = (orientation) => {
+          if (orientation === orientationAtExit) return
+          stopWaiting()
+          Device.supportedInterfaceOrientations = originalOrientations
+        }
+        Device.addOrientationListener(restoreOnRotation)
+      }
+    }
+    selection.subscribe(onSelectionChanged)
+    return () => {
+      selection.unsubscribe(onSelectionChanged)
+      stopWaiting()
+      if (originalOrientations) Device.supportedInterfaceOrientations = originalOrientations
+    }
+  }, [selection])
 
   const checkClipboard = useEffectEvent(async (generation: number) => {
     if (pollingGenerationRef.current === generation || generation !== generationRef.current) return
@@ -155,6 +192,7 @@ export function TranslatorRootView() {
       tint="systemBlue"
       tabViewStyle="sidebarAdaptable"
       tabBarMinimizeBehavior="onScrollDown"
+      tabViewSearchActivation="searchTabSelection"
       sheet={releaseNotesSheet}
       translationHost={systemTranslationHost}
       pip={{
@@ -212,6 +250,13 @@ export function TranslatorRootView() {
             const next = loadTranslatorSettings()
             setSettings(next)
           }}
+        />
+      </Tab>
+      <Tab title="" systemImage="camera" value={CAMERA_TAB} role="search">
+        <PhotoTranslationView
+          active={selection.value === CAMERA_TAB}
+          startInCamera
+          onClose={() => selection.setValue(lastContentTab.current)}
         />
       </Tab>
     </TabView>

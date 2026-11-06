@@ -10,6 +10,7 @@ import {
   translateChunkedText,
 } from "./translation_chunking"
 import { isLikelyUntranslated } from "./translation_validation"
+import { photoContextInstructions } from "./translation_context"
 
 const SESSION_INSTRUCTIONS = [
   "You are a translation engine for an iOS translation panel.",
@@ -70,6 +71,7 @@ function buildPrompt(request: TranslationRequest, retryUntranslated = false) {
     ...(retryUntranslated ? [
       "6. The previous response copied the source. Translate it into the target language; do not repeat the source text.",
     ] : []),
+    ...photoContextInstructions(request),
     "",
     "<text>",
     request.sourceText,

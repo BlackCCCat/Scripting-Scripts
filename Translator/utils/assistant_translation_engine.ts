@@ -6,6 +6,7 @@ import type {
 } from "../types"
 import { translateChunkedText } from "./translation_chunking"
 import { isLikelyUntranslated } from "./translation_validation"
+import { photoContextInstructions } from "./translation_context"
 
 const ASSISTANT_TRANSLATION_SYSTEM_PROMPT = [
   "You are a translation engine for an iOS translation panel.",
@@ -81,6 +82,7 @@ export function createAssistantTranslationEngine(config?: TranslationEngineConfi
             ...(attempt > 0 ? [
               "The previous response repeated the source. Return a translation in the target language.",
             ] : []),
+            ...photoContextInstructions(request),
             "",
             "<text>",
             request.sourceText,

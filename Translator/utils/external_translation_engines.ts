@@ -10,6 +10,7 @@ import type {
 import { translateChunkedText } from "./translation_chunking"
 import { AI_PROVIDERS, aiProvider } from "./ai_providers"
 import { isLikelyUntranslated } from "./translation_validation"
+import { photoContextInstructions } from "./translation_context"
 
 const GOOGLE_WEB_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 let googleRetryAfter = 0
@@ -219,8 +220,9 @@ function buildAiUserPrompt(request: TranslationRequest) {
     `Source language: ${promptNameForLanguage(request.sourceLanguageCode)}.`,
     `Target language: ${promptNameForLanguage(request.targetLanguageCode)}.`,
     "Only return the translated text.",
+    ...photoContextInstructions(request),
     "",
-    request.sourceText,
+    ...(request.photoContext ? ["<text>", request.sourceText, "</text>"] : [request.sourceText]),
   ].join("\n")
 }
 
