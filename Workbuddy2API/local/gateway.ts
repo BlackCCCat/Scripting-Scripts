@@ -1,5 +1,5 @@
 import { ChatUpstreamError, completeChat, streamChat, type ChatRequest } from "./chat"
-import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, listenPort, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
+import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, listenPort, modelCatalog, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
 import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
 import { clearPendingStop, pendingStopId } from "./serviceControl"
@@ -19,6 +19,11 @@ let activityIssue = ""
 let lastError = ""
 const listeners = new Set<() => void>()
 const notify = () => { for (const listener of listeners) listener() }
+let catalogRefresh: Promise<unknown> | null = null
+function ensureModelCatalog(): Promise<unknown> {
+  if (!catalogRefresh) catalogRefresh = refreshModelCatalog().finally(() => { catalogRefresh = null })
+  return catalogRefresh
+}
 
 export function subscribeGateway(listener: () => void): () => void {
   listeners.add(listener)
@@ -86,7 +91,10 @@ async function handleApi(request: HttpInput, reply: HttpReply): Promise<void> {
     if (request.method !== "GET") return reply.json(405, errorBody(405, "仅支持 GET"))
     try {
       trace?.mark("models.lookup")
-      if (accounts().some(item => item.enabled !== false) && modelCatalogNeedsRefresh()) await refreshModelCatalog()
+      if (accounts().some(item => item.enabled !== false) && modelCatalogNeedsRefresh()) {
+        try { await ensureModelCatalog() }
+        catch (error) { trace?.fail("models.refresh", error); if (!modelCatalog().length) throw error }
+      }
       const ids = modelIds(accountRotationEnabled() ? undefined : fixedAccountUid())
       trace?.mark("models.ready", { count: ids.length })
       return reply.json(200, { object: "list", data: ids.map(id => ({ id, object: "model", owned_by: id.startsWith("cn:") ? "Workbuddy" : "Workbuddy AI" })) })
@@ -110,7 +118,7 @@ async function handleApi(request: HttpInput, reply: HttpReply): Promise<void> {
       try { await streamChat(payload, event => reply.event(event), reply.signal, trace) }
       finally { clearInterval(heartbeat) }
       await reply.endEvents()
-    } else await reply.json(200, await completeChat(payload, undefined, "main", trace))
+    } else await reply.json(200, await completeChat(payload, undefined, "main", trace, reply.signal))
   } catch (error) {
     trace?.fail("gateway.error", error)
     if (reply.signal.aborted) return

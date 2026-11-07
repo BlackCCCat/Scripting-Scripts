@@ -195,7 +195,7 @@ function retryAfterError(uid: string, bareModel: string, error: unknown): boolea
   return false
 }
 
-export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main", trace?: DiagnosticTrace | null): Promise<Record<string, unknown>> {
+export async function completeChat(request: ChatRequest, onlyUid?: string, agentType: "main" | "auxiliary" = "main", trace?: DiagnosticTrace | null, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const bareModel = validateChat(request)
   const session = await chatSession(request)
   const routeKey = session.routeKey ? `${request.model.startsWith("global:") ? "global" : "cn"}:${session.routeKey}` : ""
@@ -209,7 +209,7 @@ export async function completeChat(request: ChatRequest, onlyUid?: string, agent
     if (!onlyUid && accountRotationEnabled() && uid !== preferredUid) lastPicked.set(request.model, uid)
     const startedAt = Date.now()
     try {
-      const response = await requestChat(uid, request, bareModel, session, agentType, undefined, trace)
+      const response = await requestChat(uid, request, bareModel, session, agentType, signal, trace)
       let text: string
       try { text = await response.text() }
       catch (error) { trace?.fail("upstream.read", error); throw error }
@@ -239,7 +239,7 @@ export async function completeChat(request: ChatRequest, onlyUid?: string, agent
 async function forwardEvents(response: Response, bareModel: string, includeUsage: boolean, onEvent: (event: unknown) => Promise<void>, signal: AbortSignal, trace?: DiagnosticTrace | null): Promise<Record<string, unknown>> {
   const reader = response.dataStream.getReader()
   const decoder = new TextDecoder("utf-8")
-  let pending = "", frames = "", eventData: string[] = [], done = false, eof = false, bytesRead = 0
+  let pending = "", frames = "", eventData: string[] = [], done = false, bytesRead = 0
   let eventCount = 0, reasoningChars = 0, answerChars = 0, lastProgressAt = Date.now(), lastProgressBytes = 0
   const startedAt = Date.now()
   let lastChunkAt = startedAt, firstReasoningAt = 0, firstAnswerAt = 0, writingClient = false
@@ -308,11 +308,18 @@ async function forwardEvents(response: Response, bareModel: string, includeUsage
       else if (line.startsWith("data:")) eventData.push(line.slice(5).trimStart())
     }
   }
+  let stopWaiting: (() => void) | null = null
+  const aborted = new Promise<null>(resolve => {
+    stopWaiting = () => resolve(null)
+    if (signal.aborted) resolve(null)
+    else signal.addEventListener("abort", stopWaiting, { once: true })
+  })
   try {
     while (!done) {
       if (signal.aborted) throw new Error("客户端连接已关闭")
-      const chunk = await reader.read()
-      if (chunk.done) { eof = true; break }
+      const chunk = await Promise.race([reader.read(), aborted])
+      if (!chunk) throw new Error("客户端连接已关闭")
+      if (chunk.done) break
       lastChunkAt = Date.now()
       const bytes = chunk.value.toUint8Array()
       if (!bytes) { failureStage = "upstream.decode"; throw new ChatUpstreamError("上游响应解码失败") }
@@ -334,9 +341,12 @@ async function forwardEvents(response: Response, bareModel: string, includeUsage
     trace?.fail(signal.aborted ? "client.aborted" : failureStage, error)
     throw error
   } finally {
+    if (stopWaiting) signal.removeEventListener("abort", stopWaiting)
     if (waitingTimer) clearInterval(waitingTimer)
-    if (!eof) try { await reader.cancel() } catch { }
-    reader.releaseLock()
+    // 不能调 reader.cancel()：它会立刻把流的 errorSignaled 置位，而原生 URLSession 的 completion
+    // 回调随后仍会调用 controller.close()，那里抛 "Stream is errored"（任务已完成时原生 cancel
+    // 是空操作，所以取消并不能阻止 completion 到达）。中断上游交给 AbortSignal，这里只释放读锁。
+    try { reader.releaseLock() } catch (error) { trace?.fail("upstream.stream_release", error) }
   }
 }
 
