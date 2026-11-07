@@ -1,5 +1,5 @@
 import { NavigationStack, Script, Tab, TabView, useEffect, useState } from "scripting"
-import { accounts } from "../local/store"
+import { accounts, restoreSyncedAccounts } from "../local/store"
 import { refreshBalance } from "../local/upstream"
 import { OverviewPage } from "./Overview"
 import { AccountsPage } from "./Accounts"
@@ -19,6 +19,7 @@ export function App() {
       if (refreshing) return
       refreshing = true
       try {
+        try { restoreSyncedAccounts() } catch (error) { console.warn("iCloud 账号恢复失败", error) }
         await Promise.allSettled(accounts().map(account => refreshBalance(account.uid)))
         if (active) setDataRevision(value => value + 1)
       } finally { refreshing = false }

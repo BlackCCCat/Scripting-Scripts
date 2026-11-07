@@ -53,8 +53,12 @@ async function run() {
   }
   LiveActivity.addActivityUpdateListener(onActivityUpdate)
   try {
-    const migration = migrateCredentialKeys()
-    if (migration.failed) await Dialog.alert({ title: "钥匙串迁移未完成", message: `${migration.failed} 条旧凭据未能清理，请检查 Scripting 的钥匙串权限。` })
+    try {
+      const migration = migrateCredentialKeys()
+      if (migration.failed) await Dialog.alert({ title: "钥匙串迁移未完成", message: `${migration.failed} 条凭据未能迁移或清理，请检查 iCloud 钥匙串状态。` })
+    } catch (error) {
+      await Dialog.alert({ title: "钥匙串暂不可用", message: error instanceof Error ? error.message : String(error) })
+    }
     Script.onResume(() => { void (async () => {
       if (await checkPendingStop()) return
       await restoreGateway()
