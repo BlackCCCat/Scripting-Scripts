@@ -7,7 +7,8 @@ import { App } from "./ui/App"
 
 // Script.onError 在旧版本不存在，注册失败时静默跳过，不影响启动
 try {
-  if (typeof Script.onError === "function") Script.onError((error: any) => {
+  const scriptWithError = Script as typeof Script & { onError?: (handler: (error: any) => void) => void }
+  if (typeof scriptWithError.onError === "function") scriptWithError.onError((error: any) => {
     const message = String(error?.message ?? error)
     // Scripting 运行时 fetch 桥接的已知问题：响应流被 cancel/error 后，原生 completion 仍会
     // 调用 controller.close()，这层异常在脚本侧无法捕获，单独归档避免与真实脚本错误混淆。

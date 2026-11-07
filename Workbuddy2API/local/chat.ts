@@ -312,7 +312,7 @@ async function forwardEvents(response: Response, bareModel: string, includeUsage
   const aborted = new Promise<null>(resolve => {
     stopWaiting = () => resolve(null)
     if (signal.aborted) resolve(null)
-    else signal.addEventListener("abort", stopWaiting, { once: true })
+    else signal.addEventListener("abort", stopWaiting)
   })
   try {
     while (!done) {
