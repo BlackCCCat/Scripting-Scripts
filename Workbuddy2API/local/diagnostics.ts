@@ -43,7 +43,7 @@ export const diagnosticStageNames: Record<string, string> = {
   "socket.accepted": "客户端已连接", "socket.closed": "客户端连接关闭", "socket.error": "客户端连接错误",
   "http.headers": "已读取请求头", "http.body": "已读取请求体", "http.parse": "请求解析失败", "http.finish": "请求结束",
   "chat.validated": "聊天请求已识别", "chat.invalid_json": "请求 JSON 无效", "chat.attempt_failed": "账号请求失败",
-  "models.lookup": "查询模型", "models.ready": "模型列表已生成", "models.error": "模型查询失败",
+  "models.lookup": "查询模型", "models.ready": "模型列表已生成", "models.error": "模型查询失败", "models.refresh": "模型目录刷新失败",
   "route.candidates": "筛选账号", "route.selected": "选用账号", "route.failure": "换号决策",
   "credential.check": "检查账号凭据", "credential.ready": "凭据就绪",
   "upstream.send": "发送上游请求", "upstream.connect": "连接上游失败", "upstream.headers": "收到上游响应头",
@@ -54,6 +54,10 @@ export const diagnosticStageNames: Record<string, string> = {
   "upstream.parse": "上游事件格式错误", "upstream.event_error": "上游返回错误事件", "upstream.decode": "上游解码失败", "upstream.aggregate": "聚合上游响应失败",
   "downstream.headers": "已发送客户端响应头", "downstream.completed": "客户端响应写完", "downstream.heartbeat": "已发送流式心跳", "downstream.event": "客户端事件写入失败", "downstream.write": "客户端连接写入失败",
   "socket.idle_timeout": "本机连接空闲超时", "gateway.error": "接口返回错误", "gateway.unhandled": "服务内部错误",
+  "client.abort": "关闭客户端请求时出错", "downstream.end": "结束客户端连接失败", "downstream.destroy": "销毁客户端连接失败",
+  "downstream.end_events": "结束事件流失败", "gateway.reply_failed": "写入错误响应失败", "socket.timeout": "设置连接超时失败",
+  "upstream.stream_cancel": "取消上游流失败", "upstream.stream_release": "释放上游流失败",
+  "server.error": "HTTP 服务错误", "server.stop": "关闭连接失败",
   "client.aborted": "客户端已断开", "service.stopped": "HTTP 服务已关闭", "logging.disabled": "日志记录已关闭",
 }
 
@@ -117,6 +121,7 @@ function formatEntry(entry: Record<string, unknown>): string {
   switch (entry.kind) {
     case "run.started": return logLine(at, id, "HTTP 服务启动", { port: Number(entry.port), lan: entry.lan === true, enabled: entry.enabled === true })
     case "run.ended": return logLine(at, id, "HTTP 服务关闭")
+    case "server.error": return logLine(at, id, diagnosticStageName(String(entry.stage ?? "server.error")), entry.fields as DiagnosticFields | undefined)
     case "run.cleared": return logLine(at, id, "日志已手动清理", { port: Number(entry.port), lan: entry.lan === true })
     case "logging.enabled": return logLine(at, id, "已开启日志记录")
     case "logging.disabled": return logLine(at, id, "已关闭日志记录")
@@ -286,6 +291,14 @@ function safeError(error: unknown): DiagnosticFields {
     : upstreamCode === "14018" ? "账号额度不足" : undefined
   return { name, ...(code ? { code } : {}), ...(status ? { status } : {}),
     ...(upstreamCode ? { upstreamCode } : {}), message: safeMessage ?? upstreamReason ?? (status >= 400 ? `上游返回 HTTP ${status}，原文已省略` : "原始错误已省略，查看相邻阶段与计数") }
+}
+
+export function reportServerIssue(stage: string, error: unknown) {
+  try { console.error(stage, error) } catch { }
+  if (!active || !current) return
+  appendFile({ kind: "server.error", id: "服务", at: Date.now(), stage, fields: safeError(error) })
+  save()
+  void flushFile()
 }
 
 export class DiagnosticTrace {

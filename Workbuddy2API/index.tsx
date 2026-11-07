@@ -5,6 +5,21 @@ import { clearPendingStop, pendingStopId, serviceActivityRef } from "./local/ser
 import { migrateCredentialKeys } from "./local/store"
 import { App } from "./ui/App"
 
+// Script.onError 在旧版本不存在，注册失败时静默跳过，不影响启动
+try {
+  if (typeof Script.onError === "function") Script.onError((error: any) => {
+    const message = String(error?.message ?? error)
+    // Scripting 运行时 fetch 桥接的已知问题：响应流被 cancel/error 后，原生 completion 仍会
+    // 调用 controller.close()，这层异常在脚本侧无法捕获，单独归档避免与真实脚本错误混淆。
+    const runtime = /^Stream is (?:closed or errored|errored)$/.test(message)
+    if (runtime) console.warn("[Scripting runtime] " + message)
+    const key = runtime ? "runtimeErrs" : "errs"
+    const list = Storage.get(key) as string[] ?? []
+    list.push([error, error?.name ?? "", error?.stack ?? ""].filter(Boolean).join("\n"))
+    Storage.set(key, list.slice(-20))
+  })
+} catch { }
+
 async function run() {
   let exiting = false
   const exitAfterActivityEnds = async (runId: string, activityId: string) => {
