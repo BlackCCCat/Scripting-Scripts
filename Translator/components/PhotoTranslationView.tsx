@@ -1,7 +1,7 @@
 import {
   Button, CaptureVideoPreviewView, GeometryReader, HStack, Image, MagnifyGesture, Menu,
   Navigation, NavigationStack, ProgressView, Rectangle, Script, Spacer, Text, VStack, ZStack,
-  useEffect, useEffectEvent, useRef, useState,
+  useColorScheme, useEffect, useEffectEvent, useRef, useState,
 } from "scripting"
 import type { CameraControlParameter } from "scripting"
 import { AUTO_LANGUAGE, LANGUAGE_OPTIONS } from "../constants"
@@ -14,6 +14,33 @@ import { EngineIcon } from "./EngineIcon"
 
 type Camera = { session: AVCaptureSession; device: AVCaptureDevice; photo: AVCapturePhotoOutput }
 const SELECT_TEXT_MESSAGE = "点击文字区域选择内容，确认后翻译。"
+
+function CameraOpeningCurtain({ dark, revealing }: { dark: boolean; revealing: boolean }) {
+  const color = dark ? "black" : "white"
+  const animation = { animation: Animation.easeOut(0.45), value: revealing }
+  return <GeometryReader frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+    ignoresSafeArea={{ regions: "container", edges: "all" }}>
+    {(proxy) => {
+      const { width, height } = proxy.size
+      const bleed = Math.max(120, proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom + 16)
+      const halfHeight = height / 2 + bleed
+      return <ZStack frame={{ width, height }}>
+        <Rectangle fill={color} frame={{ width: width + bleed * 2, height: halfHeight + 1 }}
+          position={{ x: width / 2, y: height / 4 - bleed / 2 }}
+          offset={{ x: 0, y: revealing ? -halfHeight - 1 : 0 }}
+          animation={animation} />
+        <Rectangle fill={color} frame={{ width: width + bleed * 2, height: halfHeight + 1 }}
+          position={{ x: width / 2, y: height * 3 / 4 + bleed / 2 }}
+          offset={{ x: 0, y: revealing ? halfHeight + 1 : 0 }}
+          animation={animation} />
+        <Image systemName="camera.fill" font={52}
+          foregroundStyle={dark ? "white" : "black"}
+          position={{ x: width / 2, y: height / 2 }}
+          opacity={revealing ? 0 : 1} animation={animation} />
+      </ZStack>
+    }}
+  </GeometryReader>
+}
 
 function PhotoOverlay({ image, blocks, selecting, selected, onSelect, onTap }: {
   image: UIImage
@@ -91,6 +118,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   onClose?: () => void
 }) {
   const dismiss = Navigation.useDismiss()
+  const colorScheme = useColorScheme()
   const settings = loadTranslatorSettings()
   const engines = getExecutableEngines(settings).filter(isLiveEngineAvailable)
   const [engineId, setEngineId] = useState(engines[0]?.id ?? "")
@@ -108,6 +136,10 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   const [controlsVisible, setControlsVisible] = useState(true)
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
+  const [openingPhase, setOpeningPhase] = useState<"idle" | "waiting" | "revealing">(
+    active && startInCamera && !initialBatch ? "waiting" : "idle"
+  )
+  const [previewMounted, setPreviewMounted] = useState(false)
   const [translationHost] = useState(() => new Translation())
   const cameraRef = useRef<Camera | null>(null)
   const pinchStartZoomRef = useRef<number | null>(null)
@@ -170,6 +202,8 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   async function startCamera() {
     if (workingRef.current || cameraRef.current?.session.isRunning) return
     workingRef.current = true
+    setOpeningPhase("waiting")
+    setPreviewMounted(false)
     setBusy(true)
     setMessage("正在打开相机…")
     const revision = ++revisionRef.current
@@ -201,7 +235,10 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
       setMessage("")
     } catch (error) {
       await stopCamera()
-      if (aliveRef.current && revision === revisionRef.current) setMessage(error instanceof Error ? error.message : String(error))
+      if (aliveRef.current && revision === revisionRef.current) {
+        setOpeningPhase("idle")
+        setMessage(error instanceof Error ? error.message : String(error))
+      }
     } finally {
       workingRef.current = false
       if (aliveRef.current) setBusy(false)
@@ -304,6 +341,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   async function capture() {
     const current = cameraRef.current
     if (!current || workingRef.current) return
+    setOpeningPhase("idle")
     workingRef.current = true
     setBusy(true)
     let started = false
@@ -377,6 +415,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   useEffect(() => {
     if (!active) {
       revisionRef.current += 1
+      setOpeningPhase("idle")
       void stopCamera()
       return
     }
@@ -391,8 +430,23 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
     }
   }, [active])
 
+  useEffect(() => {
+    if (!active || !camera || !previewMounted || image || openingPhase !== "waiting") return
+    const timer = setTimeout(() => {
+      void withAnimation(Animation.easeOut(0.45), () => setOpeningPhase("revealing"))
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [active, camera, previewMounted, image, openingPhase])
+
+  useEffect(() => {
+    if (openingPhase !== "revealing") return
+    const timer = setTimeout(() => setOpeningPhase("idle"), 500)
+    return () => clearTimeout(timer)
+  }, [openingPhase])
+
   async function close() {
     revisionRef.current += 1
+    setOpeningPhase("idle")
     setBusy(true)
     setPageOrientation("portrait")
     await stopCamera()
@@ -420,6 +474,8 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
 
   const viewingCamera = !!camera && !image
   const showingCaptureSurface = !image && (viewingCamera || (active && startInCamera))
+  const showOpeningCurtain = openingPhase !== "idle" ||
+    (active && startInCamera && !camera && !image && !message)
   const sourcePicker = (width: number) => <Menu
     buttonStyle={useGlass ? "glass" : "bordered"}
     frame={{ width }}
@@ -518,7 +574,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
       navigationBarVisibility="hidden"
       navigationBarBackButtonHidden
       tabBarVisibility="hidden"
-      preferredColorScheme={showingCaptureSurface ? "dark" : undefined}
+      preferredColorScheme={showingCaptureSurface && !showOpeningCurtain ? "dark" : undefined}
       translationHost={translationHost}
       background={showingCaptureSurface ? "black" : "systemGroupedBackground"}
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
@@ -545,6 +601,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
       {camera ? (
         <CaptureVideoPreviewView
           session={camera.session} videoDevice={camera.device}
+          onAppear={() => setPreviewMounted(true)}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
           opacity={image ? 0 : 1}
           ignoresSafeArea={{ regions: "container", edges: "all" }}
@@ -571,7 +628,8 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
           <Text font="subheadline">{message || "翻译中…"}</Text>
         </VStack>
       ) : null}
-      {busy && !image ? <ProgressView progressViewStyle="circular" controlSize="large" tint="white" /> : null}
+      {busy && !image && !showOpeningCurtain
+        ? <ProgressView progressViewStyle="circular" controlSize="large" tint="white" /> : null}
       {controlsVisible ? <GeometryReader frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
         {(proxy) => {
           const insets = proxy.safeAreaInsets
@@ -636,6 +694,9 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
           )
         }}
       </GeometryReader> : null}
+      {showOpeningCurtain
+        ? <CameraOpeningCurtain dark={colorScheme === "dark"} revealing={openingPhase === "revealing"} />
+        : null}
     </ZStack></NavigationStack>
   )
 }
