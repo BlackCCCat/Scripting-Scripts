@@ -6,7 +6,7 @@ import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, t
 import { gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
 import { alertError, Busy, Failure, Hint } from "./Shared"
 
-export function MorePage() {
+export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void }) {
   const [state, setState] = useState(gatewayState)
   const [busy, setBusy] = useState(false)
   const [host, setHost] = useState(() => addressHost(""))
@@ -72,9 +72,15 @@ export function MorePage() {
   function changeCloudSync(value: boolean) {
     if (syncing) return
     setSyncing(true)
+    const before = credentialSyncEnabled()
+    const accountCount = accounts().length
     try { setCredentialSyncEnabled(value) }
     catch (error) { void alertError(error) }
-    finally { setCloudSync(credentialSyncEnabled()); setSyncing(false) }
+    finally {
+      setCloudSync(credentialSyncEnabled())
+      if (credentialSyncEnabled() !== before || accounts().length !== accountCount) onAccountsChanged()
+      setSyncing(false)
+    }
   }
   const accountChoices = accounts()
   return <List navigationTitle="更多">

@@ -116,7 +116,7 @@ function credentialEntry(uid: string): { key: string; raw: string; value: Creden
     } catch { return null }
   }
   const active = credentialSyncEnabled()
-  const scopes = Storage.get<boolean>(CREDENTIAL_CLEANUP) === true ? [active, !active] : [active]
+  const scopes = active || Storage.get<boolean>(CREDENTIAL_CLEANUP) === true ? [active, !active] : [active]
   for (const synchronizable of scopes) {
     for (const key of [secretKey(uid, nickname), SECRET + uid, ...secretKeys(uid, synchronizable)]) {
       const found = read(key, synchronizable)
@@ -135,7 +135,13 @@ export function saveCredential(value: Credential) {
   const options = keychainOptions(synchronizable)
   const previous = Keychain.get(key, options)
   const oldKeys = secretKeys(value.uid, synchronizable)
-  if (!Keychain.set(key, JSON.stringify(value), options)) throw new Error("凭据保存失败")
+  const raw = JSON.stringify(value)
+  if (!Keychain.set(key, raw, options)) throw new Error("凭据保存失败")
+  if (Keychain.get(key, options) !== raw) {
+    if (previous === null) Keychain.remove(key, options)
+    else Keychain.set(key, previous, options)
+    throw new Error("凭据保存后无法读取")
+  }
   const existing = accounts().find(item => item.uid === value.uid)
   const next = accounts().filter(item => item.uid !== value.uid)
   next.push({ ...existing, uid: value.uid, nickname: value.nickname, site: value.site, enterpriseId: value.enterpriseId, error: undefined })
@@ -168,8 +174,9 @@ export function setCredentialSyncEnabled(enabled: boolean): void {
       if (enabled && existing && existing.value.expiresAt >= value.expiresAt) continue
       const destination = existing?.key ?? secretKey(value.uid, value.nickname)
       const previous = Keychain.get(destination, target)
-      if (!Keychain.set(destination, raw!, target) || Keychain.get(destination, target) !== raw) throw new Error(`凭据迁移失败：${value.nickname}`)
+      if (!Keychain.set(destination, raw!, target)) throw new Error(`凭据迁移失败：${value.nickname}`)
       written.push({ key: destination, previous })
+      if (Keychain.get(destination, target) !== raw) throw new Error(`凭据迁移后无法读取：${value.nickname}`)
       targetEntries.set(value.uid, { key: destination, value })
     }
     if (!Storage.set(CREDENTIAL_CLEANUP, true)) throw new Error("凭据迁移状态保存失败")
@@ -184,6 +191,7 @@ export function setCredentialSyncEnabled(enabled: boolean): void {
     }
     throw error
   }
+  if (enabled) { restoreSyncedAccounts(); return }
   let failed = 0
   for (const key of sourceKeys) {
     if (!Keychain.remove(key, source) || Keychain.contains(key, source)) failed++
@@ -217,7 +225,8 @@ export function migrateCredentialKeys(): { migrated: number; failed: number } {
     const source = items.find(item => item.key === desired) ?? items.find(item => item.key === SECRET + uid) ?? items[0]
     if (!account) {
       try { saveCredential(source.value) } catch { failed++; continue }
-    } else if (source.key !== desired && !Keychain.set(desired, source.raw, options)) { failed++; continue }
+    } else if (source.key !== desired &&
+      (!Keychain.set(desired, source.raw, options) || Keychain.get(desired, options) !== source.raw)) { failed++; continue }
     for (const item of items) {
       if (item.key === desired) continue
       if (!Keychain.contains(item.key, options)) { migrated++; continue }
@@ -228,12 +237,23 @@ export function migrateCredentialKeys(): { migrated: number; failed: number } {
   if (Storage.get<boolean>(CREDENTIAL_CLEANUP) === true) {
     const previous = keychainOptions(!credentialSyncEnabled())
     const activeSync = credentialSyncEnabled()
+    const activeOptions = keychainOptions(activeSync)
     let cleanupFailed = 0
     for (const key of Keychain.keys(previous).filter(key => key.startsWith(SECRET))) {
-      const value = parsedCredential(Keychain.get(key, previous))
-      const activeCopy = value && secretKeys(value.uid, activeSync).some(activeKey =>
-        parsedCredential(Keychain.get(activeKey, keychainOptions(activeSync)))?.uid === value.uid)
-      if (!activeCopy) { cleanupFailed++; continue }
+      const raw = Keychain.get(key, previous)
+      const value = parsedCredential(raw)
+      if (!value) { cleanupFailed++; continue }
+      const activeCopy = secretKeys(value.uid, activeSync).map(activeKey => {
+        const activeRaw = Keychain.get(activeKey, activeOptions)
+        return { raw: activeRaw, value: parsedCredential(activeRaw) }
+      }).find(item => item.value?.uid === value.uid)
+      if (!activeCopy || activeCopy.value!.expiresAt < value.expiresAt ||
+        activeCopy.value!.expiresAt === value.expiresAt && activeCopy.raw !== raw) {
+        const destination = secretKey(value.uid, value.nickname)
+        if (!Keychain.set(destination, raw!, activeOptions) || Keychain.get(destination, activeOptions) !== raw) {
+          cleanupFailed++; continue
+        }
+      }
       if (Keychain.remove(key, previous) && !Keychain.contains(key, previous)) migrated++
       else cleanupFailed++
     }

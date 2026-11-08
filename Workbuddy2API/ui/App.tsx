@@ -1,5 +1,5 @@
 import { NavigationStack, Script, Tab, TabView, useEffect, useState } from "scripting"
-import { accounts, restoreSyncedAccounts } from "../local/store"
+import { accounts, credentialSyncEnabled, restoreSyncedAccounts } from "../local/store"
 import { refreshBalance } from "../local/upstream"
 import { OverviewPage } from "./Overview"
 import { AccountsPage } from "./Accounts"
@@ -25,8 +25,17 @@ export function App() {
       } finally { refreshing = false }
     }
     void refreshBalances()
+    const cloudTimer = setInterval(() => {
+      if (!credentialSyncEnabled()) return
+      try {
+        if (restoreSyncedAccounts()) {
+          setDataRevision(value => value + 1)
+          void refreshBalances()
+        }
+      } catch (error) { console.warn("iCloud 账号恢复失败", error) }
+    }, 30_000)
     const removeResume = Script.onResume(() => { setDataRevision(value => value + 1); void refreshBalances() })
-    return () => { active = false; removeResume() }
+    return () => { active = false; clearInterval(cloudTimer); removeResume() }
   }, [])
   const visibleRevision = revision + dataRevision
   return <TabView tint="systemPurple" sheet={releaseNotes}>
@@ -34,6 +43,6 @@ export function App() {
     <Tab title="账号" systemImage="person.2.fill" value={1}><NavigationStack><AccountsPage revision={visibleRevision} onChanged={changed} /></NavigationStack></Tab>
     <Tab title="任务" systemImage="checklist" value={2}><NavigationStack><TasksPage revision={revision} /></NavigationStack></Tab>
     <Tab title="数据" systemImage="chart.bar.fill" value={3}><NavigationStack><DataPage revision={visibleRevision} /></NavigationStack></Tab>
-    <Tab title="更多" systemImage="ellipsis.circle.fill" value={4}><NavigationStack><MorePage /></NavigationStack></Tab>
+    <Tab title="更多" systemImage="ellipsis.circle.fill" value={4}><NavigationStack><MorePage onAccountsChanged={changed} /></NavigationStack></Tab>
   </TabView>
 }

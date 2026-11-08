@@ -1,5 +1,5 @@
 import { Button, Capsule, HStack, Image, List, Menu, Navigation, NavigationLink, Picker, RoundedRectangle, ScrollView, Section, Spacer, Text, TextField, VStack, ZStack, useEffect, useRef, useState } from "scripting"
-import { accounts, checkinStatusNeedsRefresh, removeAccount, saveCredential, todayInChina, updateAccount, type Account, type Site } from "../local/store"
+import { accounts, checkinStatusNeedsRefresh, removeAccount, restoreSyncedAccounts, saveCredential, todayInChina, updateAccount, type Account, type Site } from "../local/store"
 import { beginLogin, checkin, parseKeychainWorkBuddy, pollLogin, refreshBalance, refreshCheckinStatus, type LoginSession } from "../local/upstream"
 import { alertError, Busy, Failure, glass, Hint, primaryButton } from "./Shared"
 import { AccountTasksPage } from "./Tasks"
@@ -36,7 +36,8 @@ export function AccountsPage({ revision, onChanged }: { revision: number; onChan
     if (busy) return
     setBusy(true)
     let failures = 0
-    for (const item of items) { try { await refreshBalance(item.uid) } catch { failures++ } }
+    try { restoreSyncedAccounts() } catch (error) { console.warn("iCloud 账号恢复失败", error) }
+    for (const item of accounts()) { try { await refreshBalance(item.uid) } catch { failures++ } }
     refresh(); setBusy(false)
     if (failures) await Dialog.alert({ message: `${failures} 个账号余额刷新失败，请查看账号详情。` })
   }
