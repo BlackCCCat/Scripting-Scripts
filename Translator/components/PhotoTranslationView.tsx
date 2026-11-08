@@ -142,6 +142,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   const [previewMounted, setPreviewMounted] = useState(false)
   const [translationHost] = useState(() => new Translation())
   const cameraRef = useRef<Camera | null>(null)
+  const cameraOpenedOnceRef = useRef(false)
   const pinchStartZoomRef = useRef<number | null>(null)
   const stoppingRef = useRef<Promise<void>>(Promise.resolve())
   const revisionRef = useRef(0)
@@ -202,7 +203,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
   async function startCamera() {
     if (workingRef.current || cameraRef.current?.session.isRunning) return
     workingRef.current = true
-    setOpeningPhase("waiting")
+    setOpeningPhase(cameraOpenedOnceRef.current ? "idle" : "waiting")
     setPreviewMounted(false)
     setBusy(true)
     setMessage("正在打开相机…")
@@ -226,6 +227,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
         await stopCamera()
         return
       }
+      cameraOpenedOnceRef.current = true
       setImage(null)
       setResult(null)
       setRecognizedBlocks([])
@@ -336,6 +338,15 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
     if (!image || !selectedIds.length || busy) return
     const blocks = recognizedBlocks.filter((_, index) => selectedIds.includes(index))
     void processImage(image, { recognized: { blocks } })
+  }
+
+  function resetSelection() {
+    if (!image || !result || !recognizedBlocks.length || busy) return
+    setResult(null)
+    setPreviewBlocks([])
+    setSelectedIds([])
+    setControlsVisible(true)
+    setMessage(SELECT_TEXT_MESSAGE)
   }
 
   async function capture() {
@@ -474,8 +485,9 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
 
   const viewingCamera = !!camera && !image
   const showingCaptureSurface = !image && (viewingCamera || (active && startInCamera))
+  const pageBackground = showingCaptureSurface ? "black" : image ? "systemBackground" : "systemGroupedBackground"
   const showOpeningCurtain = openingPhase !== "idle" ||
-    (active && startInCamera && !camera && !image && !message)
+    (!cameraOpenedOnceRef.current && active && startInCamera && !camera && !image && !message)
   const sourcePicker = (width: number) => <Menu
     buttonStyle={useGlass ? "glass" : "bordered"}
     frame={{ width }}
@@ -536,8 +548,15 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
     action={() => { void (viewingCamera ? capture() : startCamera()) }}
   ><Image systemName={viewingCamera ? "circle.inset.filled" : "camera.circle.fill"}
     font={68} foregroundStyle={showingCaptureSurface ? "white" : "accentColor"} /></Button>
-  const confirmButton = image && !result && recognizedBlocks.length
-    ? <Button buttonStyle="borderedProminent"
+  const selectionButton = image && recognizedBlocks.length
+    ? result ? <Button buttonStyle={useGlass ? "glass" : "bordered"}
+        frame={{ width: compactControls ? 44 : 52, height: sideButtonSize }}
+        disabled={busy}
+        accessibilityLabel="重新选择识别文字"
+        action={resetSelection}>
+        <Image systemName="arrow.counterclockwise" font="title2" />
+      </Button>
+    : <Button buttonStyle="borderedProminent"
         frame={{ width: compactControls ? 44 : 52, height: sideButtonSize }}
         disabled={busy || !selectedIds.length}
         accessibilityLabel={`确认翻译已选中的 ${selectedIds.length} 处文字`}
@@ -570,13 +589,13 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
         padding={{ horizontal: 20, vertical: 8 }}>{status}</Text>
     : !camera && !image ? <Text foregroundStyle="secondaryLabel">拍照或从相册选择图片，再点选文字翻译。</Text> : null
   return (
-    <NavigationStack><ZStack
+    <NavigationStack background={pageBackground}><ZStack
       navigationBarVisibility="hidden"
       navigationBarBackButtonHidden
       tabBarVisibility="hidden"
       preferredColorScheme={showingCaptureSurface && !showOpeningCurtain ? "dark" : undefined}
       translationHost={translationHost}
-      background={showingCaptureSurface ? "black" : "systemGroupedBackground"}
+      background={pageBackground}
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
       onCameraCaptureEvent={{
         isEnabled: viewingCamera && !busy,
@@ -659,9 +678,9 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
                 <Spacer />
                 {captureButton}
                 <Spacer />
-                {confirmButton ? <HStack spacing={8} frame={{ width: sideWidth }}>
+                {selectionButton ? <HStack spacing={8} frame={{ width: sideWidth }}>
                   {albumButton}
-                  {confirmButton}
+                  {selectionButton}
                 </HStack> : albumButton}
               </VStack>
             </HStack>
@@ -680,7 +699,7 @@ export function PhotoTranslationView({ initialBatch = null, startInCamera = fals
               <HStack frame={{ maxWidth: "infinity" }} padding={{ horizontal: 24, bottom: 12 }}>
                 <HStack spacing={8} frame={{ width: sideWidth, alignment: "leading" }}>
                   {albumButton}
-                  {confirmButton}
+                  {selectionButton}
                 </HStack>
                 <Spacer />
                 {captureButton}
