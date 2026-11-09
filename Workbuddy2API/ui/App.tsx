@@ -1,5 +1,5 @@
 import { NavigationStack, Script, Tab, TabView, useEffect, useState } from "scripting"
-import { accounts, credentialSyncEnabled, restoreSyncedAccounts } from "../local/store"
+import { accounts, credentialSyncEnabled, readableSyncedAccounts, reconcileSyncedCredentials, restoreSyncedAccounts } from "../local/store"
 import { refreshBalance } from "../local/upstream"
 import { OverviewPage } from "./Overview"
 import { AccountsPage } from "./Accounts"
@@ -15,11 +15,16 @@ export function App() {
   const changed = () => setRevision(value => value + 1)
   useEffect(() => {
     let active = true, refreshing = false
+    let lastCloudCount: number | null = null
     async function refreshBalances() {
       if (refreshing) return
       refreshing = true
       try {
-        try { restoreSyncedAccounts() } catch (error) { console.warn("iCloud 账号恢复失败", error) }
+        try {
+          restoreSyncedAccounts()
+          const cleanup = reconcileSyncedCredentials()
+          if (cleanup.failed) console.warn(`${cleanup.failed} 条旧本机凭据暂未清理`)
+        } catch (error) { console.warn("iCloud 账号恢复或凭据清理失败", error) }
         await Promise.allSettled(accounts().map(account => refreshBalance(account.uid)))
         if (active) setDataRevision(value => value + 1)
       } finally { refreshing = false }
@@ -28,10 +33,12 @@ export function App() {
     const cloudTimer = setInterval(() => {
       if (!credentialSyncEnabled()) return
       try {
-        if (restoreSyncedAccounts()) {
-          setDataRevision(value => value + 1)
-          void refreshBalances()
-        }
+        const added = restoreSyncedAccounts()
+        const cleanup = reconcileSyncedCredentials()
+        const cloudCount = readableSyncedAccounts()
+        if (added || cleanup.removed || cloudCount !== null && cloudCount !== lastCloudCount) setDataRevision(value => value + 1)
+        lastCloudCount = cloudCount
+        if (added) void refreshBalances()
       } catch (error) { console.warn("iCloud 账号恢复失败", error) }
     }, 30_000)
     const removeResume = Script.onResume(() => { setDataRevision(value => value + 1); void refreshBalances() })

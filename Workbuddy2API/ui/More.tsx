@@ -1,6 +1,6 @@
-import { Button, HStack, Image, Link, List, NavigationLink, Picker, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
+import { Button, HStack, Image, Link, List, NavigationLink, Picker, ProgressView, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
 import { Script } from "scripting"
-import { accountRotationEnabled, accounts, addressHost, credentialSyncEnabled, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, setAccountRotationEnabled, setAddressHost, setCredentialSyncEnabled, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
+import { accountRotationEnabled, accounts, addressHost, credentialStorageCounts, credentialSyncEnabled, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, setAccountRotationEnabled, setAddressHost, setCredentialSyncEnabled, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
 import { clearDiagnosticRun, diagnosticFailure, diagnosticFieldsText, diagnosticLocalTime, diagnosticOutcomeName, diagnosticSnapshot, diagnosticStageName, diagnosticsEnabled, exportDiagnosticFile, readDiagnosticLog, setDiagnosticsEnabled, subscribeDiagnostics, type DiagnosticRequest } from "../local/diagnostics"
 import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, type GiftStatus, type Voucher } from "../local/upstream"
 import { gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
@@ -15,6 +15,7 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
   const [fixedUid, setFixedUid] = useState(fixedAccountUid)
   const [logging, setLogging] = useState(diagnosticsEnabled)
   const [syncing, setSyncing] = useState(false)
+  const [cloudProgress, setCloudProgress] = useState<{ completed: number; total: number; phase: string } | null>(null)
   const [cloudSync, setCloudSync] = useState(credentialSyncEnabled)
   useEffect(() => subscribeGateway(() => setState(gatewayState())), [])
   const autoHost = serviceDefaultHost
@@ -69,20 +70,23 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
       setRotation(value)
     } catch (error) { await alertError(error) }
   }
-  function changeCloudSync(value: boolean) {
+  async function changeCloudSync(value: boolean) {
     if (syncing) return
     setSyncing(true)
     const before = credentialSyncEnabled()
     const accountCount = accounts().length
-    try { setCredentialSyncEnabled(value) }
-    catch (error) { void alertError(error) }
+    try {
+      await setCredentialSyncEnabled(value, (completed, total, phase) => setCloudProgress({ completed, total, phase }))
+    } catch (error) { await alertError(error) }
     finally {
       setCloudSync(credentialSyncEnabled())
       if (credentialSyncEnabled() !== before || accounts().length !== accountCount) onAccountsChanged()
+      setCloudProgress(null)
       setSyncing(false)
     }
   }
   const accountChoices = accounts()
+  const storedCredentials = !syncing ? credentialStorageCounts() : null
   return <List navigationTitle="更多">
     <Section title="模型与日志">
       <NavigationLink destination={<ModelsPage />}><HStack spacing={12}><Image systemName="square.stack.3d.up" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>模型</Text><Hint>模型目录与展示控制</Hint></VStack></HStack></NavigationLink>
@@ -97,8 +101,14 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
       <NavigationLink destination={<AboutPage />}><HStack spacing={12}><Image systemName="chevron.left.forwardslash.chevron.right" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>开源</Text><Hint>仓库、构建与同步基准</Hint></VStack></HStack></NavigationLink>
     </Section>
     <Section title="账号同步">
-      <Toggle title="iCloud 同步登录信息" systemImage="icloud" value={cloudSync} disabled={syncing} onChanged={changeCloudSync} />
-      <Hint>开启后将登录凭据同步到 iCloud；其他设备也需开启。关闭后迁回本机。</Hint>
+      <Toggle title="iCloud 同步登录信息" systemImage="icloud" value={cloudSync} disabled={syncing} onChanged={value => void changeCloudSync(value)} />
+      {syncing && cloudProgress && <VStack alignment="leading" spacing={6}>
+        <ProgressView value={cloudProgress.completed} total={cloudProgress.total} progressViewStyle="linear" />
+        <Hint>{cloudProgress.phase}</Hint>
+      </VStack>}
+      {!syncing && <Hint>{storedCredentials === null ? "钥匙串数量暂不可读取"
+        : `本机 ${storedCredentials.local} 个 · iCloud ${storedCredentials.cloud} 个`}</Hint>}
+      <Hint>开启后保留已验证的 iCloud 凭据，清理本机旧副本。</Hint>
     </Section>
     <Section title="系统 · 本机 API 服务">
       <Text>{state.running ? "运行中" : "已停止"}</Text>
