@@ -1,5 +1,5 @@
 import { NavigationStack, Script, Tab, TabView, useEffect, useState } from "scripting"
-import { accounts, credentialSyncEnabled, restoreSyncedAccounts } from "../local/store"
+import { accounts, credentialSyncEnabled, readableSyncedAccounts, restoreSyncedAccounts } from "../local/store"
 import { refreshBalance } from "../local/upstream"
 import { OverviewPage } from "./Overview"
 import { AccountsPage } from "./Accounts"
@@ -15,6 +15,7 @@ export function App() {
   const changed = () => setRevision(value => value + 1)
   useEffect(() => {
     let active = true, refreshing = false
+    let lastCloudCount: number | null = null
     async function refreshBalances() {
       if (refreshing) return
       refreshing = true
@@ -28,10 +29,11 @@ export function App() {
     const cloudTimer = setInterval(() => {
       if (!credentialSyncEnabled()) return
       try {
-        if (restoreSyncedAccounts()) {
-          setDataRevision(value => value + 1)
-          void refreshBalances()
-        }
+        const added = restoreSyncedAccounts()
+        const cloudCount = readableSyncedAccounts()
+        if (added || cloudCount !== null && cloudCount !== lastCloudCount) setDataRevision(value => value + 1)
+        lastCloudCount = cloudCount
+        if (added) void refreshBalances()
       } catch (error) { console.warn("iCloud 账号恢复失败", error) }
     }, 30_000)
     const removeResume = Script.onResume(() => { setDataRevision(value => value + 1); void refreshBalances() })

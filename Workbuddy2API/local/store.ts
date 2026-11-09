@@ -53,6 +53,8 @@ const ACCOUNT_ROTATION = "wb2api.local.account-rotation"
 const FIXED_ACCOUNT = "wb2api.local.fixed-account"
 const CREDENTIAL_SYNC = "wb2api.local.credential-sync"
 const CREDENTIAL_CLEANUP = "wb2api.local.credential-cleanup"
+const CLOUD_INDEX = "wb2api.local.account-index"
+const CLOUD_ACCESS_UPDATED = "wb2api.local.cloud-access-v1"
 
 export function accounts(): Account[] { return Storage.get<Account[]>(ACCOUNTS) ?? [] }
 
@@ -76,8 +78,39 @@ export function rememberCheckinStatus(uid: string) {
 
 export const credentialSyncEnabled = (): boolean => Storage.get<boolean>(CREDENTIAL_SYNC) === true
 const keychainOptions = (synchronizable: boolean) => ({ synchronizable })
+const keychainWriteOptions = (synchronizable: boolean) => synchronizable
+  ? { synchronizable: true, accessibility: "first_unlock" as const }
+  : { synchronizable: false, accessibility: "first_unlock_this_device" as const }
 const secretKey = (uid: string, nickname: string) => `${SECRET}${uid} · ${nickname.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 32) || uid}`
-const secretKeys = (uid: string, synchronizable: boolean) => Keychain.keys(keychainOptions(synchronizable)).filter(key => key === SECRET + uid || key.startsWith(`${SECRET}${uid} · `))
+
+type CloudIndexEntry = { uid: string; key: string }
+
+function cloudIndex(): CloudIndexEntry[] {
+  const raw = Keychain.get(CLOUD_INDEX, keychainOptions(true))
+  if (!raw) return []
+  try {
+    const entries = JSON.parse(raw) as CloudIndexEntry[]
+    return Array.isArray(entries) ? entries.filter(item => typeof item?.uid === "string" && /^[\w-]{1,64}$/.test(item.uid)
+      && typeof item.key === "string" && (item.key === SECRET + item.uid || item.key.startsWith(`${SECRET}${item.uid} · `))) : []
+  } catch { return [] }
+}
+
+function writeCloudIndex(entries: CloudIndexEntry[]) {
+  const options = keychainOptions(true)
+  const previous = Keychain.get(CLOUD_INDEX, options)
+  const raw = JSON.stringify([...new Map(entries.map(item => [item.uid, item])).values()])
+  if (!Keychain.set(CLOUD_INDEX, raw, keychainWriteOptions(true)) || Keychain.get(CLOUD_INDEX, options) !== raw) {
+    if (previous === null) Keychain.remove(CLOUD_INDEX, options)
+    else Keychain.set(CLOUD_INDEX, previous, keychainWriteOptions(true))
+    throw new Error("iCloud 账号索引保存失败")
+  }
+}
+
+const scopedSecretKeys = (synchronizable: boolean) => [...new Set([
+  ...Keychain.keys(keychainOptions(synchronizable)).filter(key => key.startsWith(SECRET)),
+  ...(synchronizable ? cloudIndex().map(item => item.key) : []),
+])]
+const secretKeys = (uid: string, synchronizable: boolean) => scopedSecretKeys(synchronizable).filter(key => key === SECRET + uid || key.startsWith(`${SECRET}${uid} · `))
 
 function parsedCredential(raw: string | null): Credential | null {
   if (!raw) return null
@@ -94,8 +127,7 @@ export function restoreSyncedAccounts(): number {
   const existing = accounts()
   const known = new Set(existing.map(item => item.uid))
   const added: Account[] = []
-  for (const key of Keychain.keys(keychainOptions(true))) {
-    if (!key.startsWith(SECRET)) continue
+  for (const key of scopedSecretKeys(true)) {
     const value = parsedCredential(Keychain.get(key, keychainOptions(true)))
     if (!value || known.has(value.uid) || key !== SECRET + value.uid && !key.startsWith(`${SECRET}${value.uid} · `)) continue
     known.add(value.uid)
@@ -103,6 +135,17 @@ export function restoreSyncedAccounts(): number {
   }
   if (added.length && !Storage.set(ACCOUNTS, [...existing, ...added])) throw new Error("iCloud 账号列表恢复失败")
   return added.length
+}
+
+export function readableSyncedAccounts(): number | null {
+  try {
+    const uids = new Set<string>()
+    for (const key of scopedSecretKeys(true)) {
+      const value = parsedCredential(Keychain.get(key, keychainOptions(true)))
+      if (value) uids.add(value.uid)
+    }
+    return uids.size
+  } catch { return null }
 }
 
 function credentialEntry(uid: string): { key: string; raw: string; value: Credential } | null {
@@ -136,76 +179,125 @@ export function saveCredential(value: Credential) {
   const previous = Keychain.get(key, options)
   const oldKeys = secretKeys(value.uid, synchronizable)
   const raw = JSON.stringify(value)
-  if (!Keychain.set(key, raw, options)) throw new Error("凭据保存失败")
+  if (!Keychain.set(key, raw, keychainWriteOptions(synchronizable))) throw new Error("凭据保存失败")
   if (Keychain.get(key, options) !== raw) {
     if (previous === null) Keychain.remove(key, options)
-    else Keychain.set(key, previous, options)
+    else Keychain.set(key, previous, keychainWriteOptions(synchronizable))
     throw new Error("凭据保存后无法读取")
   }
-  const existing = accounts().find(item => item.uid === value.uid)
-  const next = accounts().filter(item => item.uid !== value.uid)
+  const oldAccounts = accounts()
+  const existing = oldAccounts.find(item => item.uid === value.uid)
+  const next = oldAccounts.filter(item => item.uid !== value.uid)
   next.push({ ...existing, uid: value.uid, nickname: value.nickname, site: value.site, enterpriseId: value.enterpriseId, error: undefined })
   if (!Storage.set(ACCOUNTS, next)) {
     if (previous === null) Keychain.remove(key, options)
-    else Keychain.set(key, previous, options)
+    else Keychain.set(key, previous, keychainWriteOptions(synchronizable))
     throw new Error("账号列表保存失败")
+  }
+  if (synchronizable) {
+    try {
+      const index = cloudIndex()
+      if (index.find(item => item.uid === value.uid)?.key !== key)
+        writeCloudIndex([...index.filter(item => item.uid !== value.uid), { uid: value.uid, key }])
+    }
+    catch (error) {
+      Storage.set(ACCOUNTS, oldAccounts)
+      if (previous === null) Keychain.remove(key, options)
+      else Keychain.set(key, previous, keychainWriteOptions(true))
+      throw error
+    }
   }
   for (const oldKey of oldKeys) if (oldKey !== key) Keychain.remove(oldKey, options)
 }
 
-export function setCredentialSyncEnabled(enabled: boolean): void {
-  if (enabled === credentialSyncEnabled()) return
+export async function setCredentialSyncEnabled(
+  enabled: boolean,
+  onProgress?: (completed: number, total: number, phase: string) => void,
+): Promise<number> {
+  if (enabled === credentialSyncEnabled()) return enabled ? restoreSyncedAccounts() : 0
   const source = keychainOptions(!enabled)
   const target = keychainOptions(enabled)
-  const sourceKeys = Keychain.keys(source).filter(key => key.startsWith(SECRET))
+  const sourceKeys = scopedSecretKeys(!enabled)
+  const total = sourceKeys.length + 3
+  let completed = 0
+  const progress = (phase: string) => onProgress?.(completed, total, phase)
+  progress(enabled ? "正在读取本机凭据" : "正在读取同步凭据")
+  await new Promise<void>(resolve => setTimeout(resolve, 80))
   const targetEntries = new Map<string, { key: string; value: Credential }>()
-  for (const key of Keychain.keys(target)) {
-    if (!key.startsWith(SECRET)) continue
+  for (const key of scopedSecretKeys(enabled)) {
     const value = parsedCredential(Keychain.get(key, target))
     if (value && (key === SECRET + value.uid || key.startsWith(`${SECRET}${value.uid} · `))) targetEntries.set(value.uid, { key, value })
   }
   const written: { key: string; previous: string | null }[] = []
+  const previousIndex = Keychain.get(CLOUD_INDEX, keychainOptions(true))
+  let indexWritten = false
   try {
     for (const key of sourceKeys) {
       const raw = Keychain.get(key, source)
       const value = parsedCredential(raw)
       if (!value || key !== SECRET + value.uid && !key.startsWith(`${SECRET}${value.uid} · `)) throw new Error(`无法识别旧凭据：${key}`)
       const existing = targetEntries.get(value.uid)
-      if (enabled && existing && existing.value.expiresAt >= value.expiresAt) continue
-      const destination = existing?.key ?? secretKey(value.uid, value.nickname)
-      const previous = Keychain.get(destination, target)
-      if (!Keychain.set(destination, raw!, target)) throw new Error(`凭据迁移失败：${value.nickname}`)
-      written.push({ key: destination, previous })
-      if (Keychain.get(destination, target) !== raw) throw new Error(`凭据迁移后无法读取：${value.nickname}`)
-      targetEntries.set(value.uid, { key: destination, value })
+      if (!(enabled && existing && existing.value.expiresAt >= value.expiresAt)) {
+        const destination = existing?.key ?? secretKey(value.uid, value.nickname)
+        const previous = Keychain.get(destination, target)
+        if (!Keychain.set(destination, raw!, keychainWriteOptions(enabled))) throw new Error(`凭据迁移失败：${value.nickname}`)
+        written.push({ key: destination, previous })
+        if (Keychain.get(destination, target) !== raw) throw new Error(`凭据迁移后无法读取：${value.nickname}`)
+        targetEntries.set(value.uid, { key: destination, value })
+      }
+      completed++
+      progress(`已核验 ${value.nickname}`)
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
     }
-    if (!Storage.set(CREDENTIAL_CLEANUP, true)) throw new Error("凭据迁移状态保存失败")
+    if (enabled && sourceKeys.length) {
+      writeCloudIndex([...cloudIndex(), ...[...targetEntries].map(([uid, item]) => ({ uid, key: item.key }))])
+      indexWritten = true
+    }
+    completed++
+    progress(enabled ? "正在读取 iCloud 账号索引" : "正在准备本机账号索引")
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    if (sourceKeys.length && !Storage.set(CREDENTIAL_CLEANUP, true)) throw new Error("凭据迁移状态保存失败")
     if (!Storage.set(CREDENTIAL_SYNC, enabled)) {
-      Storage.remove(CREDENTIAL_CLEANUP)
+      if (sourceKeys.length) Storage.remove(CREDENTIAL_CLEANUP)
       throw new Error("iCloud 同步设置保存失败")
     }
   } catch (error) {
     for (const item of written) {
       if (item.previous === null) Keychain.remove(item.key, target)
-      else Keychain.set(item.key, item.previous, target)
+      else Keychain.set(item.key, item.previous, keychainWriteOptions(enabled))
+    }
+    if (indexWritten) {
+      if (previousIndex === null) Keychain.remove(CLOUD_INDEX, keychainOptions(true))
+      else Keychain.set(CLOUD_INDEX, previousIndex, keychainWriteOptions(true))
     }
     throw error
   }
-  if (enabled) { restoreSyncedAccounts(); return }
+  const added = enabled ? restoreSyncedAccounts() : 0
+  completed++
+  progress(enabled ? "正在恢复账号列表" : "正在确认本机凭据")
+  await new Promise<void>(resolve => setTimeout(resolve, 0))
   let failed = 0
   for (const key of sourceKeys) {
     if (!Keychain.remove(key, source) || Keychain.contains(key, source)) failed++
   }
+  if (!enabled && (!Keychain.remove(CLOUD_INDEX, keychainOptions(true)) || Keychain.contains(CLOUD_INDEX, keychainOptions(true)))) failed++
   if (!failed) Storage.remove(CREDENTIAL_CLEANUP)
-  if (enabled) restoreSyncedAccounts()
+  completed++
+  progress(enabled ? "本机迁移完成" : "已迁回本机")
   if (failed) throw new Error(`同步方式已切换，但 ${failed} 条旧凭据未能删除；下次启动会重试清理`)
+  await new Promise<void>(resolve => setTimeout(resolve, 120))
+  return added
 }
 
 export function migrateCredentialKeys(): { migrated: number; failed: number } {
   let migrated = 0, failed = 0
-  if (credentialSyncEnabled()) restoreSyncedAccounts()
-  const options = keychainOptions(credentialSyncEnabled())
-  const keys = new Set([...Keychain.keys(options).filter(key => key.startsWith(SECRET)), ...accounts().map(item => SECRET + item.uid)])
+  const sync = credentialSyncEnabled()
+  const upgradeCloudAccess = sync && Storage.get<boolean>(CLOUD_ACCESS_UPDATED) !== true
+  if (sync && scopedSecretKeys(false).length)
+    Storage.set(CREDENTIAL_CLEANUP, true)
+  if (sync) restoreSyncedAccounts()
+  const options = keychainOptions(sync)
+  const keys = new Set([...scopedSecretKeys(sync), ...accounts().map(item => SECRET + item.uid)])
   const entries = new Map<string, { key: string; raw: string; value: Credential }[]>()
   for (const key of keys) {
     const raw = Keychain.get(key, options)
@@ -226,7 +318,16 @@ export function migrateCredentialKeys(): { migrated: number; failed: number } {
     if (!account) {
       try { saveCredential(source.value) } catch { failed++; continue }
     } else if (source.key !== desired &&
-      (!Keychain.set(desired, source.raw, options) || Keychain.get(desired, options) !== source.raw)) { failed++; continue }
+      (!Keychain.set(desired, source.raw, keychainWriteOptions(sync)) || Keychain.get(desired, options) !== source.raw)) { failed++; continue }
+    if (upgradeCloudAccess &&
+      (!Keychain.set(desired, source.raw, keychainWriteOptions(true)) || Keychain.get(desired, options) !== source.raw)) { failed++; continue }
+    if (sync) {
+      const index = cloudIndex()
+      if (index.find(item => item.uid === uid)?.key !== desired) {
+        try { writeCloudIndex([...index.filter(item => item.uid !== uid), { uid, key: desired }]) }
+        catch { failed++; continue }
+      }
+    }
     for (const item of items) {
       if (item.key === desired) continue
       if (!Keychain.contains(item.key, options)) { migrated++; continue }
@@ -234,6 +335,7 @@ export function migrateCredentialKeys(): { migrated: number; failed: number } {
       else failed++
     }
   }
+  if (upgradeCloudAccess && entries.size && !failed) Storage.set(CLOUD_ACCESS_UPDATED, true)
   if (Storage.get<boolean>(CREDENTIAL_CLEANUP) === true) {
     const previous = keychainOptions(!credentialSyncEnabled())
     const activeSync = credentialSyncEnabled()
@@ -245,18 +347,29 @@ export function migrateCredentialKeys(): { migrated: number; failed: number } {
       if (!value) { cleanupFailed++; continue }
       const activeCopy = secretKeys(value.uid, activeSync).map(activeKey => {
         const activeRaw = Keychain.get(activeKey, activeOptions)
-        return { raw: activeRaw, value: parsedCredential(activeRaw) }
+        return { key: activeKey, raw: activeRaw, value: parsedCredential(activeRaw) }
       }).find(item => item.value?.uid === value.uid)
+      let destination = activeCopy?.key ?? secretKey(value.uid, value.nickname)
+      let targetRaw = activeCopy?.raw
       if (!activeCopy || activeCopy.value!.expiresAt < value.expiresAt ||
         activeCopy.value!.expiresAt === value.expiresAt && activeCopy.raw !== raw) {
-        const destination = secretKey(value.uid, value.nickname)
-        if (!Keychain.set(destination, raw!, activeOptions) || Keychain.get(destination, activeOptions) !== raw) {
-          cleanupFailed++; continue
+        destination = secretKey(value.uid, value.nickname)
+        targetRaw = raw
+      }
+      if (!Keychain.set(destination, targetRaw!, keychainWriteOptions(activeSync)) || Keychain.get(destination, activeOptions) !== targetRaw) {
+        cleanupFailed++; continue
+      }
+      if (activeSync) {
+        const index = cloudIndex()
+        if (index.find(item => item.uid === value.uid)?.key !== destination) {
+          try { writeCloudIndex([...index.filter(item => item.uid !== value.uid), { uid: value.uid, key: destination }]) }
+          catch { cleanupFailed++; continue }
         }
       }
       if (Keychain.remove(key, previous) && !Keychain.contains(key, previous)) migrated++
       else cleanupFailed++
     }
+    if (!activeSync && (!Keychain.remove(CLOUD_INDEX, keychainOptions(true)) || Keychain.contains(CLOUD_INDEX, keychainOptions(true)))) cleanupFailed++
     if (!cleanupFailed) Storage.remove(CREDENTIAL_CLEANUP)
     failed += cleanupFailed
   }
@@ -270,16 +383,25 @@ export function updateAccount(uid: string, change: Partial<Account>) {
 
 export function removeAccount(uid: string) {
   const modes = Storage.get<boolean>(CREDENTIAL_CLEANUP) === true ? [false, true] : [credentialSyncEnabled()]
+  const oldAccounts = accounts()
   const previous = modes.flatMap(sync => secretKeys(uid, sync).map(key => ({ key, sync, raw: Keychain.get(key, keychainOptions(sync)) })))
   for (const { key, sync } of previous) {
     if (!Keychain.remove(key, keychainOptions(sync))) {
-      for (const item of previous) if (item.raw !== null) Keychain.set(item.key, item.raw, keychainOptions(item.sync))
+      for (const item of previous) if (item.raw !== null) Keychain.set(item.key, item.raw, keychainWriteOptions(item.sync))
       throw new Error("凭据删除失败")
     }
   }
-  if (!Storage.set(ACCOUNTS, accounts().filter(item => item.uid !== uid))) {
-    for (const item of previous) if (item.raw !== null) Keychain.set(item.key, item.raw, keychainOptions(item.sync))
+  if (!Storage.set(ACCOUNTS, oldAccounts.filter(item => item.uid !== uid))) {
+    for (const item of previous) if (item.raw !== null) Keychain.set(item.key, item.raw, keychainWriteOptions(item.sync))
     throw new Error("账号列表保存失败")
+  }
+  if (modes.includes(true)) {
+    try { writeCloudIndex(cloudIndex().filter(item => item.uid !== uid)) }
+    catch (error) {
+      Storage.set(ACCOUNTS, oldAccounts)
+      for (const item of previous) if (item.raw !== null) Keychain.set(item.key, item.raw, keychainWriteOptions(item.sync))
+      throw error
+    }
   }
   Storage.set(MODEL_LOCKS, modelLocks().filter(item => item.uid !== uid))
 }
