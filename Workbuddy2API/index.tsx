@@ -2,7 +2,7 @@ import { LiveActivity, Navigation, Script } from "scripting"
 import { currentServiceRunId, gatewayState, restoreGateway, stopGateway } from "./local/gateway"
 import { forgetEndedServiceActivity } from "./local/serviceActivity"
 import { clearPendingStop, pendingStopId, serviceActivityRef } from "./local/serviceControl"
-import { migrateCredentialKeys } from "./local/store"
+import { credentialSyncEnabled, migrateCredentialKeys, setCredentialSyncEnabled } from "./local/store"
 import { App } from "./ui/App"
 
 // Script.onError 在旧版本不存在，注册失败时静默跳过，不影响启动
@@ -55,6 +55,7 @@ async function run() {
   LiveActivity.addActivityUpdateListener(onActivityUpdate)
   try {
     try {
+      if (credentialSyncEnabled()) await setCredentialSyncEnabled(true)
       const migration = migrateCredentialKeys()
       if (migration.failed) await Dialog.alert({ title: "钥匙串迁移未完成", message: `${migration.failed} 条凭据未能迁移或清理，请检查 iCloud 钥匙串状态。` })
     } catch (error) {

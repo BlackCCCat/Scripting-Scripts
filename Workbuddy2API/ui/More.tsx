@@ -75,10 +75,8 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
     setSyncing(true)
     const before = credentialSyncEnabled()
     const accountCount = accounts().length
-    let waitingForCloud = false
     try {
       await setCredentialSyncEnabled(value, (completed, total, phase) => setCloudProgress({ completed, total, phase }))
-      waitingForCloud = value && !accounts().length
     } catch (error) { await alertError(error) }
     finally {
       setCloudSync(credentialSyncEnabled())
@@ -86,8 +84,6 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
       setCloudProgress(null)
       setSyncing(false)
     }
-    if (waitingForCloud)
-      await Dialog.alert({ title: "等待 iCloud 凭据", message: `此设备尚未读到同步账号。请确认两台设备使用同一 Apple 账户，脚本名称均为「${Script.name}」；凭据到达后会自动显示。` })
   }
   const accountChoices = accounts()
   const readableCloudAccounts = cloudSync && !syncing ? readableSyncedAccounts() : null
@@ -110,7 +106,9 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
         <ProgressView value={cloudProgress.completed} total={cloudProgress.total} progressViewStyle="linear" />
         <Hint>{cloudProgress.phase}</Hint>
       </VStack>}
-      {cloudSync && !syncing && <Hint>{`本机可读取同步凭据：${readableCloudAccounts === null ? "读取失败" : `${readableCloudAccounts} 个`}`}</Hint>}
+      {cloudSync && !syncing && <Hint>{readableCloudAccounts === null ? "同步钥匙串暂不可读取"
+        : readableCloudAccounts > 0 ? `已读取 ${readableCloudAccounts} 个同步账号`
+        : accounts().length ? "未读到同步凭据，请检查账号登录状态" : "等待其他设备的同步凭据"}</Hint>}
       <Hint>开启后将登录凭据同步到 iCloud；其他设备也需开启。关闭后迁回本机。</Hint>
     </Section>
     <Section title="系统 · 本机 API 服务">
