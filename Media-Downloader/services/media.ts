@@ -578,6 +578,7 @@ async function downloadHLSPlanAsLocalPlaylist(options: {
     options.onProgress?.({
       fraction,
       stage: `${options.label} ${completedUnits}/${totalUnits} · ${formatBytes(bytesWritten)}`,
+      transferFraction: fraction,
     })
   }
 
@@ -890,12 +891,8 @@ function startYtDlpProgressPolling(options: {
     const progress = readYtDlpProgress()
     if (progress) {
       const percent = progress.percent ?? null
-      const inner = percent != null
-        ? Math.max(0, Math.min(1, percent / 100))
-        : progress.downloadedBytes
-          ? Math.max(0.02, Math.min(0.96, Math.log2(progress.downloadedBytes / (1024 * 1024) + 1) / 8))
-          : 0
-      const fraction = options.start + (options.end - options.start) * inner
+      const inner = percent != null ? Math.max(0, Math.min(1, percent / 100)) : null
+      const fraction = options.start + (options.end - options.start) * (inner ?? 0)
       const downloaded = progress.downloadedBytes ? formatBytes(progress.downloadedBytes) : null
       const total = progress.totalBytes ? formatBytes(progress.totalBytes) : null
       const speed = progress.speed ? `${formatBytes(progress.speed)}/s` : null
@@ -914,6 +911,7 @@ function startYtDlpProgressPolling(options: {
       options.onProgress?.({
         fraction,
         stage: detail ? `${options.stage} · ${detail}` : options.stage,
+        transferFraction: inner == null ? null : fraction,
       })
     }
     timer = setTimeout(tick, 500)
@@ -1309,8 +1307,8 @@ async function downloadGenericMedia(
         cookieFilePath,
         extractorArgs
       ),
-      start: 0.2,
-      end: 0.94,
+      start: 0,
+      end: 1,
       stage: `正在下载 ${platform} 视频`,
       onProgress: options?.onProgress,
       onLog: options?.onLog,
@@ -1323,6 +1321,9 @@ async function downloadGenericMedia(
       metadata: extractYtDlpMetadata(raw.output) || probe,
     }
   } else {
+    const videoBytes = formatSize(choice.video)
+    const audioBytes = formatSize(choice.audio)
+    const videoShare = videoBytes > 0 && audioBytes > 0 ? videoBytes / (videoBytes + audioBytes) : 0.75
     report(0.2, `正在下载 ${platform} 视频流`)
     const videoRaw = await runYtDlpDownloadWithProgress({
       args: buildYtDlpRunnerArgs(
@@ -1335,8 +1336,8 @@ async function downloadGenericMedia(
         cookieFilePath,
         extractorArgs
       ),
-      start: 0.2,
-      end: 0.54,
+      start: 0,
+      end: videoShare,
       stage: `正在下载 ${platform} 视频流`,
       onProgress: options?.onProgress,
       onLog: options?.onLog,
@@ -1361,8 +1362,8 @@ async function downloadGenericMedia(
         cookieFilePath,
         extractorArgs
       ),
-      start: 0.56,
-      end: 0.78,
+      start: videoShare,
+      end: 1,
       stage: `正在下载 ${platform} 音频流`,
       onProgress: options?.onProgress,
       onLog: options?.onLog,
@@ -1408,6 +1409,7 @@ async function downloadGenericMedia(
   }
 
   const filePath = result.paths[result.paths.length - 1]
+  report(0.95, "正在验证下载文件")
   await verifyOutputFile(filePath, log)
   const fileName = Path.basename(filePath)
   const bytesWritten = fileSize(filePath)
@@ -1504,6 +1506,9 @@ async function downloadM3U8(
     const canDownloadAudio = !audioPlan || (!audioPlan.unsupportedReason && audioPlan.segments.length > 0)
 
     if (canDownloadVideo && canDownloadAudio) {
+      const videoUnits = videoPlan.segments.length + Number(Boolean(videoPlan.initMapURL))
+      const audioUnits = audioPlan ? audioPlan.segments.length + Number(Boolean(audioPlan.initMapURL)) : 0
+      const videoShare = videoUnits / (videoUnits + audioUnits)
       const segmentDir = Path.join(TEMP_DIR, `m3u8-${Date.now()}`)
       FileManager.createDirectorySync(segmentDir, true)
       registerCurrentTaskPath(segmentDir)
@@ -1519,8 +1524,8 @@ async function downloadM3U8(
         playlistFileName: "video_local.m3u8",
         prefix: "video",
         label: "正在下载 m3u8 视频分片",
-        start: 0.14,
-        end: audioPlan ? 0.56 : 0.78,
+        start: 0,
+        end: videoShare,
         onProgress: options?.onProgress,
         isCancelled: options?.isCancelled,
       })
@@ -1534,8 +1539,8 @@ async function downloadM3U8(
           playlistFileName: "audio_local.m3u8",
           prefix: "audio",
           label: "正在下载 m3u8 音频分片",
-          start: 0.58,
-          end: 0.78,
+          start: videoShare,
+          end: 1,
           onProgress: options?.onProgress,
           isCancelled: options?.isCancelled,
         })
@@ -1618,21 +1623,21 @@ async function downloadM3U8(
   report(0.12, "正在通过 ffmpeg 下载 m3u8")
   log("切换到 ffmpeg 下载器。")
 
-  let smoothStopped = false
-  let smoothTimer: ReturnType<typeof setTimeout> | null = null
-  const smoothStartedAt = Date.now()
-  const smoothTick = () => {
-    if (smoothStopped || options?.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) return
-    const elapsed = Date.now() - smoothStartedAt
-    const inner = Math.min(0.95, 1 - Math.exp(-elapsed / 90000))
-    const fraction = 0.12 + (0.94 - 0.12) * inner
+  let sizeTimer: ReturnType<typeof setTimeout> | null = null
+  const reportSize = () => {
+    if (options?.isCancelled?.() || FileManager.existsSync(CANCEL_FLAG_PATH)) return
+    let written = 0
+    try {
+      if (FileManager.existsSync(filePath)) written = FileManager.statSync(filePath).size
+    } catch {}
     options?.onProgress?.({
-      fraction,
-      stage: `正在通过 ffmpeg 下载 m3u8 · ${Math.round(fraction * 100)}%`,
+      fraction: 0.12,
+      stage: `正在通过 ffmpeg 下载 m3u8 · ${formatBytes(written)}`,
+      transferFraction: null,
     })
-    smoothTimer = setTimeout(smoothTick, 500)
+    sizeTimer = setTimeout(reportSize, 500)
   }
-  smoothTimer = setTimeout(smoothTick, 500)
+  reportSize()
 
   const baseCommand = [
       "ffmpeg",
@@ -1654,14 +1659,13 @@ async function downloadM3U8(
       "+faststart",
       filePath,
     ]
-  const result = await Shell.run(
-    commandLine(baseCommand),
-    { timeout: 7200 }
-  )
+  let result: ShellExecutionResult
+  try {
+    result = await Shell.run(commandLine(baseCommand), { timeout: 7200 })
+  } finally {
+    if (sizeTimer) clearTimeout(sizeTimer)
+  }
   logShellResult(log, "ffmpeg m3u8 direct download", result)
-
-  smoothStopped = true
-  if (smoothTimer) clearTimeout(smoothTimer)
 
   if (result.exitCode === 130 || FileManager.existsSync(CANCEL_FLAG_PATH)) {
     await removeIfExists(filePath)

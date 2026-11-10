@@ -597,8 +597,9 @@ function View() {
   }
 
   const copyDownloadStatus = async () => {
+    const transferFraction = latestProgressRef.current.transferFraction
     const statusText = loading
-      ? `${Math.round(latestProgressRef.current.fraction * 100)}% · ${latestProgressRef.current.stage}`
+      ? `${transferFraction == null ? "" : `${Math.round(transferFraction * 100)}% · `}${latestProgressRef.current.stage}`
       : (latestStatusRef.current || status || t.ready)
     await copyText(statusText, t.copiedStatus)
   }
@@ -1139,9 +1140,13 @@ function View() {
         <Section title={t.status}>
           {loading ? (
             <VStack alignment="leading" spacing={8} onTapGesture={() => void copyDownloadStatus()}>
-              <ProgressView value={downloadProgress.fraction} total={1} />
+              {downloadProgress.transferFraction !== undefined ? (
+                <ProgressView value={downloadProgress.transferFraction ?? undefined} total={1} progressViewStyle="linear" />
+              ) : null}
               <Text>{localizeRuntimeText(downloadProgress.stage, preferences.language)}</Text>
-              <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(downloadProgress.fraction * 100)}%</Text>
+              {downloadProgress.transferFraction != null ? (
+                <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(downloadProgress.transferFraction * 100)}%</Text>
+              ) : null}
             </VStack>
           ) : (
             <Text foregroundStyle="secondaryLabel" onTapGesture={() => void copyDownloadStatus()}>{localizeRuntimeText(status, preferences.language)}</Text>

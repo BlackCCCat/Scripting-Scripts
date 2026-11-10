@@ -43,6 +43,7 @@ export type DownloadSuccess = {
 export type DownloadProgress = {
   fraction: number
   stage: string
+  transferFraction?: number | null
 }
 
 export type DownloadLogFn = (message: string) => void
@@ -642,7 +643,7 @@ async function downloadImageBatch(options: {
   sourceURL: string
   extracted: ExtractedInfo
   imageURLs: string[]
-  onProgress: (fraction: number, stage: string) => void
+  onProgress: (fraction: number, stage: string, transferFraction?: number | null) => void
   onLog: (message: string) => void
 }): Promise<DownloadSuccess> {
   const { sourceURL, extracted, imageURLs, onProgress, onLog } = options
@@ -657,7 +658,7 @@ async function downloadImageBatch(options: {
     const imageURL = imageURLs[index]
     const progressStart = 0.22 + (index / imageURLs.length) * 0.68
     const progressEnd = 0.22 + ((index + 1) / imageURLs.length) * 0.68
-    onProgress(progressStart, `正在下载图片 ${index + 1}/${imageURLs.length}`)
+    onProgress(progressStart, `正在下载图片 ${index + 1}/${imageURLs.length}`, index / imageURLs.length)
     onLog(`下载图片 ${index + 1}/${imageURLs.length}`)
 
     try {
@@ -699,7 +700,11 @@ async function downloadImageBatch(options: {
         start: progressStart,
         end: progressEnd,
         stage: `正在下载图片 ${index + 1}/${imageURLs.length}`,
-        onProgress: ({ fraction, stage }) => onProgress(fraction, stage),
+        onProgress: ({ fraction, stage, transferFraction }) => onProgress(
+          fraction,
+          stage,
+          transferFraction == null ? null : (index + transferFraction) / imageURLs.length
+        ),
       })
       const bytesWritten = FileManager.statSync(filePath).size
       if (bytesWritten === 0) {
@@ -1074,8 +1079,8 @@ export async function downloadVideo(
     onLog?: DownloadLogFn
   }
 ): Promise<DownloadSuccess> {
-  const reportProgress = (fraction: number, stage: string) => {
-    options?.onProgress?.({ fraction, stage })
+  const reportProgress = (fraction: number, stage: string, transferFraction?: number | null) => {
+    options?.onProgress?.({ fraction, stage, transferFraction })
   }
   const log = (message: string) => {
     options?.onLog?.(message)

@@ -65,7 +65,11 @@ export async function downloadURLToFileWithProgress(options: {
       const detail = total > 0
         ? `${formatBytes(downloaded)} / ${formatBytes(total)}`
         : formatBytes(downloaded)
-      options.onProgress?.({ fraction, stage: `${options.stage} · ${detail}` })
+      options.onProgress?.({
+        fraction,
+        stage: `${options.stage} · ${detail}`,
+        transferFraction: total > 0 ? inner : null,
+      })
     }
 
     task.onComplete = (error) => {

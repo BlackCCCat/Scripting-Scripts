@@ -230,13 +230,17 @@ function IntentDownloadView(props: {
           cancellationAction: <Button title={t.close} action={() => Script.exit(Intent.text(t.cancel))} />,
         }}
       >
-        <Section title={t.progress}>
-          <VStack alignment="leading" spacing={8}>
-            <ProgressView value={progress.fraction} total={1} />
-            <Text>{localizeRuntimeText(progress.stage, preferences.language)}</Text>
-            <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(progress.fraction * 100)}%</Text>
-          </VStack>
-        </Section>
+        {progress.transferFraction !== undefined ? (
+          <Section title={t.progress}>
+            <VStack alignment="leading" spacing={8}>
+              <ProgressView value={progress.transferFraction ?? undefined} total={1} progressViewStyle="linear" />
+              <Text>{localizeRuntimeText(progress.stage, preferences.language)}</Text>
+              {progress.transferFraction != null ? (
+                <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(progress.transferFraction * 100)}%</Text>
+              ) : null}
+            </VStack>
+          </Section>
+        ) : null}
 
         <Section title={t.status}>
           <Text foregroundStyle="secondaryLabel">{localizeRuntimeText(status, preferences.language)}</Text>
