@@ -129,7 +129,7 @@ type HomeRoute =
   | { kind: "favoriteEditor"; sessionId: string; item?: ClipItem; initial?: FavoriteDraft; preferredFormat?: "plain" | "fields"; favoriteGroups: FavoriteGroup[]; zoomSourceID?: string }
   | { kind: "favoriteGroupEditor" }
   | { kind: "favoriteGroupManager"; groups: FavoriteGroup[]; counts: Record<string, number> }
-  | { kind: "favoriteFields"; item: ClipItem; fields: FavoriteField[] }
+  | { kind: "favoriteFields"; sessionId: string; item: ClipItem; fields: FavoriteField[] }
   | { kind: "image"; item: ClipItem }
   | { kind: "tokens"; tokens: CaisToken[]; zoomSourceID?: string }
 const EMPTY_CLIP_KIND_COUNTS: ClipKindCountsByScope = {
@@ -1336,7 +1336,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
     if (embeddedHomeNavigation) {
       listRefreshBlocked.current = true
-      presentHomeRoute({ kind: "favoriteFields", item, fields: parsed.fields })
+      presentHomeRoute({ kind: "favoriteFields", sessionId: makeId("favorite-fields"), item, fields: parsed.fields })
       return
     }
     listRefreshBlocked.current = true
@@ -1970,7 +1970,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
   }
 
-  function renderFavoriteFieldContextMenu(field: FavoriteField, copy: () => void) {
+  function renderFavoriteFieldContextMenu(field: FavoriteField, copy: () => void, reveal?: { action: () => void; revealed: boolean }) {
     return (
       <FavoriteFieldActionMenu
         settings={settingsRef.current}
@@ -1978,6 +1978,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         onCopy={copy}
         onBuiltin={(action) => runBuiltinActionForFavoriteField(field, action)}
         onCustom={(action) => runCustomActionForFavoriteField(field, action)}
+        onReveal={reveal?.action}
+        revealed={reveal?.revealed}
       />
     )
   }
@@ -2749,6 +2751,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       const route = homeRoute
       return (
         <FavoriteFieldsDetailView
+          key={route.sessionId}
           title={displayFavoriteItemTitle(route.item, favoriteDelimiterForItem(route.item, settings.favoriteFieldDelimiter), privateRulesForItem(route.item, privateKeywords))}
           fields={route.fields}
           privateKeywords={privateRulesForItem(route.item, privateKeywords)}

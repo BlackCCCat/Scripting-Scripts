@@ -19,6 +19,8 @@ export function FavoriteFieldActionMenu(props: {
   onCopy: () => void | Promise<void>
   onBuiltin: (action: KeyboardMenuBuiltinAction) => void | Promise<void>
   onCustom: (action: KeyboardCustomAction) => void | Promise<void>
+  onReveal?: () => void
+  revealed?: boolean
 }) {
   const actions = getOrderedMenuBuiltins(props.settings).filter((action) =>
     props.settings.keyboardMenu.builtins[action] &&
@@ -62,6 +64,11 @@ export function FavoriteFieldActionMenu(props: {
           ? <Menu title="自定义功能" systemImage="wand.and.stars">{customActions}</Menu>
           : customActions
         : null}
+      {props.onReveal ? <Button
+        title={props.revealed ? "隐藏" : "查看"}
+        systemImage={props.revealed ? "eye.slash" : "eye"}
+        action={props.onReveal}
+      /> : null}
     </Group>
   )
 }

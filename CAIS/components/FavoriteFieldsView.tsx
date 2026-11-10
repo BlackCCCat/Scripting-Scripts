@@ -55,7 +55,7 @@ function presentCopyToast(
   ;(globalThis as any).setTimeout?.(() => presented.setValue(true), 0)
 }
 
-function FavoriteFieldContent(props: { field: FavoriteField; privateKeywords: PrivateFieldRule[] }) {
+function FavoriteFieldContent(props: { field: FavoriteField; privateKeywords: PrivateFieldRule[]; revealed?: boolean }) {
   return (
     <VStack spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
       <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "center" as any }}>
@@ -74,7 +74,7 @@ function FavoriteFieldContent(props: { field: FavoriteField; privateKeywords: Pr
         frame={{ maxWidth: "infinity", alignment: "leading" as any }}
         multilineTextAlignment="leading"
       >
-        {displayFavoriteFieldValue(props.field, props.privateKeywords)}
+        {props.revealed ? props.field.value : displayFavoriteFieldValue(props.field, props.privateKeywords)}
       </Text>
     </VStack>
   )
@@ -444,11 +444,13 @@ export function FavoriteFieldsDetailView(props: {
   renderFieldContextMenu?: (
     field: FavoriteField,
     copy: () => void,
+    reveal?: { action: () => void; revealed: boolean },
   ) => VirtualNode
 }) {
   const dismiss = Navigation.useDismiss()
   const copyToastPresented = useObservable(false)
   const [copyToastMessage, setCopyToastMessage] = useState("")
+  const [revealedFieldIds, setRevealedFieldIds] = useState<string[]>([])
   const glassRows = props.cardGlassEffect && Number.parseInt(Device.systemVersion, 10) >= 26
   const glassCardShape = { type: "rect", cornerRadius: 18 } as const
 
@@ -462,6 +464,35 @@ export function FavoriteFieldsDetailView(props: {
     const message = await props.onCopyAll()
     if (!message) return
     presentCopyToast(copyToastPresented, setCopyToastMessage, message)
+  }
+
+  function fieldIsPrivate(field: FavoriteField) {
+    return displayFavoriteFieldValue(field, props.privateKeywords) !== field.value
+  }
+
+  function toggleFieldReveal(field: FavoriteField) {
+    setRevealedFieldIds((ids) => ids.includes(field.id)
+      ? ids.filter((id) => id !== field.id)
+      : [...ids, field.id])
+  }
+
+  function fieldMenu(field: FavoriteField, copy: () => void) {
+    return props.renderFieldContextMenu?.(field, copy, fieldIsPrivate(field)
+      ? { action: () => toggleFieldReveal(field), revealed: revealedFieldIds.includes(field.id) }
+      : undefined)
+  }
+
+  function fieldSwipeActions(field: FavoriteField) {
+    if (!fieldIsPrivate(field)) return undefined
+    return {
+      allowsFullSwipe: false,
+      actions: [<Button
+        title={revealedFieldIds.includes(field.id) ? "隐藏" : "查看"}
+        systemImage={revealedFieldIds.includes(field.id) ? "eye.slash" : "eye"}
+        tint="systemBlue"
+        action={() => toggleFieldReveal(field)}
+      />],
+    }
   }
 
   const copyToast = {
@@ -494,6 +525,7 @@ export function FavoriteFieldsDetailView(props: {
       >
         <LazyVStack
           spacing={10}
+          swipeActionsContainer
           frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}
           padding={{ top: 18, bottom: 24, leading: 20, trailing: 20 }}
         >
@@ -507,9 +539,8 @@ export function FavoriteFieldsDetailView(props: {
                 key={field.id}
                 frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                 contentShape={{ kind: "contextMenuPreview", shape: glassCardShape } as any}
-                contextMenu={props.renderFieldContextMenu ? {
-                  menuItems: props.renderFieldContextMenu(field, copy),
-                } : undefined}
+                contextMenu={props.renderFieldContextMenu ? { menuItems: fieldMenu(field, copy)! } : undefined}
+                trailingSwipeActions={fieldSwipeActions(field)}
               >
                 <HStack
                   spacing={12}
@@ -519,7 +550,7 @@ export function FavoriteFieldsDetailView(props: {
                   onTapGesture={copy}
                   glassEffect={glassCardShape}
                 >
-                  <FavoriteFieldContent field={field} privateKeywords={props.privateKeywords} />
+                  <FavoriteFieldContent field={field} privateKeywords={props.privateKeywords} revealed={revealedFieldIds.includes(field.id)} />
                 </HStack>
               </HStack>
             )
@@ -564,11 +595,10 @@ export function FavoriteFieldsDetailView(props: {
             background="rgba(0,0,0,0.001)"
             contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
             onTapGesture={() => void copyField(field)}
-            contextMenu={props.renderFieldContextMenu ? {
-              menuItems: props.renderFieldContextMenu(field, () => void copyField(field)),
-            } : undefined}
+            contextMenu={props.renderFieldContextMenu ? { menuItems: fieldMenu(field, () => void copyField(field))! } : undefined}
+            trailingSwipeActions={fieldSwipeActions(field)}
           >
-            <FavoriteFieldContent field={field} privateKeywords={props.privateKeywords} />
+            <FavoriteFieldContent field={field} privateKeywords={props.privateKeywords} revealed={revealedFieldIds.includes(field.id)} />
           </HStack>
         ))}
       </Section>
