@@ -370,7 +370,10 @@ export function DashboardRootView(props: {
     reloadAllWidgets()
   }
 
-  const refreshSingleAccount = async (account: SubscriptionAccount) => {
+  const refreshSingleAccount = async (
+    account: SubscriptionAccount,
+    forceRealAccount = false
+  ) => {
     const prevState = accountStates[account.id]
     const prevSnapshot =
       prevState?.type === "loaded"
@@ -386,7 +389,7 @@ export function DashboardRootView(props: {
       [account.id]: { type: "loading", previous: prevSnapshot },
     }))
 
-    if (settings.isDemoMode) {
+    if (settings.isDemoMode && !forceRealAccount) {
       const demoSnap = generateDemoSnapshot(
         account.id,
         account.provider,
@@ -740,7 +743,7 @@ export function DashboardRootView(props: {
     const nextAccounts = [newAccount, ...realAccounts]
     setRealAccounts(nextAccounts)
     saveStoredAccounts(nextAccounts)
-    refreshSingleAccount(newAccount)
+    void refreshSingleAccount(newAccount, true)
   }
 
   const handleQuickAddFromCatalog = (provider: ProviderId) => {

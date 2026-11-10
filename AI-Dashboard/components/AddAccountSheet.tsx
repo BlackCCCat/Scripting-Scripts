@@ -441,56 +441,65 @@ export function AddAccountSheet(props: {
     setErrorMessage(null)
     const controller = new WebViewController({ ephemeral: false })
     let capturedCode: string | null = null
-    controller.shouldAllowRequest = async (req) => {
-      if (
-        req.url.startsWith("http://localhost:1455/auth/callback") ||
-        req.url.startsWith("http://127.0.0.1:1455/auth/callback")
-      ) {
-        try {
-          const u = new URL(req.url)
-          const code = u.searchParams.get("code")
-          if (code) {
-            capturedCode = code
-          }
-        } catch {}
-        controller.dismiss()
-        return false
-      }
-      return true
-    }
-
     const authPlan = buildCodexWebAuthPlan()
+    let callbackError: string | null = null
+    controller.onNavigationAction = (action) => {
+      const url = action.url
+      if (
+        !url ||
+        (!url.startsWith("http://localhost:1455/auth/callback") &&
+          !url.startsWith("http://127.0.0.1:1455/auth/callback"))
+      ) {
+        return "allow"
+      }
+      try {
+        const callback = new URL(url)
+        if (callback.searchParams.get("state") !== authPlan.state) {
+          callbackError = "OpenAI 授权状态不匹配，请重新登录"
+        } else {
+          capturedCode = callback.searchParams.get("code")
+          callbackError = callback.searchParams.get("error_description") ||
+            callback.searchParams.get("error")
+        }
+      } catch {
+        callbackError = "OpenAI 授权回调地址无效，请重新登录"
+      }
+      controller.dismiss()
+      return "cancel"
+    }
     try {
       void controller.loadURL(authPlan.url)
       await controller.present({
         navigationTitle: "OpenAI 授权登录",
         fullscreen: false,
       })
-      if (capturedCode) {
-        const tokenResult = await exchangeCodexWebOAuthCode(
-          capturedCode,
-          authPlan.codeVerifier
-        )
-        const extraMetadata: Record<string, string> = {}
-        if (tokenResult.email) {
-          extraMetadata.accountEmail = tokenResult.email
-          extraMetadata.email = tokenResult.email
-        }
-        if (tokenResult.planType) {
-          extraMetadata.planType = tokenResult.planType
-        }
-        const envelope = buildCredentialEnvelope({
-          provider: "codex",
-          rawInput: tokenResult.accessToken,
-          refreshToken: tokenResult.refreshToken,
-          expiresAt: new Date(
-            Date.now() + tokenResult.expiresIn * 1000
-          ).toISOString(),
-          accountID: tokenResult.accountID,
-          extraMetadata,
-        })
-        finalizeAccountWithEnvelope(envelope)
+      if (callbackError) throw new Error(callbackError)
+      if (!capturedCode) {
+        throw new Error("未收到 OpenAI 授权回调，账号未添加。请完成网页授权后再关闭窗口，或使用设备码登录")
       }
+      const tokenResult = await exchangeCodexWebOAuthCode(
+        capturedCode,
+        authPlan.codeVerifier
+      )
+      const extraMetadata: Record<string, string> = {}
+      if (tokenResult.email) {
+        extraMetadata.accountEmail = tokenResult.email
+        extraMetadata.email = tokenResult.email
+      }
+      if (tokenResult.planType) {
+        extraMetadata.planType = tokenResult.planType
+      }
+      const envelope = buildCredentialEnvelope({
+        provider: "codex",
+        rawInput: tokenResult.accessToken,
+        refreshToken: tokenResult.refreshToken,
+        expiresAt: new Date(
+          Date.now() + tokenResult.expiresIn * 1000
+        ).toISOString(),
+        accountID: tokenResult.accountID,
+        extraMetadata,
+      })
+      finalizeAccountWithEnvelope(envelope)
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : "OpenAI 授权登录未完成，请重试"
