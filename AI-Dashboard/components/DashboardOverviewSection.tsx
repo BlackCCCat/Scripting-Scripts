@@ -114,7 +114,7 @@ export function DashboardOverviewSection(props: {
             chartItems.reduce((sum, item) => sum + item.remainingPercent, 0) /
               chartItems.length
           )
-        : 100
+        : null
 
     return {
       totalCny,
@@ -128,8 +128,13 @@ export function DashboardOverviewSection(props: {
     }
   }, [accounts, accountStates])
 
-  const avgUsedPercent = Math.max(0, 100 - stats.avgRemainingPercent)
-  const avgHealthColor = remainingQuotaColor(stats.avgRemainingPercent, false)
+  const avgRemainingPercent = stats.avgRemainingPercent
+  const avgUsedPercent = avgRemainingPercent === null
+    ? null
+    : Math.max(0, 100 - avgRemainingPercent)
+  const avgHealthColor = avgRemainingPercent === null
+    ? "secondaryLabel"
+    : remainingQuotaColor(avgRemainingPercent, false)
   const chartContentWidth = Math.max(310, stats.chartItems.length * 54)
 
   return (
@@ -249,10 +254,12 @@ export function DashboardOverviewSection(props: {
               foregroundStyle={avgHealthColor}
               lineLimit={1}
             >
-              {`${stats.avgRemainingPercent}%`}
+              {avgRemainingPercent === null ? "—" : `${avgRemainingPercent}%`}
             </Text>
             <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-              {`平均已消耗 ${avgUsedPercent}% 周期额度`}
+              {avgUsedPercent !== null
+                ? `平均已消耗 ${avgUsedPercent}% 周期额度`
+                : "暂无可计算的周期配额"}
             </Text>
           </VStack>
 
