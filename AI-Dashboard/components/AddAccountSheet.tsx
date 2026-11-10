@@ -173,7 +173,11 @@ export function AddAccountSheet(props: {
           typeof parsed.accessToken === "string" &&
           parsed.accessToken.trim()
         ) {
-          setRawCredential(parsed.accessToken.trim())
+          if (parsed.provider !== selectedProviderId) {
+            throw new Error(`所选凭据不属于 ${meta.displayName}，请重新选择`)
+          }
+          // 保留 OAuth refreshToken、有效期与账号标识，供保存时完整复用。
+          setRawCredential(trimmed)
           if (parsed.metadata?.serverAddress && meta.requiresGatewayAddress) {
             setServerAddress(parsed.metadata.serverAddress)
           }
@@ -187,7 +191,10 @@ export function AddAccountSheet(props: {
           setErrorMessage(null)
           return
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("所选凭据不属于")) {
+          throw err
+        }
         // 非 JSON 格式，直接按原生 API Key / Token 填入
       }
 
@@ -1041,6 +1048,7 @@ export function AddAccountSheet(props: {
         embedded={props.embedded}
         zoomNamespace={props.zoomNamespace}
         navigationTransition={props.navigationTransition}
+        onAccountCreated={onAccountCreated}
         onSelect={handleSelectProvider}
         onClose={onCancel}
       />
@@ -1059,7 +1067,7 @@ export function ProviderPickerSheet(props: {
   embedded?: boolean
   zoomNamespace?: any
   navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
-  onAccountCreated?: (
+  onAccountCreated: (
     account: SubscriptionAccount,
     envelope: ProviderCredentialEnvelope
   ) => void
@@ -1135,7 +1143,7 @@ export function ProviderPickerSheet(props: {
             onCancel={() => setSelectedProviderForForm(null)}
             onAccountCreated={(account, envelope) => {
               setSelectedProviderForForm(null)
-              onAccountCreated?.(account, envelope)
+              onAccountCreated(account, envelope)
             }}
           />
         ) : (

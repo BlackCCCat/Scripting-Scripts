@@ -1,6 +1,7 @@
 import {
   Button,
   Capsule,
+  DisclosureGroup,
   HStack,
   Image,
   ProgressView,
@@ -100,6 +101,9 @@ export function AccountQuotaRow(props: {
     Boolean(w.wallet)
   )
   const quotaWindows = (snapshot?.windows ?? []).filter((w) => !w.wallet)
+  const visibleQuotaWindows = quotaWindows.slice(0, 5)
+  const hiddenQuotaWindows = quotaWindows.slice(5)
+  const [isMoreQuotaExpanded, setIsMoreQuotaExpanded] = useState(false)
 
   const identity = snapshot?.accountIdentity?.trim() || null
   const [maskOverride, setMaskOverride] = useState<boolean | null>(null)
@@ -261,9 +265,26 @@ export function AccountQuotaRow(props: {
               spacing={8}
               frame={{ maxWidth: "infinity", alignment: "leading" }}
             >
-              {quotaWindows.map((win) => (
+              {visibleQuotaWindows.map((win) => (
                 <QuotaProgressCard key={win.id} window={win} />
               ))}
+              {hiddenQuotaWindows.length > 0 ? (
+                <DisclosureGroup
+                  title={`其余 ${hiddenQuotaWindows.length} 项配额`}
+                  isExpanded={isMoreQuotaExpanded}
+                  onChanged={setIsMoreQuotaExpanded}
+                >
+                  <VStack
+                    alignment="leading"
+                    spacing={8}
+                    frame={{ maxWidth: "infinity", alignment: "leading" }}
+                  >
+                    {hiddenQuotaWindows.map((win) => (
+                      <QuotaProgressCard key={win.id} window={win} />
+                    ))}
+                  </VStack>
+                </DisclosureGroup>
+              ) : null}
             </VStack>
           ) : null}
 
