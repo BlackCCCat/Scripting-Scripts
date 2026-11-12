@@ -10,9 +10,9 @@ import {
   List,
   Menu,
   Navigation,
-  NavigationStack,
   ProgressView,
   Section,
+  ScrollView,
   Spacer,
   Text,
   TextField,
@@ -40,31 +40,37 @@ import {
 import { loadConfig, type AppConfig } from "../utils/config"
 import { downloadModule } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
-import { RemoteControlView } from "./RemoteControlView"
-import { SettingsView } from "./SettingsView"
 import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
+import { BatchCompactButton } from "./BatchCompactButton"
 import {
   fetchEnabledModuleNames,
   getModuleRemoteName,
   setRemoteModuleEnabled,
 } from "../utils/remote_control"
 import { autoExportMetadataToICloud } from "../utils/metadata_sync"
+import type { TabActionSink } from "../shared/TabActions"
 
 function ModuleIcon(props: { module: ModuleInfo }) {
   const [failed, setFailed] = useState(false)
   const isRemote = !!props.module.link
   const fallbackName = isRemote ? "icloud.and.arrow.down.fill" : "puzzlepiece.extension.fill"
   const fallbackColor = isRemote ? "systemBlue" : "systemOrange"
-  const frame = { width: 30, height: 30 }
-  const iconShape = { type: "rect", cornerRadius: 7 } as any
+  const frame = { width: 36, height: 36 }
+  const iconShape = { type: "rect", cornerRadius: 9 } as any
 
   const fallback = (
-    <Image
-      systemName={fallbackName}
-      font={24}
-      foregroundStyle={fallbackColor}
+    <VStack
       frame={frame}
-    />
+      background={isRemote ? "rgba(0, 122, 255, 0.12)" : "rgba(255, 149, 0, 0.12)"}
+      clipShape={iconShape}
+      alignment="center"
+    >
+      <Image
+        systemName={fallbackName}
+        font={18}
+        foregroundStyle={fallbackColor}
+      />
+    </VStack>
   )
 
   if (props.module.icon && !failed) {
@@ -92,7 +98,8 @@ function FilterMenu(props: {
   return (
     <Menu
       label={(
-        <HStack spacing={3} frame={{ width: 96, alignment: "trailing" }}>
+        <HStack spacing={4} frame={{ width: 120, alignment: "trailing" }}>
+          <Image systemName="folder" font={11} foregroundStyle="accentColor" />
           <Text lineLimit={1} truncationMode="tail" foregroundStyle="accentColor">
             {props.value}
           </Text>
@@ -158,45 +165,7 @@ function BatchMoveMenu(props: {
   )
 }
 
-function BatchCompactButton(props: {
-  title: string
-  systemImage: string
-  tint?: "systemBlue" | "systemGreen" | "systemRed"
-  disabled?: boolean
-  onPress: () => void | Promise<void>
-}) {
-  const foreground = props.disabled ? "secondaryLabel" : (props.tint ?? "systemBlue")
-
-  return (
-    <Button
-      action={() => {
-        HapticFeedback.mediumImpact()
-        void props.onPress()
-      }}
-      disabled={props.disabled}
-      buttonStyle="borderless"
-      glassEffect
-      buttonBorderShape="roundedRectangle"
-      tint={props.tint ?? "systemBlue"}
-      frame={{ maxWidth: "infinity", minHeight: 46 }}
-      listRowBackground={<EmptyView />}
-      listRowSeparator="hidden"
-    >
-      <VStack
-        frame={{ maxWidth: "infinity", minHeight: 46, alignment: "center" }}
-        padding={{ top: 3, bottom: 3 }}
-        spacing={2}
-      >
-        <Image systemName={props.systemImage} font={15} foregroundStyle={foreground} />
-        <Text font="caption2" foregroundStyle={foreground} lineLimit={1}>
-          {props.title}
-        </Text>
-      </VStack>
-    </Button>
-  )
-}
-
-export function HomeView() {
+export function HomeView(props: { onActionsChange: TabActionSink; configRevision: number }) {
   const releaseNotesSheet = useMarkdownReleaseNotesSheet({
     markdownFile: "changelog.md",
     storageKey: "surge-modules-manager:release-notes:last-seen-hash",
@@ -269,8 +238,6 @@ export function HomeView() {
   })
   const selectedModules = filteredModules.filter((m) => selectedKeys.has(moduleKey(m)))
   const selectedDownloadableCount = selectedModules.filter((m) => !!m.link).length
-  const onlyLocalFiltered =
-    filteredModules.length > 0 && filteredModules.every((m) => m.isLocal || !m.link)
   const remoteControlReady = !!String(cfg.remotePort ?? "").trim()
 
   function moduleKey(m: ModuleInfo): string {
@@ -322,6 +289,13 @@ export function HomeView() {
   useEffect(() => {
     void refreshModules()
   }, [])
+  useEffect(() => {
+    if (!props.configRevision) return
+    const next = loadConfig()
+    setCfg(next)
+    void refreshModules(true)
+    void refreshRemoteModules(true, next)
+  }, [props.configRevision])
 
   useEffect(() => {
     void refreshRemoteModules(true)
@@ -395,39 +369,6 @@ export function HomeView() {
       }
       return next
     })
-  }
-
-  async function openSettings() {
-    await Navigation.present({
-      element: (
-        <SettingsView
-          initial={loadConfig()}
-          onDone={(next) => {
-            setCfg(next)
-            void refreshModules(true)
-          }}
-        />
-      ),
-    })
-    setCfg(loadConfig())
-    await refreshModules(true)
-  }
-
-  async function openRemoteSettings() {
-    await Navigation.present({
-      element: (
-        <RemoteControlView
-          initial={loadConfig()}
-          onDone={(next) => {
-            setCfg(next)
-            void refreshRemoteModules(true, next)
-          }}
-        />
-      ),
-    })
-    const next = loadConfig()
-    setCfg(next)
-    await refreshRemoteModules(true, next)
   }
 
   async function refreshRemoteModules(silent = false, nextCfg: AppConfig = cfg) {
@@ -584,7 +525,7 @@ export function HomeView() {
         readOnly: true,
       })
       try {
-        await controller.present({ navigationTitle: target.name, fullscreen: true })
+        await controller.present({ navigationTitle: target.name, fullscreen: false })
       } finally {
         controller.dispose()
       }
@@ -597,8 +538,10 @@ export function HomeView() {
     const ok = await Dialog.confirm({
       title: "删除模块",
       message: `确定删除模块：${target.name}？`,
+      confirmLabel: "删除",
+      cancelLabel: "取消",
     })
-    if (!ok) return
+    if (ok !== true) return
 
     setBusy(true)
     setStage("删除模块中…")
@@ -740,8 +683,10 @@ export function HomeView() {
     const ok = await Dialog.confirm({
       title: "批量删除",
       message: `确定删除已选的 ${selectedModules.length} 个模块？`,
+      confirmLabel: "删除",
+      cancelLabel: "取消",
     })
-    if (!ok) return
+    if (ok !== true) return
 
     setBusy(true)
     setStage("批量删除中…")
@@ -925,58 +870,92 @@ export function HomeView() {
   const showStatusPanel = statusCardVisible && (stage !== "就绪" || progress !== null || !!lastFailureDetails)
   const showTopCard = showStatusPanel || selectionMode
   const showSearchPanel = searchVisible || !!searchText.trim()
-  const showTopInset = showSearchPanel || showTopCard
+  const remoteCount = modules.filter((m) => !!m.link).length
+  const glass = parseInt(Device.systemVersion, 10) >= 26
+  useEffect(() => {
+    props.onActionsChange({
+      add: () => { void addModule() },
+      update: () => { void downloadAll() },
+      canAdd: !busy,
+      canUpdate: !busy && filteredModules.some((m) => !!m.link),
+      search: () => {
+        if (searchVisible || searchText.trim()) {
+          setSearchVisible(false)
+          setSearchText("")
+        } else setSearchVisible(true)
+      },
+      batch: () => selectionMode ? exitSelectionMode() : setSelectionMode(true),
+      searchActive: searchVisible || !!searchText.trim(),
+      batchActive: selectionMode,
+    })
+    return () => props.onActionsChange(null)
+  }, [props.onActionsChange, busy, categories, filterCategory, filterDir, searchText, searchVisible, selectionMode, modules, baseDir])
 
+  const categoryButtons = (
+    <HStack spacing={8}>
+      {filterOptions.map((cat) => (
+        <Button
+          key={cat}
+          action={() => {
+            HapticFeedback.selection()
+            setFilterCategory(cat)
+          }}
+          buttonStyle={glass
+            ? (filterCategory === cat ? "glassProminent" : "glass")
+            : (filterCategory === cat ? "borderedProminent" : "bordered")}
+          controlSize="small"
+          buttonBorderShape="capsule"
+        >
+          <Text fixedSize={{ horizontal: true, vertical: false }}>{cat}</Text>
+        </Button>
+      ))}
+    </HStack>
+  )
   return (
-    <NavigationStack>
       <List
         sheet={releaseNotesSheet}
-        navigationTitle={"Surge 模块管理"}
-        navigationBarTitleDisplayMode={"inline"}
         listStyle={"insetGroup"}
-        toolbar={{
-          topBarLeading: (
-            <HStack>
-              <Button title="" systemImage="switch.2" action={withButtonHaptic(openRemoteSettings)} />
-              <Button
-                title=""
-                systemImage={searchVisible || searchText.trim() ? "magnifyingglass.circle.fill" : "magnifyingglass"}
-                action={withButtonHaptic(() => setSearchVisible((value) => !value))}
-              />
-            </HStack>
-          ),
-          topBarTrailing: (
-            <HStack>
-              <Button
-                title=""
-                systemImage={selectionMode ? "checkmark.circle.fill" : "checklist"}
-                action={withButtonHaptic(() => {
-                  if (selectionMode) exitSelectionMode()
-                  else setSelectionMode(true)
-                })}
-              />
-              <Button title="" systemImage="gearshape" action={withButtonHaptic(openSettings)} />
-            </HStack>
-          ),
-        }}
         ignoresSafeArea={{ regions: "keyboard" }}
         safeAreaInset={{
           top: {
             alignment: "center",
             spacing: 0,
             content: (
-              showTopInset ? (
-                <VStack
-                  spacing={showSearchPanel && showTopCard ? 8 : 0}
-                  padding={{ top: 8, bottom: 8, leading: 18, trailing: 18 }}
-                  frame={{ maxWidth: "infinity" }}
-                >
+                <VStack spacing={8} padding={{ top: 8, bottom: 8, leading: 16, trailing: 16 }} frame={{ maxWidth: "infinity" }}>
+                  <VStack
+                    spacing={10}
+                    padding={{ top: 14, bottom: 12, leading: 14, trailing: 14 }}
+                    frame={{ maxWidth: "infinity" }}
+                    background={glass ? "clear" : "secondarySystemGroupedBackground"}
+                    glassEffect={glass ? { glass: UIGlass.regular(), shape: { type: "rect", cornerRadius: 24 } } : false}
+                    clipShape={glass ? undefined : { type: "rect", cornerRadius: 24 }}
+                  >
+                  <HStack spacing={0} padding={{ leading: 4, trailing: 4 }}>
+                    <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity" }}>
+                      <Text font="title3" fontWeight="semibold">{modules.length}</Text>
+                      <Text font="caption2" foregroundStyle="secondaryLabel">全部模块</Text>
+                    </VStack>
+                    <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity" }}>
+                      <Text font="title3" fontWeight="semibold">{remoteCount}</Text>
+                      <Text font="caption2" foregroundStyle="secondaryLabel">远程模块</Text>
+                    </VStack>
+                    <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity" }}>
+                      <Text font="title3" fontWeight="semibold">{enabledModuleNames.size}</Text>
+                      <Text font="caption2" foregroundStyle="secondaryLabel">已启用</Text>
+                    </VStack>
+                  </HStack>
+                  </VStack>
+                  <ScrollView axes="horizontal" frame={{ height: 36 }}>
+                    {categoryButtons}
+                  </ScrollView>
                   {showSearchPanel ? (
                     <HStack
                       spacing={8}
-                      padding={{ top: 10, bottom: 10, leading: 14, trailing: 14 }}
+                      padding={{ top: 10, bottom: 10, leading: 18, trailing: 18 }}
                       frame={{ maxWidth: "infinity" }}
-                      glassEffect={{ type: "rect", cornerRadius: 20 } as any}
+                      background={glass ? "clear" : "secondarySystemGroupedBackground"}
+                      glassEffect={glass ? { glass: UIGlass.regular(), shape: { type: "rect", cornerRadius: 20 } } : false}
+                      clipShape={glass ? undefined : { type: "rect", cornerRadius: 20 }}
                     >
                       <TextField
                         title="搜索"
@@ -998,7 +977,9 @@ export function HomeView() {
                       spacing={showStatusPanel && selectionMode ? 10 : 0}
                       padding={{ top: 13, bottom: 12, leading: 18, trailing: 18 }}
                       frame={{ maxWidth: "infinity", alignment: "leading" }}
-                      glassEffect={{ type: "rect", cornerRadius: 28 } as any}
+                      background={glass ? "clear" : "secondarySystemGroupedBackground"}
+                      glassEffect={glass ? { glass: UIGlass.regular(), shape: { type: "rect", cornerRadius: 24 } } : false}
+                      clipShape={glass ? undefined : { type: "rect", cornerRadius: 24 }}
                     >
                       {showStatusPanel ? fixedStatusPanel : null}
                       {showStatusPanel && selectionMode ? <Divider /> : null}
@@ -1006,41 +987,6 @@ export function HomeView() {
                     </VStack>
                   ) : null}
                 </VStack>
-              ) : <VStack />
-            ),
-          },
-          bottom: {
-            alignment: "trailing",
-            spacing: 0,
-            content: (
-              selectionMode ? <VStack /> : <VStack spacing={18} padding={{ bottom: 18, trailing: 16 }}>
-                <Button
-                  action={withButtonHaptic(addModule)}
-                  buttonStyle="glass"
-                  buttonBorderShape="circle"
-                  controlSize="extraLarge"
-                  tint="systemBlue"
-                  disabled={busy}
-                  frame={{ width: 76, height: 76 }}
-                >
-                  <VStack frame={{ width: 56, height: 56, alignment: "center" }}>
-                    <Image systemName="plus" font={30} foregroundStyle="systemBlue" />
-                  </VStack>
-                </Button>
-                <Button
-                  action={withButtonHaptic(downloadAll)}
-                  buttonStyle="glass"
-                  buttonBorderShape="circle"
-                  controlSize="extraLarge"
-                  tint="systemGreen"
-                  disabled={busy || onlyLocalFiltered}
-                  frame={{ width: 76, height: 76 }}
-                >
-                  <VStack frame={{ width: 56, height: 56, alignment: "center" }}>
-                    <Image systemName="arrow.triangle.2.circlepath" font={28} foregroundStyle="systemGreen" />
-                  </VStack>
-                </Button>
-              </VStack>
             ),
           },
         }}
@@ -1061,29 +1007,29 @@ export function HomeView() {
                   onSelect={(value) => setFilterDir(value)}
                 />
               ) : null}
-              <FilterMenu
-                value={filterCategory}
-                options={filterOptions}
-                onSelect={(value) => setFilterCategory(value)}
-              />
             </HStack>
           )}
         >
           {filteredModules.length === 0 ? (
-            <Text>{searchText.trim() ? "暂无匹配模块" : "暂无模块"}</Text>
+            <Text>{searchText.trim() ? "暂无匹配模块" : "暂无模块，长按底部「模块」添加"}</Text>
           ) : (
-            filteredModules.map((m) => (
+            filteredModules.map((m, index) => (
               (() => {
                 const remoteName = getModuleRemoteName(m)
                 return (
                   <VStack
                     key={`${m.name}-${m.link}`}
+                    alignment="leading"
+                    frame={{ maxWidth: "infinity", alignment: "leading" }}
+                    listRowInsets={0}
+                    listRowSeparator="hidden"
                     contextMenu={selectionMode ? undefined : {
                       menuItems: (
                         <Group>
-                          <Button title="查看模块" action={withButtonHaptic(() => viewModuleContent(m))} />
-                          <Button title="复制链接" action={withButtonHaptic(() => copyModuleLink(m))} />
-                          <Button title="删除" role="destructive" action={withButtonHaptic(() => deleteModuleFor(m))} />
+                          <Button title="查看模块" systemImage="doc.text" action={withButtonHaptic(() => viewModuleContent(m))} />
+                          <Button title="编辑模块" systemImage="pencil" action={withButtonHaptic(() => modifyModuleFor(m))} />
+                          <Button title="复制链接" systemImage="doc.on.doc" disabled={!m.link} action={withButtonHaptic(() => copyModuleLink(m))} />
+                          <Button title="删除" tint="systemRed" systemImage="trash" action={withButtonHaptic(() => deleteModuleFor(m))} />
                         </Group>
                       ),
                     }}
@@ -1092,6 +1038,7 @@ export function HomeView() {
                       actions: selectionMode ? [] : [
                         <Button
                           title="更新"
+                          systemImage="arrow.triangle.2.circlepath"
                           tint={m.link ? "systemGreen" : "systemGray"}
                           disabled={!m.link}
                           action={withButtonHaptic(() => downloadSingle(m))}
@@ -1101,28 +1048,40 @@ export function HomeView() {
                     trailingSwipeActions={{
                       allowsFullSwipe: false,
                       actions: selectionMode ? [] : [
-                        <Button title="编辑" tint="systemOrange" action={withButtonHaptic(() => modifyModuleFor(m))} />,
+                        <Button title="编辑" systemImage="pencil" tint="systemOrange" action={withButtonHaptic(() => modifyModuleFor(m))} />,
+                        <Button title="删除" systemImage="trash" tint="systemRed" action={withButtonHaptic(() => deleteModuleFor(m))} />,
                       ],
                     }}
                   >
-                    <HStack spacing={10}>
+                    <HStack spacing={12} alignment="center" padding={{ top: 8, bottom: 8, leading: 16, trailing: 16 }} frame={{ maxWidth: "infinity", alignment: "leading" }}>
                       {selectionMode ? (
                         <Button
                           title=""
                           systemImage={selectedKeys.has(moduleKey(m)) ? "checkmark.circle.fill" : "circle"}
+                          tint="systemBlue"
                           action={withButtonHaptic(() => toggleSelection(m))}
                         />
                       ) : null}
                       <ModuleIcon module={m} />
-                      <VStack alignment="leading" spacing={3}>
-                        <Text font="headline">{m.name}</Text>
-                        {m.category ? (
-                          <Text font="caption" foregroundStyle="secondaryLabel">
-                            {m.category}
-                          </Text>
-                        ) : null}
+                      <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+                        <Text font="headline" lineLimit={1}>{m.name}</Text>
+                        <HStack spacing={6} alignment="center">
+                          {m.category ? (
+                            <Text
+                              font="caption2"
+                              foregroundStyle="secondaryLabel"
+                            >
+                              {m.category}
+                            </Text>
+                          ) : null}
+                          <Image
+                            systemName={m.link ? "icloud" : "internaldrive"}
+                            font={12}
+                            foregroundStyle={m.link ? "systemTeal" : "systemOrange"}
+                            accessibilityLabel={m.link ? "远程模块" : "本地模块"}
+                          />
+                        </HStack>
                       </VStack>
-                      <Spacer />
                       {!selectionMode ? (
                         <Toggle
                           title=""
@@ -1135,6 +1094,7 @@ export function HomeView() {
                         />
                       ) : null}
                     </HStack>
+                    {index < filteredModules.length - 1 ? <Divider /> : null}
                   </VStack>
                 )
               })()
@@ -1142,6 +1102,5 @@ export function HomeView() {
           )}
         </Section>
       </List>
-    </NavigationStack>
   )
 }

@@ -55,6 +55,9 @@ function PlainRowButton(props: { title: string; onPress: () => void }) {
 export function SettingsView(props: {
   initial?: AppConfig
   onDone?: (cfg: AppConfig) => void
+  embedded?: boolean
+  active?: boolean
+  configRevision?: number
 }) {
   const dismiss = Navigation.useDismiss()
   const initialCfg = props.initial ?? loadConfig()
@@ -71,6 +74,15 @@ export function SettingsView(props: {
     void refreshBookmarks(props.initial ?? loadConfig())
     void refreshCounts(props.initial ?? loadConfig())
   }, [])
+  useEffect(() => {
+    if (!props.configRevision) return
+    const latest = loadConfig()
+    setCfg(latest)
+    void refreshCounts(latest)
+  }, [props.configRevision])
+  useEffect(() => {
+    if (props.active) void refreshCounts(loadConfig())
+  }, [props.active])
 
   function isPromiseLike(v: any): v is Promise<any> {
     return !!v && typeof v === "object" && typeof v.then === "function"
@@ -280,7 +292,8 @@ function deleteCategoryAt(indices: number[]) {
         await exportMetadataToICloud()
       }
       props.onDone?.(cfg)
-      dismiss()
+      if (props.embedded) await Dialog.alert({ message: "设置已保存" })
+      else dismiss()
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) })
     }
@@ -373,12 +386,11 @@ function deleteCategoryAt(indices: number[]) {
     ),
   }
 
-  return (
-    <NavigationStack>
+  const content = (
       <VStack
-        navigationTitle={"设置"}
+        navigationTitle={props.embedded ? undefined : "设置"}
         navigationBarTitleDisplayMode={"inline"}
-        toolbar={{
+        toolbar={props.embedded && !props.active ? undefined : {
           topBarTrailing: (
             <Button
               title="保存"
@@ -538,6 +550,6 @@ function deleteCategoryAt(indices: number[]) {
           </Section>
         </Form>
       </VStack>
-    </NavigationStack>
   )
+  return props.embedded ? content : <NavigationStack>{content}</NavigationStack>
 }

@@ -30,15 +30,15 @@ export function RemoteControlView(props: {
         remotePassword: String(cfg.remotePassword ?? ""),
       }
       saveConfig(fixed)
-      props.onDone?.(fixed)
       dismiss()
+      props.onDone?.(fixed)
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) })
     }
   }
 
   return (
-    <NavigationStack>
+    <NavigationStack presentationDetents={["medium", "large"]} presentationDragIndicator="visible">
       <VStack
         navigationTitle={"HTTP 远程控制"}
         navigationBarTitleDisplayMode={"inline"}

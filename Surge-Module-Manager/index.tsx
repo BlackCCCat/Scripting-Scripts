@@ -1,5 +1,5 @@
 import { Intent, Navigation, Script } from "scripting"
-import { HomeView } from "./components/HomeView"
+import { SurgeApp } from "./components/SurgeApp"
 import { runShortcutUpdate } from "./utils/shortcut_update"
 
 function hasShortcutInput(): boolean {
@@ -30,7 +30,7 @@ async function run() {
   }
 
   await Navigation.present({
-    element: <HomeView />,
+    element: <SurgeApp />,
   })
 
   // 视图关闭后退出脚本（Scripting 推荐模式）
