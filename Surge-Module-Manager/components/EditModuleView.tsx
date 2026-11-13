@@ -21,10 +21,64 @@ import {
 } from "scripting"
 
 import { loadModules, type ModuleInfo } from "../utils/storage"
+import { loadConfig, type OnlineModuleSource } from "../utils/config"
 
-let cachedLibraryItems: ModuleInfo[] | null = null
-let cachedLibraryError: string | null = null
-let cachedLibraryPromise: Promise<ModuleInfo[]> | null = null
+type LibraryCacheEntry = { items: ModuleInfo[]; fetchedAt: number }
+const CACHE_AGE_MS = 60 * 60 * 1000
+const libraryCache = new Map<OnlineModuleSource, LibraryCacheEntry>()
+const libraryPending = new Map<OnlineModuleSource, Promise<LibraryCacheEntry>>()
+const libraryProgress = new Map<OnlineModuleSource, number>()
+const libraryProgressListeners = new Map<OnlineModuleSource, Set<(value: number) => void>>()
+
+function cacheKey(source: OnlineModuleSource): string {
+  return `surge_online_modules_${source}_v1`
+}
+
+function readLibraryCache(source: OnlineModuleSource): LibraryCacheEntry | null {
+  const memory = libraryCache.get(source)
+  if (memory) return memory
+  try {
+    const saved = Storage.get<LibraryCacheEntry>(cacheKey(source))
+    if (!saved || !Number.isFinite(saved.fetchedAt) || !Array.isArray(saved.items) ||
+      !saved.items.every(item => typeof item.name === "string" && typeof item.link === "string")) return null
+    libraryCache.set(source, saved)
+    return saved
+  } catch {
+    return null
+  }
+}
+
+function reportLibraryProgress(source: OnlineModuleSource, value: number): void {
+  const progress = Math.max(libraryProgress.get(source) ?? 0, value)
+  libraryProgress.set(source, progress)
+  libraryProgressListeners.get(source)?.forEach(listener => listener(progress))
+}
+
+async function loadFmzModules(onProgress: (value: number) => void): Promise<ModuleInfo[]> {
+  if (!GitHub.isAvailable()) throw new Error("请先在 Scripting 设置 → GitHub 配置登录信息")
+  const owner = "fmz200"
+  const repo = "wool_scripts"
+  const root = "Surge/module"
+  const modules: ModuleInfo[] = []
+  const dirs = [root]
+  let scanned = 0
+  while (dirs.length) {
+    const path = dirs.shift()!
+    const entries = await GitHub.getContent({ owner, repo, path, ref: "main" })
+    if (!Array.isArray(entries)) throw new Error(`无法读取 GitHub 目录：${path}`)
+    for (const entry of entries) {
+      if (entry.type === "dir") {
+        dirs.push(entry.path)
+      } else if (entry.type === "file" && /\.(?:sgmodule|module)$/i.test(entry.name)) {
+        const link = String(entry.download_url ?? "")
+        if (link) modules.push({ name: entry.name.replace(/\.(?:sgmodule|module)$/i, ""), link })
+      }
+    }
+    scanned += 1
+    onProgress(Math.min(95, Math.floor(scanned / (scanned + dirs.length) * 95)))
+  }
+  return modules.sort((a, b) => a.name.localeCompare(b.name))
+}
 
 function LocalContentEditorView(props: {
   initialContent: string
@@ -87,12 +141,14 @@ export function EditModuleView(props: {
   const [content, setContent] = useState<string>("")
   const [libraryItems, setLibraryItems] = useState<ModuleInfo[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
+  const [libraryPercent, setLibraryPercent] = useState(0)
   const [libraryError, setLibraryError] = useState("")
   const [existingLinks, setExistingLinks] = useState<Set<string>>(new Set())
   const [existingNames, setExistingNames] = useState<Set<string>>(new Set())
   const [filterText, setFilterText] = useState("")
   const [showOnlyNew, setShowOnlyNew] = useState(false)
   const showLibrary = !initial
+  const [librarySource] = useState<OnlineModuleSource>(() => loadConfig().onlineModuleSource)
 
   const categoryOptions = useMemo<string[]>(() => ["不设置分类", ...props.categories], [props.categories])
   const initialIdx = Math.max(
@@ -195,55 +251,66 @@ export function EditModuleView(props: {
   }
 
   async function loadLibrary() {
+    const cached = readLibraryCache(librarySource)
+    if (cached) setLibraryItems(cached.items)
+    if (cached && Date.now() - cached.fetchedAt < CACHE_AGE_MS) return
+    const listener = (value: number) => setLibraryPercent(value)
+    const listeners = libraryProgressListeners.get(librarySource) ?? new Set<(value: number) => void>()
+    listeners.add(listener)
+    libraryProgressListeners.set(librarySource, listeners)
     try {
-      if (cachedLibraryItems) {
-        setLibraryItems(cachedLibraryItems)
-        setLibraryError(cachedLibraryError ?? "")
-        return
-      }
-      if (cachedLibraryPromise) {
-        setLibraryLoading(true)
-        const list = await cachedLibraryPromise
-        setLibraryItems(list)
-        setLibraryError(cachedLibraryError ?? "")
-        return
-      }
       setLibraryLoading(true)
+      setLibraryPercent(libraryProgress.get(librarySource) ?? 0)
       setLibraryError("")
-      cachedLibraryPromise = (async () => {
-        const fetchFn: any = (globalThis as any).fetch
-        if (typeof fetchFn !== "function") throw new Error("fetch 不可用")
-        const res = await fetchFn("https://surge.qingr.moe/", {
-          headers: { "User-Agent": "Mozilla/5.0" },
-        })
-        if (!res?.ok) throw new Error(`请求失败：${res?.status ?? "unknown"}`)
-        const html = await res.text()
+      let pending = libraryPending.get(librarySource)
+      if (!pending) {
+        libraryProgress.set(librarySource, 0)
+        pending = (async (): Promise<LibraryCacheEntry> => {
+          const items = librarySource === "fmz200"
+            ? await loadFmzModules(value => reportLibraryProgress(librarySource, value))
+            : await (async () => {
+              const fetchFn: any = (globalThis as any).fetch
+              if (typeof fetchFn !== "function") throw new Error("fetch 不可用")
+              const res = await fetchFn("https://surge.qingr.moe/", {
+                headers: { "User-Agent": "Mozilla/5.0" },
+              })
+              if (!res?.ok) throw new Error(`请求失败：${res?.status ?? "unknown"}`)
+              const html = await res.text()
 
-        const all = extractLinks(html)
-        const preSection = pickSection(html, "前置依赖", ["Official", "Beta", "Others", "官方", "测试"]) ?? ""
-        const pre = preSection ? extractLinks(preSection) : all.slice(0, 2)
-        const preSet = new Set(pre.map((i) => i.link))
-        const official = all.filter((i) => i.link.includes(".official.") && !preSet.has(i.link))
-        const beta = all.filter((i) => i.link.includes(".beta.") && !preSet.has(i.link))
-        const others = all.filter(
-          (i) =>
-            i.link.includes(".sgmodule") &&
-            !i.link.includes(".official.") &&
-            !i.link.includes(".beta.") &&
-            !preSet.has(i.link)
-        )
-        return uniqueByLink([...pre, ...official, ...beta, ...others])
-      })()
+              const all = extractLinks(html)
+              const preSection = pickSection(html, "前置依赖", ["Official", "Beta", "Others", "官方", "测试"]) ?? ""
+              const pre = preSection ? extractLinks(preSection) : all.slice(0, 2)
+              const preSet = new Set(pre.map((i) => i.link))
+              const official = all.filter((i) => i.link.includes(".official.") && !preSet.has(i.link))
+              const beta = all.filter((i) => i.link.includes(".beta.") && !preSet.has(i.link))
+              const others = all.filter(
+                (i) =>
+                  i.link.includes(".sgmodule") &&
+                  !i.link.includes(".official.") &&
+                  !i.link.includes(".beta.") &&
+                  !preSet.has(i.link)
+              )
+              return uniqueByLink([...pre, ...official, ...beta, ...others])
+            })()
+          reportLibraryProgress(librarySource, 100)
+          const entry = { items, fetchedAt: Date.now() }
+          libraryCache.set(librarySource, entry)
+          try { Storage.set(cacheKey(librarySource), entry) } catch {}
+          return entry
+        })()
+        libraryPending.set(librarySource, pending)
+      }
 
-      const combined = await cachedLibraryPromise
-      cachedLibraryItems = combined
-      cachedLibraryError = null
-      setLibraryItems(combined)
+      const result = await pending
+      setLibraryItems(result.items)
     } catch (e: any) {
       const msg = String(e?.message ?? e)
-      cachedLibraryError = msg
       setLibraryError(msg)
     } finally {
+      libraryPending.delete(librarySource)
+      libraryProgress.delete(librarySource)
+      listeners.delete(listener)
+      if (!listeners.size) libraryProgressListeners.delete(librarySource)
       setLibraryLoading(false)
     }
   }
@@ -493,10 +560,12 @@ export function EditModuleView(props: {
                 <HStack>
                   <Text>在线模块(来自</Text>
                   <Button
-                    title="LoonKissSurge"
+                    title={librarySource === "fmz200" ? "fmz200/wool_scripts" : "LoonKissSurge"}
                     action={() => {
                       HapticFeedback.mediumImpact()
-                      openLink("https://github.com/QingRex/LoonKissSurge/")
+                      openLink(librarySource === "fmz200"
+                        ? "https://github.com/fmz200/wool_scripts/tree/main/Surge/module"
+                        : "https://github.com/QingRex/LoonKissSurge/")
                     }}
                   />
                   <Text>)</Text>
@@ -512,7 +581,7 @@ export function EditModuleView(props: {
                 </HStack>
               )}
             >
-              {libraryLoading ? <Text>加载中...</Text> : null}
+              {libraryLoading ? <Text>{libraryItems.length ? "刷新中" : "加载中"}：{libraryPercent}%</Text> : null}
               {libraryError ? <Text>{libraryError}</Text> : null}
               {filterText ? (
                 <HStack>

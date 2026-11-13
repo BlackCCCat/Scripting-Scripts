@@ -22,6 +22,7 @@ import {
   loadConfig,
   saveConfig,
   type AppConfig,
+  type OnlineModuleSource,
 } from "../utils/config"
 import { countModulesByCategory, loadCategoriesFromModules, renameCategoryInModules } from "../utils/storage"
 import {
@@ -68,6 +69,10 @@ export function SettingsView(props: {
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
   const [metadataAction, setMetadataAction] = useState<"" | "export" | "import">("")
   const concurrencyOptions = Array.from({ length: 10 }, (_, idx) => idx + 1)
+  const onlineSources: { value: OnlineModuleSource; title: string }[] = [
+    { value: "fmz200", title: "fmz200/wool_scripts" },
+    { value: "loonKissSurge", title: "LoonKissSurge" },
+  ]
 
   useEffect(() => {
     setCfg(props.initial ?? loadConfig())
@@ -488,6 +493,20 @@ function deleteCategoryAt(indices: number[]) {
                   {num}
                 </Text>
               ))}
+            </Picker>
+          </Section>
+
+          <Section header={<Text>在线模块</Text>}>
+            <Picker
+              title="模块来源"
+              pickerStyle="menu"
+              value={Math.max(0, onlineSources.findIndex(source => source.value === cfg.onlineModuleSource))}
+              onChanged={(idx: number) => {
+                HapticFeedback.heavyImpact()
+                setCfg(current => ({ ...current, onlineModuleSource: onlineSources[idx]?.value ?? "fmz200" }))
+              }}
+            >
+              {onlineSources.map((source, idx) => <Text key={source.value} tag={idx}>{source.title}</Text>)}
             </Picker>
           </Section>
 

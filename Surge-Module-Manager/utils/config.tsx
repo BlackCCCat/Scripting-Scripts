@@ -8,7 +8,10 @@ export type AppConfig = {
   remoteHost: string
   remotePort: string
   remotePassword: string
+  onlineModuleSource: OnlineModuleSource
 }
+
+export type OnlineModuleSource = "fmz200" | "loonKissSurge"
 
 const KEY = "surge_modules_manager_cfg_v1"
 
@@ -22,6 +25,7 @@ const DEFAULT_CONFIG: AppConfig = {
   remoteHost: "http://127.0.0.1",
   remotePort: "6171",
   remotePassword: "",
+  onlineModuleSource: "fmz200",
 }
 
 function normalizeDownloadConcurrency(value: unknown): number {
@@ -58,6 +62,7 @@ export function loadConfig(): AppConfig {
     const remoteHost = String(obj?.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost
     const remotePort = String(obj?.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort
     const remotePassword = String(obj?.remotePassword ?? "")
+    const onlineModuleSource: OnlineModuleSource = obj?.onlineModuleSource === "loonKissSurge" ? "loonKissSurge" : "fmz200"
     return {
       ...DEFAULT_CONFIG,
       ...obj,
@@ -70,6 +75,7 @@ export function loadConfig(): AppConfig {
       remoteHost,
       remotePort,
       remotePassword,
+      onlineModuleSource,
     }
   } catch {
     return DEFAULT_CONFIG
@@ -88,6 +94,7 @@ export function saveConfig(cfg: AppConfig): void {
     remoteHost: String(cfg.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost,
     remotePort: String(cfg.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort,
     remotePassword: String(cfg.remotePassword ?? ""),
+    onlineModuleSource: cfg.onlineModuleSource === "loonKissSurge" ? "loonKissSurge" : "fmz200",
   }
   const raw = JSON.stringify(fixed)
   if (st?.set) st.set(KEY, raw)
