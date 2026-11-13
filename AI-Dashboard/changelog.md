@@ -1,6 +1,10 @@
+## v2.2.3
+- refactor: 迁移弃用的 ForEach.count 至 useObservable + data + builder 架构，订阅自动持久化，消除控制台警告。
+
 ## v2.2.2
-- fix:codex账号登录后，无法正常添加账号到概览页
-- improve:过多数据时进行折叠
+- fix: codex账号登录后，无法正常添加账号到概览页
+- improve: 过多数据时进行折叠
+- refactor: 迁移弃用的 ForEach.count 至 useObservable + data + builder 架构，订阅自动持久化，消除控制台警告。
 
 ## v2.2.1
 - new: 适配 Scripting 主页 UI，支持作为应用主页常驻运行。

@@ -21,6 +21,7 @@ import {
   VStack,
   useEffect,
   useMemo,
+  useObservable,
   useRef,
   useState,
 } from "scripting"
@@ -104,6 +105,23 @@ type DashboardHomeRoute =
   | { kind: "edit"; zoomSourceID: string }
   | null
 
+function reorderSublistInMasterByItems(
+  master: SubscriptionAccount[],
+  sublist: SubscriptionAccount[],
+  reorderedSublist: SubscriptionAccount[]
+): SubscriptionAccount[] {
+  const subIdSet = new Set(sublist.map((a) => a.id))
+  let subCursor = 0
+  return master.map((item) => {
+    if (subIdSet.has(item.id)) {
+      const replacement = reorderedSublist[subCursor]
+      subCursor++
+      return replacement ?? item
+    }
+    return item
+  })
+}
+
 function reorderSublistInMaster(
   master: SubscriptionAccount[],
   sublist: SubscriptionAccount[],
@@ -120,16 +138,71 @@ function reorderSublistInMaster(
   const reorderedSub = [...restSub]
   reorderedSub.splice(insertAt, 0, ...moving)
 
-  const subIdSet = new Set(sublist.map((a) => a.id))
-  let subCursor = 0
-  return master.map((item) => {
-    if (subIdSet.has(item.id)) {
-      const replacement = reorderedSub[subCursor]
-      subCursor++
-      return replacement ?? item
+  return reorderSublistInMasterByItems(master, sublist, reorderedSub)
+}
+
+interface DashboardAccountListSectionProps {
+  header: any
+  items: SubscriptionAccount[]
+  onReorder: (reorderedSublist: SubscriptionAccount[]) => void
+  renderRow: (account: SubscriptionAccount) => any
+}
+
+function DashboardAccountListSection(props: DashboardAccountListSectionProps) {
+  const { header, items, onReorder, renderRow } = props
+  const itemsObservable = useObservable<SubscriptionAccount[]>(() => items)
+  const skipNextSync = useRef(false)
+  const currentItemsRef = useRef(items)
+  currentItemsRef.current = items
+
+  useEffect(() => {
+    itemsObservable.setValue(items)
+  }, [items])
+
+  useEffect(() => {
+    const listener = (nextItems: SubscriptionAccount[]) => {
+      if (skipNextSync.current) {
+        skipNextSync.current = false
+        return
+      }
+      const prev = currentItemsRef.current
+      if (
+        nextItems.length === prev.length &&
+        nextItems.every((item, i) => item.id === prev[i]?.id)
+      ) {
+        return
+      }
+      onReorder(nextItems)
     }
-    return item
-  })
+
+    itemsObservable.subscribe(listener)
+    return () => {
+      itemsObservable.unsubscribe(listener)
+    }
+  }, [itemsObservable, onReorder])
+
+  const handleMove = (indices: number[], newOffset: number) => {
+    skipNextSync.current = true
+    const current = [...itemsObservable.value]
+    const moving = indices.map((i) => current[i]).filter(Boolean)
+    if (moving.length === 0) return
+    const rest = current.filter((_, i) => !indices.includes(i))
+    const insertAt = Math.max(0, Math.min(rest.length, newOffset))
+    rest.splice(insertAt, 0, ...moving)
+    itemsObservable.setValue(rest)
+    onReorder(rest)
+  }
+
+  return (
+    <Section header={header}>
+      <ForEach
+        data={itemsObservable}
+        editActions="move"
+        onMove={handleMove}
+        builder={(acc) => renderRow(acc)}
+      />
+    </Section>
+  )
 }
 
 export function DashboardRootView(props: {
@@ -682,6 +755,28 @@ export function DashboardRootView(props: {
     reloadAllWidgets()
   }
 
+  const handleSublistReordered = (
+    sublist: SubscriptionAccount[],
+    reorderedSublist: SubscriptionAccount[]
+  ) => {
+    if (settings.isDemoMode) {
+      setDemoAccounts((prev) =>
+        reorderSublistInMasterByItems(prev, sublist, reorderedSublist)
+      )
+      HapticFeedback.lightImpact()
+      return
+    }
+    const next = reorderSublistInMasterByItems(
+      realAccounts,
+      sublist,
+      reorderedSublist
+    )
+    setRealAccounts(next)
+    saveStoredAccounts(next)
+    HapticFeedback.lightImpact()
+    reloadAllWidgets()
+  }
+
   const handleMoveSublist = (
     sublist: SubscriptionAccount[],
     indices: number[],
@@ -703,6 +798,7 @@ export function DashboardRootView(props: {
     setRealAccounts(next)
     saveStoredAccounts(next)
     HapticFeedback.lightImpact()
+    reloadAllWidgets()
   }
 
   const handleMoveAccountsInEdit = (indices: number[], newOffset: number) => {
@@ -1128,7 +1224,7 @@ export function DashboardRootView(props: {
           )
           if (groupItems.length === 0) return null
           return (
-            <Section
+            <DashboardAccountListSection
               key={category}
               header={
                 <HStack spacing={6}>
@@ -1144,23 +1240,16 @@ export function DashboardRootView(props: {
                   </Text>
                 </HStack>
               }
-            >
-              <ForEach
-                count={groupItems.length}
-                onMove={(indices, newOffset) =>
-                  handleMoveSublist(groupItems, indices, newOffset)
-                }
-                itemBuilder={(idx) => {
-                  const acc = groupItems[idx]
-                  if (!acc) return <VStack />
-                  return renderAccountRowWithSwipe(acc)
-                }}
-              />
-            </Section>
+              items={groupItems}
+              onReorder={(reorderedSublist) =>
+                handleSublistReordered(groupItems, reorderedSublist)
+              }
+              renderRow={renderAccountRowWithSwipe}
+            />
           )
         })
       ) : (
-        <Section
+        <DashboardAccountListSection
           header={
             <HStack spacing={6}>
               <Image
@@ -1175,19 +1264,12 @@ export function DashboardRootView(props: {
               </Text>
             </HStack>
           }
-        >
-          <ForEach
-            count={filteredAccounts.length}
-            onMove={(indices, newOffset) =>
-              handleMoveSublist(filteredAccounts, indices, newOffset)
-            }
-            itemBuilder={(idx) => {
-              const acc = filteredAccounts[idx]
-              if (!acc) return <VStack />
-              return renderAccountRowWithSwipe(acc)
-            }}
-          />
-        </Section>
+          items={filteredAccounts}
+          onReorder={(reorderedSublist) =>
+            handleSublistReordered(filteredAccounts, reorderedSublist)
+          }
+          renderRow={renderAccountRowWithSwipe}
+        />
       )}
     </List>
   )
