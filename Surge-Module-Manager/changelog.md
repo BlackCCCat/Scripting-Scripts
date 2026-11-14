@@ -1,4 +1,9 @@
+## v3.1.2
+- 移除弃用API的使用
+- UI细节优化
+
 ## v3.1.1
+- 分类列表改用 ForEach.data，移除弃用 API；订阅列表滑动操作统一显示文字按钮。
 - 在线模块加载显示百分比进度，按来源持久缓存列表；打开时直接显示缓存，超过 1 小时刷新。
 - 设置页可切换在线模块来源，默认使用 fmz200/wool_scripts；通过 Scripting GitHub 登录读取 Surge/module 及子目录中的 .module、.sgmodule 文件，保留 LoonKissSurge 来源。
 

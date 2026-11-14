@@ -14,6 +14,7 @@ import {
   Spacer,
   Picker,
   useEffect,
+  useObservable,
   useState,
 } from "scripting"
 
@@ -63,6 +64,7 @@ export function SettingsView(props: {
   const dismiss = Navigation.useDismiss()
   const initialCfg = props.initial ?? loadConfig()
   const [cfg, setCfg] = useState<AppConfig>(initialCfg)
+  const categoryRows = useObservable(() => initialCfg.categories.map(name => ({ id: name, name })))
 
   const [bookmarks, setBookmarks] = useState<{ name: string; path: string }[]>([])
   const [bookmarkIdx, setBookmarkIdx] = useState<number>(0)
@@ -73,6 +75,21 @@ export function SettingsView(props: {
     { value: "fmz200", title: "fmz200/wool_scripts" },
     { value: "loonKissSurge", title: "LoonKissSurge" },
   ]
+
+  useEffect(() => {
+    categoryRows.setValue(cfg.categories.map(name => ({ id: name, name })))
+  }, [cfg.categories])
+
+  useEffect(() => {
+    const onRowsChanged = (rows: { id: string; name: string }[], previous: { id: string; name: string }[]) => {
+      if (rows.length >= previous.length) return
+      HapticFeedback.heavyImpact()
+      setCfg(current => ({ ...current, categories: rows.map(row => row.name) }))
+      void refreshCounts()
+    }
+    categoryRows.subscribe(onRowsChanged)
+    return () => categoryRows.unsubscribe(onRowsChanged)
+  }, [categoryRows])
 
   useEffect(() => {
     setCfg(props.initial ?? loadConfig())
@@ -274,20 +291,6 @@ export function SettingsView(props: {
     })
     await renameCategoryInModules(oldName, nextName, cfg.baseDir)
     await refreshCounts()
-  }
-
-function deleteCategoryAt(indices: number[]) {
-    if (!indices.length) return
-    HapticFeedback.heavyImpact()
-    setCfg((c) => {
-      const next = [...(c.categories ?? [])]
-      const sorted = [...indices].sort((a, b) => b - a)
-      for (const i of sorted) {
-        if (i >= 0 && i < next.length) next.splice(i, 1)
-      }
-      return { ...c, categories: next }
-    })
-    void refreshCounts()
   }
 
   async function saveAndClose() {
@@ -532,10 +535,10 @@ function deleteCategoryAt(indices: number[]) {
               <Text>暂无分类</Text>
             ) : (
               <ForEach
-                count={cfg.categories.length}
-                onDelete={(indices) => deleteCategoryAt(indices)}
-                  itemBuilder={(index) => {
-                    const cat = cfg.categories[index]
+                data={categoryRows}
+                editActions="delete"
+                builder={(item) => {
+                    const cat = item.name
                     const count = categoryCounts[cat] ?? 0
                     return (
                       <HStack
@@ -558,7 +561,7 @@ function deleteCategoryAt(indices: number[]) {
                         <Text>{count}</Text>
                       </HStack>
                     )
-                  }}
+                }}
               />
             )}
           </Section>

@@ -371,7 +371,6 @@ export function SubscriptionsView(props: { onActionsChange: TabActionSink }) {
                 actions: selectionMode ? [] : [
                   <Button
                     title="更新"
-                    systemImage="arrow.triangle.2.circlepath"
                     tint="systemGreen"
                     disabled={!!busyName}
                     action={() => {
@@ -384,8 +383,8 @@ export function SubscriptionsView(props: { onActionsChange: TabActionSink }) {
               trailingSwipeActions={{
                 allowsFullSwipe: false,
                 actions: selectionMode ? [] : [
-                  <Button title="编辑" systemImage="pencil" tint="systemOrange" action={() => { HapticFeedback.mediumImpact(); void edit(item) }} />,
-                  <Button title="删除" systemImage="trash" tint="systemRed" action={() => { HapticFeedback.mediumImpact(); void remove(item) }} />,
+                  <Button title="编辑" tint="systemOrange" action={() => { HapticFeedback.mediumImpact(); void edit(item) }} />,
+                  <Button title="删除" tint="systemRed" action={() => { HapticFeedback.mediumImpact(); void remove(item) }} />,
                 ],
               }}
             >
