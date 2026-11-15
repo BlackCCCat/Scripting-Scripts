@@ -392,7 +392,8 @@ export function HomeView(props: { onActionsChange: TabActionSink; configRevision
     }
     const subDirs = await listDirectSubDirs()
     const info = await Navigation.present<ModuleInfo>({
-      element: <EditModuleView title="添加模块" categories={categories} saveDirs={subDirs} />,
+      element: <EditModuleView title="添加模块" categories={categories}
+        defaultCategory={filterCategory === "全部" ? undefined : filterCategory} saveDirs={subDirs} />,
     })
     if (!info) return
 

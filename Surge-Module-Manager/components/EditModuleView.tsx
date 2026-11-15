@@ -130,6 +130,7 @@ export function EditModuleView(props: {
   title: string
   categories: string[]
   initial?: ModuleInfo
+  defaultCategory?: string
   saveDirs?: string[]
 }) {
   const dismiss = Navigation.useDismiss()
@@ -153,7 +154,7 @@ export function EditModuleView(props: {
   const categoryOptions = useMemo<string[]>(() => ["不设置分类", ...props.categories], [props.categories])
   const initialIdx = Math.max(
     0,
-    categoryOptions.findIndex((c) => c === (initial?.category ?? ""))
+    categoryOptions.findIndex((c) => c === (initial?.category ?? props.defaultCategory ?? ""))
   )
   const [categoryIdx, setCategoryIdx] = useState<number>(initialIdx >= 0 ? initialIdx : 0)
   const saveDirOptions = useMemo<string[]>(() => {
@@ -170,7 +171,17 @@ export function EditModuleView(props: {
   }, [showLibrary])
 
   useEffect(() => {
-    const currentDir = initial?.saveDir ?? ""
+    let currentDir = initial?.saveDir ?? ""
+    if (!initial) {
+      try {
+        const saved = Storage.get<{ scope: string; directory: string }>("surge_module_last_save_dir_v1")
+        const config = loadConfig()
+        const scope = config.baseBookmarkName || config.baseDir
+        if (saved?.scope === scope && saved.directory) {
+          currentDir = saveDirOptions.find(dir => dir.split("/").pop() === saved.directory) ?? ""
+        }
+      } catch {}
+    }
     if (!saveDirOptions.length || !currentDir) {
       setSaveDirIdx(0)
       return
@@ -378,6 +389,15 @@ export function EditModuleView(props: {
       content: isRemote ? undefined : localContent,
       category: cat,
       saveDir,
+    }
+    if (!initial) {
+      try {
+        const config = loadConfig()
+        Storage.set("surge_module_last_save_dir_v1", {
+          scope: config.baseBookmarkName || config.baseDir,
+          directory: saveDir?.split("/").pop() ?? "",
+        })
+      } catch {}
     }
     dismiss(result)
   }
