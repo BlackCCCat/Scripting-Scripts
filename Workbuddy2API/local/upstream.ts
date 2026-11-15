@@ -21,6 +21,7 @@ const CHAT_UA: Record<Site, string> = {
 export type LoginSession = { site: Site; state: string; url: string; startedAt: number }
 export type GrowthTask = {
   task_code: string; title: string; task_desc: string; description: string
+  task_type?: string; jump_url?: string
   current?: number; target?: number; accept_status: string; claimed: boolean
   claimable: boolean; has_reward: boolean; locked: boolean; miniprogram: boolean
   completedAt?: number; claimedAt?: number
@@ -393,7 +394,7 @@ function parseTasks(data: any, miniprogram: boolean): GrowthTask[] {
     const status = String(raw.accept_status || raw.status || "未接受")
     const completedAt = typeof raw.completed_at === "string" ? Date.parse(raw.completed_at) : NaN
     return [{ task_code: code, title: String(raw.title || raw.task_title || raw.task_name || code), task_desc: String(raw.task_desc || ""),
-      description: String(raw.description || ""), current, target, accept_status: status,
+      description: String(raw.description || ""), task_type: String(raw.task_type || ""), jump_url: String(raw.jump_url || ""), current, target, accept_status: status,
       claimed, claimable: !claimed && ((target != null && target > 0 && current != null && current >= target) || ((target == null || target === 0) && status === "completed")),
       has_reward: raw.has_reward === true, locked: raw.locked === true || raw.locked === "true", miniprogram,
       completedAt: Number.isFinite(completedAt) ? completedAt : undefined }]
@@ -581,6 +582,27 @@ export async function reportChatActivity(uid: string, modelId = "deepseek-v4.1-f
       "X-User-Id": uid, "X-Domain": hostFrom(chatBase(account)),
     },
   })
+}
+
+export async function reportGrowthEvents(uid: string, events: Record<string, unknown>[]): Promise<void> {
+  const account = await freshCredential(uid)
+  if (account.site !== "cn" || account.enterpriseId) throw new Error("该账号不能上报国内成长任务")
+  const response = await fetch(`${chatBase(account)}/v2/report`, {
+    method: "POST", timeout: 30, body: JSON.stringify(events),
+    headers: {
+      Accept: "application/json, text/plain, */*", "Content-Type": "application/json;charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest", "X-Request-ID": randomHex(), "X-Product": "SaaS",
+      "User-Agent": CHAT_UA.cn, Authorization: `Bearer ${account.accessToken}`,
+      "X-User-Id": uid, "X-Domain": hostFrom(chatBase(account)),
+    },
+  })
+  const raw = await response.text()
+  if (!response.ok) throw new UpstreamError(`任务事件上报失败（HTTP ${response.status}）`, response.status)
+  // 桌面事件接口也可能以空响应体确认传输成功；最终是否计入任务仍以回读进度为准。
+  if (!raw.trim()) return
+  let payload: any
+  try { payload = JSON.parse(raw) } catch { throw new UpstreamError("任务事件上报返回无法解析的内容", response.status) }
+  if (payload?.code !== 0) throw new UpstreamError(String(payload?.msg ?? payload?.message ?? "任务事件上报被拒绝").slice(0, 180), response.status, Number(payload?.code))
 }
 
 export async function adoptFirstBuddy(uid: string): Promise<void> {

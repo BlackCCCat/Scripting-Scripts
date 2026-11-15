@@ -149,17 +149,19 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
 
 function AboutPage() {
   return <List navigationTitle="开源与关于">
-    <Section title="项目"><Text>WorkBuddy2API for Scripting</Text><Hint>界面与功能参考 chenyynx 的 wb2api-ios；账号与任务协议参考 workbuddy2api-panel，成长任务一键执行流程参考 L0NE-6 的 WorkBuddy-Daily。感谢各项目作者及维护者。</Hint></Section>
+    <Section title="项目"><Text>WorkBuddy2API for Scripting</Text><Hint>界面与功能参考 chenyynx 的 wb2api-ios；账号与任务协议参考 workbuddy2api-panel，成长任务流程参考 L0NE-6 的 WorkBuddy-Daily 及 jichie 的 magpie-workbuddy-tasks。感谢各项目作者及维护者。</Hint></Section>
     <Section title="原项目">
       <Link url="https://github.com/chenyynx/wb2api-ios"><HStack spacing={9}><Image systemName="iphone" foregroundStyle="systemBlue" /><Text>wb2api-ios · iOS 原项目</Text></HStack></Link>
       <Link url="https://github.com/misakano7545/workbuddy2api-panel"><HStack spacing={9}><Image systemName="server.rack" foregroundStyle="systemGreen" /><Text>workbuddy2api-panel · 上游后端</Text></HStack></Link>
       <Link url="https://github.com/L0NE-6/WorkBuddy-Daily"><HStack spacing={9}><Image systemName="checklist" foregroundStyle="systemOrange" /><Text>WorkBuddy-Daily · 任务自动化参考</Text></HStack></Link>
+      <Link url="https://github.com/jichie/magpie-workbuddy-tasks"><HStack spacing={9}><Image systemName="checkmark.square" foregroundStyle="systemPurple" /><Text>magpie-workbuddy-tasks · 成长任务参考</Text></HStack></Link>
     </Section>
     <Section title="同步参考">
-      <Hint>iOS 界面最初参考 42cd9651。iOS 与后端提交于 2026-10-31 核对，任务项目于 2026-11-01 核对；本脚本仅同步适用功能。</Hint>
+      <Hint>iOS 界面最初参考 42cd9651。iOS 与后端提交于 2026-10-31 核对；WorkBuddy-Daily 于 2026-11-01 核对，magpie-workbuddy-tasks 于 2026-11-15 核对。本脚本仅同步适用功能。</Hint>
       <Link url="https://github.com/chenyynx/wb2api-ios/commit/5c809a055d9a417370843abf8aa855c7eb755b97"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemBlue" /><Text>iOS 最新提交 · 5c809a055d9a</Text></HStack></Link>
       <Link url="https://github.com/misakano7545/workbuddy2api-panel/commit/8ab87d4e5178318fcbee9f611c48d3316749edc2"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemGreen" /><Text>后端最新提交 · 8ab87d4e5178</Text></HStack></Link>
       <Link url="https://github.com/L0NE-6/WorkBuddy-Daily/commit/c442bab4d356e3450433df83de9c2dabe3248239"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemOrange" /><Text>任务最新提交 · c442bab4d356</Text></HStack></Link>
+      <Link url="https://github.com/jichie/magpie-workbuddy-tasks/commit/37abcc13c88a367536f25ac9280877f1969eb2a7"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemPurple" /><Text>magpie 任务参考 · 37abcc13c88a</Text></HStack></Link>
     </Section>
   </List>
 }

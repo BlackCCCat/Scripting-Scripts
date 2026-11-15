@@ -218,7 +218,7 @@ export function AccountTasksPage({ account }: { account: Account }) {
     setBusy(true); setError(""); setResult("")
     try {
       setResult((await processTask(account.uid, task)).message)
-      if (task.claimable || ["first_buddy", "chat_5", "Model_chat_GLM5.2"].includes(task.task_code)) {
+      if (canAutoProcessTask(task, account.site === "cn" && !account.enterpriseId)) {
         try { await refreshBalance(account.uid) } catch (cause) { setError(`余额刷新失败：${cause instanceof Error ? cause.message : String(cause)}`) }
       }
       setTasks(await listTasks(account.uid, setWarning))

@@ -1,6 +1,7 @@
 import { completeChat } from "./chat"
 import { credential } from "./store"
-import { acceptTask, adoptFirstBuddy, claimTask, listTasks, reportChatActivity, type GrowthTask } from "./upstream"
+import { growthEventCount, growthEvents, supportsGrowthEvent } from "./taskEvents"
+import { acceptTask, adoptFirstBuddy, claimTask, listTasks, reportChatActivity, reportGrowthEvents, type GrowthTask } from "./upstream"
 
 const automated = new Set(["chat_5", "first_buddy", "Model_chat_GLM5.2"])
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
@@ -11,7 +12,7 @@ export function taskAction(task: GrowthTask): string {
   if (task.claimed) return "已领取"
   if (task.locked) return "未解锁"
   if (task.claimable && task.task_code !== "first_buddy") return "领取奖励"
-  if (automated.has(task.task_code) && !task.miniprogram) return "推进并领奖"
+  if ((automated.has(task.task_code) || supportsGrowthEvent(task)) && !task.miniprogram) return "推进并领奖"
   return ["accepted", "completed"].includes(task.accept_status) ? "等待进度" : "接受任务"
 }
 
@@ -21,7 +22,7 @@ export function canProcessTask(task: GrowthTask, canWrite: boolean): boolean {
 
 export function canAutoProcessTask(task: GrowthTask, canWrite: boolean): boolean {
   return canWrite && !task.claimed && !task.locked &&
-    ((task.claimable && task.task_code !== "first_buddy") || (automated.has(task.task_code) && !task.miniprogram))
+    ((task.claimable && task.task_code !== "first_buddy") || ((automated.has(task.task_code) || supportsGrowthEvent(task)) && !task.miniprogram))
 }
 
 export function taskUnavailableReason(task: GrowthTask, canWrite: boolean): string {
@@ -47,13 +48,14 @@ export async function processTask(uid: string, selected: GrowthTask): Promise<Ta
     await claimTask(uid, task)
     return { status: "done", message: "上游已确认领奖请求" }
   }
-  if (!["accepted", "completed"].includes(task.accept_status) && !["chat_5", "first_buddy"].includes(task.task_code)) {
+  if (!["accepted", "completed"].includes(task.accept_status) && task.task_type !== "auto" && !["chat_5", "first_buddy"].includes(task.task_code)) {
     await acceptTask(uid, task)
     task = (await listTasks(uid)).find(item => item.task_code === task!.task_code)
     if (!task || !["accepted", "completed", "claimed"].includes(task.accept_status)) throw new Error("接受请求已发送，但上游未确认登记")
   }
   if (task.claimed) return { status: "done", message: "上游已确认领取" }
-  if (!automated.has(task.task_code) || task.miniprogram) return { status: "pending", message: "已接受任务，等待上游记录进度" }
+  if (!(automated.has(task.task_code) || supportsGrowthEvent(task)) || task.miniprogram)
+    return { status: "pending", message: "已接受任务，等待上游记录进度" }
 
   if (task.task_code === "chat_5") {
     const count = Math.max(0, Math.min(5, (task.target || 5) - (task.current || 0)))
@@ -65,12 +67,21 @@ export async function processTask(uid: string, selected: GrowthTask): Promise<Ta
     await reportChatActivity(uid)
     await wait(1050)
     await adoptFirstBuddy(uid)
-  } else {
+  } else if (task.task_code === "Model_chat_GLM5.2") {
     await completeChat({ model: "cn:glm-5.2", messages: [{ role: "user", content: "hi，请回复一句话" }], stream: false }, uid, "auxiliary")
     await wait(1050)
     await reportChatActivity(uid, "glm-5.2", "GLM-5.2")
+  } else {
+    const count = growthEventCount(task)
+    if (!count) return { status: "pending", message: "进度已达目标，等待上游开放领奖" }
+    await wait(1050)
+    for (let i = 0; i < count; i++) {
+      await reportGrowthEvents(uid, growthEvents(uid, task, i))
+      if (i + 1 < count) await wait(1050)
+    }
   }
 
+  await wait(1500)
   for (let i = 0; i < 4; i++) {
     task = (await listTasks(uid)).find(item => item.task_code === selected.task_code)
     if (!task) throw new Error("动作已执行，但回读时任务消失")
@@ -111,7 +122,7 @@ export async function runTaskBatch(uid: string, tasks: GrowthTask[], onEntry: (e
   try {
     const latest = await listTasks(uid)
     for (const task of latest) {
-      if (task.claimable && task.task_code !== "first_buddy" && !attempted.has(task.task_code)) await run(task)
+      if (canAutoProcessTask(task, canWrite) && !attempted.has(task.task_code)) await run(task)
     }
   } finally {
     for (const task of skipped) {
