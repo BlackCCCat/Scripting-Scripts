@@ -42,12 +42,14 @@ import {
   addClipFromPayload,
   clearClipboardClipsByRange,
   clearFavoriteClips,
+  countClipsOverLimit,
   editClipContent,
   getClipGroups,
   getClipKindCounts,
   getFavoriteGroupItemCounts,
   getFullClipContent,
   markCopied,
+  pruneClipsToLimit,
   softDeleteClip,
   toggleFavorite,
   togglePinned,
@@ -1087,7 +1089,22 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       previous.iCloudSync !== nextSettings.iCloudSync ||
       previous.iCloudSyncImages !== nextSettings.iCloudSyncImages
     try {
+      if (nextSettings.maxItems < previous.maxItems) {
+        const excess = await countClipsOverLimit(nextSettings.maxItems)
+        if (excess > 0) {
+          const confirmed = await Dialog.confirm({
+            title: "减少保留条数？",
+            message: `将按时间删除超出 ${nextSettings.maxItems} 条的最旧记录（当前 ${excess} 条）。收藏和置顶不受影响，此操作无法撤销。`,
+            cancelLabel: "取消",
+            confirmLabel: "删除",
+          })
+          if (!confirmed) return
+        }
+      }
       if (needsStorageMigration) await applyICloudSyncSettings(previous, nextSettings)
+      if (nextSettings.maxItems < previous.maxItems) {
+        await pruneClipsToLimit(nextSettings.maxItems, deleteChangeSource)
+      }
       const next = saveSettings(nextSettings)
       settingsRef.current = next
       setSettings(next)
@@ -1098,12 +1115,12 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         publishLanShareStatus(await reconcileLanShareServer(next))
       }
       if (needsStorageMigration || previous.maxItems !== next.maxItems) {
-        void refresh(next)
+        await refresh(next)
       }
     } catch (error: any) {
       await Dialog.alert({
-        title: "iCloud 同步失败",
-        message: String(error?.message ?? error ?? "数据迁移失败"),
+        title: needsStorageMigration ? "iCloud 同步失败" : "设置更新失败",
+        message: String(error?.message ?? error ?? "请稍后重试"),
       })
     }
   }

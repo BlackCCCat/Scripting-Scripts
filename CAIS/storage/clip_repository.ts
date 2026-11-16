@@ -17,6 +17,7 @@ import { favoriteDelimiterForItem, normalizeFavoriteDelimiter, parseFavoriteFiel
 import { makeRegex } from "../utils/custom_action"
 import {
   countClipKindsByScope,
+  countTrimmableClips,
   countFavoriteGroupItems,
   countClipsByScope,
   deleteClipboardClipsByRange,
@@ -38,6 +39,7 @@ import {
   listImageFingerprintCandidates,
   nextFavoriteGroupSortOrder,
   nextFavoriteItemOrder,
+  pruneActiveClips,
   reorderFavoriteGroups as reorderFavoriteGroupRows,
   replaceAutomaticFavoriteGroupAssignments,
   saveImageFingerprint,
@@ -222,6 +224,17 @@ export async function getClipGroups(scope: ClipListScope, search = "", limit = 1
 
 export async function getClipCounts(): Promise<Record<ClipListScope, number>> {
   return countClipsByScope()
+}
+
+export async function countClipsOverLimit(maxItems: number): Promise<number> {
+  return Math.max(0, (await countTrimmableClips()) - maxItems)
+}
+
+export async function pruneClipsToLimit(maxItems: number, changeSource?: unknown): Promise<void> {
+  const imagePaths = await pruneActiveClips(maxItems)
+  if (!imagePaths) return
+  for (const path of imagePaths) await removeImage(path)
+  bumpClipDataVersion(changeSource)
 }
 
 export async function getClipKindCounts(): Promise<ClipKindCountsByScope> {

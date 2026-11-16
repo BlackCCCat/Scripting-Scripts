@@ -914,6 +914,42 @@ export async function trimActiveClips(maxItems: number): Promise<void> {
   }
 }
 
+export async function countTrimmableClips(): Promise<number> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT COUNT(*) AS item_count FROM clips WHERE deleted_at IS NULL AND pinned = 0 AND favorite = 0"
+  )
+  return Number(rows[0]?.item_count ?? 0)
+}
+
+export async function pruneActiveClips(maxItems: number): Promise<string[] | null> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll(
+    "SELECT id, image_path, updated_at FROM clips WHERE deleted_at IS NULL AND pinned = 0 AND favorite = 0 ORDER BY updated_at DESC, id DESC LIMIT -1 OFFSET ?",
+    [maxItems],
+  )
+  if (!rows.length) return null
+
+  await db.transaction(rows.map((row) => ({
+    sql: "DELETE FROM clips WHERE id = ? AND updated_at = ? AND deleted_at IS NULL AND pinned = 0 AND favorite = 0",
+    args: [row.id, row.updated_at],
+  })))
+
+  const imageRows = rows.filter((row) => row.image_path)
+  const remainingIds = new Set<string>()
+  for (let offset = 0; offset < imageRows.length; offset += 400) {
+    const ids = imageRows.slice(offset, offset + 400).map((row) => row.id)
+    const remaining = await db.fetchAll(
+      `SELECT id FROM clips WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    )
+    for (const row of remaining) remainingIds.add(String(row.id))
+  }
+  return imageRows
+    .filter((row) => !remainingIds.has(String(row.id)))
+    .map((row) => String(row.image_path))
+}
+
 export async function getFullClipContent(id: string): Promise<string> {
   const db = await initializeDatabase()
   const rows = await db.fetchAll("SELECT content FROM clips WHERE id = ?", [id])
