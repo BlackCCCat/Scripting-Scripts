@@ -31,6 +31,7 @@ import {
   Form,
   Navigation,
   useColorScheme,
+  type ScrollPhase,
   type VirtualNode,
 } from "scripting"
 
@@ -615,6 +616,9 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   const deleteRefreshScheduled = useRef(false)
   const listRefreshBlocked = useRef(false)
   const listRefreshDeferred = useRef(false)
+  const appListScrolling = useRef(false)
+  const passiveRefreshPending = useRef(false)
+  const schedulePassiveRefresh = useRef<() => void>(() => {})
   const favoriteGroupOrderWrites = useRef<Promise<void>>(Promise.resolve())
   const favoriteGroupOrderWritesPending = useRef(0)
   const favoriteGroupOrderRevision = useRef(0)
@@ -688,6 +692,18 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     () => privateFieldKeywords(settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled),
     [settings.favoriteFieldPrivateKeywords, settings.favoriteFieldPrivacyEnabled],
   )
+  const favoriteListContent = useMemo(
+    () => renderFavoriteList(),
+    [favoriteGroups.value, favoriteGroupItemCounts, initialDataReady, initialDataError, query, settings, privateKeywords, homeZoomNamespace],
+  )
+  const clipboardListContent = useMemo(
+    () => renderGroupedClipList(
+      clipboardGroups,
+      query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+      { allowDelete: (item) => !item.favorite && !item.manualFavorite },
+    ),
+    [clipboardGroups, initialDataReady, initialDataError, query, settings, privateKeywords, homeZoomNamespace],
+  )
 
   function homeZoomTransition(sourceID: string): NavigationZoomTransition | undefined {
     return homeZoomNamespace ? { type: "zoom", sourceID, namespace: homeZoomNamespace } : undefined
@@ -703,6 +719,14 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
 
   useEffect(() => {
     writeActiveTab(activeTab.value)
+  }, [activeTab.value])
+
+  useEffect(() => {
+    appListScrolling.current = false
+    if (passiveRefreshPending.current) {
+      passiveRefreshPending.current = false
+      schedulePassiveRefresh.current()
+    }
   }, [activeTab.value])
 
   useEffect(() => {
@@ -758,6 +782,10 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
 
     function scheduleRefresh() {
       if (stopped) return
+      if (appListScrolling.current) {
+        passiveRefreshPending.current = true
+        return
+      }
       if (listRefreshBlocked.current) {
         listRefreshDeferred.current = true
         return
@@ -770,6 +798,11 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       const run = () => {
         if (stopped) {
           refreshQueued = false
+          return
+        }
+        if (appListScrolling.current) {
+          refreshQueued = false
+          passiveRefreshPending.current = true
           return
         }
         void refresh(settingsRef.current).catch(() => {}).finally(() => {
@@ -800,7 +833,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }
 
     function checkDatabaseVersion() {
-      if (checkingDatabaseDataVersion) return
+      if (checkingDatabaseDataVersion || appListScrolling.current) return
       checkingDatabaseDataVersion = true
       void readDatabaseDataVersion().then((version) => {
         if (stopped) return
@@ -860,6 +893,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
       }
     }
 
+    schedulePassiveRefresh.current = scheduleRefresh
     const unsubscribe = subscribeClipDataChanges(refreshForVersion)
     const timer = (globalThis as any).setInterval?.(() => {
       checkDatabaseVersion()
@@ -867,6 +901,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     }, 700)
     return () => {
       stopped = true
+      schedulePassiveRefresh.current = () => {}
       unsubscribe()
       closeSocket()
       if (timer) (globalThis as any).clearInterval?.(timer)
@@ -2831,7 +2866,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           toast={favoriteVisible ? toastOptions() : undefined}
         >
           {searchPanel("favorites")}
-          {renderFavoriteList()}
+          {favoriteListContent}
         </Form> : null}
 
         {visitedHomeTabs.includes(TAB_CLIPS) || clipboardVisible ? <Form
@@ -2847,11 +2882,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         >
           {pipControlPanel()}
           {searchPanel("clipboard")}
-          {renderGroupedClipList(
-            clipboardGroups,
-            query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-            { allowDelete: (item) => !item.favorite && !item.manualFavorite }
-          )}
+          {clipboardListContent}
         </Form> : null}
 
         {visitedHomeTabs.includes(TAB_SETTINGS) || settingsVisible ? <VStack
@@ -2876,6 +2907,15 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         </VStack> : null}
       </ZStack>
     )
+  }
+
+  function handleAppListScrollPhase(tab: number, phase: ScrollPhase) {
+    if (activeTab.value !== tab) return
+    appListScrolling.current = phase !== "idle"
+    if (phase === "idle" && passiveRefreshPending.current) {
+      passiveRefreshPending.current = false
+      schedulePassiveRefresh.current()
+    }
   }
 
   if (homeScreenMode) {
@@ -2911,13 +2951,14 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           <Form
             formStyle="grouped"
             listRowSpacing={10}
+            onScrollPhaseChange={(_, phase) => handleAppListScrollPhase(TAB_FAVORITES, phase)}
             contentMargins={APP_SCROLL_CONTENT_MARGINS}
             frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: favoriteToolbarButtons() }}
             toast={toastOptions()}
           >
             {searchPanel("favorites")}
-            {renderFavoriteList()}
+            {favoriteListContent}
           </Form>
         </NavigationStack>
       </Tab>
@@ -2927,6 +2968,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           <Form
             formStyle="grouped"
             listRowSpacing={10}
+            onScrollPhaseChange={(_, phase) => handleAppListScrollPhase(TAB_CLIPS, phase)}
             contentMargins={APP_SCROLL_CONTENT_MARGINS}
             frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             toolbar={{ topBarLeading: toolbarLeading(), topBarTrailing: clipToolbarButtons() }}
@@ -2934,11 +2976,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
           >
             {pipControlPanel()}
             {searchPanel("clipboard")}
-            {renderGroupedClipList(
-              clipboardGroups,
-              query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-              { allowDelete: (item) => !item.favorite && !item.manualFavorite }
-            )}
+            {clipboardListContent}
           </Form>
         </NavigationStack>
       </Tab>

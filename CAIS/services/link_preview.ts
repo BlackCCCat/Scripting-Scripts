@@ -13,8 +13,9 @@ let active = 0
 let pending = 0
 
 export function linkPreviewFresh(preview: LinkPreview | undefined | null): boolean {
-  return Boolean(preview && (preview.iconUrl || (!preview.title && !preview.summary)) &&
-    Date.now() - preview.fetchedAt < (preview.title || preview.summary ? SUCCESS_TTL : FAILURE_TTL))
+  if (!preview) return false
+  const ttl = preview.title || preview.summary ? SUCCESS_TTL : FAILURE_TTL
+  return Date.now() - preview.fetchedAt < ttl
 }
 
 async function fetchPreview(url: string): Promise<LinkPreview> {
