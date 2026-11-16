@@ -585,6 +585,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   })
   const colorScheme = useColorScheme()
   const activeTab = useObservable(readActiveTab())
+  const [visitedHomeTabs, setVisitedHomeTabs] = useState<number[]>(() => [activeTab.value])
   const pipPresented = useObservable(false)
   const toastPresented = useObservable(false)
   const favoriteGroupDisplayOrder = useRef<string[] | null>(null)
@@ -2326,7 +2327,10 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         title="页面"
         pickerStyle="segmented"
         value={activeTab.value}
-        onChanged={(value: number) => activeTab.setValue(value)}
+        onChanged={(value: number) => {
+          setVisitedHomeTabs((tabs) => tabs.includes(value) ? tabs : [...tabs, value])
+          activeTab.setValue(value)
+        }}
         frame={{ width: 220 }}
       >
         <Image tag={TAB_FAVORITES} systemName="star" />
@@ -2809,26 +2813,54 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   }
 
   function renderHomeCurrentPage() {
-    if (activeTab.value === TAB_FAVORITES) {
-      return (
-        <Form
+    const favoriteVisible = activeTab.value === TAB_FAVORITES
+    const clipboardVisible = activeTab.value === TAB_CLIPS
+    const settingsVisible = activeTab.value === TAB_SETTINGS
+
+    return (
+      <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+        {visitedHomeTabs.includes(TAB_FAVORITES) || favoriteVisible ? <Form
           formStyle="grouped"
           listRowSpacing={10}
           contentMargins={APP_SCROLL_CONTENT_MARGINS}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-          toast={toastOptions()}
+          opacity={favoriteVisible ? 1 : 0}
+          zIndex={favoriteVisible ? 1 : 0}
+          allowsHitTesting={favoriteVisible}
+          accessibilityHidden={!favoriteVisible}
+          toast={favoriteVisible ? toastOptions() : undefined}
         >
           {searchPanel("favorites")}
           {renderFavoriteList()}
-        </Form>
-      )
-    }
+        </Form> : null}
 
-    if (activeTab.value === TAB_SETTINGS) {
-      return (
-        <VStack
+        {visitedHomeTabs.includes(TAB_CLIPS) || clipboardVisible ? <Form
+          formStyle="grouped"
+          listRowSpacing={10}
+          contentMargins={APP_SCROLL_CONTENT_MARGINS}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          opacity={clipboardVisible ? 1 : 0}
+          zIndex={clipboardVisible ? 1 : 0}
+          allowsHitTesting={clipboardVisible}
+          accessibilityHidden={!clipboardVisible}
+          toast={clipboardVisible ? toastOptions() : undefined}
+        >
+          {pipControlPanel()}
+          {searchPanel("clipboard")}
+          {renderGroupedClipList(
+            clipboardGroups,
+            query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
+            { allowDelete: (item) => !item.favorite && !item.manualFavorite }
+          )}
+        </Form> : null}
+
+        {visitedHomeTabs.includes(TAB_SETTINGS) || settingsVisible ? <VStack
           frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" as any }}
-          toast={toastOptions()}
+          opacity={settingsVisible ? 1 : 0}
+          zIndex={settingsVisible ? 1 : 0}
+          allowsHitTesting={settingsVisible}
+          accessibilityHidden={!settingsVisible}
+          toast={settingsVisible ? toastOptions() : undefined}
         >
           <SettingsView
             value={settings}
@@ -2841,26 +2873,8 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
             keepHomeNavigationDestination
             zoomNamespace={homeZoomNamespace}
           />
-        </VStack>
-      )
-    }
-
-    return (
-      <Form
-        formStyle="grouped"
-        listRowSpacing={10}
-        contentMargins={APP_SCROLL_CONTENT_MARGINS}
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        toast={toastOptions()}
-      >
-        {pipControlPanel()}
-        {searchPanel("clipboard")}
-        {renderGroupedClipList(
-          clipboardGroups,
-          query.trim() ? "没有匹配的剪贴板内容。" : "点击右上角采集按钮，或开启 PiP 监听。",
-          { allowDelete: (item) => !item.favorite && !item.manualFavorite }
-        )}
-      </Form>
+        </VStack> : null}
+      </ZStack>
     )
   }
 
