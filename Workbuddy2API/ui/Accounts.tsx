@@ -127,7 +127,7 @@ function AccountPage({ account, onChanged }: { account: Account; onChanged: () =
       {current.site === "cn" && !current.enterpriseId && <Button title={checking ? "查询签到状态…" : current.checkedIn === todayInChina() ? "今日已签到" : statusUnavailable ? "状态未确认，尝试签到" : current.checkinActive === false ? "签到活动未开启" : "签到"}
         systemImage={current.checkedIn === todayInChina() ? "checkmark.seal.fill" : "checkmark.seal"}
         disabled={busy || checking || current.checkedIn === todayInChina() || current.checkinActive === false && !statusUnavailable} action={() => void run("checkin")} />}
-      <NavigationLink destination={<AccountTasksPage account={current} />}><HStack><Image systemName="checklist" /><Text>成长任务</Text></HStack></NavigationLink>
+      <NavigationLink destination={<AccountTasksPage account={current} />}><HStack><Image systemName="checklist" /><Text>账号任务</Text></HStack></NavigationLink>
       <NavigationLink destination={<LoginPage site={current.site} expectedUid={current.uid} onChanged={() => { setCurrent(accounts().find(item => item.uid === current.uid) ?? current); onChanged() }} />}><HStack><Image systemName="arrow.triangle.2.circlepath" /><Text>重新授权</Text></HStack></NavigationLink>
     </Section>
     <Section><Button title="移除账号" systemImage="trash" role="destructive" action={() => void remove()} /></Section>

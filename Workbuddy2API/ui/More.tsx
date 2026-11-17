@@ -157,11 +157,11 @@ function AboutPage() {
       <Link url="https://github.com/jichie/magpie-workbuddy-tasks"><HStack spacing={9}><Image systemName="checkmark.square" foregroundStyle="systemPurple" /><Text>magpie-workbuddy-tasks · 成长任务参考</Text></HStack></Link>
     </Section>
     <Section title="同步参考">
-      <Hint>iOS 界面最初参考 42cd9651。iOS 与后端提交于 2026-10-31 核对；WorkBuddy-Daily 于 2026-11-01 核对，magpie-workbuddy-tasks 于 2026-11-15 核对。本脚本仅同步适用功能。</Hint>
+      <Hint>iOS 界面最初参考 42cd9651。iOS 与后端提交于 2026-10-31 核对；WorkBuddy-Daily 于 2026-11-01 核对，magpie-workbuddy-tasks 于 2026-11-17 核对。本脚本仅同步适用功能。</Hint>
       <Link url="https://github.com/chenyynx/wb2api-ios/commit/5c809a055d9a417370843abf8aa855c7eb755b97"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemBlue" /><Text>iOS 最新提交 · 5c809a055d9a</Text></HStack></Link>
       <Link url="https://github.com/misakano7545/workbuddy2api-panel/commit/8ab87d4e5178318fcbee9f611c48d3316749edc2"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemGreen" /><Text>后端最新提交 · 8ab87d4e5178</Text></HStack></Link>
       <Link url="https://github.com/L0NE-6/WorkBuddy-Daily/commit/c442bab4d356e3450433df83de9c2dabe3248239"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemOrange" /><Text>任务最新提交 · c442bab4d356</Text></HStack></Link>
-      <Link url="https://github.com/jichie/magpie-workbuddy-tasks/commit/37abcc13c88a367536f25ac9280877f1969eb2a7"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemPurple" /><Text>magpie 任务参考 · 37abcc13c88a</Text></HStack></Link>
+      <Link url="https://github.com/jichie/magpie-workbuddy-tasks/commit/0474b8c9105cba4bf341dbfd2b9c8c08fa240b17"><HStack spacing={9}><Image systemName="arrow.triangle.2.circlepath" foregroundStyle="systemPurple" /><Text>magpie 任务参考 · 0474b8c9105c</Text></HStack></Link>
     </Section>
   </List>
 }

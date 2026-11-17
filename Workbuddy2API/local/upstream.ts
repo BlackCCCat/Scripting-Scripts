@@ -24,7 +24,22 @@ export type GrowthTask = {
   task_type?: string; jump_url?: string
   current?: number; target?: number; accept_status: string; claimed: boolean
   claimable: boolean; has_reward: boolean; locked: boolean; miniprogram: boolean
-  completedAt?: number; claimedAt?: number
+  completedAt?: number; claimedAt?: number; rewardCredit?: number; rewardEnergy?: number
+}
+
+export type CampaignTask = {
+  code: string; title: string; current: number; target: number; credit: number
+  completedAt?: string; claimedAt?: string; jumpUrl?: string; kind?: string
+}
+export type CampaignActivity = {
+  code: string; title: string; pagePath: string; tasks: CampaignTask[]; error?: string
+}
+export type StreakStatus = {
+  days?: number; makeupCards?: number; lotteryChances?: number
+  tiers?: Array<{ name: string; status: string; credit?: number; energy?: number; cards?: number; chances?: number }>
+  nextTier?: string; nextTierRemaining?: number
+  heatmap: Array<{ date: string; score: number | null }>
+  today?: string; todayActive?: boolean; error?: string
 }
 
 export class UpstreamError extends Error {
@@ -397,7 +412,8 @@ function parseTasks(data: any, miniprogram: boolean): GrowthTask[] {
       description: String(raw.description || ""), task_type: String(raw.task_type || ""), jump_url: String(raw.jump_url || ""), current, target, accept_status: status,
       claimed, claimable: !claimed && ((target != null && target > 0 && current != null && current >= target) || ((target == null || target === 0) && status === "completed")),
       has_reward: raw.has_reward === true, locked: raw.locked === true || raw.locked === "true", miniprogram,
-      completedAt: Number.isFinite(completedAt) ? completedAt : undefined }]
+      completedAt: Number.isFinite(completedAt) ? completedAt : undefined,
+      rewardCredit: taskProgress(raw.reward_credit), rewardEnergy: taskProgress(raw.reward_energy) }]
   })
 }
 
@@ -438,6 +454,115 @@ export async function listTasks(uid: string, onWarning?: (message: string) => vo
   if (!succeeded) throw new Error(failures.join("；"))
   if (failures.length) onWarning?.(failures.join("；"))
   return withClaimTimes(uid, merged)
+}
+
+const CAMPAIGNS = [
+  { code: "campaign_starbucks_2026", title: "星巴克协作", pagePath: "subpackages/secondary/starbucks-activity-428/index",
+    names: { ai_chat: "与 AI 对话 3 次", expert: "召唤专家并对话", app: "解锁 App 能力" },
+    kinds: { ai_chat: "chat", expert: "expert", app: "app" }, times: { ai_chat: 3 } },
+  { code: "campaign_reporter_2026", title: "记者节福利活动", pagePath: "subpackages/journalist-benefit/index",
+    names: { expert_chat: "体验媒体工作助理专家", skill_use: "体验采访素材整理技能", desktop_same: "体验内容发布排期灵感" },
+    kinds: { expert_chat: "expert", skill_use: "skill", desktop_same: "desktop" }, times: {} },
+] as const
+
+let extraReadTail: Promise<void> = Promise.resolve()
+let lastExtraReadAt = 0
+function pacedExtraRead<T>(run: () => Promise<T>): Promise<T> {
+  const result = extraReadTail.then(async () => {
+    const delay = Math.max(0, 1050 - (Date.now() - lastExtraReadAt))
+    if (delay) await new Promise<void>(resolve => setTimeout(resolve, delay))
+    lastExtraReadAt = Date.now()
+    return run()
+  })
+  extraReadTail = result.then(() => undefined, () => undefined)
+  return result
+}
+
+export async function fetchCampaignActivities(uid: string): Promise<CampaignActivity[]> {
+  const account = await freshCredential(uid)
+  if (account.site !== "cn" || account.enterpriseId) return []
+  const result: CampaignActivity[] = []
+  for (const spec of CAMPAIGNS) {
+    try {
+      // 运营活动是计费域的独立清单，不能从成长任务列表推断。
+      const data = await pacedExtraRead(() => envelope(`https://www.codebuddy.cn/portal/activity/tasks?activity_code=${encodeURIComponent(spec.code)}`, {
+        headers: { ...billingHeaders(account), Origin: "https://www.codebuddy.cn", Referer: "https://www.codebuddy.cn/",
+          "X-Requested-With": "XMLHttpRequest", "X-Product": "SaaS", "X-CodeBuddy-Request": "1" },
+      }))
+      if (!Array.isArray(data?.tasks)) throw new Error("上游未返回活动任务列表")
+      const progress = new Map<string, any>((Array.isArray(data.progress) ? data.progress : [])
+        .filter((item: any) => typeof item?.task_code === "string").map((item: any) => [item.task_code, item]))
+      const tasks: CampaignTask[] = data.tasks.flatMap((raw: any) => {
+        const code = raw?.task_code
+        if (typeof code !== "string" || !code) return []
+        const done = progress.get(code) ?? {}
+        const names = spec.names as Record<string, string>
+        const kinds = spec.kinds as Record<string, string>
+        const times = spec.times as Record<string, number>
+        return [{ code, title: String(raw.title || raw.task_title || names[code] || code),
+          current: taskProgress(done.progress) ?? 0, target: taskProgress(raw.target_count) || times[code] || 1,
+          credit: taskProgress(raw.reward_credit) ?? 0, completedAt: String(done.completed_at || "") || undefined,
+          claimedAt: String(done.claimed_at || "") || undefined, jumpUrl: typeof raw.jump_url === "string" ? raw.jump_url : undefined,
+          kind: String(raw.kind || kinds[code] || "") || undefined }]
+      })
+      result.push({ code: spec.code, title: spec.title, pagePath: spec.pagePath, tasks })
+    } catch (error) {
+      result.push({ code: spec.code, title: spec.title, pagePath: spec.pagePath, tasks: [],
+        error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return result
+}
+
+export async function fetchStreakStatus(uid: string): Promise<StreakStatus> {
+  const account = await freshCredential(uid)
+  if (account.site !== "cn" || account.enterpriseId) return { heatmap: [] }
+  const state: StreakStatus = { heatmap: [] }
+  const errors: string[] = []
+  try {
+    const data = await pacedExtraRead(() => accountJSON(uid, "/activity/growth/streak"))
+    state.days = taskProgress(data?.streak?.days)
+    state.makeupCards = taskProgress(data?.makeup_cards?.balance ?? data?.makeup_cards)
+    const redemption = data?.redemption_status ?? {}
+    const tierRows = Array.isArray(redemption?.tiers) ? redemption.tiers : []
+    state.tiers = (["7d", "14d", "28d"] as const).map(name => {
+      const row = tierRows.find((item: any) => item?.tier === name || item?.name === name) ?? {}
+      return { name, status: String(redemption[`tier_${name}_status`] ?? redemption[name] ?? row.status ?? "未提供"),
+        credit: taskProgress(row.credit), energy: taskProgress(row.energy),
+        cards: taskProgress(row.cards), chances: taskProgress(row.chances) }
+    })
+    state.nextTier = typeof data?.streak?.next_tier === "string" ? data.streak.next_tier : undefined
+    state.nextTierRemaining = taskProgress(data?.streak?.next_tier_remaining)
+  } catch (error) { errors.push(`连登状态：${error instanceof Error ? error.message : String(error)}`) }
+  try {
+    const data = await pacedExtraRead(() => accountJSON(uid, "/activity/growth/heatmap"))
+    const cells = Array.isArray(data) ? data : [data?.cells, data?.days, data?.heatmap].find(Array.isArray) ?? []
+    state.heatmap = cells.flatMap((raw: any) => {
+      const date = String(raw?.date ?? raw?.day ?? "")
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return []
+      const value = raw?.score
+      const score = (typeof value === "number" || typeof value === "string" && value.trim()) && value != null && Number.isFinite(Number(value))
+        ? Number(value) : null
+      return [{ date, score }]
+    }).sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date))
+    state.today = typeof data?.today?.date === "string" ? data.today.date : undefined
+    state.todayActive = typeof data?.today?.is_active === "boolean" ? data.today.is_active : undefined
+  } catch (error) { errors.push(`连登日历：${error instanceof Error ? error.message : String(error)}`) }
+  try {
+    const data = await pacedExtraRead(() => accountJSON(uid, "/activity/growth/lottery/summary"))
+    const chances = taskProgress(data?.chances)
+    if (chances == null) throw new Error("上游未返回抽奖次数")
+    state.lotteryChances = chances
+  } catch {
+    try {
+      const data = await pacedExtraRead(() => accountJSON(uid, "/activity/growth/lottery/chances"))
+      const chances = taskProgress(data?.balance)
+      if (chances == null) throw new Error("上游未返回抽奖次数")
+      state.lotteryChances = chances
+    } catch (error) { errors.push(`抽奖次数：${error instanceof Error ? error.message : String(error)}`) }
+  }
+  if (errors.length) state.error = errors.join("；")
+  return state
 }
 
 function withClaimTimes(uid: string, tasks: GrowthTask[]): GrowthTask[] {
