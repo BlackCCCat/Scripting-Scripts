@@ -6,11 +6,83 @@ import { parseLinkPreviewHtml, previewableWebUrl } from "../utils/link_preview"
 const MAX_HTML_BYTES = 160_000
 const SUCCESS_TTL = 7 * 24 * 60 * 60 * 1000
 const FAILURE_TTL = 5 * 60 * 1000
-const MAX_PENDING = 8
-const inflight = new Map<string, Promise<LinkPreview | null>>()
-const waiting: Array<() => void> = []
-let active = 0
-let pending = 0
+const MAX_PENDING = 24
+type PreviewListener = (preview: LinkPreview | null) => void
+type PreviewJob = { url: string; listeners: Set<PreviewListener>; started: boolean }
+const jobs = new Map<string, PreviewJob>()
+const queue: PreviewJob[] = []
+const recent = new Map<string, LinkPreview>()
+const scrollingOwners = new Set<unknown>()
+const idleCallbacks = new Set<() => void>()
+const idleWaiters = new Set<() => void>()
+let running = false
+let wakeTimer: ReturnType<typeof setTimeout> | null = null
+
+function remember(url: string, preview: LinkPreview): void {
+  recent.delete(url)
+  recent.set(url, preview)
+  if (recent.size > 128) recent.delete(recent.keys().next().value!)
+}
+
+function scheduleIdleWork(): void {
+  if (wakeTimer || scrollingOwners.size || (!queue.length && !idleCallbacks.size)) return
+  wakeTimer = setTimeout(() => {
+    wakeTimer = null
+    if (scrollingOwners.size) return
+    const callbacks = [...idleCallbacks].slice(0, 4)
+    for (const callback of callbacks) {
+      idleCallbacks.delete(callback)
+      try { callback() } catch {}
+    }
+    if (running) {
+      if (idleCallbacks.size) scheduleIdleWork()
+      return
+    }
+    let job: PreviewJob | undefined
+    while ((job = queue.shift())) {
+      if (jobs.get(job.url) === job && job.listeners.size) break
+    }
+    if (!job || jobs.get(job.url) !== job || !job.listeners.size) {
+      if (idleCallbacks.size) scheduleIdleWork()
+      return
+    }
+    job.started = true
+    running = true
+    void loadPreview(job.url).then((preview) => {
+      if (preview) remember(job.url, preview)
+      for (const listener of job.listeners) {
+        try { listener(preview) } catch {}
+      }
+    }).catch(() => {}).finally(() => {
+      if (jobs.get(job!.url) === job) jobs.delete(job!.url)
+      running = false
+      scheduleIdleWork()
+    })
+    if (idleCallbacks.size) scheduleIdleWork()
+  }, 150)
+}
+
+async function waitForIdle(): Promise<void> {
+  while (scrollingOwners.size) {
+    await new Promise<void>((resolve) => idleWaiters.add(resolve))
+  }
+}
+
+export function setLinkPreviewScrolling(owner: unknown, scrolling: boolean): void {
+  if (scrolling) scrollingOwners.add(owner)
+  else scrollingOwners.delete(owner)
+  if (scrollingOwners.size) return
+  const waiters = [...idleWaiters]
+  idleWaiters.clear()
+  for (const resolve of waiters) resolve()
+  scheduleIdleWork()
+}
+
+export function runWhenLinkPreviewIdle(callback: () => void): () => void {
+  idleCallbacks.add(callback)
+  scheduleIdleWork()
+  return () => { idleCallbacks.delete(callback) }
+}
 
 export function linkPreviewFresh(preview: LinkPreview | undefined | null): boolean {
   if (!preview) return false
@@ -46,36 +118,43 @@ async function fetchPreview(url: string): Promise<LinkPreview> {
   } finally {
     void reader.cancel().catch(() => {})
   }
+  await waitForIdle()
   const parsed = parseLinkPreviewHtml(html, response.url || url)
   if (!parsed.title && !parsed.summary) throw new Error("网页未提供可显示内容")
   return { ...parsed, fetchedAt: Date.now() }
 }
 
 async function loadPreview(url: string): Promise<LinkPreview | null> {
+  await waitForIdle()
   const cached = await readLinkPreview(url)
   if (linkPreviewFresh(cached)) return cached
-  if (active >= 2) await new Promise<void>((resolve) => waiting.push(resolve))
-  active += 1
-  try {
-    const preview = await fetchPreview(url).catch(() => ({ title: "", summary: "", fetchedAt: Date.now() }))
-    try { await writeLinkPreview(url, preview) } catch {}
-    return preview
-  } finally {
-    active -= 1
-    waiting.shift()?.()
-  }
+  const preview = await fetchPreview(url).catch(() => ({ title: "", summary: "", fetchedAt: Date.now() }))
+  await waitForIdle()
+  try { await writeLinkPreview(url, preview) } catch {}
+  return preview
 }
 
-export function requestLinkPreview(url: string): Promise<LinkPreview | null> {
-  if (!previewableWebUrl(url)) return Promise.resolve(null)
-  const current = inflight.get(url)
-  if (current) return current
-  if (pending >= MAX_PENDING) return Promise.resolve(null)
-  pending += 1
-  const task = loadPreview(url).catch(() => null).finally(() => {
-    pending -= 1
-    inflight.delete(url)
-  })
-  inflight.set(url, task)
-  return task
+export function observeLinkPreview(url: string, listener: PreviewListener): () => void {
+  if (!previewableWebUrl(url)) return () => {}
+  const cached = recent.get(url)
+  if (linkPreviewFresh(cached)) {
+    return runWhenLinkPreviewIdle(() => listener(cached!))
+  }
+  let job = jobs.get(url)
+  if (!job) {
+    if (jobs.size >= MAX_PENDING) return () => {}
+    job = { url, listeners: new Set(), started: false }
+    jobs.set(url, job)
+    queue.push(job)
+  }
+  job.listeners.add(listener)
+  scheduleIdleWork()
+  return () => {
+    job!.listeners.delete(listener)
+    if (!job!.started && !job!.listeners.size && jobs.get(url) === job) {
+      jobs.delete(url)
+      const index = queue.indexOf(job!)
+      if (index >= 0) queue.splice(index, 1)
+    }
+  }
 }

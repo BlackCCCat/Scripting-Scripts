@@ -1,9 +1,9 @@
-import { GeometryReader, HStack, Image, Spacer, Text, VStack, ZStack, useColorScheme, useMemo, useRef, useState } from "scripting"
+import { GeometryReader, HStack, Image, Spacer, Text, VStack, ZStack, useColorScheme, useEffect, useMemo, useRef, useState } from "scripting"
 import type { ClipItem, LinkPreview } from "../types"
 import { clipTitle, formatDateTime, summarizeContent } from "../utils/common"
 import { imageListPreviewPath } from "../storage/image_store"
 import { displayFavoriteFieldsContent, displayFavoriteItemTitle, favoriteDelimiterForItem, isFieldFavorite, privateRulesForItem, type PrivateFieldRule } from "../utils/favorite_fields"
-import { linkPreviewFresh, requestLinkPreview } from "../services/link_preview"
+import { linkPreviewFresh, observeLinkPreview, runWhenLinkPreviewIdle } from "../services/link_preview"
 import { previewableWebUrl } from "../utils/link_preview"
 import type { NavigationZoomNamespace } from "../utils/navigation_zoom"
 
@@ -35,9 +35,13 @@ function ClipRowContent(props: {
 }) {
   const item = props.item
   const [preview, setPreview] = useState<LinkPreview | undefined>(item.linkPreview)
-  const [iconFailed, setIconFailed] = useState(false)
-  const currentPreview = preview ?? item.linkPreview
+  const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null)
+  const [readyIconUrl, setReadyIconUrl] = useState<string | null>(null)
+  const currentPreview = item.linkPreview && (!preview || item.linkPreview.fetchedAt > preview.fetchedAt)
+    ? item.linkPreview : preview
   const visible = useRef(false)
+  const cancelPreview = useRef<(() => void) | null>(null)
+  const cancelIcon = useRef<(() => void) | null>(null)
   const webUrl = item.kind === "url" ? previewableWebUrl(item.content) : null
   const defaultTitle = item.title === clipTitle(item.kind, item.content)
   const fieldDelimiter = favoriteDelimiterForItem(item, props.favoriteFieldDelimiter)
@@ -48,15 +52,31 @@ function ClipRowContent(props: {
   const displayContent = isFieldFavorite(item)
     ? displayFavoriteFieldsContent(item.content, fieldDelimiter, privateRules)
     : item.content
+
+  function scheduleIcon(url?: string) {
+    cancelIcon.current?.()
+    if (url) cancelIcon.current = runWhenLinkPreviewIdle(() => setReadyIconUrl(url))
+    else setReadyIconUrl(null)
+  }
+
+  useEffect(() => {
+    if (visible.current) scheduleIcon(currentPreview?.iconUrl)
+  }, [currentPreview?.iconUrl])
+
+  useEffect(() => () => {
+    cancelPreview.current?.()
+    cancelIcon.current?.()
+  }, [])
+
   return (
     <>
-      {item.kind === "url" && currentPreview?.iconUrl && !iconFailed && !failedLinkIcons.has(currentPreview.iconUrl) ? (
+      {item.kind === "url" && currentPreview?.iconUrl && readyIconUrl === currentPreview.iconUrl && failedIconUrl !== currentPreview.iconUrl && !failedLinkIcons.has(currentPreview.iconUrl) ? (
         <Image
           imageUrl={currentPreview.iconUrl}
           placeholder={<Image systemName="link" foregroundStyle={pinned ? "systemOrange" : "systemBlue"} />}
           onError={() => {
             if (currentPreview.iconUrl) failedLinkIcons.add(currentPreview.iconUrl)
-            setIconFailed(true)
+            setFailedIconUrl(currentPreview.iconUrl ?? null)
           }}
           resizable
           scaleToFit
@@ -74,12 +94,18 @@ function ClipRowContent(props: {
         spacing={5}
         onAppear={() => {
           visible.current = true
+          scheduleIcon(currentPreview?.iconUrl)
+          cancelPreview.current?.()
           if (!webUrl || linkPreviewFresh(currentPreview)) return
-          void requestLinkPreview(item.content).then((result) => {
+          cancelPreview.current = observeLinkPreview(item.content, (result) => {
             if (visible.current) setPreview(result ?? { title: "", summary: "", fetchedAt: 0 })
           })
         }}
-        onDisappear={() => { visible.current = false }}
+        onDisappear={() => {
+          visible.current = false
+          cancelPreview.current?.()
+          cancelIcon.current?.()
+        }}
       >
         <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
           <Text font="headline" lineLimit={1} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>

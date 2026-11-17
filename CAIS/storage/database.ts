@@ -25,7 +25,7 @@ let openingDb: Promise<DB> | null = null
 let initializingDb: Promise<DB> | null = null
 let connectionGeneration = 0
 let initialized = false
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const CLIP_ROW_SELECT = "id, kind, title, substr(content, 1, 2000) as content, content_hash, image_path, image_fingerprint, source_change_count, created_at, updated_at, last_copied_at, pinned, favorite_pinned, favorite, manual_favorite, favorite_format, field_delimiter, field_delimiter_override, field_privacy_override, field_private_keywords, favorite_group_id, favorite_group_manual, favorite_order, favorite_updated_at, deleted_at, CASE WHEN kind = 'url' THEN (SELECT title FROM link_previews WHERE url = clips.content) END AS link_title, CASE WHEN kind = 'url' THEN (SELECT summary FROM link_previews WHERE url = clips.content) END AS link_summary, CASE WHEN kind = 'url' THEN (SELECT icon_url FROM link_previews WHERE url = clips.content) END AS link_icon_url, CASE WHEN kind = 'url' THEN (SELECT fetched_at FROM link_previews WHERE url = clips.content) END AS link_fetched_at"
 const UNIQUE_ACTIVE_TEXT_INDEX = "idx_clips_unique_active_text"
@@ -199,6 +199,22 @@ export async function readDatabaseDataVersion(): Promise<number> {
   return Number(row.data_version ?? Object.values(row)[0] ?? 0) || 0
 }
 
+export async function readClipDatabaseRevision(): Promise<number> {
+  const db = await initializeDatabase()
+  const rows = await db.fetchAll("SELECT version FROM clip_data_revision WHERE id = 1")
+  return Number(rows[0]?.version ?? 0)
+}
+
+async function ensureClipDataRevision(db: DB): Promise<void> {
+  await db.execute("CREATE TABLE IF NOT EXISTS clip_data_revision (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)")
+  await db.execute("INSERT OR IGNORE INTO clip_data_revision (id, version) VALUES (1, 0)")
+  for (const table of ["clips", "favorite_groups"] as const) {
+    for (const operation of ["INSERT", "UPDATE", "DELETE"] as const) {
+      await db.execute(`CREATE TRIGGER IF NOT EXISTS cais_${table}_${operation.toLowerCase()}_revision AFTER ${operation} ON ${table} BEGIN UPDATE clip_data_revision SET version = version + 1 WHERE id = 1; END`)
+    }
+  }
+}
+
 async function ensureSchema(db: DB): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS clips (
@@ -295,6 +311,7 @@ export async function initializeDatabase(): Promise<DB> {
       await addColumnIfMissing(db, "clips", "field_private_keywords", "field_private_keywords TEXT")
       await addColumnIfMissing(db, "link_previews", "icon_url", "icon_url TEXT")
     }
+    if (version < 5) await ensureClipDataRevision(db)
     if (version < SCHEMA_VERSION) await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     if (generation === connectionGeneration) initialized = true
     return db

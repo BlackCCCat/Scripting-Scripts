@@ -11,7 +11,7 @@ import {
   updateClipTitle,
 } from "../storage/clip_repository"
 import { bumpClipDataVersion, readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
-import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
+import { initializeDatabase, readClipDatabaseRevision, readDatabaseDataVersion } from "../storage/database"
 import { imagePreviewPath } from "../storage/image_store"
 import { loadSettings } from "../storage/settings_store"
 import {
@@ -55,7 +55,9 @@ let serverPort: number | null = null
 let versionTimer: any = null
 let lastBroadcastVersion = 0
 let lastDatabaseDataVersion: number | null = null
+let lastClipDatabaseRevision: number | null = null
 let checkingDatabaseDataVersion = false
+let versionGeneration = 0
 let unsubscribeDataChanges: (() => void) | null = null
 let sessions: AuthorizedSession[] = []
 let reconcileQueue: Promise<LanShareRuntimeStatus> = Promise.resolve({
@@ -260,12 +262,19 @@ function notifyDataChanged(version = readClipDataVersion()): void {
 
 function startVersionBroadcasting(): void {
   stopVersionBroadcasting()
+  const generation = versionGeneration
   lastBroadcastVersion = readClipDataVersion()
   unsubscribeDataChanges = subscribeClipDataChanges(notifyDataChanged)
-  void readDatabaseDataVersion().then((version) => {
+  checkingDatabaseDataVersion = true
+  void Promise.all([readDatabaseDataVersion(), readClipDatabaseRevision()]).then(([version, revision]) => {
+    if (generation !== versionGeneration) return
     lastDatabaseDataVersion = version
-  }).catch(() => {})
+    lastClipDatabaseRevision = revision
+  }).catch(() => {}).finally(() => {
+    if (generation === versionGeneration) checkingDatabaseDataVersion = false
+  })
   versionTimer = (globalThis as any).setInterval?.(() => {
+    if (generation !== versionGeneration) return
     sessions = sessions.filter(({ session, token }) => {
       if (authorizedToken(token)) return true
       try { session.close() } catch {}
@@ -273,26 +282,28 @@ function startVersionBroadcasting(): void {
     })
     if (!checkingDatabaseDataVersion) {
       checkingDatabaseDataVersion = true
-      void readDatabaseDataVersion().then((databaseVersion) => {
-        if (lastDatabaseDataVersion != null && databaseVersion !== lastDatabaseDataVersion) {
-          lastDatabaseDataVersion = databaseVersion
-          bumpClipDataVersion()
-        } else {
-          lastDatabaseDataVersion = databaseVersion
-        }
+      void readDatabaseDataVersion().then(async (databaseVersion) => {
+        if (generation !== versionGeneration || databaseVersion === lastDatabaseDataVersion) return
+        const revision = await readClipDatabaseRevision()
+        if (generation !== versionGeneration) return
+        if (lastClipDatabaseRevision != null && revision !== lastClipDatabaseRevision) bumpClipDataVersion()
+        lastDatabaseDataVersion = databaseVersion
+        lastClipDatabaseRevision = revision
       }).catch(() => {}).finally(() => {
-        checkingDatabaseDataVersion = false
+        if (generation === versionGeneration) checkingDatabaseDataVersion = false
       })
     }
   }, VERSION_POLL_INTERVAL_MS)
 }
 
 function stopVersionBroadcasting(): void {
+  versionGeneration++
   if (versionTimer) (globalThis as any).clearInterval?.(versionTimer)
   versionTimer = null
   unsubscribeDataChanges?.()
   unsubscribeDataChanges = null
   lastDatabaseDataVersion = null
+  lastClipDatabaseRevision = null
   checkingDatabaseDataVersion = false
 }
 

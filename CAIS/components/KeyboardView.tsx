@@ -43,7 +43,7 @@ import {
   togglePinned,
 } from "../storage/clip_repository"
 import { readClipDataVersion } from "../storage/change_signal"
-import { readDatabaseDataVersion } from "../storage/database"
+import { readClipDatabaseRevision, readDatabaseDataVersion } from "../storage/database"
 import { loadSettings } from "../storage/settings_store"
 import { imagePreviewPath } from "../storage/image_store"
 import { clipTitle, isLikelyURL, summarizeContent } from "../utils/common"
@@ -998,6 +998,7 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       void loadMore()
     }
     let lastSeenDatabaseDataVersion: number | null = null
+    let lastSeenClipDatabaseRevision: number | null = null
     let checkingDatabaseDataVersion = false
     let refreshQueued = false
     let refreshRequested = false
@@ -1024,12 +1025,16 @@ export function KeyboardView(props: { initialState?: KeyboardInitialState } = {}
       setAppPipActive((current) => current === pipActive ? current : pipActive)
       if (checkingDatabaseDataVersion) return
       checkingDatabaseDataVersion = true
-      void readDatabaseDataVersion().then((databaseVersion) => {
+      void readDatabaseDataVersion().then(async (databaseVersion) => {
         if (stopped) return
-        if (lastSeenDatabaseDataVersion != null && databaseVersion !== lastSeenDatabaseDataVersion) {
+        if (databaseVersion === lastSeenDatabaseDataVersion) return
+        const revision = await readClipDatabaseRevision()
+        if (stopped) return
+        if (lastSeenClipDatabaseRevision != null && revision !== lastSeenClipDatabaseRevision) {
           scheduleRefresh()
         }
         lastSeenDatabaseDataVersion = databaseVersion
+        lastSeenClipDatabaseRevision = revision
       }).catch(() => {}).finally(() => {
         checkingDatabaseDataVersion = false
       })

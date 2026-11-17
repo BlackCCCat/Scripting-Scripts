@@ -63,8 +63,9 @@ import {
   saveFavoriteGroup,
   updateFavoriteFromInput,
 } from "../storage/clip_repository"
-import { initializeDatabase, readDatabaseDataVersion } from "../storage/database"
+import { initializeDatabase, readClipDatabaseRevision, readDatabaseDataVersion } from "../storage/database"
 import { readClipDataVersion, subscribeClipDataChanges } from "../storage/change_signal"
+import { setLinkPreviewScrolling } from "../services/link_preview"
 import { defaultSettings, loadSettings, saveSettings } from "../storage/settings_store"
 import { applyICloudSyncSettings } from "../storage/icloud_sync"
 import { formatDateTime, isLikelyURL, makeId, withHaptic } from "../utils/common"
@@ -617,6 +618,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   const listRefreshBlocked = useRef(false)
   const listRefreshDeferred = useRef(false)
   const appListScrolling = useRef(false)
+  const linkPreviewScrollOwner = useRef({}).current
   const passiveRefreshPending = useRef(false)
   const schedulePassiveRefresh = useRef<() => void>(() => {})
   const favoriteGroupOrderWrites = useRef<Promise<void>>(Promise.resolve())
@@ -723,11 +725,14 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
 
   useEffect(() => {
     appListScrolling.current = false
+    setLinkPreviewScrolling(linkPreviewScrollOwner, false)
     if (passiveRefreshPending.current) {
       passiveRefreshPending.current = false
       schedulePassiveRefresh.current()
     }
   }, [activeTab.value])
+
+  useEffect(() => () => setLinkPreviewScrolling(linkPreviewScrollOwner, false), [])
 
   useEffect(() => {
     const previousResumeHandler = (globalThis as any)[CAIS_APP_RESUME_HANDLER]
@@ -774,6 +779,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     let stopped = false
     let lastSeenClipDataVersion = readClipDataVersion()
     let lastSeenDatabaseDataVersion: number | null = null
+    let lastSeenClipDatabaseRevision: number | null = null
     let checkingDatabaseDataVersion = false
     let refreshQueued = false
     let refreshRequested = false
@@ -835,12 +841,16 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
     function checkDatabaseVersion() {
       if (checkingDatabaseDataVersion || appListScrolling.current) return
       checkingDatabaseDataVersion = true
-      void readDatabaseDataVersion().then((version) => {
+      void readDatabaseDataVersion().then(async (version) => {
         if (stopped) return
-        if (lastSeenDatabaseDataVersion != null && version !== lastSeenDatabaseDataVersion) {
+        if (version === lastSeenDatabaseDataVersion) return
+        const revision = await readClipDatabaseRevision()
+        if (stopped) return
+        if (lastSeenClipDatabaseRevision != null && revision !== lastSeenClipDatabaseRevision) {
           scheduleRefresh()
         }
         lastSeenDatabaseDataVersion = version
+        lastSeenClipDatabaseRevision = revision
       }).catch(() => {}).finally(() => {
         checkingDatabaseDataVersion = false
       })
@@ -2857,6 +2867,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         {visitedHomeTabs.includes(TAB_FAVORITES) || favoriteVisible ? <Form
           formStyle="grouped"
           listRowSpacing={10}
+          onScrollPhaseChange={(_, phase) => handleAppListScrollPhase(TAB_FAVORITES, phase)}
           contentMargins={APP_SCROLL_CONTENT_MARGINS}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
           opacity={favoriteVisible ? 1 : 0}
@@ -2872,6 +2883,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
         {visitedHomeTabs.includes(TAB_CLIPS) || clipboardVisible ? <Form
           formStyle="grouped"
           listRowSpacing={10}
+          onScrollPhaseChange={(_, phase) => handleAppListScrollPhase(TAB_CLIPS, phase)}
           contentMargins={APP_SCROLL_CONTENT_MARGINS}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
           opacity={clipboardVisible ? 1 : 0}
@@ -2912,6 +2924,7 @@ export function AppRoot(props: { mode?: AppRootMode; zoomNamespace?: NavigationZ
   function handleAppListScrollPhase(tab: number, phase: ScrollPhase) {
     if (activeTab.value !== tab) return
     appListScrolling.current = phase !== "idle"
+    setLinkPreviewScrolling(linkPreviewScrollOwner, phase !== "idle")
     if (phase === "idle" && passiveRefreshPending.current) {
       passiveRefreshPending.current = false
       schedulePassiveRefresh.current()
