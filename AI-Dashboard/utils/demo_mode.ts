@@ -153,6 +153,9 @@ export function generateDemoSnapshot(
     collectedAt: nowIso,
     providerPlanName: specificWindows.planName,
     accountIdentity: specificWindows.identity,
+    museAdditionalTokens: provider === "muse"
+      ? { value: "0% used (1B tokens left)", remainingPercentage: 100 }
+      : undefined,
     sourceCredentialFingerprint: `demo-fp-${provider}`,
     region,
     codexResetCards: specificWindows.codexResetCards,
@@ -270,6 +273,19 @@ function getProviderDemoWindows(
         ],
       }
     }
+
+    case "muse":
+      return {
+        planName: "Power",
+        identity: "Muse 演示账号",
+        windows: [{
+          id: "muse.weekly",
+          name: "每周使用额度",
+          period: "weekly",
+          usedPercentage: 38,
+          resetsAt: in5Days,
+        }],
+      }
 
     case "claude":
       return {

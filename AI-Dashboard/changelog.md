@@ -1,3 +1,6 @@
+## v2.2.4
+- new:新增Muse源，通过网页登录添加卡片展示信息，同时账号的额外Tokens也同样支持展示
+
 ## v2.2.3
 - refactor: 迁移弃用的 ForEach.count 至 useObservable + data + builder 架构，订阅自动持久化，消除控制台警告。
 

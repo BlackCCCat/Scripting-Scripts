@@ -1286,6 +1286,10 @@ export async function extractWebSessionFromController(
     return true
   })
 
+  if (provider === "muse" && !matchedCookies.some((cookie) => cookie.name === "hatch_sess" && cookie.value)) {
+    throw new Error("尚未检测到 Muse 的有效登录 Cookie，请先在 muse.ai 完成登录")
+  }
+
   // 如果存在指定 localStorageKeys（如 Kimi / Qwen Cloud），尝试从页面读取
   let storageToken = ""
   if (profile?.localStorageKeys && profile.localStorageKeys.length > 0) {

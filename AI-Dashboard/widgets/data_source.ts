@@ -190,6 +190,26 @@ function buildWidgetAccountData(
     }
   })
 
+  // Muse 额外额度独立于每周额度，但在小组件中使用同一套普通配额进度条。
+  const additional = acc.provider === "muse" ? snapshot?.museAdditionalTokens : undefined
+  const labelUsed = additional?.value.match(/^(\d+(?:\.\d+)?)%\s*used\b/i)
+  const additionalRemaining = additional?.remainingPercentage ?? (
+    labelUsed && Number(labelUsed[1]) <= 100
+      ? 100 - Number(labelUsed[1])
+      : undefined
+  )
+  if (additionalRemaining !== undefined && Number.isFinite(additionalRemaining)) {
+    const remaining = Math.min(100, Math.max(0, additionalRemaining))
+    rawQuotas.push({
+      id: "muse.additionalTokens",
+      name: "额外 Tokens",
+      usedPercentage: 100 - remaining,
+      remainingPercentage: remaining,
+      isExhausted: remaining <= 0,
+      isUnlimited: false,
+    })
+  }
+
   // 当供应商指标数量超过 5 个时，至多显示 5 个并优先展示有消耗的进度条
   const quotas = selectTopWidgetQuotas(rawQuotas, 5)
 
@@ -269,6 +289,7 @@ function buildWidgetAccountData(
   const statusInfo = getWidgetStatusOrUpdateTime({
     fetchedAtISO: snapshot?.collectedAt,
     metadata: refreshMeta,
+    provider: acc.provider,
   })
 
   return {
@@ -307,7 +328,7 @@ function mergeSingleQuotaAccounts(
   // 统计各供应商账号中 quotas.length === 1 && !isWallet 的数量
   const singleQuotaProviderCounts = new Map<string, number>()
   for (const acc of accounts) {
-    if (!acc.isWallet && acc.quotas.length === 1) {
+    if (acc.provider !== "muse" && !acc.isWallet && acc.quotas.length === 1) {
       singleQuotaProviderCounts.set(
         acc.provider,
         (singleQuotaProviderCounts.get(acc.provider) || 0) + 1

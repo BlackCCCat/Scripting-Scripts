@@ -36,8 +36,10 @@ async function run() {
           meta.nextAutomaticAttemptAt &&
           new Date(meta.nextAutomaticAttemptAt).getTime() > now
         const isUnauthorized =
-          meta.lastErrorCode === "invalidCredential" ||
-          meta.lastErrorCode === "missingCredential"
+          acc.provider !== "muse" && (
+            meta.lastErrorCode === "invalidCredential" ||
+            meta.lastErrorCode === "missingCredential"
+          )
         return isStale && !isBackoff && !isUnauthorized
       })
 
@@ -68,6 +70,7 @@ async function run() {
     const reloadPolicy = resolveWidgetReloadPolicy({
       snapshots: Object.values(snapshots),
       metadataList,
+      providers: data.accounts.map((a) => a.provider),
       reloadMinutes: intervalMinutes,
       now: Date.now(),
     })

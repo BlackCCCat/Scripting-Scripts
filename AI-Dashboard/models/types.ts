@@ -41,6 +41,7 @@ export type ProviderId =
   | "miniMaxInternational"
   | "mistral"
   | "moonshot"
+  | "muse"
   | "neuralwatt"
   | "newAPI"
   | "notionAI"
@@ -157,6 +158,10 @@ export interface QuotaSnapshot {
   collectedAt: string // ISO 8601
   providerPlanName?: string
   accountIdentity?: string
+  museAdditionalTokens?: {
+    value: string
+    remainingPercentage?: number
+  }
   sourceCredentialFingerprint?: string
   region?: string
   codexResetCards?: {

@@ -56,6 +56,7 @@ import {
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
 import { DeviceCodeLoginSheet } from "./DeviceCodeLoginSheet"
+import { validateMuseAccount } from "../providers/muse"
 
 
 export function AddAccountSheet(props: {
@@ -104,6 +105,7 @@ export function AddAccountSheet(props: {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isPresentingBuiltInBrowser, setIsPresentingBuiltInBrowser] =
     useState<boolean>(false)
+  const [isValidatingMuse, setIsValidatingMuse] = useState(false)
 
   // 子 Sheet 控制：设备码登录
   const [isDeviceLoginPresented, setIsDeviceLoginPresented] =
@@ -253,7 +255,8 @@ export function AddAccountSheet(props: {
     onAccountCreated(newAccount, envelope)
   }
 
-  const handleSaveManual = () => {
+  const handleSaveManual = async () => {
+    if (isValidatingMuse) return
     try {
       setErrorMessage(null)
       const envelope = buildCredentialEnvelope({
@@ -262,12 +265,18 @@ export function AddAccountSheet(props: {
         serverAddress: meta.requiresGatewayAddress ? serverAddress : undefined,
         region: meta.requiresRegion ? selectedRegion : undefined,
       })
+      if (selectedProviderId === "muse") {
+        setIsValidatingMuse(true)
+        await validateMuseAccount(envelope)
+      }
       finalizeAccountWithEnvelope(envelope)
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : "凭证校验未通过，请检查输入格式"
       )
       HapticFeedback.notificationError()
+    } finally {
+      setIsValidatingMuse(false)
     }
   }
 
@@ -289,6 +298,9 @@ export function AddAccountSheet(props: {
         selectedProviderId,
         controller
       )
+      if (selectedProviderId === "muse") {
+        await validateMuseAccount(envelope, controller)
+      }
       finalizeAccountWithEnvelope(envelope)
     } catch (err) {
       setErrorMessage(
@@ -564,8 +576,8 @@ export function AddAccountSheet(props: {
         ),
         confirmationAction: (
           <Button
-            title="保存"
-            disabled={!rawCredential.trim()}
+            title={isValidatingMuse ? "验证 Muse 账号中…" : "保存"}
+            disabled={!rawCredential.trim() || isValidatingMuse}
             action={handleSaveManual}
           />
         ),

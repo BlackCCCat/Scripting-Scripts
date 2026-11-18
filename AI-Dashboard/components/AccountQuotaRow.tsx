@@ -288,6 +288,40 @@ export function AccountQuotaRow(props: {
             </VStack>
           ) : null}
 
+          {account.provider === "muse" && snapshot.museAdditionalTokens ? (
+            <VStack
+              alignment="leading"
+              spacing={7}
+              padding={12}
+              frame={{ maxWidth: "infinity", alignment: "leading" }}
+              background={
+                <RoundedRectangle
+                  cornerRadius={12}
+                  style="continuous"
+                  fill="quaternarySystemFill"
+                />
+              }
+            >
+              <Text font="caption2" fontWeight="semibold" foregroundStyle="accentColor">
+                Additional Tokens
+              </Text>
+              {snapshot.museAdditionalTokens.remainingPercentage !== undefined ? (
+                <ProgressView
+                  value={snapshot.museAdditionalTokens.remainingPercentage}
+                  total={100}
+                  progressViewStyle="linear"
+                  tint={remainingQuotaColor(
+                    snapshot.museAdditionalTokens.remainingPercentage,
+                    snapshot.museAdditionalTokens.remainingPercentage <= 0
+                  )}
+                />
+              ) : null}
+              <Text font="subheadline" fontWeight="medium" foregroundStyle="label" lineLimit={2}>
+                {snapshot.museAdditionalTokens.value}
+              </Text>
+            </VStack>
+          ) : null}
+
           {/* 刷新异常横幅（若上次刷新失败但保留了缓存快照） */}
           {state.type === "failed" ? (
             <HStack

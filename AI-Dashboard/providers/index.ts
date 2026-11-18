@@ -49,6 +49,7 @@ import { queryMiniMaxChinaQuota } from "./miniMaxChina"
 import { queryMiniMaxInternationalQuota } from "./miniMaxInternational"
 import { queryMistralQuota } from "./mistral"
 import { queryMoonshotQuota } from "./moonshot"
+import { queryMuseQuota } from "./muse"
 import { queryNeuralwattQuota } from "./neuralwatt"
 import { queryNewAPIQuota } from "./newAPI"
 import { queryNotionAIQuota } from "./notionAI"
@@ -138,6 +139,7 @@ export const PROVIDER_HANDLERS: Record<ProviderId, ProviderQuotaHandler> = {
   miniMaxInternational: queryMiniMaxInternationalQuota,
   mistral: queryMistralQuota,
   moonshot: queryMoonshotQuota,
+  muse: queryMuseQuota,
   neuralwatt: queryNeuralwattQuota,
   newAPI: queryNewAPIQuota,
   notionAI: queryNotionAIQuota,

@@ -1,4 +1,4 @@
-import type { QuotaSnapshot } from "../models/types"
+import type { ProviderId, QuotaSnapshot } from "../models/types"
 import type { WidgetRefreshMetadata } from "../services/refresh_service"
 
 export type WidgetReloadPolicy =
@@ -21,6 +21,7 @@ function clampReloadMinutes(value: number): number {
 export function resolveWidgetReloadPolicy(input: {
   snapshots: QuotaSnapshot[]
   metadataList: WidgetRefreshMetadata[]
+  providers?: ProviderId[]
   reloadMinutes: number
   now?: number
 }): WidgetReloadPolicy {
@@ -28,9 +29,12 @@ export function resolveWidgetReloadPolicy(input: {
 
   // 1. 如果所有展示账号凭证都已失效，不再调度唤醒，彻底避免耗电
   const hasValidAccount = input.metadataList.some(
-    (m) =>
-      m.lastErrorCode !== "missingCredential" &&
-      m.lastErrorCode !== "invalidCredential"
+    (m, index) =>
+      input.providers?.[index] === "muse" ||
+      (
+        m.lastErrorCode !== "missingCredential" &&
+        m.lastErrorCode !== "invalidCredential"
+      )
   )
   if (input.metadataList.length > 0 && !hasValidAccount) {
     return { policy: "never" }
@@ -82,6 +86,7 @@ export function resolveWidgetReloadPolicy(input: {
 export function getWidgetStatusOrUpdateTime(input: {
   fetchedAtISO?: string | null
   metadata?: WidgetRefreshMetadata | null
+  provider?: ProviderId
   fallbackTimeText?: string
   now?: number
 }): { text: string; isWarning: boolean } {
@@ -89,6 +94,14 @@ export function getWidgetStatusOrUpdateTime(input: {
   const meta = input.metadata
 
   if (meta) {
+    if (input.provider === "muse") {
+      if (meta.lastErrorCode === "missingCredential") {
+        return { text: "凭证暂不可用", isWarning: true }
+      }
+      if (meta.lastErrorCode === "invalidCredential") {
+        return { text: "登录待确认", isWarning: true }
+      }
+    }
     // 凭据缺失或失效
     if (
       meta.lastErrorCode === "invalidCredential" ||
