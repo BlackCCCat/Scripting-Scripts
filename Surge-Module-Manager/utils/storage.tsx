@@ -167,6 +167,15 @@ function parseTag(content: string, key: string): string | undefined {
   return m?.[1]?.trim()
 }
 
+export function moduleNameFromContent(content: string): string {
+  const name = (parseTag(content, "name") ?? "").replace(/\.sgmodule$/i, "").trim()
+  if (!name) throw new Error("模块名称为空，且内容中没有有效的 #!name=，请手动填写名称")
+  if (/[\x00-\x1f/\\]/.test(name) || name === "." || name === "..") {
+    throw new Error("#!name= 含有不能用于文件名的字符，请手动填写名称")
+  }
+  return name
+}
+
 function parseIcon(content: string): string | undefined {
   const lines = String(content ?? "").split(/\r?\n/g)
   for (const raw of lines) {

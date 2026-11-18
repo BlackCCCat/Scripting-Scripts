@@ -20,7 +20,7 @@ import {
   useState,
 } from "scripting"
 
-import { loadModules, type ModuleInfo } from "../utils/storage"
+import { loadModules, moduleNameFromContent, type ModuleInfo } from "../utils/storage"
 import { loadConfig, type OnlineModuleSource } from "../utils/config"
 
 type LibraryCacheEntry = { items: ModuleInfo[]; fetchedAt: number }
@@ -327,7 +327,7 @@ export function EditModuleView(props: {
   }
 
   async function onSave() {
-    const trimmedName = name.trim()
+    let trimmedName = name.trim()
     const trimmedLink = link.trim()
     const localContent = String(content ?? "")
     const trimmedContent = localContent.trim()
@@ -335,22 +335,25 @@ export function EditModuleView(props: {
     const saveDir =
       saveDirOptions.length && saveDirIdx > 0 ? saveDirOptions[saveDirIdx] : undefined
 
-    if (!trimmedName || !trimmedLink) {
-      if (!trimmedName) {
-        await Dialog.alert({ message: "名称不能为空" })
-        return
-      }
-      if (isRemote) {
-        await Dialog.alert({ message: "链接不能为空" })
-        return
-      }
-      if (!trimmedContent) {
-        await Dialog.alert({ message: "模块内容不能为空" })
-        return
-      }
-    } else if (!isRemote && !trimmedContent) {
+    if (initial && !trimmedName) {
+      await Dialog.alert({ message: "名称不能为空" })
+      return
+    }
+    if (isRemote && !trimmedLink) {
+      await Dialog.alert({ message: "链接不能为空" })
+      return
+    }
+    if (!isRemote && !trimmedContent) {
       await Dialog.alert({ message: "模块内容不能为空" })
       return
+    }
+    if (!trimmedName && !isRemote) {
+      try {
+        trimmedName = moduleNameFromContent(localContent)
+      } catch (e: any) {
+        await Dialog.alert({ message: String(e?.message ?? e) })
+        return
+      }
     }
 
     if (!initial) {
@@ -366,7 +369,7 @@ export function EditModuleView(props: {
         } catch {}
       }
 
-      if (names.has(trimmedName)) {
+      if (trimmedName && names.has(trimmedName)) {
         await Dialog.alert({
           title: "模块已存在",
           message: `已存在同名模块：${trimmedName}`,

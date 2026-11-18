@@ -1,5 +1,5 @@
 import { Path } from "scripting"
-import { moduleFilePath, ensureStorage, type ModuleInfo, getModulesDirResolved } from "./storage"
+import { moduleFilePath, moduleNameFromContent, ensureStorage, loadModules, type ModuleInfo, getModulesDirResolved } from "./storage"
 import { loadConfig } from "./config"
 import { downloadWithProgress } from "./stream_downloader"
 
@@ -61,31 +61,40 @@ async function writeFinalModule(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   rawText: string
-): Promise<void> {
+): Promise<string> {
   if (!rawText) throw new Error(`下载内容为空: ${info.link}`)
+
+  const autoNamed = !info.name.trim()
+  const name = autoNamed ? moduleNameFromContent(rawText) : info.name
+  const path = moduleFilePath(name, targetDir)
+  if (autoNamed) {
+    if ((await loadModules()).some(module => module.name === name) || await fm.exists(path)) {
+      throw new Error(`模块名称已存在：${name}`)
+    }
+  }
 
   let content = injectNameFlag(rawText)
   content = injectUrl(content, info.link, info.linkPrefix)
   content = injectCategory(content, info.category)
 
-  const path = moduleFilePath(info.name, targetDir)
   await fm.writeAsString(path, content)
+  return name
 }
 
 async function downloadModuleDirect(
   fm: any,
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string
-): Promise<void> {
+): Promise<string> {
   const text = await fetchModuleText(info.link)
-  await writeFinalModule(fm, info, targetDir, text)
+  return writeFinalModule(fm, info, targetDir, text)
 }
 
 async function downloadModuleStream(
   fm: any,
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string
-): Promise<void> {
+): Promise<string> {
   const tmpDir = fm.temporaryDirectory ?? Path.join(Path.dirname(moduleFilePath(info.name, targetDir)), ".tmp")
   const tmpPath = Path.join(tmpDir, `${info.name}_${Date.now()}.tmp`)
 
@@ -103,7 +112,7 @@ async function downloadModuleStream(
   }
 
   try {
-    await writeFinalModule(fm, info, targetDir, text)
+    return await writeFinalModule(fm, info, targetDir, text)
   } finally {
     try {
       if (typeof fm.remove === "function") await fm.remove(tmpPath)
@@ -115,7 +124,7 @@ async function downloadModuleStream(
 export async function downloadModule(
   info: ModuleInfo & { linkPrefix?: string },
   options: DownloadModuleOptions = {}
-): Promise<{ ok: boolean; message?: string }> {
+): Promise<{ ok: boolean; message?: string; name?: string }> {
   await ensureStorage()
 
   const fm: any = (globalThis as any).FileManager
@@ -128,12 +137,10 @@ export async function downloadModule(
 
   const targetDir = info.saveDir ?? (await getModulesDirResolved())
   try {
-    if (options.mode === "direct") {
-      await downloadModuleDirect(fm, info, targetDir)
-    } else {
-      await downloadModuleStream(fm, info, targetDir)
-    }
-    return { ok: true }
+    const name = options.mode === "direct"
+      ? await downloadModuleDirect(fm, info, targetDir)
+      : await downloadModuleStream(fm, info, targetDir)
+    return { ok: true, name }
   } catch (e: any) {
     return { ok: false, message: String(e?.message ?? e) }
   }

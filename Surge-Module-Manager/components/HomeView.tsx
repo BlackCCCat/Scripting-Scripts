@@ -398,7 +398,7 @@ export function HomeView(props: { onActionsChange: TabActionSink; configRevision
     if (!info) return
 
     const current = await loadModules()
-    const nameExists = current.some((m) => m.name === info.name)
+    const nameExists = !!info.name && current.some((m) => m.name === info.name)
     const linkExists = info.link ? current.some((m) => m.link === info.link) : false
     if (nameExists) {
       await Dialog.alert({ message: "模块名称已存在" })
@@ -424,7 +424,7 @@ export function HomeView(props: { onActionsChange: TabActionSink; configRevision
           await Dialog.alert({ message: res.message ?? "下载失败" })
           setStage("添加完成（下载失败）")
         } else {
-          setStage("添加完成（已下载）")
+          setStage(`添加完成（已下载：${res.name ?? info.name}）`)
         }
       }
       await refreshModules()
