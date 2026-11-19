@@ -46,6 +46,7 @@ const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
 
 export function ProviderCatalogView(props: {
   isDemoMode: boolean
+  defaultSynchronizable: boolean
   isHomeScreen?: boolean
   zoomNamespace?: any
   tabSwitchMenu?: VirtualNode
@@ -138,7 +139,7 @@ export function ProviderCatalogView(props: {
                 <AddAccountSheet
                   key={addingProvider.nonce}
                   initialProviderId={addingProvider.provider}
-                  defaultSynchronizable={false}
+                  defaultSynchronizable={props.defaultSynchronizable}
                   startWithPicker={false}
                   embedded={true}
                   zoomNamespace={zoomNamespace}

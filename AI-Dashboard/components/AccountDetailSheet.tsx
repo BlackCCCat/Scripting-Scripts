@@ -309,23 +309,16 @@ export function AccountDetailSheet(props: {
         })
 
         if (targetKey !== account.credentialKeychainKey) {
-          if (activeEnvelope) {
-            saveEnvelopeToKeychain(
-              targetKey,
-              activeEnvelope,
-              account.preferssynchronizableKeychain
-            )
-            removeEnvelopeFromKeychain(
-              account.credentialKeychainKey,
-              account.preferssynchronizableKeychain
-            )
+          if (!activeEnvelope) throw new Error("原登录凭据不可读取，请先重新登录")
+          if (!saveEnvelopeToKeychain(targetKey, activeEnvelope, account.preferssynchronizableKeychain) ||
+            Keychain.get(targetKey, { synchronizable: account.preferssynchronizableKeychain }) !== JSON.stringify(activeEnvelope)) {
+            throw new Error("新账号凭据写入失败，原登录凭据已保留")
           }
         } else if (updatedEnvelope) {
-          saveEnvelopeToKeychain(
-            targetKey,
-            updatedEnvelope,
-            account.preferssynchronizableKeychain
-          )
+          if (!saveEnvelopeToKeychain(targetKey, updatedEnvelope, account.preferssynchronizableKeychain) ||
+            Keychain.get(targetKey, { synchronizable: account.preferssynchronizableKeychain }) !== JSON.stringify(updatedEnvelope)) {
+            throw new Error("登录凭据写入失败，请重试")
+          }
         }
       }
 
@@ -341,8 +334,13 @@ export function AccountDetailSheet(props: {
         widgetOrder: parsedOrder !== undefined && !isNaN(parsedOrder) && parsedOrder > 0 ? parsedOrder : undefined,
       }
 
-      HapticFeedback.notificationSuccess()
       onUpdateAccount(updatedAccount, updatedEnvelope)
+      if (!isDemoMode) {
+        if (targetKey !== account.credentialKeychainKey) {
+          removeEnvelopeFromKeychain(account.credentialKeychainKey, account.preferssynchronizableKeychain)
+        }
+      }
+      HapticFeedback.notificationSuccess()
       onClose()
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "保存修改失败")
@@ -369,11 +367,15 @@ export function AccountDetailSheet(props: {
   const supportsWebViewFlow = Boolean(meta.webSessionProfile)
 
   const handleEnvelopeUpdated = (newEnvelope: ProviderCredentialEnvelope) => {
-    saveEnvelopeToKeychain(
+    if (!saveEnvelopeToKeychain(
       account.credentialKeychainKey,
       newEnvelope,
       account.preferssynchronizableKeychain
-    )
+    ) || Keychain.get(account.credentialKeychainKey, { synchronizable: account.preferssynchronizableKeychain }) !== JSON.stringify(newEnvelope)) {
+      setErrorMessage("登录凭据写入失败，请重试")
+      HapticFeedback.notificationError()
+      return
+    }
     HapticFeedback.notificationSuccess()
     onUpdateAccount(account, newEnvelope)
     onClose()

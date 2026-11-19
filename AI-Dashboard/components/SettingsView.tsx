@@ -6,6 +6,7 @@ import {
   LabeledContent,
   NavigationStack,
   Picker,
+  ProgressView,
   Section,
   Spacer,
   Text,
@@ -29,6 +30,10 @@ export function SettingsView(props: {
   tabSwitchMenu?: VirtualNode
   changelogContent?: string
   onUpdateSettings: (next: DashboardSettings) => void
+  keychainSyncBusy: boolean
+  keychainSyncProgress: { completed: number; total: number; phase: string } | null
+  keychainSyncError: string | null
+  onSetKeychainSync: (enabled: boolean) => Promise<void>
   onResetDemoAccounts: () => void
   onClearSnapshotCache: () => void
   onOpenChangelog?: () => void
@@ -43,6 +48,10 @@ export function SettingsView(props: {
     tabSwitchMenu,
     changelogContent,
     onUpdateSettings,
+    keychainSyncBusy,
+    keychainSyncProgress,
+    keychainSyncError,
+    onSetKeychainSync,
     onResetDemoAccounts,
     onClearSnapshotCache,
     onOpenChangelog,
@@ -205,7 +214,10 @@ export function SettingsView(props: {
           ) : null}
         </Section>
 
-        <Section header={<Text>看板布局与刷新策略</Text>}>
+        <Section
+          header={<Text>看板布局与刷新策略</Text>}
+          footer={<Text>开启后会将现有账号的登录凭据转存到 iCloud 钥匙串，并同步以后新增的账号；关闭后会在本机保留可读取的凭据。</Text>}
+        >
           <Toggle
             title="分组显示"
             value={settings.groupByRouteCategory}
@@ -221,12 +233,33 @@ export function SettingsView(props: {
             }
           />
           <Toggle
-            title="新增账号默认开启 iCloud 钥匙串同步"
+            title="iCloud 钥匙串同步"
             value={settings.prefersICloudKeychain}
-            onChanged={(val) =>
-              onUpdateSettings({ ...settings, prefersICloudKeychain: val })
-            }
+            disabled={keychainSyncBusy}
+            onChanged={(val) => void onSetKeychainSync(val)}
           />
+          {keychainSyncBusy && keychainSyncProgress ? (
+            <VStack alignment="leading" spacing={6}>
+              <ProgressView
+                value={keychainSyncProgress.completed}
+                total={keychainSyncProgress.total}
+                progressViewStyle="linear"
+              />
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                {keychainSyncProgress.phase}
+              </Text>
+            </VStack>
+          ) : null}
+          {keychainSyncError ? (
+            <VStack alignment="leading" spacing={6}>
+              <Text font="caption" foregroundStyle="systemOrange">
+                {keychainSyncError}
+              </Text>
+              {settings.prefersICloudKeychain && !keychainSyncBusy ? (
+                <Button title="重试同步" systemImage="arrow.clockwise" action={() => void onSetKeychainSync(true)} />
+              ) : null}
+            </VStack>
+          ) : null}
         </Section>
 
         <Section

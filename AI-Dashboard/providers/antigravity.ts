@@ -4,7 +4,6 @@ import {
   QuotaPeriod,
   QuotaWindow,
 } from "../models/types"
-import { saveEnvelopeToKeychain } from "../utils/credential_store"
 import { tryExtractIdentityFromJWT } from "../utils/theme"
 import {
   GOOGLE_OAUTH_CLIENT_ID,
@@ -766,9 +765,6 @@ export const queryAntigravityQuota: ProviderQuotaHandler = async (
         if (refreshed.refreshToken) {
           envelope.refreshToken = refreshed.refreshToken
         }
-        const keychainKey =
-          envelope.metadata.keychainKey || `ai_dashboard.cred.${accountID}`
-        saveEnvelopeToKeychain(keychainKey, envelope, false)
         fetchResult = await runFetch(token)
       } else {
         throw new QuotaQueryError(

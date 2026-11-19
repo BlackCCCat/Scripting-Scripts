@@ -15,7 +15,6 @@ import {
   Spacer,
   Text,
   TextField,
-  Toggle,
   VStack,
   useEffect,
   useMemo,
@@ -99,9 +98,6 @@ export function AddAccountSheet(props: {
   )
   const [rawCredential, setRawCredential] = useState<string>("")
   const [showPlainCredential, setShowPlainCredential] = useState<boolean>(false)
-  const [synchronizable, setSynchronizable] = useState<boolean>(
-    defaultSynchronizable
-  )
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isPresentingBuiltInBrowser, setIsPresentingBuiltInBrowser] =
     useState<boolean>(false)
@@ -234,9 +230,9 @@ export function AddAccountSheet(props: {
       existingAccounts,
     })
 
-    const saved = saveEnvelopeToKeychain(keychainKey, envelope, synchronizable)
-    if (!saved) {
-      setErrorMessage("写入系统钥匙串 (Keychain) 失败，请检查权限")
+    const saved = saveEnvelopeToKeychain(keychainKey, envelope, defaultSynchronizable)
+    if (!saved || Keychain.get(keychainKey, { synchronizable: defaultSynchronizable }) !== JSON.stringify(envelope)) {
+      setErrorMessage("写入系统钥匙串 (Keychain) 后无法回读，请检查权限")
       HapticFeedback.notificationError()
       return
     }
@@ -247,7 +243,7 @@ export function AddAccountSheet(props: {
       credentialKeychainKey: keychainKey,
       createdAt: new Date().toISOString(),
       isEnabled: true,
-      preferssynchronizableKeychain: synchronizable,
+      preferssynchronizableKeychain: defaultSynchronizable,
       serverAddress: envelope.metadata.serverAddress,
       region: effectiveRegion,
     }
@@ -1023,14 +1019,6 @@ export function AddAccountSheet(props: {
           </HStack>
         </Section>
 
-        <Section header={<Text>钥匙串同步</Text>}>
-          <Toggle
-            title="允许 iCloud 钥匙串同步"
-            value={synchronizable}
-            onChanged={setSynchronizable}
-          />
-        </Section>
-
         {errorMessage ? (
           <Section header={<Text>提示</Text>}>
             <Text foregroundStyle="systemRed">{errorMessage}</Text>
@@ -1043,6 +1031,7 @@ export function AddAccountSheet(props: {
     return (
       <ProviderPickerSheet
         selectedId={selectedProviderId}
+        defaultSynchronizable={defaultSynchronizable}
         embedded={true}
         zoomNamespace={props.zoomNamespace}
         navigationTransition={props.navigationTransition}
@@ -1057,6 +1046,7 @@ export function AddAccountSheet(props: {
     return (
       <ProviderPickerSheet
         selectedId={hasUserSelectedProvider ? selectedProviderId : null}
+        defaultSynchronizable={defaultSynchronizable}
         embedded={props.embedded}
         zoomNamespace={props.zoomNamespace}
         navigationTransition={props.navigationTransition}
@@ -1076,6 +1066,7 @@ export function AddAccountSheet(props: {
 
 export function ProviderPickerSheet(props: {
   selectedId?: ProviderId | null
+  defaultSynchronizable: boolean
   embedded?: boolean
   zoomNamespace?: any
   navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
@@ -1138,7 +1129,7 @@ export function ProviderPickerSheet(props: {
           <AddAccountSheet
             key={`add-form-${selectedProviderForForm.provider}-${selectedProviderForForm.nonce}`}
             initialProviderId={selectedProviderForForm.provider}
-            defaultSynchronizable={false}
+            defaultSynchronizable={props.defaultSynchronizable}
             startWithPicker={false}
             embedded={embedded}
             isPushed={true}

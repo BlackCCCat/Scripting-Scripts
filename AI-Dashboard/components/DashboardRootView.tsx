@@ -49,6 +49,7 @@ import {
   saveEnvelopeToKeychain,
   saveStoredAccounts,
   saveStoredSnapshots,
+  setDashboardKeychainSyncEnabled,
 } from "../utils/credential_store"
 import {
   createDefaultDemoAccounts,
@@ -229,6 +230,14 @@ export function DashboardRootView(props: {
   const [settings, setSettings] = useState<DashboardSettings>(() =>
     loadDashboardSettings()
   )
+  const [keychainSyncBusy, setKeychainSyncBusy] = useState(false)
+  const [keychainSyncProgress, setKeychainSyncProgress] = useState<{
+    completed: number
+    total: number
+    phase: string
+  } | null>(null)
+  const [keychainSyncError, setKeychainSyncError] = useState<string | null>(null)
+  const keychainSyncBusyRef = useRef(false)
   const [realAccounts, setRealAccounts] = useState<SubscriptionAccount[]>(
     () => {
       const list = loadStoredAccounts()
@@ -443,10 +452,42 @@ export function DashboardRootView(props: {
     reloadAllWidgets()
   }
 
+  const changeKeychainSync = async (enabled: boolean) => {
+    if (keychainSyncBusyRef.current) return
+    keychainSyncBusyRef.current = true
+    setKeychainSyncBusy(true)
+    setKeychainSyncError(null)
+    try {
+      const result = await setDashboardKeychainSyncEnabled(enabled, (completed, total, phase) => {
+        setKeychainSyncProgress({ completed, total, phase })
+      })
+      setRealAccounts(result.accounts)
+      setSettings(result.settings)
+      if (result.cleanupFailed > 0) {
+        setKeychainSyncError(`${result.cleanupFailed} 条旧本机凭据暂未清理；已验证的 iCloud 凭据可以正常使用`)
+      }
+      reloadAllWidgets()
+    } catch (error) {
+      setKeychainSyncError(error instanceof Error ? error.message : "钥匙串同步失败，请重试")
+    } finally {
+      keychainSyncBusyRef.current = false
+      setKeychainSyncBusy(false)
+      setKeychainSyncProgress(null)
+    }
+  }
+
+  const hasReconciledKeychainRef = useRef(false)
+  useEffect(() => {
+    if (hasReconciledKeychainRef.current || !settings.prefersICloudKeychain) return
+    hasReconciledKeychainRef.current = true
+    void changeKeychainSync(true)
+  }, [])
+
   const refreshSingleAccount = async (
     account: SubscriptionAccount,
     forceRealAccount = false
   ) => {
+    if (keychainSyncBusyRef.current) return
     const prevState = accountStates[account.id]
     const prevSnapshot =
       prevState?.type === "loaded"
@@ -538,6 +579,7 @@ export function DashboardRootView(props: {
 
   // 全部账号刷新（支持手动操作与启动时静默无感拉取）
   const refreshAllAccounts = async (options?: { isManual?: boolean }) => {
+    if (keychainSyncBusyRef.current) return
     const isManual = options?.isManual ?? false
     if (isRefreshingAll) return
     const enabledList = currentAccounts.filter((a) => a.isEnabled)
@@ -685,21 +727,23 @@ export function DashboardRootView(props: {
   const hasScriptAutoRefreshedRef = useRef<boolean>(false)
   useEffect(() => {
     if (isHomeScreen) return
+    if (keychainSyncBusyRef.current) return
     if (settings.autoRefreshOnLaunch && !hasScriptAutoRefreshedRef.current) {
       hasScriptAutoRefreshedRef.current = true
       void refreshAllAccounts({ isManual: true })
     }
-  }, [isHomeScreen, settings.autoRefreshOnLaunch, settings.isDemoMode])
+  }, [isHomeScreen, settings.autoRefreshOnLaunch, settings.isDemoMode, keychainSyncBusy])
 
   // 首页 UI 模式：常驻启动首次挂载时无条件自动刷新已添加供应商（后台静默拉取）
   const hasHomeAutoRefreshedRef = useRef<boolean>(false)
   useEffect(() => {
     if (!isHomeScreen) return
+    if (keychainSyncBusyRef.current) return
     if (!hasHomeAutoRefreshedRef.current) {
       hasHomeAutoRefreshedRef.current = true
       void refreshAllAccounts({ isManual: false })
     }
-  }, [isHomeScreen, settings.isDemoMode])
+  }, [isHomeScreen, settings.isDemoMode, keychainSyncBusy])
 
   // 首页 UI 模式：监听从其他系统 Tab 切回 Home Tab 事件，自动静默刷新一次额度
   useEffect(() => {
@@ -969,8 +1013,8 @@ export function DashboardRootView(props: {
               const next = realAccounts.map((a) =>
                 a.id === updated.id ? updated : a
               )
+              if (!saveStoredAccounts(next)) throw new Error("账号信息保存失败，原登录凭据已保留")
               setRealAccounts(next)
-              saveStoredAccounts(next)
               refreshSingleAccount(updated)
             }
           }}
@@ -1130,8 +1174,8 @@ export function DashboardRootView(props: {
                         const next = realAccounts.map((a) =>
                           a.id === updated.id ? updated : a
                         )
+                        if (!saveStoredAccounts(next)) throw new Error("账号信息保存失败，原登录凭据已保留")
                         setRealAccounts(next)
-                        saveStoredAccounts(next)
                         refreshSingleAccount(updated)
                       }
                     }}
@@ -1282,6 +1326,7 @@ export function DashboardRootView(props: {
       return (
         <ProviderCatalogView
           isDemoMode={settings.isDemoMode}
+          defaultSynchronizable={settings.prefersICloudKeychain}
           isHomeScreen={true}
           zoomNamespace={homeZoomNamespace}
           tabSwitchMenu={renderTabSwitchMenu()}
@@ -1301,6 +1346,10 @@ export function DashboardRootView(props: {
         tabSwitchMenu={renderTabSwitchMenu()}
         changelogContent={releaseNotes.rawContent}
         onUpdateSettings={updateSettings}
+        keychainSyncBusy={keychainSyncBusy}
+        keychainSyncProgress={keychainSyncProgress}
+        keychainSyncError={keychainSyncError}
+        onSetKeychainSync={changeKeychainSync}
         onResetDemoAccounts={() => {
           const defaults = createDefaultDemoAccounts()
           setDemoAccounts(defaults)
@@ -1367,6 +1416,7 @@ export function DashboardRootView(props: {
       <Tab title="供应商目录" systemImage="square.grid.2x2.fill" value={1}>
         <ProviderCatalogView
           isDemoMode={settings.isDemoMode}
+          defaultSynchronizable={settings.prefersICloudKeychain}
           onQuickAddAccount={handleQuickAddFromCatalog}
           onDismiss={() => dismiss()}
         />
@@ -1379,6 +1429,10 @@ export function DashboardRootView(props: {
           demoAccountCount={demoAccounts.length}
           changelogContent={releaseNotes.rawContent}
           onUpdateSettings={updateSettings}
+          keychainSyncBusy={keychainSyncBusy}
+          keychainSyncProgress={keychainSyncProgress}
+          keychainSyncError={keychainSyncError}
+          onSetKeychainSync={changeKeychainSync}
           onResetDemoAccounts={() => {
             const defaults = createDefaultDemoAccounts()
             setDemoAccounts(defaults)

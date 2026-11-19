@@ -5,11 +5,12 @@ import {
   QuotaSnapshot,
   SubscriptionAccount,
 } from "../models/types"
-import { getProviderMeta } from "./providers_catalog"
+import { getProviderMeta, PROVIDERS_CATALOG } from "./providers_catalog"
 
 const STORAGE_ACCOUNTS_KEY = "ai_dashboard.accounts.v1"
 const STORAGE_SNAPSHOTS_KEY = "ai_dashboard.snapshots.v1"
 const STORAGE_SETTINGS_KEY = "ai_dashboard.settings.v1"
+const CLOUD_ACCOUNTS_KEY = "ai_dashboard.sync.accounts.v1"
 
 export const DEFAULT_SETTINGS: DashboardSettings = {
   isDemoMode: true,
@@ -281,7 +282,10 @@ export function saveEnvelopeToKeychain(
   synchronizable: boolean
 ): boolean {
   const payload = JSON.stringify(envelope)
-  return Keychain.set(keychainKey, payload, { synchronizable })
+  return Keychain.set(keychainKey, payload, {
+    synchronizable,
+    accessibility: synchronizable ? "first_unlock" : "first_unlock_this_device",
+  })
 }
 
 export function loadEnvelopeFromKeychain(
@@ -450,8 +454,18 @@ export function loadStoredAccounts(): SubscriptionAccount[] {
   return list
 }
 
-export function saveStoredAccounts(accounts: SubscriptionAccount[]): void {
-  Storage.set(STORAGE_ACCOUNTS_KEY, accounts)
+export function saveStoredAccounts(accounts: SubscriptionAccount[]): boolean {
+  const previous = loadStoredAccounts()
+  if (!Storage.set(STORAGE_ACCOUNTS_KEY, accounts)) return false
+  if (loadDashboardSettings().prefersICloudKeychain) {
+    try {
+      updateCloudAccountIndex(previous, accounts)
+    } catch {
+      // 本地账号已保存；下次打开设置或脚本时会再次同步索引。
+      console.warn("iCloud 账号索引暂未更新")
+    }
+  }
+  return true
 }
 
 /**
@@ -548,4 +562,259 @@ export function loadDashboardSettings(): DashboardSettings {
 
 export function saveDashboardSettings(settings: DashboardSettings): void {
   Storage.set(STORAGE_SETTINGS_KEY, settings)
+}
+
+const knownProviderIds = new Set<ProviderId>(PROVIDERS_CATALOG.map((item) => item.id))
+
+function cloudAccountRecord(account: SubscriptionAccount): SubscriptionAccount {
+  return {
+    id: account.id,
+    provider: account.provider,
+    displayName: account.displayName,
+    credentialKeychainKey: account.credentialKeychainKey,
+    createdAt: account.createdAt,
+    isEnabled: account.isEnabled,
+    preferssynchronizableKeychain: true,
+    serverAddress: account.serverAddress,
+    region: account.region,
+    widgetOrder: account.widgetOrder,
+  }
+}
+
+function readCloudAccountIndex(): SubscriptionAccount[] {
+  const raw = Keychain.get(CLOUD_ACCOUNTS_KEY, { synchronizable: true })
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) throw new Error("invalid index")
+    const valid = parsed.filter((item): item is SubscriptionAccount => {
+      if (!item || typeof item !== "object") return false
+      const value = item as Partial<SubscriptionAccount>
+      return typeof value.id === "string" && value.id.length > 0 &&
+        typeof value.provider === "string" && knownProviderIds.has(value.provider as ProviderId) &&
+        typeof value.displayName === "string" &&
+        typeof value.credentialKeychainKey === "string" &&
+        value.credentialKeychainKey.startsWith("ai_dashboard.") &&
+        typeof value.createdAt === "string" &&
+        typeof value.isEnabled === "boolean"
+    })
+    if (valid.length !== parsed.length) throw new Error("invalid index entry")
+    return valid.map(cloudAccountRecord)
+  } catch {
+    throw new Error("iCloud 账号索引无法读取，请稍后重试")
+  }
+}
+
+function credentialRawForAccount(account: SubscriptionAccount): string | null {
+  const candidates = [account.preferssynchronizableKeychain, !account.preferssynchronizableKeychain]
+    .map((synchronizable) => Keychain.get(account.credentialKeychainKey, { synchronizable }))
+    .filter((raw): raw is string => typeof raw === "string")
+  let best: { raw: string; expiresAt: number } | null = null
+  for (const raw of candidates) {
+    try {
+      const envelope = JSON.parse(raw) as ProviderCredentialEnvelope
+      if (envelope.provider !== account.provider || !envelope.accessToken?.trim()) continue
+      const expiresAt = envelope.expiresAt ? Date.parse(envelope.expiresAt) : 0
+      const score = Number.isFinite(expiresAt) ? expiresAt : 0
+      if (!best || score > best.expiresAt) best = { raw, expiresAt: score }
+    } catch {
+      // 跳过损坏的凭据副本。
+    }
+  }
+  return best?.raw ?? null
+}
+
+function credentialExpiry(raw: string | null): number {
+  if (!raw) return 0
+  try {
+    const expiresAt = (JSON.parse(raw) as ProviderCredentialEnvelope).expiresAt
+    const parsed = expiresAt ? Date.parse(expiresAt) : 0
+    return Number.isFinite(parsed) ? parsed : 0
+  } catch {
+    return 0
+  }
+}
+
+function setKeychainChecked(key: string, raw: string, synchronizable: boolean): void {
+  const previous = Keychain.get(key, { synchronizable })
+  if (!Keychain.set(key, raw, {
+    synchronizable,
+    accessibility: synchronizable ? "first_unlock" : "first_unlock_this_device",
+  }) || Keychain.get(key, { synchronizable }) !== raw) {
+    if (previous === null) Keychain.remove(key, { synchronizable })
+    else Keychain.set(key, previous, {
+      synchronizable,
+      accessibility: synchronizable ? "first_unlock" : "first_unlock_this_device",
+    })
+    throw new Error("钥匙串写入后无法回读")
+  }
+}
+
+function updateCloudAccountIndex(
+  previousAccounts: SubscriptionAccount[],
+  accounts: SubscriptionAccount[]
+): void {
+  const existing = readCloudAccountIndex()
+  const currentIDs = new Set(accounts.map((account) => account.id))
+  const removedIDs = new Set(previousAccounts.filter((account) => !currentIDs.has(account.id)).map((account) => account.id))
+  const synced = accounts.filter((account) =>
+    account.preferssynchronizableKeychain &&
+    credentialRawForAccount(account) !== null &&
+    Keychain.get(account.credentialKeychainKey, { synchronizable: true }) !== null
+  ).map(cloudAccountRecord)
+  const verifiedIDs = new Set(synced.map((account) => account.id))
+  const retained = existing.filter((account) => !verifiedIDs.has(account.id) && !removedIDs.has(account.id))
+  const next = [...retained, ...synced]
+  const raw = JSON.stringify(next)
+  if (Keychain.get(CLOUD_ACCOUNTS_KEY, { synchronizable: true }) !== raw) {
+    setKeychainChecked(CLOUD_ACCOUNTS_KEY, raw, true)
+  }
+}
+
+export type DashboardKeychainSyncResult = {
+  accounts: SubscriptionAccount[]
+  settings: DashboardSettings
+  moved: number
+  restored: number
+  cleanupFailed: number
+}
+
+/** 先写入并回读所有目标凭据，再提交账号及开关；失败时保留原位置。 */
+export async function setDashboardKeychainSyncEnabled(
+  enabled: boolean,
+  onProgress?: (completed: number, total: number, phase: string) => void
+): Promise<DashboardKeychainSyncResult> {
+  const originalAccounts = loadStoredAccounts()
+  const originalSettings = loadDashboardSettings()
+  const cloudAccounts = enabled ? readCloudAccountIndex() : []
+  const cloudByID = new Map(cloudAccounts.map((account) => [account.id, account]))
+  const knownIDs = new Set(originalAccounts.map((account) => account.id))
+  const restoredAccounts = cloudAccounts.filter((account) => {
+    if (knownIDs.has(account.id) || credentialRawForAccount(account) === null) return false
+    knownIDs.add(account.id)
+    return true
+  })
+  const sourceAccounts = [...originalAccounts, ...restoredAccounts]
+  const total = sourceAccounts.length + 2
+  let completed = 0
+  let moved = 0
+  const written: { key: string; synchronizable: boolean; previous: string | null }[] = []
+  const nextAccounts: SubscriptionAccount[] = []
+  let accountsSaveAttempted = false
+  let settingsSaveAttempted = false
+  const progress = (phase: string) => onProgress?.(completed, total, phase)
+  progress(enabled ? "正在检查现有登录凭据" : "正在保留本机登录凭据")
+
+  const write = (key: string, raw: string, synchronizable: boolean) => {
+    const previous = Keychain.get(key, { synchronizable })
+    if (previous === raw) return
+    if (!Keychain.set(key, raw, {
+      synchronizable,
+      accessibility: synchronizable ? "first_unlock" : "first_unlock_this_device",
+    })) throw new Error("钥匙串写入失败")
+    written.push({ key, synchronizable, previous })
+    if (Keychain.get(key, { synchronizable }) !== raw) {
+      throw new Error("钥匙串写入后无法回读")
+    }
+  }
+
+  try {
+    for (const account of sourceAccounts) {
+      const localRaw = credentialRawForAccount(account)
+      const remoteAccount = enabled ? cloudByID.get(account.id) : undefined
+      const remoteRaw = remoteAccount ? credentialRawForAccount(remoteAccount) : null
+      const raw = credentialExpiry(remoteRaw) > credentialExpiry(localRaw)
+        ? remoteRaw
+        : localRaw ?? remoteRaw
+      if (!raw) throw new Error(`账号「${account.displayName}」的登录凭据不可读取，请先重新登录`)
+      const alreadyInTarget = account.preferssynchronizableKeychain === enabled &&
+        Keychain.get(account.credentialKeychainKey, { synchronizable: enabled }) !== null
+      const targetKey = alreadyInTarget
+        ? account.credentialKeychainKey
+        : enabled
+          ? `ai_dashboard.sync.cred.${account.id}`
+          : `ai_dashboard.cred.${account.provider}.${account.id}`
+      try {
+        write(targetKey, raw, enabled)
+      } catch {
+        throw new Error(`账号「${account.displayName}」的${enabled ? "iCloud" : "本机"}凭据写入失败`)
+      }
+      if (!alreadyInTarget) moved++
+      nextAccounts.push({
+        ...account,
+        credentialKeychainKey: targetKey,
+        preferssynchronizableKeychain: enabled,
+      })
+      completed++
+      progress(`已处理 ${account.displayName}`)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+
+    if (JSON.stringify(loadStoredAccounts()) !== JSON.stringify(originalAccounts)) {
+      throw new Error("同步期间账号列表发生变化，请重试")
+    }
+    if (JSON.stringify(loadDashboardSettings()) !== JSON.stringify(originalSettings)) {
+      throw new Error("同步期间设置发生变化，请重试")
+    }
+    if (enabled && (nextAccounts.length > 0 || cloudAccounts.length > 0)) {
+      const existing = cloudAccounts.filter((account) => !knownIDs.has(account.id))
+      write(CLOUD_ACCOUNTS_KEY, JSON.stringify([...existing, ...nextAccounts.map(cloudAccountRecord)]), true)
+    }
+    completed++
+    progress("已检查 iCloud 账号索引")
+
+    const nextSettings = { ...loadDashboardSettings(), prefersICloudKeychain: enabled }
+    accountsSaveAttempted = true
+    if (!Storage.set(STORAGE_ACCOUNTS_KEY, nextAccounts)) throw new Error("账号列表保存失败")
+    settingsSaveAttempted = true
+    if (!Storage.set(STORAGE_SETTINGS_KEY, nextSettings)) throw new Error("iCloud 同步设置保存失败")
+    completed++
+    progress("同步设置已保存")
+  } catch (error) {
+    let rollbackFailed = false
+    if (accountsSaveAttempted && !Storage.set(STORAGE_ACCOUNTS_KEY, originalAccounts)) rollbackFailed = true
+    if (settingsSaveAttempted && !Storage.set(STORAGE_SETTINGS_KEY, originalSettings)) rollbackFailed = true
+    for (const item of written.reverse()) {
+      try {
+        if (item.previous === null) {
+          if (!Keychain.remove(item.key, { synchronizable: item.synchronizable }) &&
+            Keychain.get(item.key, { synchronizable: item.synchronizable }) !== null) rollbackFailed = true
+        } else if (!Keychain.set(item.key, item.previous, {
+          synchronizable: item.synchronizable,
+          accessibility: item.synchronizable ? "first_unlock" : "first_unlock_this_device",
+        }) || Keychain.get(item.key, { synchronizable: item.synchronizable }) !== item.previous) rollbackFailed = true
+      } catch {
+        rollbackFailed = true
+      }
+    }
+    if (rollbackFailed) throw new Error("iCloud 同步失败，部分回滚未完成；原登录凭据已保留，请勿删除账号并重试")
+    throw error
+  }
+
+  let cleanupFailed = 0
+  if (enabled) {
+    for (const account of sourceAccounts) {
+      try {
+        const target = nextAccounts.find((item) => item.id === account.id)!
+        if (Keychain.get(target.credentialKeychainKey, { synchronizable: true }) === null) {
+          cleanupFailed++
+          continue
+        }
+        if (Keychain.get(account.credentialKeychainKey, { synchronizable: false }) !== null &&
+          !Keychain.remove(account.credentialKeychainKey, { synchronizable: false })) cleanupFailed++
+        if (account.credentialKeychainKey !== target.credentialKeychainKey &&
+          Keychain.get(account.credentialKeychainKey, { synchronizable: true }) !== null &&
+          !Keychain.remove(account.credentialKeychainKey, { synchronizable: true })) cleanupFailed++
+      } catch {
+        cleanupFailed++
+      }
+    }
+  }
+  return {
+    accounts: nextAccounts,
+    settings: { ...originalSettings, prefersICloudKeychain: enabled },
+    moved,
+    restored: restoredAccounts.length,
+    cleanupFailed,
+  }
 }

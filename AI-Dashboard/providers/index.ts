@@ -212,7 +212,13 @@ export async function queryProviderQuota(
   }
 
   const collectedAt = new Date().toISOString()
+  const tokenBeforeQuery = envelope.accessToken
+  const refreshTokenBeforeQuery = envelope.refreshToken
   const snapshot = await handler(accountID, envelope, collectedAt)
+  if (envelope.provider === "antigravity" &&
+    (envelope.accessToken !== tokenBeforeQuery || envelope.refreshToken !== refreshTokenBeforeQuery)) {
+    updatedCredential = envelope
+  }
   snapshot.sourceCredentialFingerprint =
     envelope.metadata.sourceCredentialFingerprint ||
     computeCredentialFingerprint(envelope)
