@@ -40,9 +40,11 @@ import {
 } from "../services/provider_auth"
 import {
   buildCredentialEnvelope,
+  computeCredentialFingerprint,
   generateAccountKeychainKey,
   loadEnvelopeFromKeychain,
   loadStoredAccounts,
+  normalizeGatewayServerAddress,
   removeEnvelopeFromKeychain,
   saveEnvelopeToKeychain,
 } from "../utils/credential_store"
@@ -292,6 +294,17 @@ export function AccountDetailSheet(props: {
           serverAddress: meta.requiresGatewayAddress ? serverAddress : undefined,
           region: existingEnvelope?.metadata.region,
         })
+      } else if (!isDemoMode && meta.requiresGatewayAddress) {
+        const nextAddress = normalizeGatewayServerAddress(serverAddress)
+        if (nextAddress !== existingEnvelope?.metadata.serverAddress) {
+          if (!existingEnvelope) throw new Error("原登录凭据不可读取，请先重新登录")
+          updatedEnvelope = {
+            ...existingEnvelope,
+            metadata: { ...existingEnvelope.metadata, serverAddress: nextAddress },
+          }
+          updatedEnvelope.metadata.sourceCredentialFingerprint =
+            computeCredentialFingerprint(updatedEnvelope)
+        }
       }
 
       const existingAccounts = loadStoredAccounts()
@@ -329,8 +342,10 @@ export function AccountDetailSheet(props: {
         credentialKeychainKey: targetKey,
         isEnabled,
         serverAddress: meta.requiresGatewayAddress
-          ? serverAddress.trim()
-          : account.serverAddress,
+          ? activeEnvelope?.metadata.serverAddress
+          : account.provider === "openAIAPI" || account.provider === "anthropic"
+            ? undefined
+            : account.serverAddress,
         widgetOrder: parsedOrder !== undefined && !isNaN(parsedOrder) && parsedOrder > 0 ? parsedOrder : undefined,
       }
 

@@ -127,33 +127,38 @@ export function buildCredentialEnvelope(params: {
 
   // 若用户直接粘贴了已编码的 ProviderCredentialEnvelope JSON，则直接解包校验
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    let parsed: Partial<ProviderCredentialEnvelope> | null = null
     try {
-      const parsed = JSON.parse(trimmed) as Partial<ProviderCredentialEnvelope>
-      if (parsed && parsed.provider === provider && typeof parsed.accessToken === "string" && parsed.accessToken.trim()) {
-        const envelope: ProviderCredentialEnvelope = {
-          provider,
-          kind: parsed.kind ?? meta.credentialKind,
-          accessToken: parsed.accessToken.trim(),
-          refreshToken: parsed.refreshToken,
-          expiresAt: parsed.expiresAt,
-          accountID: parsed.accountID,
-          metadata: { ...(parsed.metadata ?? {}), ...(extraMetadata ?? {}) },
-        }
-        if (serverAddress) {
-          envelope.metadata.serverAddress = normalizeGatewayServerAddress(serverAddress)
-        }
-        if (region) {
-          envelope.metadata.region = region
-        }
-        envelope.metadata.sourceCredentialFingerprint = computeCredentialFingerprint(envelope)
-        return envelope
-      }
+      parsed = JSON.parse(trimmed) as Partial<ProviderCredentialEnvelope>
     } catch {
       // 非 Envelope JSON，继续走下方专项封装
+    }
+    if (parsed && parsed.provider === provider && typeof parsed.accessToken === "string" && parsed.accessToken.trim()) {
+      const envelope: ProviderCredentialEnvelope = {
+        provider,
+        kind: parsed.kind ?? meta.credentialKind,
+        accessToken: parsed.accessToken.trim(),
+        refreshToken: parsed.refreshToken,
+        expiresAt: parsed.expiresAt,
+        accountID: parsed.accountID,
+        metadata: { ...(parsed.metadata ?? {}), ...(extraMetadata ?? {}) },
+      }
+      if (serverAddress) {
+        envelope.metadata.serverAddress = normalizeGatewayServerAddress(serverAddress)
+      }
+      if (provider === "openAIAPI" || provider === "anthropic") {
+        delete envelope.metadata.serverAddress
+      }
+      if (region) envelope.metadata.region = region
+      envelope.metadata.sourceCredentialFingerprint = computeCredentialFingerprint(envelope)
+      return envelope
     }
   }
 
   const metadata: Record<string, string> = { ...(extraMetadata ?? {}) }
+  if (provider === "openAIAPI" || provider === "anthropic") {
+    delete metadata.serverAddress
+  }
 
   if (meta.requiresGatewayAddress) {
     metadata.serverAddress = normalizeGatewayServerAddress(serverAddress ?? "")

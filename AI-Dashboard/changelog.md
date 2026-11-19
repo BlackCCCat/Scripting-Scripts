@@ -1,3 +1,7 @@
+## v2.2.6
+- improve:个别供应商icon矢量化处理
+- new:增加Anthropic供应商
+
 ## v2.2.5
 - improve:iCloud同步功能调整，现在iCloud同步开关开启后，自动将已有账号信息直接同步到iCloud钥匙串，而不是只能将新增账号同步至iCloud钥匙串
 - fix:Antigravity 刷新令牌时绕过同步设置的问题

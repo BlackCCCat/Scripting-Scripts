@@ -111,6 +111,7 @@ export function formatWindowTitle(window: QuotaWindow): string {
 }
 
 export function formatPeriodBadgeText(window: QuotaWindow): string {
+  if (window.spentAmount !== undefined) return "月度花费"
   if (window.wallet) {
     return window.wallet.isMonetary ? "资金钱包" : "点数账户"
   }
@@ -179,6 +180,14 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
   usedPercent: number | null
   remainingPercent: number | null
 } {
+  if (window.spentAmount !== undefined) {
+    return {
+      primaryRemainingText: `已花费 ${formatMoney(window.spentAmount, window.unit ?? "USD")}`,
+      secondaryUsedText: "官方未提供剩余额度",
+      usedPercent: null,
+      remainingPercent: null,
+    }
+  }
   if (window.isUnlimited) {
     return {
       primaryRemainingText: "不限次数 / 不限额",

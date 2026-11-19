@@ -231,7 +231,7 @@ export async function refreshAccountById(accountId: string): Promise<{
   }
 
   try {
-    const result = await queryProviderQuota(account.id, envelope)
+    const result = await queryProviderQuota(account, envelope)
     if (result.updatedCredential) {
       saveEnvelopeToKeychain(
         account.credentialKeychainKey,
@@ -314,7 +314,7 @@ export async function refreshAllAccountsFromBackground(): Promise<{
         }
 
         try {
-          const result = await queryProviderQuota(acc.id, envelope)
+          const result = await queryProviderQuota(acc, envelope)
           if (result.updatedCredential) {
             saveEnvelopeToKeychain(
               acc.credentialKeychainKey,

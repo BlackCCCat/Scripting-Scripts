@@ -1113,7 +1113,7 @@ export function ProviderPickerSheet(props: {
       searchable={{
         value: searchText,
         onChanged: setSearchText,
-        prompt: "搜索 78 家 AI 供应商名称或域名",
+        prompt: "搜索 79 家 AI 供应商名称或域名",
       }}
       toolbar={{
         cancellationAction: embedded ? undefined : (
@@ -1162,7 +1162,7 @@ export function ProviderPickerSheet(props: {
             setRouteFilter(v as ProviderRouteCategory | "all")
           }
         >
-          <Text tag="all">全部路径 (78)</Text>
+          <Text tag="all">全部路径 (79)</Text>
           <Text tag="direct_api">直连 API 密钥 (39)</Text>
           <Text tag="gateway">自建/聚合网关 (5)</Text>
           <Text tag="device_oauth">OAuth 设备码与轮询 (7)</Text>

@@ -3,6 +3,7 @@ import {
   ProviderId,
   ProviderQueryResult,
   ProviderQuotaHandler,
+  SubscriptionAccount,
 } from "../models/types"
 import { refreshCredentialIfNeeded } from "../services/provider_auth"
 import { computeCredentialFingerprint } from "../utils/credential_store"
@@ -13,6 +14,7 @@ import { queryAixyQuota } from "./aixy"
 import { queryAlibabaCodingPlanQuota } from "./alibabaCodingPlan"
 import { queryAlibabaTokenPlanQuota } from "./alibabaTokenPlan"
 import { queryAmpQuota } from "./amp"
+import { queryAnthropicQuota } from "./anthropic"
 import { queryAntigravityQuota } from "./antigravity"
 import { queryAtlasCloudQuota } from "./atlasCloud"
 import { queryAugmentCodeQuota } from "./augmentCode"
@@ -97,6 +99,7 @@ export const PROVIDER_HANDLERS: Record<ProviderId, ProviderQuotaHandler> = {
   alibabaCodingPlan: queryAlibabaCodingPlanQuota,
   alibabaTokenPlan: queryAlibabaTokenPlanQuota,
   amp: queryAmpQuota,
+  anthropic: queryAnthropicQuota,
   antigravity: queryAntigravityQuota,
   atlasCloud: queryAtlasCloudQuota,
   augmentCode: queryAugmentCodeQuota,
@@ -190,11 +193,24 @@ export const PROVIDER_HANDLERS: Record<ProviderId, ProviderQuotaHandler> = {
  * 统一入口：根据供应商 ID 自动分派到 providers/ 目录下对应的独立平台脚本
  */
 export async function queryProviderQuota(
-  accountID: string,
+  account: SubscriptionAccount,
   initialEnvelope: ProviderCredentialEnvelope
 ): Promise<ProviderQueryResult> {
+  if (account.provider !== initialEnvelope.provider) {
+    throw new QuotaQueryError("invalidCredential", "账号与钥匙串凭据的供应商不一致")
+  }
   let envelope = initialEnvelope
   let updatedCredential: ProviderCredentialEnvelope | undefined
+  if (
+    (account.provider === "openAIAPI" || account.provider === "anthropic") &&
+    envelope.metadata.serverAddress
+  ) {
+    const metadata = { ...envelope.metadata }
+    delete metadata.serverAddress
+    envelope = { ...envelope, metadata }
+    envelope.metadata.sourceCredentialFingerprint = computeCredentialFingerprint(envelope)
+    updatedCredential = envelope
+  }
 
   if (!envelope.accessToken.trim()) {
     throw new QuotaQueryError("missingCredential")
@@ -214,7 +230,7 @@ export async function queryProviderQuota(
   const collectedAt = new Date().toISOString()
   const tokenBeforeQuery = envelope.accessToken
   const refreshTokenBeforeQuery = envelope.refreshToken
-  const snapshot = await handler(accountID, envelope, collectedAt)
+  const snapshot = await handler(account.id, envelope, collectedAt)
   if (envelope.provider === "antigravity" &&
     (envelope.accessToken !== tokenBeforeQuery || envelope.refreshToken !== refreshTokenBeforeQuery)) {
     updatedCredential = envelope

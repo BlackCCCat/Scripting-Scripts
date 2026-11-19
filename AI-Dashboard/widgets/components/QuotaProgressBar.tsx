@@ -99,7 +99,7 @@ export function QuotaProgressBar(props: {
           <Text
             font={valueFontSize}
             fontWeight="heavy"
-            foregroundStyle="systemGreen"
+            foregroundStyle={item.isSpendOnly ? "systemBlue" : "systemGreen"}
             monospaced={true}
             lineLimit={1}
           >
@@ -125,7 +125,7 @@ export function QuotaProgressBar(props: {
         <Text
           font={valueFontSize}
           fontWeight="heavy"
-          foregroundStyle="systemGreen"
+          foregroundStyle={item.isSpendOnly ? "systemBlue" : "systemGreen"}
           monospaced={true}
           lineLimit={1}
         >

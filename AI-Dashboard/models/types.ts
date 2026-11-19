@@ -4,6 +4,7 @@ export type ProviderId =
   | "alibabaCodingPlan"
   | "alibabaTokenPlan"
   | "amp"
+  | "anthropic"
   | "antigravity"
   | "atlasCloud"
   | "augmentCode"
@@ -149,6 +150,7 @@ export interface QuotaWindow {
   overagePermitted?: boolean
   overageCount?: number
   exactCounts?: DecimalQuotaCounts
+  spentAmount?: number // 周期内已花费金额，不能推断为剩余额度
   resetSemantics?: QuotaResetSemantics
 }
 

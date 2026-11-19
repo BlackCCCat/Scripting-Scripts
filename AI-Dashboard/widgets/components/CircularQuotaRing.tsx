@@ -61,7 +61,7 @@ export function CircularQuotaRing(props: {
           padding={{ horizontal: 5, vertical: 3 }}
           background={<Circle fill="quaternarySystemFill" />}
         >
-          <Text font={size >= 48 ? 12 : 8} fontWeight="bold" foregroundStyle="systemGreen" monospaced={true}>
+          <Text font={size >= 48 ? 12 : 8} fontWeight="bold" foregroundStyle={item.isSpendOnly ? "systemBlue" : "systemGreen"} monospaced={true}>
             {bal}
           </Text>
         </HStack>

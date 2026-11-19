@@ -13,6 +13,7 @@ import {
   generateDemoSnapshot,
 } from "../utils/demo_mode"
 import { getProviderMeta } from "../utils/providers_catalog"
+import { formatMoney } from "../utils/quota_formatting"
 import { CODEX_RESET_CACHE_KEY } from "../services/codex_reset_feed"
 import { ACTIVE_WALLET_KEY } from "../services/app_intents"
 import {
@@ -151,6 +152,7 @@ function buildWidgetAccountData(
 
     const isBalanceOnly =
       Boolean(w.wallet) ||
+      w.spentAmount !== undefined ||
       w.unit === "Credits" ||
       (w.usedPercentage === undefined &&
         (w.remainingCount !== undefined || w.wallet?.total !== undefined))
@@ -158,6 +160,8 @@ function buildWidgetAccountData(
     let balanceText: string | undefined = undefined
     if (w.wallet) {
       balanceText = `${w.wallet.total} ${w.wallet.currency}`
+    } else if (w.spentAmount !== undefined) {
+      balanceText = formatMoney(w.spentAmount, w.unit ?? "USD")
     } else if (w.remainingCount !== undefined) {
       balanceText = `${w.remainingCount} ${w.unit || ""}`.trim()
     }
@@ -186,6 +190,7 @@ function buildWidgetAccountData(
       resetsAt: w.resetsAt,
       resetCountdownText: formatWidgetCountdown(w.resetsAt),
       isBalanceOnly,
+      isSpendOnly: w.spentAmount !== undefined,
       balanceText,
     }
   })

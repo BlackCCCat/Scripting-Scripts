@@ -19,6 +19,7 @@ export type WidgetQuotaItem = {
   resetsAt?: string // ISO 8601
   resetCountdownText?: string
   isBalanceOnly?: boolean
+  isSpendOnly?: boolean
   balanceText?: string
 }
 

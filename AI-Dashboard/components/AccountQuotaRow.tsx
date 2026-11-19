@@ -617,7 +617,7 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
           font="caption"
           fontWeight="semibold"
           monospacedDigit={true}
-          foregroundStyle={window.isUnlimited ? "systemGreen" : statusColor}
+          foregroundStyle={window.spentAmount !== undefined ? "systemBlue" : window.isUnlimited ? "systemGreen" : statusColor}
         >
           {breakdown.primaryRemainingText}
         </Text>

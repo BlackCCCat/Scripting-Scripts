@@ -535,7 +535,7 @@ export function DashboardRootView(props: {
     }
 
     try {
-      const result = await queryProviderQuota(account.id, envelope)
+      const result = await queryProviderQuota(account, envelope)
       if (result.updatedCredential) {
         saveEnvelopeToKeychain(
           account.credentialKeychainKey,
@@ -660,7 +660,7 @@ export function DashboardRootView(props: {
           }
 
           try {
-            const result = await queryProviderQuota(acc.id, envelope)
+            const result = await queryProviderQuota(acc, envelope)
             if (result.updatedCredential) {
               saveEnvelopeToKeychain(
                 acc.credentialKeychainKey,
@@ -1232,7 +1232,7 @@ export function DashboardRootView(props: {
               description={
                 searchQuery.trim()
                   ? "请尝试更换搜索关键词，或在「供应商目录」中添加新平台"
-                  : "支持 DeepSeek、OpenAI Codex、Claude、WorkBuddy、火山方舟、MiniMax、New API 等 78 家 AI 平台"
+                  : "支持 DeepSeek、OpenAI Codex、Claude、Anthropic、WorkBuddy、火山方舟、MiniMax、New API 等 79 家 AI 平台"
               }
             />
             <Button
