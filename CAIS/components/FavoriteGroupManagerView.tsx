@@ -10,7 +10,9 @@ import {
   Spacer,
   Text,
   VStack,
+  useEffect,
   useObservable,
+  useRef,
   useState,
 } from "scripting"
 
@@ -34,11 +36,33 @@ export function FavoriteGroupManagerView(props: {
 }) {
   const dismiss = Navigation.useDismiss()
   const editMode = useObservable(() => EditModeAPI.inactive())
-  const [groups, setGroups] = useState(props.initialGroups)
+  const groups = useObservable(props.initialGroups)
+  const updatingGroups = useRef(false)
   const [counts, setCounts] = useState(props.initialCounts)
   const [editingGroup, setEditingGroup] = useState<FavoriteGroup | null>(null)
   const [editorPresented, setEditorPresented] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  function setGroups(next: FavoriteGroup[]) {
+    updatingGroups.current = true
+    try {
+      groups.setValue(next)
+    } finally {
+      updatingGroups.current = false
+    }
+  }
+
+  useEffect(() => {
+    function onGroupsMoved(next: FavoriteGroup[], previous: FavoriteGroup[]) {
+      if (updatingGroups.current || next.length !== previous.length || next.every((group, index) => group.id === previous[index]?.id)) return
+      void props.onReorderGroups(next).catch(async (error: any) => {
+        if (groups.value === next) setGroups(previous)
+        await Dialog.alert({ message: String(error?.message ?? error ?? "分组排序失败") })
+      })
+    }
+    groups.subscribe(onGroupsMoved)
+    return () => groups.unsubscribe(onGroupsMoved)
+  }, [groups, props.onReorderGroups])
 
   function edit(group: FavoriteGroup) {
     setEditingGroup(group)
@@ -61,9 +85,9 @@ export function FavoriteGroupManagerView(props: {
       const nextGroup = editingGroup
         ? await props.onSaveGroup(editingGroup, draft)
         : await props.onCreateGroup(draft)
-      setGroups((current) => editingGroup
-        ? current.map((item) => item.id === editingGroup.id ? nextGroup : item)
-        : [...current, nextGroup]
+      setGroups(editingGroup
+        ? groups.value.map((item) => item.id === editingGroup.id ? nextGroup : item)
+        : [...groups.value, nextGroup]
       )
       setEditorPresented(false)
       void props.reloadCounts().then(setCounts).catch((error) => console.warn("[CAIS] Favorite group counts unavailable", error))
@@ -72,21 +96,8 @@ export function FavoriteGroupManagerView(props: {
     }
   }
 
-  function move(indices: number[], newOffset: number) {
-    if (!indices.length) return
-    const previous = groups
-    const moving = indices.map((index) => groups[index]).filter((group): group is FavoriteGroup => group != null)
-    const next = groups.filter((_, index) => !indices.includes(index))
-    next.splice(Math.max(0, Math.min(next.length, newOffset)), 0, ...moving)
-    setGroups(next)
-    void props.onReorderGroups(next).catch(async (error: any) => {
-      setGroups(previous)
-      await Dialog.alert({ message: String(error?.message ?? error ?? "分组排序失败") })
-    })
-  }
-
   async function remove(group: FavoriteGroup) {
-    const previousGroups = groups
+    const previousGroups = groups.value
     try {
       const confirmed = await Dialog.confirm({
         title: `删除“${group.title}”？`,
@@ -95,7 +106,7 @@ export function FavoriteGroupManagerView(props: {
         confirmLabel: "删除",
       })
       if (!confirmed) return
-      setGroups((current) => current.filter((item) => item.id !== group.id))
+      setGroups(groups.value.filter((item) => item.id !== group.id))
       await props.onDeleteGroup(group)
       void props.reloadCounts().then(setCounts).catch((error) => console.warn("[CAIS] Favorite group counts unavailable", error))
     } catch (error: any) {
@@ -163,12 +174,11 @@ export function FavoriteGroupManagerView(props: {
         header={<Text>收藏分组</Text>}
         footer={<Text>点击分组可修改规则；进入编辑模式后可拖动排序，左滑可以编辑或删除。</Text>}
       >
-        {groups.length ? (
+        {groups.value.length ? (
           <ForEach
-            count={groups.length}
-            onMove={move}
-            itemBuilder={(index) => {
-              const group = groups[index]
+            data={groups}
+            editActions="move"
+            builder={(group) => {
               return (
                 <HStack
                   key={group.id}

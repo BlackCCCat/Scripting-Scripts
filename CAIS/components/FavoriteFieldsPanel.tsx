@@ -5,6 +5,8 @@ import {
   LazyVStack,
   ScrollView,
   Text,
+  useEffect,
+  useObservable,
   VStack,
 } from "scripting"
 import type { VirtualNode } from "scripting"
@@ -21,6 +23,10 @@ export function FavoriteFieldsPanel(props: {
   renderContextMenu?: (field: FavoriteField) => VirtualNode
 }) {
   const cornerRadius = 10
+  const fields = useObservable(props.fields)
+  useEffect(() => {
+    if (fields.value !== props.fields) fields.setValue(props.fields)
+  }, [props.fields])
   return (
     <ScrollView
       axes="vertical"
@@ -31,10 +37,8 @@ export function FavoriteFieldsPanel(props: {
     >
       <LazyVStack spacing={7} frame={{ maxWidth: "infinity", alignment: "topLeading" as any }}>
         <ForEach
-          count={props.fields.length}
-          itemBuilder={(index) => {
-            const field = props.fields[index]
-            if (!field) return null as any
+          data={fields}
+          builder={(field) => {
             return (
               <HStack
                 key={field.id}

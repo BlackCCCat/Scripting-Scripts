@@ -17,6 +17,8 @@ import {
   TextField,
   Toggle,
   VStack,
+  useEffect,
+  useObservable,
   useState,
   useRef,
 } from "scripting";
@@ -86,19 +88,20 @@ function MenuBuiltinGroupView(props: {
   navigationTransition?: NavigationZoomTransition;
   onChanged: (key: KeyboardMenuBuiltinAction, value: boolean) => void;
   onPlacementChanged: (key: KeyboardMenuBuiltinAction, ungrouped: boolean) => void;
-  onMove: (actions: KeyboardMenuBuiltinAction[], indices: number[], newOffset: number) => void;
+  onReorder: (actions: KeyboardMenuBuiltinAction[]) => void;
 }) {
-  const [actions, setActions] = useState(props.actions);
+  const actions = useObservable(() => props.actions.map((id) => ({ id })));
   const [builtins, setBuiltins] = useState(props.settings.keyboardMenu.builtins);
   const [ungrouped, setUngrouped] = useState(props.ungrouped);
 
-  function move(indices: number[], newOffset: number) {
-    const moving = indices.map((index) => actions[index]).filter(Boolean);
-    const rest = actions.filter((_, index) => !indices.includes(index));
-    rest.splice(newOffset, 0, ...moving);
-    setActions(rest);
-    props.onMove(actions, indices, newOffset);
-  }
+  useEffect(() => {
+    function onMoved(next: { id: KeyboardMenuBuiltinAction }[], previous: { id: KeyboardMenuBuiltinAction }[]) {
+      if (next.every(({ id }, index) => id === previous[index]?.id)) return;
+      props.onReorder(next.map(({ id }) => id));
+    }
+    actions.subscribe(onMoved);
+    return () => actions.unsubscribe(onMoved);
+  }, [actions, props.onReorder]);
 
   return (
     <List
@@ -108,10 +111,9 @@ function MenuBuiltinGroupView(props: {
     >
       <Section>
         <ForEach
-          count={actions.length}
-          itemBuilder={(index) => {
-            const action = actions[index];
-            return action ? (
+          data={actions}
+          editActions="move"
+          builder={({ id: action }) => (
               <VStack key={action}>
                 <Toggle
                   value={builtins[action]}
@@ -142,9 +144,7 @@ function MenuBuiltinGroupView(props: {
                   <Text tag={1}>外层</Text>
                 </Picker>
               </VStack>
-            ) : <EmptyView />;
-          }}
-          onMove={move}
+          )}
         />
       </Section>
     </List>
@@ -158,8 +158,20 @@ function CustomMenuActionsView(props: {
   onEdit: (action?: KeyboardCustomAction) => void;
   onUpdate: (id: string, patch: Partial<KeyboardCustomAction>) => void;
   onRemove: (id: string) => void;
-  onMove: (indices: number[], newOffset: number) => void;
+  onReorder: (actions: KeyboardCustomAction[]) => void;
 }) {
+  const actions = useObservable(props.actions);
+
+  useEffect(() => {
+    function onMoved(next: KeyboardCustomAction[]) {
+      if (next.length !== props.actions.length || next.every((action, index) => action.id === props.actions[index]?.id)) return;
+      props.onReorder(next);
+    }
+    actions.subscribe(onMoved);
+    if (actions.value !== props.actions) actions.setValue(props.actions);
+    return () => actions.unsubscribe(onMoved);
+  }, [actions, props.actions, props.onReorder]);
+
   return (
     <List
       navigationTitle="自定义功能"
@@ -169,10 +181,9 @@ function CustomMenuActionsView(props: {
       <Section>
         {props.actions.length ? (
           <ForEach
-            count={props.actions.length}
-            itemBuilder={(index) => {
-              const action = props.actions[index];
-              return action ? (
+            data={actions}
+            editActions="move"
+            builder={(action) => (
                 <HStack
                   key={action.id}
                   matchedTransitionSource={props.zoomNamespace ? {
@@ -197,9 +208,7 @@ function CustomMenuActionsView(props: {
                     toggleStyle="switch"
                   />
                 </HStack>
-              ) : <EmptyView />;
-            }}
-            onMove={props.onMove}
+            )}
           />
         ) : (
           <Text foregroundStyle="secondaryLabel">暂无自定义功能</Text>
@@ -247,15 +256,11 @@ function KeyboardMenuSettingsPage(props: {
     commit({ ...menuSettings, ungroupedBuiltins: [...next] });
   }
 
-  function moveBuiltins(groupActions: KeyboardMenuBuiltinAction[], indices: number[], newOffset: number) {
+  function reorderBuiltins(groupActions: KeyboardMenuBuiltinAction[]) {
     const ordered = getOrderedMenuBuiltins(pageSettings);
     const groupSet = new Set(groupActions);
-    const groupOrder = ordered.filter((key) => groupSet.has(key));
-    const moving = indices.map((index) => groupOrder[index]).filter(Boolean);
-    const rest = groupOrder.filter((_, index) => !indices.includes(index));
-    rest.splice(newOffset, 0, ...moving);
     let groupIndex = 0;
-    const nextOrder = ordered.map((key) => groupSet.has(key) ? rest[groupIndex++] : key);
+    const nextOrder = ordered.map((key) => groupSet.has(key) ? groupActions[groupIndex++] : key);
     commit({ ...menuSettings, builtinOrder: nextOrder });
   }
 
@@ -265,13 +270,6 @@ function KeyboardMenuSettingsPage(props: {
 
   function removeCustom(id: string) {
     commit({ ...menuSettings, customActions: menuSettings.customActions.filter((item) => item.id !== id) });
-  }
-
-  function moveCustom(indices: number[], newOffset: number) {
-    const moving = indices.map((index) => menuSettings.customActions[index]).filter(Boolean);
-    const rest = menuSettings.customActions.filter((_, index) => !indices.includes(index));
-    rest.splice(newOffset, 0, ...moving);
-    commit({ ...menuSettings, customActions: rest });
   }
 
   function editCustom(action?: KeyboardCustomAction) {
@@ -315,7 +313,7 @@ function KeyboardMenuSettingsPage(props: {
                 } : undefined}
                 onChanged={updateBuiltin}
                 onPlacementChanged={updatePlacement}
-                onMove={(actions, indices, newOffset) => moveBuiltins(actions, indices, newOffset)}
+                onReorder={reorderBuiltins}
               />
             }
           >
@@ -350,7 +348,7 @@ function KeyboardMenuSettingsPage(props: {
               onEdit={editCustom}
               onUpdate={updateCustom}
               onRemove={removeCustom}
-              onMove={moveCustom}
+              onReorder={(customActions) => commit({ ...menuSettings, customActions })}
             />
           }
         >

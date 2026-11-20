@@ -1,4 +1,4 @@
-import { Button, Device, DragGesture, ForEach, GeometryReader, HStack, LazyVStack, ScrollView, Text, useColorScheme, useMemo, useRef, VStack, ZStack } from "scripting"
+import { Button, Device, DragGesture, ForEach, GeometryReader, HStack, LazyVStack, ScrollView, Text, useColorScheme, useEffect, useMemo, useObservable, useRef, VStack, ZStack, type VirtualNode } from "scripting"
 import type { CaisToken } from "../utils/tokenize"
 
 type TokenHitTarget = {
@@ -10,9 +10,8 @@ type TokenHitTarget = {
 }
 
 type TokenRow = {
-  y: number
+  id: string
   tokens: Array<{ token: CaisToken; width: number }>
-  targets: TokenHitTarget[]
 }
 
 type TokenLayout = {
@@ -57,22 +56,25 @@ function layoutTokens(tokens: CaisToken[], width: number, compact: boolean): Tok
   const maxWidth = Math.max(120, width)
   const maxTokenWidth = Math.max(80, Math.min(maxWidth, compact ? 180 : 240))
   const rows: TokenRow[] = []
-  let current: TokenRow = { y: 0, tokens: [], targets: [] }
+  const targets: TokenHitTarget[] = []
+  let current: TokenRow = { id: "row-0", tokens: [] }
   let x = 0
+  let y = 0
 
   for (const token of tokens) {
     const tokenWidth = Math.min(maxTokenWidth, estimatedTokenWidth(token.text, compact))
     if (current.tokens.length && x + tokenWidth > maxWidth) {
       rows.push(current)
-      current = { y: rows.length * (rowHeight + spacing), tokens: [], targets: [] }
+      y = rows.length * (rowHeight + spacing)
+      current = { id: `row-${y}`, tokens: [] }
       x = 0
     }
     current.tokens.push({ token, width: tokenWidth })
-    current.targets.push({ token, x, y: current.y, width: tokenWidth, height: rowHeight })
+    targets.push({ token, x, y, width: tokenWidth, height: rowHeight })
     x += tokenWidth + spacing
   }
   if (current.tokens.length) rows.push(current)
-  const layout = { rows, rowHeight, spacing, targets: rows.flatMap((row) => row.targets) }
+  const layout = { rows, rowHeight, spacing, targets }
   layoutCache.set(key, layout)
   if (layoutCache.size > MAX_LAYOUT_CACHE_SIZE) {
     const firstKey = layoutCache.keys().next().value
@@ -98,6 +100,14 @@ function hitToken(targets: TokenHitTarget[], x: number, y: number): CaisToken | 
 function pointNumber(value: unknown): number {
   const number = Number(value)
   return Number.isFinite(number) ? number : -1
+}
+
+function TokenRowList(props: { rows: TokenRow[]; builder: (row: TokenRow) => VirtualNode }) {
+  const rows = useObservable(props.rows)
+  useEffect(() => {
+    if (rows.value !== props.rows) rows.setValue(props.rows)
+  }, [props.rows])
+  return <ForEach data={rows} builder={props.builder} />
 }
 
 export function TokenSelectionPanel(props: {
@@ -193,14 +203,12 @@ export function TokenSelectionPanel(props: {
                     frame={{ width: contentWidth, alignment: "topLeading" as any }}
                     simultaneousGesture={selectGesture}
                   >
-                    <ForEach
-                      count={layout.rows.length}
-                      itemBuilder={(index) => {
-                        const row = layout.rows[index]
-                        if (!row) return null as any
+                    <TokenRowList
+                      rows={layout.rows}
+                      builder={(row) => {
                         return (
                         <HStack
-                          key={`row-${row.y}`}
+                          key={row.id}
                           spacing={layout.spacing}
                           frame={{ width: contentWidth, height: layout.rowHeight, alignment: "leading" as any }}
                         >
