@@ -1,6 +1,6 @@
 import { Button, Divider, HStack, Picker, ScrollView, Text, VStack, useEffect, useState } from "scripting"
 import { accounts, records, type RequestRecord } from "../local/store"
-import { RequestOutcomeChart, UsageChart, UsageTrend, type Usage } from "./DataCharts"
+import { CacheOutcomeChart, RequestOutcomeChart, UsageChart, UsageTrend, type Usage } from "./DataCharts"
 import { Hint, Metric, PageBackdrop, pageMargins, Panel } from "./Shared"
 
 type Group = "account" | "model" | "region"
@@ -18,10 +18,16 @@ export function DataPage({ revision }: { revision: number }) {
   const filtered = entries.filter(item => item.at >= from && item.at <= now)
   const successes = filtered.filter(item => item.ok)
   const tokens = successes.reduce((sum, item) => sum + item.tokens, 0)
-  const spentSamples = filtered.filter(item => item.creditsSpent != null)
+  const spentSamples = filtered.filter(item => Number.isFinite(item.creditsSpent))
   const creditsSpent = spentSamples.reduce((sum, item) => sum + (item.creditsSpent ?? 0), 0)
-  const cacheHit = filtered.reduce((sum, item) => sum + (item.cacheHitTokens ?? 0), 0)
-  const cacheTotal = filtered.reduce((sum, item) => sum + (item.cacheHitTokens ?? 0) + (item.cacheMissTokens ?? 0), 0)
+  let cacheHit = 0
+  let cacheMiss = 0
+  for (const { cacheHitTokens: hit, cacheMissTokens: miss } of filtered) {
+    if (hit == null || miss == null || !Number.isFinite(hit) || !Number.isFinite(miss) || hit < 0 || miss < 0) continue
+    cacheHit += hit
+    cacheMiss += miss
+  }
+  const cacheTotal = cacheHit + cacheMiss
   const failures = filtered.length - successes.length
   const timed = filtered.filter(item => item.durationMs != null)
   const averageLatency = timed.length ? `${(timed.reduce((sum, item) => sum + (item.durationMs ?? 0), 0) / timed.length / 1000).toFixed(1)}s` : "—"
@@ -85,6 +91,7 @@ export function DataPage({ revision }: { revision: number }) {
       </Panel>
       {!!filtered.length && <UsageTrend entries={filtered} from={from} now={now} hourly={days === -1} />}
       {!!filtered.length && <RequestOutcomeChart successes={successes.length} failures={failures} />}
+      {!!filtered.length && <CacheOutcomeChart hit={cacheHit} miss={cacheMiss} />}
     </VStack>
   </ScrollView>
 }
