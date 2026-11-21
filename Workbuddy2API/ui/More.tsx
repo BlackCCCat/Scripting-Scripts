@@ -1,10 +1,10 @@
-import { Button, HStack, Image, Link, List, NavigationLink, Picker, ProgressView, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
+import { Button, DisclosureGroup, HStack, Image, Label, Link, List, NavigationLink, Picker, ProgressView, Rectangle, Section, Text, TextField, Toggle, VStack, useEffect, useState } from "scripting"
 import { Script } from "scripting"
 import { accountRotationEnabled, accounts, addressHost, credentialStorageCounts, credentialSyncEnabled, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, setAccountRotationEnabled, setAddressHost, setCredentialSyncEnabled, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
 import { clearDiagnosticRun, diagnosticFailure, diagnosticFieldsText, diagnosticLocalTime, diagnosticOutcomeName, diagnosticSnapshot, diagnosticStageName, diagnosticsEnabled, exportDiagnosticFile, readDiagnosticLog, setDiagnosticsEnabled, subscribeDiagnostics, type DiagnosticRequest } from "../local/diagnostics"
 import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, type GiftStatus, type Voucher } from "../local/upstream"
 import { changeGatewayKeepAliveMode, gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
-import { alertError, Busy, Failure, Hint } from "./Shared"
+import { accent, alertError, Busy, Failure, heroSurface, Hint, PageBackdrop, pageMargins, StatusDot, SymbolTile } from "./Shared"
 
 export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void }) {
   const [state, setState] = useState(gatewayState)
@@ -94,66 +94,94 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
   }
   const accountChoices = accounts()
   const storedCredentials = !syncing ? credentialStorageCounts() : null
-  return <List navigationTitle="更多">
-    <Section title="模型与日志">
-      <NavigationLink destination={<ModelsPage />}><HStack spacing={12}><Image systemName="square.stack.3d.up" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>模型</Text><Hint>模型目录与展示控制</Hint></VStack></HStack></NavigationLink>
-      <NavigationLink destination={<LogsPage />}><HStack spacing={12}><Image systemName="text.alignleft" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>日志</Text><Hint>本次服务的请求过程与错误</Hint></VStack></HStack></NavigationLink>
+  const endpointChanged = host !== addressHost("") || portText !== String(listenPort())
+  return <List navigationTitle="更多" navigationBarTitleDisplayMode="large" listStyle="insetGroup"
+    scrollContentBackground="hidden" background={<PageBackdrop />} contentMargins={pageMargins}>
+    <Section>
+      <NavigationLink destination={<AboutPage />} listRowBackground={<Rectangle fill={heroSurface} />}>
+        <HStack spacing={12} padding={{ vertical: 5 }}>
+          <SymbolTile symbol="slider.horizontal.3" />
+          <VStack alignment="leading" spacing={4}>
+            <Text font="headline">WorkBuddy2API</Text>
+            <Hint>开源与关于</Hint>
+          </VStack>
+        </HStack>
+      </NavigationLink>
     </Section>
-    <Section title="资源">
-      <NavigationLink destination={<GiftPage />}><HStack spacing={12}><Image systemName="gift" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>礼包</Text><Hint>按账号查看与领取</Hint></VStack></HStack></NavigationLink>
-      <NavigationLink destination={<VouchersPage />}><HStack spacing={12}><Image systemName="ticket" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>券码</Text><Hint>历史券码一览</Hint></VStack></HStack></NavigationLink>
-      <HStack spacing={12}><Image systemName="arrow.uturn.backward.circle" foregroundStyle="secondaryLabel" /><VStack alignment="leading" spacing={2}><Text>补偿</Text><Hint>上游活动已结束</Hint></VStack></HStack>
+    <Section title="本机 API 服务">
+      <Toggle value={state.running} disabled={busy} tint={accent} onChanged={() => void toggle()}>
+        <HStack spacing={10}>
+          <Image systemName="server.rack" foregroundStyle={accent} />
+          <VStack alignment="leading" spacing={3}>
+            <Text>HTTP API</Text>
+            <HStack spacing={5}>
+              <StatusDot color={state.running ? "systemGreen" : "systemGray"} />
+              <Hint>{busy ? "正在处理…" : state.running ? "运行中" : "已停止"}</Hint>
+            </HStack>
+          </VStack>
+        </HStack>
+      </Toggle>
+      <HStack spacing={8}>
+        <Text font="subheadline" fontDesign="monospaced" lineLimit={1} truncationMode="middle"
+          frame={{ maxWidth: "infinity", alignment: "leading" }}>{serviceAddress()}</Text>
+        <Button title="复制地址" systemImage="doc.on.doc" labelStyle="iconOnly" buttonStyle="borderless"
+          disabled={endpointChanged} action={() => void copyAddress()} />
+      </HStack>
+      <Picker title="保活方式" systemImage="location" pickerStyle="menu" value={state.keepAliveMode} disabled={busy}
+        onChanged={(value: string) => void changeKeepAlive(value)}>
+        <Text tag="location">定位</Text>
+        <Text tag="audio">音频</Text>
+      </Picker>
+      <Toggle title="局域网访问" systemImage="wifi" value={state.lan} disabled={busy} tint={accent} onChanged={value => void changeLan(value)} />
+      <Toggle title="账号轮询" systemImage="arrow.triangle.2.circlepath" value={rotation} disabled={!accountChoices.length}
+        tint={accent} onChanged={value => void changeRotation(value)} />
+      {!rotation && !!accountChoices.length && <Picker title="固定账号" pickerStyle="navigationLink" value={fixedUid}
+        onChanged={(uid: string) => { try { setFixedAccountUid(uid); setFixedUid(uid) } catch (error) { void alertError(error) } }}>
+        {!!fixedUid && !accountChoices.some(item => item.uid === fixedUid) && <Text tag={fixedUid}>原账号已移除</Text>}
+        {accountChoices.map(item => <Text key={item.uid} tag={item.uid}>{item.nickname || item.uid}</Text>)}
+      </Picker>}
+      {!rotation && !accountChoices.length && <Hint>请先添加账号，再选择固定账号。</Hint>}
+      <DisclosureGroup title="连接设置">
+        <HStack spacing={10}>
+          <Text>主机名或 IP</Text>
+          <TextField title="主机名或 IP" labelsHidden prompt={autoHost()} value={host} onChanged={setHost} />
+        </HStack>
+        <HStack spacing={10}>
+          <Text>端口</Text>
+          <TextField title="端口" labelsHidden value={portText} keyboardType="numberPad" onChanged={setPortText} />
+        </HStack>
+        {endpointChanged && <Button title="保存地址和端口" systemImage="checkmark" buttonStyle="borderless"
+          disabled={busy} action={() => void saveEndpoint()} />}
+        <Hint>留空使用当前网络地址。主机名用于生成连接地址，更改端口会重启运行中的服务。</Hint>
+        <Hint>客户端的 Base URL 在地址后加 /v1。API Key 可留空。</Hint>
+        {state.running && <Hint>{state.activityActive ? "实时活动已开启" : "实时活动未显示"}</Hint>}
+      </DisclosureGroup>
+      {state.running && Script.supportsMinimization() && <Button title="收起界面，保持服务" systemImage="rectangle.compress.vertical"
+        action={() => { void Script.minimize() }} />}
+      {!!state.backgroundIssue && <Text foregroundStyle="systemOrange">{`${state.running ? "后台保活不可用" : "后台保活停止失败"}：${state.backgroundIssue}`}</Text>}
+      {!!state.activityIssue && <Text foregroundStyle="systemOrange">{state.activityIssue}</Text>}
+      {!!state.lastError && <Text foregroundStyle="systemRed">{state.lastError}</Text>}
+      {state.lan && <Hint>局域网使用明文 HTTP 且无鉴权，请仅在可信网络中开启。</Hint>}
     </Section>
-    <Section title="关于">
-      <NavigationLink destination={<AboutPage />}><HStack spacing={12}><Image systemName="chevron.left.forwardslash.chevron.right" foregroundStyle="systemPurple" /><VStack alignment="leading" spacing={2}><Text>开源</Text><Hint>仓库、构建与同步基准</Hint></VStack></HStack></NavigationLink>
+    <Section title="模型与诊断">
+      <NavigationLink destination={<ModelsPage />}><Label title="模型列表" systemImage="square.stack.3d.up" /></NavigationLink>
+      <NavigationLink destination={<LogsPage />}><Label title="请求诊断日志" systemImage="text.alignleft" /></NavigationLink>
+      <Toggle title="记录请求日志" systemImage="waveform.path.ecg" value={logging} tint={accent} onChanged={value => {
+        try { setDiagnosticsEnabled(value); setLogging(value) } catch (error) { void alertError(error) }
+      }} />
     </Section>
-    <Section title="账号同步">
-      <Toggle title="iCloud 同步登录信息" systemImage="icloud" value={cloudSync} disabled={syncing} onChanged={value => void changeCloudSync(value)} />
+    <Section title="账号与资源">
+      <Toggle title="iCloud 同步登录信息" systemImage="icloud" value={cloudSync} disabled={syncing} tint={accent}
+        onChanged={value => void changeCloudSync(value)} />
       {syncing && cloudProgress && <VStack alignment="leading" spacing={6}>
-        <ProgressView value={cloudProgress.completed} total={cloudProgress.total} progressViewStyle="linear" />
+        <ProgressView value={cloudProgress.completed} total={cloudProgress.total} progressViewStyle="linear" tint={accent} />
         <Hint>{cloudProgress.phase}</Hint>
       </VStack>}
       {!syncing && <Hint>{storedCredentials === null ? "钥匙串数量暂不可读取"
         : `本机 ${storedCredentials.local} 个 · iCloud ${storedCredentials.cloud} 个`}</Hint>}
-      <Hint>开启后保留已验证的 iCloud 凭据，清理本机旧副本。</Hint>
-    </Section>
-    <Section title="系统 · 本机 API 服务">
-      <Text>{state.running ? "运行中" : "已停止"}</Text>
-      <Picker title="保活方式" pickerStyle="menu" value={state.keepAliveMode} disabled={busy} onChanged={(value: string) => void changeKeepAlive(value)}>
-        <Text tag="location">定位</Text>
-        <Text tag="audio">音频</Text>
-      </Picker>
-      {!!state.backgroundIssue && <Text foregroundStyle="systemOrange">{`${state.running ? "后台保活不可用" : "后台保活停止失败"}：${state.backgroundIssue}`}</Text>}
-      {state.running && <Hint>{state.activityActive ? "锁屏实时活动已开启；支持的设备会显示灵动岛" : `实时活动未显示${state.activityIssue ? `：${state.activityIssue}` : ""}`}</Hint>}
-      {!state.running && !!state.activityIssue && <Text foregroundStyle="systemOrange">{state.activityIssue}</Text>}
-      <HStack spacing={8} alignment="center">
-        <TextField title="主机名或 IP" prompt={autoHost()} value={host} onChanged={setHost} frame={{ maxWidth: "infinity" }} />
-        <Button title="复制地址" systemImage="doc.on.doc" labelStyle="iconOnly" disabled={host !== addressHost("") || portText !== String(listenPort())} action={() => void copyAddress()} />
-      </HStack>
-      <TextField title="端口" value={portText} keyboardType="numberPad" onChanged={setPortText} />
-      {(host !== addressHost("") || portText !== String(listenPort())) && <Button title="保存地址和端口" systemImage="checkmark" disabled={busy} action={() => void saveEndpoint()} />}
-      <Hint>地址留空时自动使用当前网络地址；自定义地址用于复制，监听范围由局域网开关控制。端口固定，保存后若服务运行会自动重启。</Hint>
-      <Hint>接口：GET /v1/models、POST /v1/chat/completions。无需鉴权头，客户端任意填写或留空 API Key 均可。</Hint>
-      <Hint>流式请求会逐块转发上游 SSE；客户端断开时会取消上游请求。</Hint>
-      <Button title={busy ? "处理中…" : state.running ? "停止服务" : "启动服务"} systemImage={state.running ? "stop.fill" : "play.fill"} disabled={busy} action={() => void toggle()} />
-      <Toggle title="允许局域网访问" systemImage="wifi" value={state.lan} disabled={busy} onChanged={value => void changeLan(value)} />
-      <Toggle title="账号轮询" systemImage="arrow.triangle.2.circlepath" value={rotation} disabled={!accountChoices.length} onChanged={value => void changeRotation(value)} />
-      <Toggle title="请求诊断日志" systemImage="waveform.path.ecg" value={logging} onChanged={value => {
-        try { setDiagnosticsEnabled(value); setLogging(value) } catch (error) { void alertError(error) }
-      }} />
-      <Hint>默认开启；只保留最近一次 HTTP 服务运行的日志。记录阶段、状态与大小，不保存请求正文、思考文字或密钥。</Hint>
-      {!rotation && !!accountChoices.length && <>
-        <Picker title="固定账号" pickerStyle="navigationLink" value={fixedUid} onChanged={(uid: string) => { try { setFixedAccountUid(uid); setFixedUid(uid) } catch (error) { void alertError(error) } }}>
-          {!!fixedUid && !accountChoices.some(item => item.uid === fixedUid) && <Text tag={fixedUid}>原账号已移除</Text>}
-          {accountChoices.map(item => <Text key={item.uid} tag={item.uid}>{item.nickname || item.uid}</Text>)}
-        </Picker>
-        <Hint>关闭轮询后仅使用固定账号；该账号停用、额度耗尽、模型受限或请求失败时直接返回错误。</Hint>
-      </>}
-      {!rotation && !accountChoices.length && <Hint>请先添加账号，再选择固定账号。</Hint>}
-      {rotation && <Hint>新会话轮流分配账号，同一会话优先复用原账号；不可用时才尝试其他账号。</Hint>}
-      {state.running && Script.supportsMinimization() && <Button title="收起界面，保持服务" systemImage="rectangle.compress.vertical" action={() => { void Script.minimize() }} />}
-      {!!state.lastError && <Text foregroundStyle="systemRed">{state.lastError}</Text>}
-      <Hint>局域网使用明文 HTTP 且无鉴权，请仅在可信网络中开启。iOS 仍可能挂起脚本。</Hint>
+      <NavigationLink destination={<GiftPage />}><Label title="礼包" systemImage="gift" /></NavigationLink>
+      <NavigationLink destination={<VouchersPage />}><Label title="券码" systemImage="ticket" /></NavigationLink>
+      <HStack spacing={8}><Label title="补偿" systemImage="arrow.uturn.backward.circle" /><Hint>活动已结束</Hint></HStack>
     </Section>
   </List>
 }

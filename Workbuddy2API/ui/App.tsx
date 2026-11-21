@@ -7,6 +7,7 @@ import { TasksPage } from "./Tasks"
 import { DataPage } from "./Data"
 import { MorePage } from "./More"
 import { useReleaseNotes } from "./ReleaseNotes"
+import { accent } from "./Shared"
 
 export function App() {
   const [revision, setRevision] = useState(0)
@@ -45,7 +46,7 @@ export function App() {
     return () => { active = false; clearInterval(cloudTimer); removeResume() }
   }, [])
   const visibleRevision = revision + dataRevision
-  return <TabView tint="systemPurple" sheet={releaseNotes}>
+  return <TabView tint={accent} sheet={releaseNotes}>
     <Tab title="概览" systemImage="speedometer" value={0}><NavigationStack><OverviewPage revision={visibleRevision} onChanged={changed} /></NavigationStack></Tab>
     <Tab title="账号" systemImage="person.2.fill" value={1}><NavigationStack><AccountsPage revision={visibleRevision} onChanged={changed} /></NavigationStack></Tab>
     <Tab title="任务" systemImage="checklist" value={2}><NavigationStack><TasksPage revision={revision} /></NavigationStack></Tab>

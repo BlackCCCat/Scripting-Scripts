@@ -1,22 +1,26 @@
-import { Button, Capsule, HStack, Image, List, Menu, Navigation, NavigationLink, Picker, RoundedRectangle, ScrollView, Section, Spacer, Text, TextField, VStack, ZStack, useEffect, useRef, useState } from "scripting"
+import { Button, HStack, Image, Label, List, Menu, Navigation, NavigationLink, Picker, ProgressView, ScrollView, Section, Spacer, Text, VStack, useEffect, useRef, useState } from "scripting"
 import { accounts, checkinStatusNeedsRefresh, removeAccount, restoreSyncedAccounts, saveCredential, todayInChina, updateAccount, type Account, type Site } from "../local/store"
 import { beginLogin, checkin, parseKeychainWorkBuddy, pollLogin, refreshBalance, refreshCheckinStatus, type LoginSession } from "../local/upstream"
-import { alertError, Busy, Failure, glass, Hint, primaryButton } from "./Shared"
+import { alertError, barFill, Busy, Failure, glass, hideTopSeparator, Hint, PageBackdrop, pageMargins, primaryButton, StatusDot, SymbolTile } from "./Shared"
 import { AccountTasksPage } from "./Tasks"
 
 const credits = (value?: number) => value == null ? "—" : value < 0 ? "不限量" : value.toLocaleString("zh-CN")
-const CREDIT_BAR_WIDTH = 94
-
-function CreditBar({ remaining, total }: { remaining: number; total: number }) {
-  const filled = CREDIT_BAR_WIDTH * Math.max(0, Math.min(1, remaining / total))
-  return <VStack alignment="trailing" spacing={3}>
-    <ZStack alignment="leading" frame={{ width: CREDIT_BAR_WIDTH, height: 6 }}>
-      <Capsule fill="systemGray4" frame={{ width: CREDIT_BAR_WIDTH, height: 6 }} />
-      {filled > 0 && <Capsule fill="systemPurple" frame={{ width: filled, height: 6 }} />}
-    </ZStack>
-    <Text font="caption" fontWeight="medium" monospacedDigit lineLimit={1}>
-      {`已用 ${credits(Math.max(0, total - remaining))}`}
-    </Text>
+function CreditBalance({ account }: { account: Account }) {
+  const { credits: remaining, total } = account
+  if (remaining == null || remaining < 0 || total == null || total <= 0) {
+    return <HStack spacing={6}>
+      <Hint>{remaining == null ? "余额未读取" : remaining >= 0 && total == null ? "剩余积分 · 总额未知" : "剩余积分"}</Hint><Spacer />
+      <Text font="subheadline" monospacedDigit>{credits(remaining)}</Text>
+    </HStack>
+  }
+  return <VStack alignment="leading" spacing={5}>
+    <HStack spacing={6}>
+      <Hint>剩余／总积分</Hint><Spacer />
+      <Text font="subheadline" fontWeight="semibold" monospacedDigit>{`${credits(remaining)} / ${credits(total)}`}</Text>
+    </HStack>
+    <ProgressView value={Math.min(remaining, total) / total} total={1} progressViewStyle="linear" tint={barFill}
+      accessibilityLabel="剩余积分比例" />
+    <Hint>{`已用 ${credits(Math.max(0, total - remaining))}`}</Hint>
   </VStack>
 }
 
@@ -31,6 +35,7 @@ export function AccountsPage({ revision, onChanged }: { revision: number; onChan
   const visible = items.filter(item => (!availableOnly || item.enabled !== false && !item.error) && `${item.nickname} ${item.uid}`.toLowerCase().includes(search.trim().toLowerCase()))
   if (sort === "credits") visible.sort((a, b) => (b.credits ?? -1) - (a.credits ?? -1) || a.nickname.localeCompare(b.nickname, "zh-CN"))
   if (sort === "nickname") visible.sort((a, b) => a.nickname.localeCompare(b.nickname, "zh-CN"))
+  const availableCount = items.filter(item => item.enabled !== false && !item.error).length
   const lastUpdated = Math.max(0, ...items.map(item => item.updatedAt ?? 0))
   async function refreshAll() {
     if (busy) return
@@ -45,48 +50,51 @@ export function AccountsPage({ revision, onChanged }: { revision: number; onChan
     try { updateAccount(item.uid, { enabled: item.enabled === false }); refresh() }
     catch (error) { void alertError(error) }
   }
-  return <List navigationTitle="账号" navigationBarTitleDisplayMode="large" listStyle="plain" toolbar={{
-    topBarLeading: <NavigationLink destination={<LoginPage onChanged={refresh} />}><Image systemName="plus" /></NavigationLink>,
-    topBarTrailing: [
-      <Menu title="排序方式" systemImage="arrow.up.arrow.down">
-        <Button title="添加顺序" systemImage={sort === "added" ? "checkmark" : "list.number"} action={() => setSort("added")} />
-        <Button title="积分从高到低" systemImage={sort === "credits" ? "checkmark" : "arrow.down"} action={() => setSort("credits")} />
-        <Button title="按昵称" systemImage={sort === "nickname" ? "checkmark" : "textformat.abc"} action={() => setSort("nickname")} />
-      </Menu>,
-      <Button title="筛选可用" systemImage={availableOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"} action={() => setAvailableOnly(value => !value)} />,
-      <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void refreshAll()} />,
-    ],
-  }} safeAreaInset={{ top: { content: <VStack alignment="leading" spacing={6} padding={{ horizontal: 16, top: 8, bottom: 8 }} background="systemBackground">
-      <HStack spacing={8} padding={{ horizontal: 12, vertical: 7 }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 14 } }}>
-        <Image systemName="magnifyingglass" foregroundStyle="secondaryLabel" />
-        <TextField title="搜索账号" prompt="搜索昵称或 UID" value={search} onChanged={setSearch} frame={{ maxWidth: "infinity" }} />
-      </HStack>
-      <Hint>{`共 ${items.length} 个账号 · 显示 ${visible.length} 个 · ${sort === "added" ? "添加顺序" : sort === "credits" ? "积分从高到低" : "按昵称"}${availableOnly ? " · 仅可用" : ""}`}</Hint>
-      {lastUpdated > 0 && <Hint>{`更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}`}</Hint>}
-    </VStack> }, bottom: { content: <HStack padding={{ horizontal: 16, vertical: 8 }}><Spacer /><NavigationLink destination={<LoginPage onChanged={refresh} />} buttonStyle={glass ? "glassProminent" : "borderedProminent"} controlSize="large"><HStack spacing={8}><Image systemName="plus" /><Text>添加账号</Text></HStack></NavigationLink><Spacer /></HStack> } }}>
-      {visible.map(item => <NavigationLink key={item.uid} destination={<AccountPage account={item} onChanged={refresh} />}
-        listRowSeparator="hidden" listRowInsets={{ top: 20, bottom: 20, leading: 24, trailing: 24 }}
-        listRowBackground={<RoundedRectangle cornerRadius={18} fill="secondarySystemBackground" opacity={item.enabled === false ? 0.5 : 1} padding={{ horizontal: 8, vertical: 6 }} />}
-        trailingSwipeActions={{ allowsFullSwipe: false, actions: [<Button title={item.enabled === false ? "启用" : "停用"}
-          systemImage={item.enabled === false ? "checkmark.circle" : "pause.circle"}
-          tint={item.enabled === false ? "systemGreen" : "systemOrange"} action={() => toggleAccount(item)} />] }}>
-        <HStack spacing={12} opacity={item.enabled === false ? 0.5 : 1} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-          <VStack spacing={2}><Image systemName={item.enterpriseId ? "building.2.fill" : "person.crop.circle.fill"} font="title2" foregroundStyle="systemPurple" /><Image systemName="circle.fill" font="caption2" foregroundStyle={item.enabled === false ? "systemGray" : item.error ? "systemRed" : "systemGreen"} /></VStack>
-          <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-            <Text font="headline" lineLimit={1}>{item.nickname || item.uid.slice(0, 8)}</Text>
-            <Hint>{`${item.enabled === false ? "已停用 · 不参与 HTTP API" : item.error ? "需检查" : "可用"} · ${item.updatedAt ? new Date(item.updatedAt).toLocaleString("zh-CN") : "尚未更新"}`}</Hint>
-            <Hint>{item.site === "cn" ? "国内版" : "国际版"}</Hint>
+  return <VStack spacing={0} navigationTitle="账号" navigationBarTitleDisplayMode="large" background={<PageBackdrop />}
+    toolbar={{
+      topBarTrailing: [
+        <Menu title="排序方式" systemImage="arrow.up.arrow.down">
+          <Button title="添加顺序" systemImage={sort === "added" ? "checkmark" : "list.number"} action={() => setSort("added")} />
+          <Button title="积分从高到低" systemImage={sort === "credits" ? "checkmark" : "arrow.down"} action={() => setSort("credits")} />
+          <Button title="按昵称" systemImage={sort === "nickname" ? "checkmark" : "textformat.abc"} action={() => setSort("nickname")} />
+        </Menu>,
+        <Button title="筛选可用" systemImage={availableOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"} action={() => setAvailableOnly(value => !value)} />,
+        <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void refreshAll()} />,
+      ],
+    }}>
+    <List listStyle="insetGroup" scrollContentBackground="hidden" contentMargins={pageMargins}
+      searchable={{ value: search, onChanged: setSearch, prompt: "搜索昵称或 UID", placement: "navigationBarDrawerAlwaysDisplay" }}>
+      <Section listSectionSeparator={hideTopSeparator}
+        header={<Hint>{`${items.length} 个账号 · ${availableCount} 个可用${visible.length !== items.length ? ` · 显示 ${visible.length} 个` : ""}${availableOnly ? " · 仅可用" : ""}`}</Hint>}
+        footer={lastUpdated > 0 ? <Hint>{`更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}`}</Hint> : undefined}>
+        {visible.map((item, index) => <NavigationLink key={item.uid} destination={<AccountPage account={item} onChanged={refresh} />}
+          listRowSeparator={index === 0 ? hideTopSeparator : "visible"} listRowInsets={{ top: 12, bottom: 12, leading: 14, trailing: 12 }}
+          trailingSwipeActions={{ allowsFullSwipe: false, actions: [<Button title={item.enabled === false ? "启用" : "停用"}
+            systemImage={item.enabled === false ? "checkmark.circle" : "pause.circle"}
+            tint={item.enabled === false ? "systemGreen" : "systemOrange"} action={() => toggleAccount(item)} />] }}>
+          <VStack alignment="leading" spacing={9} opacity={item.enabled === false ? 0.65 : 1}
+            frame={{ maxWidth: "infinity", alignment: "leading" }}>
+            <HStack spacing={10}>
+              <SymbolTile symbol={item.enterpriseId ? "building.2" : item.site === "cn" ? "person.crop.circle" : "globe"} />
+              <VStack alignment="leading" spacing={3}>
+                <Text font="headline" lineLimit={2}>{item.nickname || item.uid.slice(0, 8)}</Text>
+                <HStack spacing={5}>
+                  <StatusDot color={item.enabled === false ? "systemGray" : item.error ? "systemOrange" : "systemGreen"} />
+                  <Hint>{`${item.site === "cn" ? "国内版" : "国际版"} · ${item.enabled === false ? "已停用" : item.error ? "需检查" : "可用"}`}</Hint>
+                </HStack>
+              </VStack>
+            </HStack>
+            <CreditBalance account={item} />
           </VStack>
-          <VStack alignment="trailing" spacing={4} frame={{ width: 100 }}>
-            <Text font="headline" monospacedDigit>{credits(item.credits)}</Text>
-            {item.total != null && item.total > 0 && item.credits != null && item.credits >= 0 &&
-              <CreditBar remaining={item.credits} total={item.total} />}
-            {item.credits != null && item.credits >= 0 && item.total == null && <Hint>总额未知</Hint>}
-          </VStack>
-        </HStack>
-      </NavigationLink>)}
-      {!visible.length && <Hint>{items.length ? "没有匹配的账号" : "尚未添加账号，点击左上角添加。"}</Hint>}
-  </List>
+        </NavigationLink>)}
+        {!visible.length && <Hint>{items.length ? "没有匹配的账号" : "尚未添加账号，点击底部添加。"}</Hint>}
+      </Section>
+    </List>
+    <NavigationLink destination={<LoginPage onChanged={refresh} />} buttonStyle={glass ? "glassProminent" : primaryButton}
+      tint={barFill} controlSize="large" padding={{ horizontal: 18 }}>
+      <Label title="添加账号" systemImage="plus" frame={{ maxWidth: "infinity" }} />
+    </NavigationLink>
+  </VStack>
 }
 
 function AccountPage({ account, onChanged }: { account: Account; onChanged: () => void }) {

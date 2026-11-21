@@ -1,16 +1,10 @@
-import { BarChart, Button, Chart, Circle, Gauge, HStack, Image, ScrollView, Text, Toggle, VStack, useEffect, useState, Script } from "scripting"
+import { BarChart, Button, Chart, Divider, Gauge, HStack, ScrollView, Spacer, Text, Toggle, VStack, useEffect, useState, Script } from "scripting"
 import { accounts, checkinStatusNeedsRefresh, modelLocks, records, todayInChina, type Account } from "../local/store"
 import { checkin, refreshBalance, refreshCheckinStatus } from "../local/upstream"
 import { gatewayState, serviceAddress, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
-import { alertError, glass, Hint } from "./Shared"
+import { accent, alertError, barFill, glass, Hint, insetSurface, Metric, PageBackdrop, pageMargins, Panel, StatusDot, SymbolTile } from "./Shared"
 
 const compact = (value: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value)
-
-function OverviewStat({ label, value, detail, accent = false }: { label: string; value: string; detail: string; accent?: boolean }) {
-  return <VStack alignment="leading" spacing={5} padding={14} frame={{ maxWidth: "infinity", alignment: "leading" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}>
-    <Hint>{label}</Hint><Text font="title2" fontWeight="semibold" monospacedDigit foregroundStyle={accent ? "systemPurple" : undefined}>{value}</Text><Hint>{detail}</Hint>
-  </VStack>
-}
 
 export function OverviewPage({ revision, onChanged }: { revision: number; onChanged: () => void }) {
   const [items, setItems] = useState<Account[]>(accounts)
@@ -75,7 +69,7 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
     const index = Math.floor((item.at - firstHour) / hour)
     if (index >= 0 && index < 24) hourlyTokens[index] += item.tokens
   }
-  const trend = hourlyTokens.map((value, index) => ({ label: new Date(firstHour + index * hour), value, unit: "hour" as const, foregroundStyle: "systemPurple" as const }))
+  const trend = hourlyTokens.map((value, index) => ({ label: new Date(firstHour + index * hour), value, unit: "hour" as const, foregroundStyle: barFill, cornerRadius: 3 }))
 
   async function run(kind: "balance" | "checkin") {
     if (busy) return
@@ -105,70 +99,89 @@ export function OverviewPage({ revision, onChanged }: { revision: number; onChan
       setServiceBusy(false)
     }
   }
-  async function showServiceAddress() {
+  async function copyServiceAddress() {
     try {
-      const url = serviceAddress()
-      const copy = await Dialog.confirm({ title: "HTTP API 地址", message: `服务地址：${url}\n端口：${gatewayState().port}`, confirmLabel: "复制地址", cancelLabel: "关闭" })
-      if (copy) await Pasteboard.setString(url)
+      await Pasteboard.setString(serviceAddress())
+      await Dialog.alert({ message: "已复制 HTTP API 地址" })
     } catch (error) { await alertError(error) }
   }
-  return <ScrollView navigationTitle="概览" navigationBarTitleDisplayMode="large" toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void run("balance").catch(alertError)} /> }}>
-    <VStack alignment="leading" spacing={16} padding={{ horizontal: 16, top: 12, bottom: 28 }}>
-      <Hint>{`${items.length} 个账号 · ${available} 个参与服务${disabled ? ` · ${disabled} 个已停用` : ""}`}</Hint>
-      <Hint>{lastUpdated ? `余额更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}` : "尚未刷新余额"}</Hint>
-      <VStack alignment="leading" spacing={8} padding={{ horizontal: 18, top: 14, bottom: 12 }} frame={{ maxWidth: "infinity", alignment: "leading" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 20 } }}>
+  return <ScrollView navigationTitle="概览" navigationBarTitleDisplayMode="large" background={<PageBackdrop />} contentMargins={pageMargins}
+    toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void run("balance").catch(alertError)} /> }}>
+    <VStack alignment="leading" spacing={14} padding={{ horizontal: 16 }}>
+      <Panel hero>
+        <HStack spacing={12}>
+          <VStack alignment="leading" spacing={4}>
+            <Text font="title2" fontWeight="bold">HTTP API</Text>
+            <HStack spacing={6}>
+              <StatusDot color={service.running ? "systemGreen" : "systemGray"} />
+              <Hint>{serviceBusy ? "正在切换…" : service.running ? "运行中" : "已停止"}</Hint>
+            </HStack>
+          </VStack>
+          <Spacer />
+          <Toggle title="HTTP API 服务" labelsHidden value={service.running} disabled={serviceBusy}
+            onChanged={value => void toggleService(value)} toggleStyle="switch" tint={accent} />
+        </HStack>
+        <HStack spacing={8} padding={{ leading: 12, trailing: 6, vertical: 2 }}
+          background={{ style: insetSurface, shape: { type: "rect", cornerRadius: 12 } }}>
+          <Text font="subheadline" fontDesign="monospaced" lineLimit={1} truncationMode="middle"
+            frame={{ maxWidth: "infinity", alignment: "leading" }}>{serviceAddress()}</Text>
+          <Button title="复制服务地址" systemImage="doc.on.doc" labelStyle="iconOnly"
+            buttonStyle={glass ? "glass" : "bordered"} action={() => void copyServiceAddress()} />
+        </HStack>
+        <Divider />
         <Button buttonStyle="plain" action={tapCheckin}>
-          <HStack spacing={16} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-            <Gauge value={available} max={Math.max(1, servingItems.length)} label={<Text>健康</Text>} currentValueLabel={<Text>{`${available}/${servingItems.length}`}</Text>} gaugeStyle="accessoryCircularCapacity" tint="systemPurple" scaleEffect={1.2} frame={{ width: 120, height: 120 }} />
-            <VStack alignment="leading" spacing={7} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-              <Text font="headline">{!items.length ? "等待添加账号" : !servingItems.length ? "账号均已停用" : available === servingItems.length ? "池子状态良好" : "部分账号需检查"}</Text>
-              <Hint>{`${available} 个参与服务 · ${servingItems.length - available} 个需检查${disabled ? ` · ${disabled} 个已停用` : ""}`}</Hint>
-              <Hint>{recent.length ? `最近 ${recent.length} 次请求成功率 ${Math.round(successes / recent.length * 100)}%` : "暂无本机请求记录"}</Hint>
+          <HStack spacing={14} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+            <Gauge value={available} max={Math.max(1, servingItems.length)} label={<Text>账号池健康</Text>}
+              currentValueLabel={<Text monospacedDigit>{`${available}/${servingItems.length}`}</Text>}
+              gaugeStyle="accessoryCircularCapacity" tint={accent} scaleEffect={1.2} frame={{ width: 72, height: 72 }} />
+            <VStack alignment="leading" spacing={5}>
+              <Text font="headline">{items.length ? "账号池健康" : "等待添加账号"}</Text>
+              <Hint>{`${available} 个可用 · ${servingItems.length - available} 个需检查${disabled ? ` · ${disabled} 个已停用` : ""}`}</Hint>
+              <HStack spacing={6}><StatusDot color={checkinColor} /><Hint>{checkinStatus}</Hint></HStack>
             </VStack>
           </HStack>
         </Button>
-        <HStack spacing={6} frame={{ maxWidth: "infinity" }}>
-          <Button buttonStyle="plain" frame={{ maxWidth: "infinity", alignment: "leading" }} action={tapCheckin}>
-            <HStack spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-              <Text font="footnote" foregroundStyle="secondaryLabel" lineLimit={2}>{checkinStatus}</Text>
-              <Circle fill={checkinColor} frame={{ width: 10, height: 10 }} />
-            </HStack>
-          </Button>
-          <HStack spacing={8} fixedSize={{ horizontal: true, vertical: false }}>
-            <Text font="caption" lineLimit={1} fixedSize={{ horizontal: true, vertical: false }}>HTTP API</Text>
-            <Button title="查看服务地址" systemImage="info.circle" labelStyle="iconOnly" buttonStyle={glass ? "glass" : "bordered"} controlSize="small" action={() => void showServiceAddress()} />
-            <Toggle title="HTTP API 服务" labelsHidden value={service.running} disabled={serviceBusy} onChanged={value => void toggleService(value)} toggleStyle="switch" tint="systemPurple" frame={{ width: 52 }} />
-          </HStack>
+      </Panel>
+      <Panel>
+        <HStack alignment="top" spacing={12}>
+          <Metric label="剩余积分" value={compact(credits)} />
+          <Divider frame={{ height: 40 }} />
+          <Metric label="今日用量 · Token" value={compact(todayTokens)} />
         </HStack>
-      </VStack>
-      <HStack spacing={10}><OverviewStat label="剩余积分" value={compact(credits)} detail="全部账号合计" accent /><OverviewStat label="今日消耗" value={compact(todayTokens)} detail="tokens · 今日" /></HStack>
-      <HStack spacing={10}><OverviewStat label="成功率" value={recent.length ? `${Math.round(successes / recent.length * 100)}%` : "—"} detail="成功 / 请求" /><OverviewStat label="缓存命中" value={cacheTotal ? `${Math.round(cacheHit / cacheTotal * 100)}%` : "—"} detail="命中 / 输入 Token" /></HStack>
-      {items.some(item => item.credits === -1) && <Hint>不限量企业账号未计入积分合计。</Hint>}
-      <VStack alignment="leading" spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-        <Text font="headline">模型锁池</Text>
-        <Hint>本机 API 请求观测到的模型限流</Hint>
-        {!lockRows.length && <HStack spacing={10} padding={12} frame={{ maxWidth: "infinity", alignment: "leading" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 14 } }}>
-          <Image systemName="checkmark.circle.fill" foregroundStyle="systemGreen" />
-          <Text>当前没有模型级限流</Text>
-        </HStack>}
-        {lockRows.map(row => <HStack key={`${row.realm}:${row.model}`} spacing={10} padding={12} frame={{ maxWidth: "infinity" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 14 } }}>
-          <Image systemName="lock.fill" foregroundStyle="systemOrange" />
-          <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-            <Text lineLimit={1}>{`${row.model} · ${row.realm}`}</Text>
-            <Hint>{`${row.total - row.locked}/${row.total} 个账号未锁 · ${row.estimated ? "本机重试" : "上游重置"} ${new Date(row.until).toLocaleString("zh-CN")}`}</Hint>
-            {!!row.reason && <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={2}>{row.reason}</Text>}
-          </VStack>
-        </HStack>)}
-      </VStack>
-      <VStack alignment="leading" spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
-        <Text font="headline">用量趋势</Text><Hint>最近 24 小时 · 每小时 · 左右滑动查看</Hint>
-        <VStack padding={12} frame={{ maxWidth: "infinity" }} background={{ style: "secondarySystemBackground", shape: { type: "rect", cornerRadius: 18 } }}>
-          {trend.some(item => item.value > 0) ? <Chart frame={{ height: 170 }} chartScrollableAxes="horizontal" chartXVisibleDomain={10 * 3600}
-            chartScrollPositionX={trend[14].label} chartScrollTargetBehavior={{ matching: new DateComponents({ hour: 1 }) }}
-            chartXAxis={{ values: { type: "strideDate", by: "hour", count: 2 }, valueLabel: { format: "time" } }}
-            chartYAxis={{ values: { type: "automatic", desiredCount: 3 } }}><BarChart marks={trend} /></Chart> : <Hint>暂无本机 Token 用量</Hint>}
+        <Divider />
+        <HStack alignment="top" spacing={12}>
+          <Metric label="请求成功率" value={recent.length ? `${Math.round(successes / recent.length * 100)}%` : "—"} />
+          <Divider frame={{ height: 40 }} />
+          <Metric label="缓存命中" value={cacheTotal ? `${Math.round(cacheHit / cacheTotal * 100)}%` : "—"} />
+        </HStack>
+        {lastUpdated > 0 && <Hint>{`余额更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}`}</Hint>}
+        {items.some(item => item.credits === -1) && <Hint>不限量企业账号未计入积分合计。</Hint>}
+      </Panel>
+      <Panel>
+        <VStack alignment="leading" spacing={3}>
+          <Text font="headline">每小时用量</Text>
+          <Hint>最近 24 小时 · 左右滑动查看</Hint>
         </VStack>
-      </VStack>
+        {trend.some(item => item.value > 0) ? <Chart frame={{ height: 155 }} chartScrollableAxes="horizontal" chartXVisibleDomain={10 * 3600}
+          chartScrollPositionX={trend[14].label} chartScrollTargetBehavior={{ matching: new DateComponents({ hour: 1 }) }}
+          chartXAxis={{ values: { type: "strideDate", by: "hour", count: 2 }, valueLabel: { format: "time" } }}
+          chartYAxis={{ values: { type: "automatic", desiredCount: 3 } }}><BarChart marks={trend} /></Chart> : <Hint>暂无本机 Token 用量</Hint>}
+      </Panel>
+      <Panel>
+        <HStack spacing={10}>
+          <SymbolTile symbol="lock" />
+          <VStack alignment="leading" spacing={3}>
+            <Text font="headline">模型锁池</Text>
+            <Hint>{lockRows.length ? `${lockRows.length} 个模型分组暂时受限` : "当前无限流"}</Hint>
+          </VStack>
+        </HStack>
+        {lockRows.map(row => <VStack key={`${row.realm}:${row.model}`} alignment="leading" spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+          <Divider />
+          <Text font="subheadline" fontWeight="medium">{`${row.model} · ${row.realm}`}</Text>
+          <Hint>{`${row.total - row.locked}/${row.total} 个账号未锁 · ${row.estimated ? "本机重试" : "上游重置"} ${new Date(row.until).toLocaleString("zh-CN")}`}</Hint>
+          {!!row.reason && <Hint>{row.reason}</Hint>}
+        </VStack>)}
+      </Panel>
     </VStack>
   </ScrollView>
 }

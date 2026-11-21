@@ -1,7 +1,7 @@
-import { Button, DisclosureGroup, Grid, GridRow, HStack, Image, Link, RoundedRectangle, Text, VStack, useEffect, useState } from "scripting"
+import { Button, DisclosureGroup, Grid, GridRow, HStack, Image, Link, Spacer, Text, VStack, useEffect, useState } from "scripting"
 import { canProcessTask, taskAction, taskUnavailableReason } from "../local/tasks"
 import { fetchCampaignActivities, fetchStreakStatus, type CampaignActivity, type CampaignTask, type GrowthTask, type StreakStatus } from "../local/upstream"
-import { alertError, Busy, Hint } from "./Shared"
+import { accent, alertError, Busy, Hint, insetSurface } from "./Shared"
 
 const text = (error: unknown) => error instanceof Error ? error.message : String(error)
 const formatTime = (value: string | number) => new Date(value).toLocaleString("zh-CN")
@@ -21,13 +21,23 @@ function TaskDestination({ url }: { url?: string }) {
   return <Hint>上游任务链接格式不可用</Hint>
 }
 
+function TaskRowLabel({ title, detail, state }: { title: string; detail: string; state?: "claimed" | "claimable" | "locked" }) {
+  return <HStack spacing={8}>
+    <Text font="subheadline" frame={{ maxWidth: "infinity", alignment: "leading" }}>{title}</Text>
+    {state === "claimed" ? <Image systemName="checkmark.circle.fill" foregroundStyle="systemGreen" accessibilityLabel="已领取" />
+      : <Text font="caption" monospacedDigit foregroundStyle={state === "claimable" ? "systemOrange" : "secondaryLabel"}>{detail}</Text>}
+  </HStack>
+}
+
 function GrowthRow({ task, canWrite, busy, onAction }: {
   task: GrowthTask; canWrite: boolean; busy?: boolean; onAction?: (task: GrowthTask) => void
 }) {
   const time = task.completedAt ? `完成于 ${formatTime(task.completedAt)}` : task.claimedAt ? `本机领取于 ${formatTime(task.claimedAt)}` : ""
   const status = task.claimed ? "已领取" : task.locked ? "未解锁" : task.claimable ? "可领奖" : growthStatus(task.accept_status)
   const progress = task.current == null || task.target == null ? "进度未知" : `${task.current}/${task.target}`
-  return <DisclosureGroup title={task.title} listRowSeparator="visible">
+  const state = task.claimed ? "claimed" : task.locked ? "locked" : task.claimable ? "claimable" : undefined
+  return <DisclosureGroup label={<TaskRowLabel title={task.title} detail={state === "locked" || state === "claimable" ? status : progress} state={state} />}
+    listRowSeparator="visible">
     <VStack alignment="leading" spacing={6} padding={{ vertical: 4 }}>
       <Hint>{`${status} · ${progress}`}</Hint>
       <Hint>{`任务代码：${task.task_code}`}</Hint>
@@ -46,7 +56,8 @@ function CampaignRow({ task }: { task: CampaignTask }) {
   const done = !!task.claimedAt
   const claimable = !done && (!!task.completedAt || task.current >= task.target)
   const status = done ? "已领取" : claimable ? "可领取" : "未完成"
-  return <DisclosureGroup title={task.title} listRowSeparator="visible">
+  return <DisclosureGroup label={<TaskRowLabel title={task.title} detail={claimable ? "待领取" : `${task.current}/${task.target}`}
+    state={done ? "claimed" : claimable ? "claimable" : undefined} />} listRowSeparator="visible">
     <VStack alignment="leading" spacing={6} padding={{ vertical: 4 }}>
       <Hint>{`${status} · ${task.current}/${task.target} · ${task.credit} 积分`}</Hint>
       <Hint>{`任务代码：${task.code}`}</Hint>
@@ -73,17 +84,18 @@ function StreakCalendar({ status }: { status: StreakStatus }) {
   const hits = cells.filter(cell => cell.score != null && cell.score > 0).length
   return <VStack alignment="leading" spacing={10}>
     <Hint>{cells.length ? `近 28 天 · ${hits} 天有记录 · 缺失日期显示未知` : "上游没有返回日历数据"}</Hint>
-    {!!cells.length && <Grid horizontalSpacing={7} verticalSpacing={7}>
-      <GridRow>{["一", "二", "三", "四", "五", "六", "日"].map(day => <Text key={day} font="caption2" foregroundStyle="secondaryLabel" frame={{ width: 32 }}>{day}</Text>)}</GridRow>
+    {!!cells.length && <Grid horizontalSpacing={4} verticalSpacing={5}>
+      <GridRow>{["一", "二", "三", "四", "五", "六", "日"].map(day => <Text key={day} font="caption2" foregroundStyle="secondaryLabel" frame={{ minWidth: 24 }}>{day}</Text>)}</GridRow>
       {rows.map((row, index) => <GridRow key={index}>{Array.from({ length: 7 }, (_, column) => {
         const cell = row[column]
-        if (!cell) return <Text key={column} frame={{ width: 32, height: 30 }}> </Text>
-        const opacity = cell.score == null || cell.score <= 0 ? 1 : cell.score <= 2 ? 0.3 : cell.score <= 5 ? 0.55 : 0.8
-        const fill = cell.score == null ? "systemGray6" : cell.score <= 0 ? "systemGray5" : "systemGreen"
-        return <VStack key={cell.date} spacing={2} frame={{ width: 32, height: 30 }}>
-          <Text font="caption2" monospacedDigit accessibilityLabel={`${cell.date}，${cell.score == null ? "状态未知" : `${cell.score} 分`}`}>{cell.date.slice(-2)}</Text>
-          <RoundedRectangle cornerRadius={3} fill={fill} opacity={opacity} frame={{ width: 26, height: 8 }} />
-        </VStack>
+        if (!cell) return <Spacer key={column} frame={{ width: 24, height: 26 }} />
+        const active = (cell.score ?? 0) > 0
+        const strength = cell.score == null || cell.score <= 2 ? 0.16 : cell.score <= 5 ? 0.25 : 0.34
+        return <Text key={cell.date} font="caption2" monospacedDigit
+          foregroundStyle={cell.date === status.today ? accent : cell.score == null ? "secondaryLabel" : "label"}
+          frame={{ minWidth: 24, minHeight: 26 }}
+          background={{ style: active ? { color: "systemGreen", opacity: strength } : insetSurface, shape: { type: "rect", cornerRadius: 6 } }}
+          accessibilityLabel={`${cell.date}，${cell.score == null ? "状态未知" : `${cell.score} 分`}`}>{cell.date.slice(-2)}</Text>
       })}</GridRow>)}
     </Grid>}
     {!!status.today && <Hint>{`上游日期 ${status.today}${status.todayActive == null ? "" : status.todayActive ? " · 今日有记录" : " · 今日暂无记录"}`}</Hint>}
