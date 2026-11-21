@@ -1,10 +1,11 @@
 import { ChatUpstreamError, completeChat, streamChat, type ChatRequest } from "./chat"
-import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, listenPort, modelCatalog, modelCatalogNeedsRefresh, modelIds, serviceEnabled, setServiceEnabled } from "./store"
+import { accountRotationEnabled, accounts, addressHost, fixedAccountUid, listenPort, modelCatalog, modelCatalogNeedsRefresh, modelIds, serviceEnabled, serviceKeepAliveMode, setServiceEnabled, setServiceKeepAliveMode, type ServiceKeepAliveMode } from "./store"
 import { refreshModelCatalog, timeOrderedId } from "./upstream"
 import { endServiceActivity, showServiceActivity } from "./serviceActivity"
 import { clearPendingStop, pendingStopId } from "./serviceControl"
 import { HttpReply, RawHttpServer, type HttpInput } from "./rawHttp"
 import { beginDiagnosticRun, endDiagnosticRun } from "./diagnostics"
+import { startServiceKeepAlive, stopServiceKeepAlive } from "./serviceKeepAlive"
 
 const LAN = "wb2api.local.lan"
 let server: RawHttpServer | null = null
@@ -48,12 +49,20 @@ export function serviceAddress(): string {
 }
 
 export function gatewayState() {
-  return { running: server?.running === true, port: server?.port ?? listenPort(), lan: lanEnabled(), keptAlive, activityActive, backgroundIssue, activityIssue, lastError }
+  return { running: server?.running === true, port: server?.port ?? listenPort(), lan: lanEnabled(), keepAliveMode: serviceKeepAliveMode(), activityActive, backgroundIssue, activityIssue, lastError }
 }
 
 export function currentServiceRunId(): string | null { return server?.running ? runId : null }
 
 const serviceActivityState = (active: boolean) => ({ runId: runId ?? "", port: server?.port ?? listenPort(), lan: lanEnabled(), keptAlive: active })
+
+export async function changeGatewayKeepAliveMode(mode: ServiceKeepAliveMode): Promise<void> {
+  if (mode === serviceKeepAliveMode()) return
+  setServiceKeepAliveMode(mode)
+  if (refreshingBackground) await refreshingBackground
+  if (server?.running && !stopping) await refreshBackgroundService()
+  else notify()
+}
 
 async function refreshBackgroundService(): Promise<void> {
   if (refreshingBackground) return refreshingBackground
@@ -65,10 +74,9 @@ async function refreshBackgroundService(): Promise<void> {
 async function updateBackgroundService(): Promise<void> {
   if (!server?.running) return
   try {
-    const requested = await BackgroundKeeper.keepAlive()
-    const state = await BackgroundKeeper.getState()
-    keptAlive = requested && state.requested && state.isActive
-    backgroundIssue = keptAlive ? "" : state.lastFailure ?? "系统未启动后台保活"
+    await startServiceKeepAlive(serviceKeepAliveMode())
+    keptAlive = true
+    backgroundIssue = ""
   } catch (error) {
     keptAlive = false
     backgroundIssue = error instanceof Error ? error.message : String(error)
@@ -177,18 +185,20 @@ async function closeGateway(): Promise<void> {
   const finalState = serviceActivityState(false)
   try { await server?.stop() }
   finally {
-    await endDiagnosticRun()
     server = null
+    backgroundIssue = ""
+    try { await stopServiceKeepAlive() }
+    catch (error) { backgroundIssue = error instanceof Error ? error.message : String(error) }
+    keptAlive = false
+    await endDiagnosticRun()
     try {
       activityIssue = await endServiceActivity(finalState) ? "" : "实时活动未能结束，重新打开脚本时会重试"
     } catch (error) { activityIssue = error instanceof Error ? error.message : String(error) }
-    try { await BackgroundKeeper.stopKeepAlive() }
-    catch (error) { backgroundIssue = error instanceof Error ? error.message : String(error) }
-    keptAlive = false
     activityActive = false
     runId = null
     notify()
     if (activityIssue) throw new Error(activityIssue)
+    if (backgroundIssue) throw new Error(`后台保活停止失败：${backgroundIssue}`)
     if (settingsError) throw settingsError
   }
 }
@@ -208,9 +218,9 @@ export async function restoreGateway(): Promise<void> {
     }
   }
   if (!serviceEnabled()) {
-    if (server?.running || keptAlive) {
+    if (server?.running || keptAlive || backgroundIssue) {
       try { await stopGateway() }
-      catch (error) { activityIssue = error instanceof Error ? error.message : String(error); notify() }
+      catch (error) { lastError = error instanceof Error ? error.message : String(error); notify() }
       return
     }
     try { activityIssue = await endServiceActivity(serviceActivityState(false)) ? "" : "实时活动未能结束" }

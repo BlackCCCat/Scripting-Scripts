@@ -1,4 +1,5 @@
 export type Site = "cn" | "intl" | "workbuddy"
+export type ServiceKeepAliveMode = "location" | "audio"
 
 export type Credential = {
   uid: string
@@ -40,6 +41,7 @@ const ACCOUNTS = "wb2api.local.accounts"
 const RECORDS = "wb2api.local.requests"
 const SECRET = "wb2api.local.account."
 const SERVICE = "wb2api.local.service"
+const SERVICE_KEEP_ALIVE = "wb2api.local.service-keep-alive"
 const CATALOG = "wb2api.local.catalog"
 const CATALOG_ACCOUNTS = "wb2api.local.catalog-accounts"
 const HIDDEN_MODELS = "wb2api.local.hidden-models"
@@ -433,6 +435,13 @@ export function recordRequest(entry: RequestRecord) {
 export function serviceEnabled(): boolean { return Storage.get<boolean>(SERVICE) === true }
 export function setServiceEnabled(enabled: boolean) {
   if (!Storage.set(SERVICE, enabled)) throw new Error("服务设置保存失败")
+}
+
+export function serviceKeepAliveMode(): ServiceKeepAliveMode {
+  return Storage.get<ServiceKeepAliveMode>(SERVICE_KEEP_ALIVE) === "audio" ? "audio" : "location"
+}
+export function setServiceKeepAliveMode(mode: ServiceKeepAliveMode) {
+  if (!Storage.set(SERVICE_KEEP_ALIVE, mode)) throw new Error("保活方式保存失败")
 }
 
 export function accountRotationEnabled(): boolean { return Storage.get<boolean>(ACCOUNT_ROTATION) !== false }

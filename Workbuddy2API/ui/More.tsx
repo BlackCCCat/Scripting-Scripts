@@ -3,7 +3,7 @@ import { Script } from "scripting"
 import { accountRotationEnabled, accounts, addressHost, credentialStorageCounts, credentialSyncEnabled, fixedAccountUid, hiddenModelIds, listenPort, modelCatalog, modelCatalogNeedsRefresh, setAccountRotationEnabled, setAddressHost, setCredentialSyncEnabled, setFixedAccountUid, setListenPort, setModelHidden, type ModelEntry } from "../local/store"
 import { clearDiagnosticRun, diagnosticFailure, diagnosticFieldsText, diagnosticLocalTime, diagnosticOutcomeName, diagnosticSnapshot, diagnosticStageName, diagnosticsEnabled, exportDiagnosticFile, readDiagnosticLog, setDiagnosticsEnabled, subscribeDiagnostics, type DiagnosticRequest } from "../local/diagnostics"
 import { claimGift, giftStatus, refreshBalance, refreshModelCatalog, vouchers, type GiftStatus, type Voucher } from "../local/upstream"
-import { gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
+import { changeGatewayKeepAliveMode, gatewayState, serviceAddress, serviceDefaultHost, setLanEnabled, startGateway, stopGateway, subscribeGateway } from "../local/gateway"
 import { alertError, Busy, Failure, Hint } from "./Shared"
 
 export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void }) {
@@ -37,6 +37,13 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
       setState(gatewayState())
     } catch (error) { setState(gatewayState()); await alertError(error) }
     finally { if (Script.supportsMinimization()) Script.enableMinimize(gatewayState().running); setBusy(false) }
+  }
+  async function changeKeepAlive(value: string) {
+    if (busy || (value !== "location" && value !== "audio")) return
+    setBusy(true)
+    try { await changeGatewayKeepAliveMode(value) }
+    catch (error) { await alertError(error) }
+    finally { setBusy(false) }
   }
   async function saveEndpoint() {
     if (busy) return
@@ -112,7 +119,11 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
     </Section>
     <Section title="系统 · 本机 API 服务">
       <Text>{state.running ? "运行中" : "已停止"}</Text>
-      {state.running && <Hint>{state.keptAlive ? "后台保活已开启" : `后台保活不可用${state.backgroundIssue ? `：${state.backgroundIssue}` : ""}`}</Hint>}
+      <Picker title="保活方式" pickerStyle="menu" value={state.keepAliveMode} disabled={busy} onChanged={(value: string) => void changeKeepAlive(value)}>
+        <Text tag="location">定位</Text>
+        <Text tag="audio">音频</Text>
+      </Picker>
+      {!!state.backgroundIssue && <Text foregroundStyle="systemOrange">{`${state.running ? "后台保活不可用" : "后台保活停止失败"}：${state.backgroundIssue}`}</Text>}
       {state.running && <Hint>{state.activityActive ? "锁屏实时活动已开启；支持的设备会显示灵动岛" : `实时活动未显示${state.activityIssue ? `：${state.activityIssue}` : ""}`}</Hint>}
       {!state.running && !!state.activityIssue && <Text foregroundStyle="systemOrange">{state.activityIssue}</Text>}
       <HStack spacing={8} alignment="center">
@@ -142,7 +153,7 @@ export function MorePage({ onAccountsChanged }: { onAccountsChanged: () => void 
       {rotation && <Hint>新会话轮流分配账号，同一会话优先复用原账号；不可用时才尝试其他账号。</Hint>}
       {state.running && Script.supportsMinimization() && <Button title="收起界面，保持服务" systemImage="rectangle.compress.vertical" action={() => { void Script.minimize() }} />}
       {!!state.lastError && <Text foregroundStyle="systemRed">{state.lastError}</Text>}
-      <Hint>局域网使用明文 HTTP 且无鉴权，请仅在可信网络中开启。后台保活使用系统音频资源；iOS 仍可能挂起或终止脚本。</Hint>
+      <Hint>局域网使用明文 HTTP 且无鉴权，请仅在可信网络中开启。iOS 仍可能挂起脚本。</Hint>
     </Section>
   </List>
 }
