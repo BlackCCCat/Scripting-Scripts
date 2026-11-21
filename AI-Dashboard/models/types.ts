@@ -267,7 +267,10 @@ export interface ProviderMeta {
   webSessionProfile?: WebSessionProfile
 }
 
+export type DashboardLanguagePreference = "system" | "zh" | "en"
+
 export interface DashboardSettings {
+  languagePreference: DashboardLanguagePreference
   isDemoMode: boolean
   autoRefreshOnLaunch: boolean
   prefersICloudKeychain: boolean

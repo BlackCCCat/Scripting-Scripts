@@ -1,4 +1,5 @@
 import { Widget } from "scripting"
+import { getDashboardLanguage, localize, setLocalizationPreference } from "../utils/localization"
 import type {
   QuotaSnapshot,
   SubscriptionAccount,
@@ -178,7 +179,7 @@ function buildWidgetAccountData(
 
     return {
       id: w.id,
-      name: shortenQuotaWindowName(w.name, acc.provider),
+      name: localize(shortenQuotaWindowName(w.name, acc.provider)),
       period: w.period,
       usedPercentage: usedPct,
       remainingPercentage: remPct,
@@ -207,7 +208,7 @@ function buildWidgetAccountData(
     const remaining = Math.min(100, Math.max(0, additionalRemaining))
     rawQuotas.push({
       id: "muse.additionalTokens",
-      name: "额外 Tokens",
+      name: localize("额外 Tokens"),
       usedPercentage: 100 - remaining,
       remainingPercentage: remaining,
       isExhausted: remaining <= 0,
@@ -302,7 +303,9 @@ function buildWidgetAccountData(
     provider: acc.provider,
     displayName: getAccountDisplayTitle(acc, snapshot),
     planName,
-    identity: snapshot?.accountIdentity,
+    identity: acc.id.startsWith("demo-")
+      ? localize(snapshot?.accountIdentity)
+      : snapshot?.accountIdentity,
     region: acc.region,
     isWallet,
     wallet,
@@ -465,6 +468,7 @@ function mergeSingleQuotaAccounts(
  */
 export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
   const settings = loadDashboardSettings()
+  setLocalizationPreference(settings.languagePreference)
   const useDemo = forceDemo ?? settings.isDemoMode
   const widgetPrivacyEnabled = settings.widgetPrivacyEnabled ?? true
   const widgetQuotaAdaptTransparent =
@@ -544,7 +548,7 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
         if (
           a.id.toLowerCase() === token ||
           a.provider.toLowerCase() === token ||
-          a.displayName.toLowerCase().includes(token)
+          (a.displayName.toLowerCase().includes(token) || localize(a.displayName).toLowerCase().includes(token))
         ) {
           matched.push(a)
         } else {
@@ -564,7 +568,7 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
           (a) =>
             a.id.toLowerCase() === token ||
             a.provider.toLowerCase() === token ||
-            a.displayName.toLowerCase().includes(token)
+            (a.displayName.toLowerCase().includes(token) || localize(a.displayName).toLowerCase().includes(token))
         )
         if (foundIdx !== -1) {
           const [item] = remaining.splice(foundIdx, 1)
@@ -602,11 +606,11 @@ export function loadWidgetRenderData(forceDemo?: boolean): WidgetRenderData {
   }
 
   const lastUpdatedAt = latestCollectedAt
-    ? new Date(latestCollectedAt).toLocaleTimeString("zh-CN", {
+    ? new Date(latestCollectedAt).toLocaleTimeString(getDashboardLanguage(), {
         hour: "2-digit",
         minute: "2-digit",
       })
-    : new Date().toLocaleTimeString("zh-CN", {
+    : new Date().toLocaleTimeString(getDashboardLanguage(), {
         hour: "2-digit",
         minute: "2-digit",
       })

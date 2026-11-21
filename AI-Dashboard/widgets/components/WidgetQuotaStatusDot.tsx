@@ -1,7 +1,4 @@
-import {
-  Circle,
-  ZStack,
-} from "scripting"
+import { Circle, ZStack } from "scripting"
 import type { Color } from "scripting"
 
 export function WidgetQuotaStatusDot(props: {

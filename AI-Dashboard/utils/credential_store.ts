@@ -6,13 +6,14 @@ import {
   SubscriptionAccount,
 } from "../models/types"
 import { getProviderMeta, PROVIDERS_CATALOG } from "./providers_catalog"
+import { DASHBOARD_SETTINGS_KEY, setLocalizationPreference } from "./localization"
 
 const STORAGE_ACCOUNTS_KEY = "ai_dashboard.accounts.v1"
 const STORAGE_SNAPSHOTS_KEY = "ai_dashboard.snapshots.v1"
-const STORAGE_SETTINGS_KEY = "ai_dashboard.settings.v1"
 const CLOUD_ACCOUNTS_KEY = "ai_dashboard.sync.accounts.v1"
 
 export const DEFAULT_SETTINGS: DashboardSettings = {
+  languagePreference: "system",
   isDemoMode: true,
   autoRefreshOnLaunch: true,
   prefersICloudKeychain: false,
@@ -540,11 +541,15 @@ export function saveStoredSnapshots(snapshots: Record<string, QuotaSnapshot>): v
 }
 
 export function loadDashboardSettings(): DashboardSettings {
-  const saved = Storage.get<Partial<DashboardSettings>>(STORAGE_SETTINGS_KEY)
+  const saved = Storage.get<Partial<DashboardSettings>>(DASHBOARD_SETTINGS_KEY)
   if (!saved || typeof saved !== "object") {
     return { ...DEFAULT_SETTINGS }
   }
   return {
+    languagePreference:
+      saved.languagePreference === "zh" || saved.languagePreference === "en"
+        ? saved.languagePreference
+        : "system",
     isDemoMode: saved.isDemoMode ?? DEFAULT_SETTINGS.isDemoMode,
     autoRefreshOnLaunch:
       saved.autoRefreshOnLaunch ?? DEFAULT_SETTINGS.autoRefreshOnLaunch,
@@ -565,8 +570,10 @@ export function loadDashboardSettings(): DashboardSettings {
   }
 }
 
-export function saveDashboardSettings(settings: DashboardSettings): void {
-  Storage.set(STORAGE_SETTINGS_KEY, settings)
+export function saveDashboardSettings(settings: DashboardSettings): boolean {
+  if (!Storage.set(DASHBOARD_SETTINGS_KEY, settings)) return false
+  setLocalizationPreference(settings.languagePreference)
+  return true
 }
 
 const knownProviderIds = new Set<ProviderId>(PROVIDERS_CATALOG.map((item) => item.id))
@@ -772,13 +779,13 @@ export async function setDashboardKeychainSyncEnabled(
     accountsSaveAttempted = true
     if (!Storage.set(STORAGE_ACCOUNTS_KEY, nextAccounts)) throw new Error("账号列表保存失败")
     settingsSaveAttempted = true
-    if (!Storage.set(STORAGE_SETTINGS_KEY, nextSettings)) throw new Error("iCloud 同步设置保存失败")
+    if (!Storage.set(DASHBOARD_SETTINGS_KEY, nextSettings)) throw new Error("iCloud 同步设置保存失败")
     completed++
     progress("同步设置已保存")
   } catch (error) {
     let rollbackFailed = false
     if (accountsSaveAttempted && !Storage.set(STORAGE_ACCOUNTS_KEY, originalAccounts)) rollbackFailed = true
-    if (settingsSaveAttempted && !Storage.set(STORAGE_SETTINGS_KEY, originalSettings)) rollbackFailed = true
+    if (settingsSaveAttempted && !Storage.set(DASHBOARD_SETTINGS_KEY, originalSettings)) rollbackFailed = true
     for (const item of written.reverse()) {
       try {
         if (item.previous === null) {

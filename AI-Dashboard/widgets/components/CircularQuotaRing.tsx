@@ -1,3 +1,4 @@
+import { localize } from "../../utils/localization"
 import {
   Circle,
   HStack,
@@ -116,7 +117,7 @@ export function CircularQuotaRing(props: {
               monospaced={true}
               lineLimit={1}
             >
-              {item.isUnlimited ? "无限" : isExhausted ? "0%" : `${Math.round(remPct)}%`}
+              {localize(item.isUnlimited ? "无限" : isExhausted ? "0%" : `${Math.round(remPct)}%`)}
             </Text>
             {!item.isUnlimited &&
             item.remainingCount !== undefined &&
@@ -129,9 +130,9 @@ export function CircularQuotaRing(props: {
                 monospaced={true}
                 lineLimit={1}
               >
-                {item.totalCount !== undefined
+                {localize(item.totalCount !== undefined
                   ? `${item.remainingCount}/${item.totalCount}`
-                  : `${item.remainingCount} ${item.unit || "积分"}`.trim()}
+                  : `${item.remainingCount} ${localize(item.unit || "积分")}`.trim())}
               </Text>
             ) : null}
           </VStack>

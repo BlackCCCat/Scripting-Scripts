@@ -1,3 +1,4 @@
+import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   BarChart,
   Button,
@@ -10,8 +11,8 @@ import {
   Section,
   Spacer,
   Text,
-  VStack,
   useMemo,
+  VStack,
 } from "scripting"
 import {
   AccountQuotaState,
@@ -135,6 +136,10 @@ export function DashboardOverviewSection(props: {
   const avgHealthColor = avgRemainingPercent === null
     ? "secondaryLabel"
     : remainingQuotaColor(avgRemainingPercent, false)
+  const isEnglish = getDashboardLanguage() === "en"
+  const captionLayout = isEnglish
+    ? { fixedSize: { horizontal: false, vertical: true } }
+    : { lineLimit: 1 }
   const chartContentWidth = Math.max(310, stats.chartItems.length * 54)
 
   return (
@@ -146,13 +151,13 @@ export function DashboardOverviewSection(props: {
             font="caption"
             foregroundStyle="accentColor"
           />
-          <Text>全局额度与资产总览</Text>
+          <Text>{localize("全局额度与资产总览")}</Text>
           <Spacer />
           <Text
             font="caption2"
             foregroundStyle={isDemoMode ? "systemOrange" : "systemGreen"}
           >
-            {isDemoMode ? "● 演示数据" : "● 实时直连"}
+            {localize(isDemoMode ? "● 演示数据" : "● 实时直连")}
           </Text>
         </HStack>
       }
@@ -202,8 +207,7 @@ export function DashboardOverviewSection(props: {
                   foregroundStyle="systemBlue"
                 />
                 <Text font="caption" foregroundStyle="secondaryLabel">
-                  监控 AI 账号
-                </Text>
+                  {localize("监控 AI 账号")}</Text>
                 <Spacer />
                 <Image
                   systemName="chevron.right"
@@ -212,12 +216,12 @@ export function DashboardOverviewSection(props: {
                 />
               </HStack>
               <Text font="title2" fontWeight="bold" monospacedDigit={true}>
-                {`${accounts.length} 个`}
+                {localize(`${accounts.length} 个`)}
               </Text>
-              <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-                {stats.warningCount > 0
+              <Text font="caption2" foregroundStyle="secondaryLabel" {...captionLayout}>
+                {localize(stats.warningCount > 0
                   ? `${stats.healthyCount} 正常 · ${stats.warningCount} 预警`
-                  : `全部 ${stats.healthyCount} 个配额健康`}
+                  : `全部 ${stats.healthyCount} 个配额健康`)}
               </Text>
             </VStack>
           </Button>
@@ -243,8 +247,7 @@ export function DashboardOverviewSection(props: {
                 foregroundStyle={avgHealthColor}
               />
               <Text font="caption" foregroundStyle="secondaryLabel">
-                平均剩余配额
-              </Text>
+                {localize("平均剩余配额")}</Text>
               <Spacer />
             </HStack>
             <Text
@@ -256,10 +259,10 @@ export function DashboardOverviewSection(props: {
             >
               {avgRemainingPercent === null ? "—" : `${avgRemainingPercent}%`}
             </Text>
-            <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-              {avgUsedPercent !== null
+            <Text font="caption2" foregroundStyle="secondaryLabel" {...captionLayout}>
+              {localize(avgUsedPercent !== null
                 ? `平均已消耗 ${avgUsedPercent}% 周期额度`
-                : "暂无可计算的周期配额"}
+                : "暂无可计算的周期配额")}
             </Text>
           </VStack>
 
@@ -284,17 +287,16 @@ export function DashboardOverviewSection(props: {
                 foregroundStyle="systemOrange"
               />
               <Text font="caption" foregroundStyle="secondaryLabel">
-                人民币钱包池
-              </Text>
+                {localize("人民币钱包池")}</Text>
               <Spacer />
             </HStack>
-            <Text font="title2" fontWeight="bold" monospacedDigit={true} lineLimit={1}>
+            <Text font={isEnglish ? "title3" : "title2"} fontWeight="bold" monospacedDigit={true} {...captionLayout}>
               {formatMoney(stats.totalCny, "CNY")}
             </Text>
-            <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-              {stats.grantedCny > 0
+            <Text font="caption2" foregroundStyle="secondaryLabel" {...captionLayout}>
+              {localize(stats.grantedCny > 0
                 ? `含赠送金 ${formatMoney(stats.grantedCny, "CNY")}`
-                : "API 预充值可用余额"}
+                : "API 预充值可用余额")}
             </Text>
           </VStack>
 
@@ -319,17 +321,16 @@ export function DashboardOverviewSection(props: {
                 foregroundStyle="systemIndigo"
               />
               <Text font="caption" foregroundStyle="secondaryLabel">
-                美元钱包池
-              </Text>
+                {localize("美元钱包池")}</Text>
               <Spacer />
             </HStack>
-            <Text font="title2" fontWeight="bold" monospacedDigit={true} lineLimit={1}>
+            <Text font={isEnglish ? "title3" : "title2"} fontWeight="bold" monospacedDigit={true} {...captionLayout}>
               {formatMoney(stats.totalUsd, "USD")}
             </Text>
-            <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-              {stats.grantedUsd > 0
+            <Text font="caption2" foregroundStyle="secondaryLabel" {...captionLayout}>
+              {localize(stats.grantedUsd > 0
                 ? `含赠送金 ${formatMoney(stats.grantedUsd, "USD")}`
-                : "国际平台与网关合计"}
+                : "国际平台与网关合计")}
             </Text>
           </VStack>
         </LazyVGrid>
@@ -355,12 +356,12 @@ export function DashboardOverviewSection(props: {
                 font="caption"
                 foregroundStyle="accentColor"
               />
-              <Text font="subheadline" fontWeight="semibold">
-                各平台周期配额剩余比例
+              <Text font="subheadline" fontWeight="semibold" layoutPriority={isEnglish ? 1 : undefined}>
+                {localize("各平台周期配额剩余比例")}
               </Text>
               <Spacer />
-              <Text font="caption2" foregroundStyle="secondaryLabel">
-                左右滑动 · 点击图标查看
+              <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={isEnglish ? { horizontal: false, vertical: true } : undefined}>
+                {localize("左右滑动 · 点击图标查看")}
               </Text>
             </HStack>
 

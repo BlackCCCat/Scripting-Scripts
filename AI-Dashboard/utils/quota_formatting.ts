@@ -1,3 +1,4 @@
+import { getDashboardLanguage, localize } from "./localization"
 import {
   ProviderId,
   QuotaResetSemantics,
@@ -12,7 +13,7 @@ export function formatAmountNumber(
   maxFractionDigits = 4
 ): string {
   if (!Number.isFinite(value)) return "0"
-  return new Intl.NumberFormat("zh-CN", {
+  return new Intl.NumberFormat(getDashboardLanguage(), {
     minimumFractionDigits: 0,
     maximumFractionDigits: maxFractionDigits,
   }).format(value)
@@ -25,7 +26,7 @@ export function formatMoney(amount: number, currency: string): string {
     absVal > 0 && absVal < 0.01 ? 4 : absVal < 1 ? 2 : 2
   const maxFraction = absVal > 0 && absVal < 0.01 ? 6 : 4
   try {
-    const formatted = new Intl.NumberFormat("zh-CN", {
+    const formatted = new Intl.NumberFormat(getDashboardLanguage(), {
       style: "currency",
       currency: code,
       currencyDisplay: code === "USD" ? "narrowSymbol" : "symbol",
@@ -47,7 +48,7 @@ export function formatWalletAmount(
   if (wallet.isMonetary) {
     return formatMoney(amount, wallet.currency)
   }
-  return `${formatAmountNumber(amount)} ${wallet.currency}`
+  return `${formatAmountNumber(amount)} ${localize(wallet.currency)}`
 }
 
 const GENERIC_WINDOW_NAMES = new Set([
@@ -200,7 +201,7 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
   const frac = formatWindowProgressFraction(window)
   const usedPct = frac !== null ? Math.round(frac * 100) : null
   const remPct = usedPct !== null ? Math.max(0, 100 - usedPct) : null
-  const unit = window.unit ? ` ${window.unit}` : ""
+  const unit = window.unit ? ` ${localize(window.unit)}` : ""
 
   if (window.exactCounts) {
     const { used, remaining, total } = window.exactCounts
@@ -379,7 +380,7 @@ export function formatShortDateTime(iso?: string): string | null {
   if (!iso) return null
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return null
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(getDashboardLanguage(), {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -415,5 +416,8 @@ export function formatFailureDescription(
         return `${meta.displayName} 服务端返回异常状态`
     }
   })()
-  return detail ? `${base}（${detail}）` : base
+  if (!detail) return localize(base)
+  return getDashboardLanguage() === "en"
+    ? `${localize(base)} (${localize(detail)})`
+    : `${base}（${detail}）`
 }

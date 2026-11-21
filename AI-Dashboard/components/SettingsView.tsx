@@ -1,3 +1,4 @@
+import { localize } from "../utils/localization"
 import {
   Button,
   Form,
@@ -11,9 +12,9 @@ import {
   Spacer,
   Text,
   Toggle,
-  VStack,
-  VirtualNode,
   useState,
+  VirtualNode,
+  VStack,
 } from "scripting"
 import { DashboardSettings } from "../models/types"
 import { PROVIDERS_CATALOG } from "../utils/providers_catalog"
@@ -80,7 +81,7 @@ export function SettingsView(props: {
 
   const formContent = (
     <Form
-      navigationTitle="设置"
+      navigationTitle={localize("设置")}
       sheet={
         isHomeScreen
           ? {
@@ -161,25 +162,23 @@ export function SettingsView(props: {
           ? tabSwitchMenu
           : (
             <Button
-              title="退出"
+              title={localize("退出")}
               systemImage="xmark"
               action={onDismiss}
             />
           ),
       }}
         confirmationDialog={{
-          title: "确认清理本地额度快照缓存？",
+          title: localize("确认清理本地额度快照缓存？"),
           titleVisibility: "visible",
           isPresented: isClearCacheConfirmPresented,
           onChanged: setIsClearCacheConfirmPresented,
           message: (
-            <Text>
-              清理后不会删除钥匙串中的账号凭证，下次刷新将重新从各供应商接口拉取。
-            </Text>
+            <Text>{localize("清理后不会删除钥匙串中的账号凭证，下次刷新将重新从各供应商接口拉取。")}</Text>
           ),
           actions: (
             <Button
-              title="清理快照缓存"
+              title={localize("清理快照缓存")}
               role="destructive"
               action={() => {
                 setIsClearCacheConfirmPresented(false)
@@ -190,16 +189,31 @@ export function SettingsView(props: {
           ),
         }}
       >
+        <Section>
+          <Picker
+            title={localize("语言")}
+            value={settings.languagePreference}
+            onChanged={(value: string) => {
+              if (value === "system" || value === "zh" || value === "en") {
+                onUpdateSettings({ ...settings, languagePreference: value })
+              }
+            }}
+          >
+            <Text tag="system">{localize("跟随系统")}</Text>
+            <Text tag="zh">中文</Text>
+            <Text tag="en">English</Text>
+          </Picker>
+        </Section>
+
         <Section
-          header={<Text>数据源与演示模式</Text>}
+          header={<Text>{localize("数据源与演示模式")}</Text>}
           footer={
             <Text>
-              演示模式提供覆盖 6 大接入路径的本地样例看板；关闭演示模式即可切换至真实 Keychain 凭证与直连 HTTP 查询。
-            </Text>
+              {localize("演示模式提供覆盖 6 大接入路径的本地样例看板；关闭演示模式即可切换至真实 Keychain 凭证与直连 HTTP 查询。")}</Text>
           }
         >
           <Toggle
-            title="演示模式 (Demo Mode)"
+            title={localize("演示模式 (Demo Mode)")}
             value={settings.isDemoMode}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, isDemoMode: val })
@@ -207,7 +221,7 @@ export function SettingsView(props: {
           />
           {settings.isDemoMode ? (
             <Button
-              title="恢复默认 9 个代表性演示账号"
+              title={localize("恢复默认 9 个代表性演示账号")}
               systemImage="arrow.counterclockwise"
               action={onResetDemoAccounts}
             />
@@ -215,25 +229,25 @@ export function SettingsView(props: {
         </Section>
 
         <Section
-          header={<Text>看板布局与刷新策略</Text>}
-          footer={<Text>开启后会将现有账号的登录凭据转存到 iCloud 钥匙串，并同步以后新增的账号；关闭后会在本机保留可读取的凭据。</Text>}
+          header={<Text>{localize("看板布局与刷新策略")}</Text>}
+          footer={<Text>{localize("开启后会将现有账号的登录凭据转存到 iCloud 钥匙串，并同步以后新增的账号；关闭后会在本机保留可读取的凭据。")}</Text>}
         >
           <Toggle
-            title="分组显示"
+            title={localize("分组显示")}
             value={settings.groupByRouteCategory}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, groupByRouteCategory: val })
             }
           />
           <Toggle
-            title="启动脚本时自动刷新已启用账号"
+            title={localize("启动脚本时自动刷新已启用账号")}
             value={settings.autoRefreshOnLaunch}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, autoRefreshOnLaunch: val })
             }
           />
           <Toggle
-            title="iCloud 钥匙串同步"
+            title={localize("iCloud 钥匙串同步")}
             value={settings.prefersICloudKeychain}
             disabled={keychainSyncBusy}
             onChanged={(val) => void onSetKeychainSync(val)}
@@ -246,39 +260,38 @@ export function SettingsView(props: {
                 progressViewStyle="linear"
               />
               <Text font="caption" foregroundStyle="secondaryLabel">
-                {keychainSyncProgress.phase}
+                {localize(keychainSyncProgress.phase)}
               </Text>
             </VStack>
           ) : null}
           {keychainSyncError ? (
             <VStack alignment="leading" spacing={6}>
               <Text font="caption" foregroundStyle="systemOrange">
-                {keychainSyncError}
+                {localize(keychainSyncError)}
               </Text>
               {settings.prefersICloudKeychain && !keychainSyncBusy ? (
-                <Button title="重试同步" systemImage="arrow.clockwise" action={() => void onSetKeychainSync(true)} />
+                <Button title={localize("重试同步")} systemImage="arrow.clockwise" action={() => void onSetKeychainSync(true)} />
               ) : null}
             </VStack>
           ) : null}
         </Section>
 
         <Section
-          header={<Text>隐私与账号保护</Text>}
+          header={<Text>{localize("隐私与账号保护")}</Text>}
           footer={
             <Text>
-              开启小组件账号隐私保护后，当小组件中显示同一供应商的多个账号时，将自动对邮箱、用户名等进行遮罩（如 d***r@gmail.com）。主看板开启账号保护显示后，卡片上的账号名称也将自动遮罩。
-            </Text>
+              {localize("开启小组件账号隐私保护后，当小组件中显示同一供应商的多个账号时，将自动对邮箱、用户名等进行遮罩（如 d***r@gmail.com）。主看板开启账号保护显示后，卡片上的账号名称也将自动遮罩。")}</Text>
           }
         >
           <Toggle
-            title="小组件账号隐私保护"
+            title={localize("小组件账号隐私保护")}
             value={settings.widgetPrivacyEnabled ?? true}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, widgetPrivacyEnabled: val })
             }
           />
           <Toggle
-            title="主看板账号保护显示"
+            title={localize("主看板账号保护显示")}
             value={settings.protectAccountIdentity}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, protectAccountIdentity: val })
@@ -287,29 +300,28 @@ export function SettingsView(props: {
         </Section>
 
         <Section
-          header={<Text>客户端直连与钥匙串状态</Text>}
+          header={<Text>{localize("客户端直连与钥匙串状态")}</Text>}
           footer={
             <Text>
-              所有 API Key、OAuth 令牌与 Web 会话 Cookie 均封装为带 SHA-256 指纹的信封存入 iOS 系统钥匙串，网络层默认拦截跨域重定向以防止凭证泄漏。
-            </Text>
+              {localize("所有 API Key、OAuth 令牌与 Web 会话 Cookie 均封装为带 SHA-256 指纹的信封存入 iOS 系统钥匙串，网络层默认拦截跨域重定向以防止凭证泄漏。")}</Text>
           }
         >
           <LabeledContent
-            title="支持 AI 供应商总数"
-            value={`${PROVIDERS_CATALOG.length} 家`}
+            title={localize("支持 AI 供应商总数")}
+            value={localize(`${PROVIDERS_CATALOG.length} 家`)}
           />
           <LabeledContent
-            title="已配置真实账号"
-            value={`${realAccountCount} 个`}
+            title={localize("已配置真实账号")}
+            value={localize(`${realAccountCount} 个`)}
           />
           <LabeledContent
-            title="当前演示账号"
-            value={`${demoAccountCount} 个`}
+            title={localize("当前演示账号")}
+            value={localize(`${demoAccountCount} 个`)}
           />
 
           {onOpenChangelog || isHomeScreen ? (
             <Button
-              title="查看更新说明 (Changelog)"
+              title={localize("查看更新说明 (Changelog)")}
               systemImage="newspaper"
               action={() => {
                 if (isHomeScreen) {
@@ -323,15 +335,14 @@ export function SettingsView(props: {
         </Section>
 
         <Section
-          header={<Text>桌面小组件</Text>}
+          header={<Text>{localize("桌面小组件")}</Text>}
           footer={
             <Text>
-              原生适配 iOS/iPadOS 桌面小、中、大、特大四种尺寸。小组件受 iOS WidgetKit 能源与网络预算调度，设置较短间隔（如 15/30 分钟）可加快后台轮询；应用内数据变动或下拉刷新时会实时同步推送至小组件。
-            </Text>
+              {localize("原生适配 iOS/iPadOS 桌面小、中、大、特大四种尺寸。小组件受 iOS WidgetKit 能源与网络预算调度，设置较短间隔（如 15/30 分钟）可加快后台轮询；应用内数据变动或下拉刷新时会实时同步推送至小组件。")}</Text>
           }
         >
           <Picker
-            title="小组件刷新间隔"
+            title={localize("小组件刷新间隔")}
             value={String(settings.widgetRefreshIntervalMinutes ?? 30)}
             onChanged={(val: string) => {
               const minutes = Number.parseInt(val, 10) || 30
@@ -341,16 +352,16 @@ export function SettingsView(props: {
               })
             }}
           >
-            <Text tag="5">5 分钟 (高频推荐)</Text>
-            <Text tag="15">15 分钟</Text>
-            <Text tag="30">30 分钟 (默认推荐)</Text>
-            <Text tag="60">1 小时</Text>
-            <Text tag="120">2 小时</Text>
-            <Text tag="360">6 小时</Text>
+            <Text tag="5">{localize("5 分钟 (高频推荐)")}</Text>
+            <Text tag="15">{localize("15 分钟")}</Text>
+            <Text tag="30">{localize("30 分钟 (默认推荐)")}</Text>
+            <Text tag="60">{localize("1 小时")}</Text>
+            <Text tag="120">{localize("2 小时")}</Text>
+            <Text tag="360">{localize("6 小时")}</Text>
           </Picker>
 
           <Toggle
-            title="用量标识适配透明模式"
+            title={localize("用量标识适配透明模式")}
             value={settings.widgetQuotaAdaptTransparent ?? false}
             onChanged={(val) => {
               onUpdateSettings({
@@ -362,7 +373,7 @@ export function SettingsView(props: {
           />
 
           <Button
-            title="小组件使用说明"
+            title={localize("小组件使用说明")}
             systemImage="questionmark.circle"
             matchedTransitionSource={
               zoomNamespace
@@ -382,7 +393,7 @@ export function SettingsView(props: {
           />
 
           <Button
-            title="预览桌面小组件样式 (小/中/大/特大)"
+            title={localize("预览桌面小组件样式 (小/中/大/特大)")}
             systemImage="rectangle.3.group"
             matchedTransitionSource={
               zoomNamespace
@@ -402,9 +413,9 @@ export function SettingsView(props: {
           />
         </Section>
 
-        <Section header={<Text>缓存维护</Text>}>
+        <Section header={<Text>{localize("缓存维护")}</Text>}>
           <Button
-            title="清理本地额度快照缓存"
+            title={localize("清理本地额度快照缓存")}
             systemImage="trash.slash"
             role="destructive"
             action={() => setIsClearCacheConfirmPresented(true)}
@@ -412,11 +423,10 @@ export function SettingsView(props: {
         </Section>
 
         <Section
-          header={<Text>开源致谢 · TokenPulse</Text>}
+          header={<Text>{localize("开源致谢 · TokenPulse")}</Text>}
           footer={
             <Text>
-              本脚本基于 TokenPulse 的供应商接入规范与安全设计理念，使用 Scripting 原生组件构建。对齐基线：commit 46ea63d (2026-10-17)。
-            </Text>
+              {localize("本脚本基于 TokenPulse 的供应商接入规范与安全设计理念，使用 Scripting 原生组件构建。对齐基线：commit 46ea63d (2026-10-17)。")}</Text>
           }
         >
           <HStack alignment="center" spacing={10}>
@@ -435,18 +445,17 @@ export function SettingsView(props: {
           </HStack>
 
           <Button
-            title="查看“TokenPulse”开源仓库"
+            title={localize("查看“TokenPulse”开源仓库")}
             systemImage="safari"
             action={handleOpenTokenPulseRepo}
           />
         </Section>
 
         <Section
-          header={<Text>开源致谢 · Antigravity-Manager</Text>}
+          header={<Text>{localize("开源致谢 · Antigravity-Manager")}</Text>}
           footer={
             <Text>
-              参考该项目实现了 Google Antigravity 多窗口配额提取、Gemini 4 Argon 独立模型解析及客户端直连会话协议。对齐基线：v4.9.8 · commit 9f8e4f2 (2026-10-17)。
-            </Text>
+              {localize("参考该项目实现了 Google Antigravity 多窗口配额提取、Gemini 4 Argon 独立模型解析及客户端直连会话协议。对齐基线：v4.9.8 · commit 9f8e4f2 (2026-10-17)。")}</Text>
           }
         >
           <HStack alignment="center" spacing={10}>
@@ -465,7 +474,7 @@ export function SettingsView(props: {
           </HStack>
 
           <Button
-            title="查看“Antigravity-Manager”开源仓库"
+            title={localize("查看“Antigravity-Manager”开源仓库")}
             systemImage="safari"
             action={handleOpenAntigravityManagerRepo}
           />

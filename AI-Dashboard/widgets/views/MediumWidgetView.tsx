@@ -1,3 +1,5 @@
+import { localizeAccountName } from "../../utils/providers_catalog"
+import { localize } from "../../utils/localization"
 import {
   Button,
   Capsule,
@@ -79,7 +81,7 @@ export function MediumAccountCard(props: {
         {/* 顶部标题栏：供应商名称、重置预测、套餐、重置卡、更新时间与健康状态 */}
         <HStack alignment="center" spacing={4} frame={{ maxWidth: "infinity" }}>
           <Text font={isCompact ? 13 : 15} fontWeight="heavy" lineLimit={1}>
-            {account.displayName}
+            {localizeAccountName(account.provider, account.displayName)}
           </Text>
 
           {/* 重置预测直接显示在标题后 */}
@@ -92,7 +94,7 @@ export function MediumAccountCard(props: {
             >
               <Image systemName="sparkles" font={isCompact ? 7.5 : 8.5} foregroundStyle="systemIndigo" />
               <Text font={isCompact ? 7.5 : 8.5} fontWeight="bold" foregroundStyle="systemIndigo" lineLimit={1}>
-                {`⚡️${account.codexResetForecast.scheduledText || account.codexResetForecast.probabilityText}`}
+                {localize(`⚡️${account.codexResetForecast.scheduledText || account.codexResetForecast.probabilityText}`)}
               </Text>
             </HStack>
           ) : null}
@@ -106,7 +108,7 @@ export function MediumAccountCard(props: {
               background={<Capsule fill="quaternarySystemFill" />}
               lineLimit={1}
             >
-              {account.planName}
+              {localize(account.planName)}
             </Text>
           ) : null}
 
@@ -140,7 +142,7 @@ export function MediumAccountCard(props: {
                   }
                   lineLimit={1}
                 >
-                  {account.updateStatusText || `更新于 ${lastUpdatedAt}`}
+                  {localize(account.updateStatusText || `更新于 ${lastUpdatedAt}`)}
                 </Text>
                 <Image
                   systemName="arrow.triangle.2.circlepath"
@@ -177,8 +179,7 @@ export function MediumAccountCard(props: {
               <VStack alignment="leading" spacing={isCompact ? 2 : 3.5}>
                 <HStack alignment="center" spacing={4}>
                   <Text font={isCompact ? 10 : 11.5} fontWeight="bold" foregroundStyle="secondaryLabel">
-                    账户可用资金池 (预付费)
-                  </Text>
+                    {localize("账户可用资金池 (预付费)")}</Text>
                   <Text
                     font={isCompact ? 7.5 : 8}
                     fontWeight="bold"
@@ -186,15 +187,14 @@ export function MediumAccountCard(props: {
                     padding={{ horizontal: 4, vertical: 1 }}
                     background={<Capsule fill="quaternarySystemFill" />}
                   >
-                    资金充足
-                  </Text>
+                    {localize("资金充足")}</Text>
                 </HStack>
                 <Text font={isCompact ? 26 : 34} fontWeight="heavy" monospaced={true} foregroundStyle="label">
                   {formatCurrencyAmount(account.wallet?.total ?? 0, account.wallet?.currency)}
                 </Text>
                 {account.wallet?.toppedUp !== undefined || account.wallet?.granted !== undefined ? (
                   <Text font={isCompact ? 8 : 9} foregroundStyle="secondaryLabel">
-                    {`${account.wallet?.toppedUp !== undefined ? `充值 ¥${account.wallet.toppedUp.toFixed(2)} ` : ""}${account.wallet?.granted !== undefined ? `· 赠金 ¥${account.wallet.granted.toFixed(2)}` : ""}`.trim()}
+                    {localize(`${account.wallet?.toppedUp !== undefined ? `充值 ¥${account.wallet.toppedUp.toFixed(2)} ` : ""}${account.wallet?.granted !== undefined ? `· 赠金 ¥${account.wallet.granted.toFixed(2)}` : ""}`.trim())}
                   </Text>
                 ) : null}
               </VStack>
@@ -245,11 +245,9 @@ export function MediumWidgetView(props: {
           foregroundStyle="accentColor"
         />
         <Text font="headline" fontWeight="bold">
-          AI 额度看板
-        </Text>
+          {localize("AI 额度看板")}</Text>
         <Text font="subheadline" foregroundStyle="secondaryLabel">
-          暂未配置监控账号，请打开应用添加供应商
-        </Text>
+          {localize("暂未配置监控账号，请打开应用添加供应商")}</Text>
       </VStack>
     )
   }

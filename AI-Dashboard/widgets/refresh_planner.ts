@@ -1,3 +1,4 @@
+import { getDashboardLanguage } from "../utils/localization"
 import type { ProviderId, QuotaSnapshot } from "../models/types"
 import type { WidgetRefreshMetadata } from "../services/refresh_service"
 
@@ -138,7 +139,7 @@ export function getWidgetStatusOrUpdateTime(input: {
   // 正常模式：展示更新时间
   let timeStr = input.fallbackTimeText
   if (!timeStr && fetchedAt !== null) {
-    timeStr = new Date(fetchedAt).toLocaleTimeString("zh-CN", {
+    timeStr = new Date(fetchedAt).toLocaleTimeString(getDashboardLanguage(), {
       hour: "2-digit",
       minute: "2-digit",
     })

@@ -1,3 +1,4 @@
+import { localize } from "../utils/localization"
 import {
   Button,
   ContentUnavailableView,
@@ -7,12 +8,13 @@ import {
   NavigationStack,
   Section,
   Text,
-  VStack,
   useEffect,
   useObservable,
   useState,
+  VStack,
 } from "scripting"
 import { SubscriptionAccount } from "../models/types"
+import { localizeAccountName } from "../utils/providers_catalog"
 import { ProviderIconView } from "./ProviderIconView"
 
 export type AccountOrderEditSheetProps = {
@@ -89,7 +91,7 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
 
   const content = (
     <List
-      navigationTitle="编辑账号卡片"
+      navigationTitle={localize("编辑账号卡片")}
       listStyle="insetGroup"
       navigationTransition={props.navigationTransition}
       environments={{
@@ -98,13 +100,13 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
       toolbar={{
         topBarLeading: props.embedded ? undefined : (
           <Button
-            title="取消"
+            title={localize("取消")}
             action={onCancel}
           />
         ),
         topBarTrailing: (
           <Button
-            title="完成"
+            title={localize("完成")}
             fontWeight="semibold"
             action={onDismiss}
           />
@@ -114,18 +116,17 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
         {accountsObservable.value.length === 0 ? (
           <Section>
             <ContentUnavailableView
-              title="暂无已添加的账号"
+              title={localize("暂无已添加的账号")}
               systemImage="tray"
-              description="请先在首页添加 AI 供应商账号"
+              description={localize("请先在首页添加 AI 供应商账号")}
             />
           </Section>
         ) : (
           <Section
-            header={<Text>拖动排序与删除</Text>}
+            header={<Text>{localize("拖动排序与删除")}</Text>}
             footer={
               <Text>
-                按住右侧三道杠滑块可上下拖动调整在首页的展示顺序；向左滑动或点击红圈可删除对应供应商账号。
-              </Text>
+                {localize("按住右侧三道杠滑块可上下拖动调整在首页的展示顺序；向左滑动或点击红圈可删除对应供应商账号。")}</Text>
             }
           >
             <ForEach
@@ -144,7 +145,7 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
                       allowsFullSwipe: true,
                       actions: [
                         <Button
-                          title="删除"
+                          title={localize("删除")}
                           systemImage="trash"
                           role="destructive"
                           tint="red"
@@ -161,7 +162,7 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
                   >
                     <ProviderIconView provider={acc.provider} size={32} />
                     <VStack alignment="leading" spacing={2}>
-                      <Text font="headline">{acc.displayName}</Text>
+                      <Text font="headline">{localizeAccountName(acc.provider, acc.displayName)}</Text>
                     </VStack>
                   </HStack>
                 )

@@ -1,24 +1,26 @@
+import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Capsule,
   DisclosureGroup,
   Divider,
   Form,
+  FlowLayout,
   HStack,
   Image,
   LabeledContent,
   List,
   NavigationStack,
   Picker,
-  SecureField,
   Section,
+  SecureField,
   Spacer,
   Text,
   TextField,
-  VStack,
   useEffect,
   useMemo,
   useState,
+  VStack,
 } from "scripting"
 import {
   buildAntigravityAuthURL,
@@ -80,6 +82,7 @@ export function AddAccountSheet(props: {
     onAccountCreated,
   } = props
 
+  const isEnglish = getDashboardLanguage() === "en"
   const [isPickingProvider, setIsPickingProvider] =
     useState<boolean>(startWithPicker)
   const [selectedProviderId, setSelectedProviderId] =
@@ -158,8 +161,8 @@ export function AddAccountSheet(props: {
   const handleImportFromKeychain = async () => {
     try {
       const picked = await Keychain.pick({
-        title: "从钥匙串导入",
-        prompt: `选择已保存在钥匙串中的 ${meta.displayName} 凭据或 API 密钥`,
+        title: localize("从钥匙串导入"),
+        prompt: localize(`选择已保存在钥匙串中的 ${meta.displayName} 凭据或 API 密钥`),
       })
       if (!picked || !picked.trim()) return
       const trimmed = picked.trim()
@@ -287,7 +290,7 @@ export function AddAccountSheet(props: {
     try {
       void controller.loadURL(meta.webSessionProfile.loginURL)
       await controller.present({
-        navigationTitle: `登录 ${meta.displayName}`,
+        navigationTitle: localize(`登录 ${meta.displayName}`),
         fullscreen: false,
       })
       const envelope = await extractWebSessionFromController(
@@ -342,7 +345,7 @@ export function AddAccountSheet(props: {
       const authUrl = buildAntigravityAuthURL()
       void controller.loadURL(authUrl)
       await controller.present({
-        navigationTitle: "Google 授权登录",
+        navigationTitle: localize("Google 授权登录"),
         fullscreen: false,
       })
       if (capturedCode) {
@@ -411,7 +414,7 @@ export function AddAccountSheet(props: {
     try {
       void controller.loadURL(authPlan.url)
       await controller.present({
-        navigationTitle: `登录 TRAE (${selectedRegion === "global" ? "国际站" : "中国站"})`,
+        navigationTitle: localize(`登录 TRAE (${selectedRegion === "global" ? "国际站" : "中国站"})`),
         fullscreen: false,
       })
       if (capturedRefreshToken) {
@@ -485,7 +488,7 @@ export function AddAccountSheet(props: {
     try {
       void controller.loadURL(authPlan.url)
       await controller.present({
-        navigationTitle: "OpenAI 授权登录",
+        navigationTitle: localize("OpenAI 授权登录"),
         fullscreen: false,
       })
       if (callbackError) throw new Error(callbackError)
@@ -552,13 +555,13 @@ export function AddAccountSheet(props: {
 
   const formContent = (
     <Form
-      navigationTitle="添加 AI 供应商"
+      navigationTitle={localize("添加 AI 供应商")}
       navigationBarTitleDisplayMode="inline"
       navigationTransition={props.navigationTransition}
       toolbar={{
         cancellationAction: (props.embedded || props.isPushed) ? undefined : (
           <Button
-            title={startWithPicker ? "选择供应商" : "取消"}
+            title={localize(startWithPicker ? "选择供应商" : "取消")}
             systemImage={startWithPicker ? "chevron.left" : undefined}
             action={
               startWithPicker
@@ -572,7 +575,7 @@ export function AddAccountSheet(props: {
         ),
         confirmationAction: (
           <Button
-            title={isValidatingMuse ? "验证 Muse 账号中…" : "保存"}
+            title={localize(isValidatingMuse ? "验证 Muse 账号中…" : "保存")}
             disabled={!rawCredential.trim() || isValidatingMuse}
             action={handleSaveManual}
           />
@@ -627,19 +630,19 @@ export function AddAccountSheet(props: {
             }
       }
     >
-        <Section header={<Text>服务提供商</Text>}>
+        <Section header={<Text>{localize("服务提供商")}</Text>}>
           <HStack alignment="center" spacing={12}>
             <ProviderIconView provider={selectedProviderId} size={40} />
             <VStack alignment="leading" spacing={2}>
-              <Text font="headline" foregroundStyle="label" lineLimit={1}>
-                {meta.displayName}
+              <Text font="headline" foregroundStyle="label" lineLimit={isEnglish ? undefined : 1}>
+                {localize(meta.displayName)}
               </Text>
               <Text
                 font="caption"
                 foregroundStyle="secondaryLabel"
-                lineLimit={1}
+                lineLimit={isEnglish ? undefined : 1}
               >
-                {`${routeCategoryTitle(meta.routeCategory)} · ${loginMethodBadgeText(meta.loginMethod)}`}
+                {`${localize(routeCategoryTitle(meta.routeCategory))} · ${localize(loginMethodBadgeText(meta.loginMethod))}`}
               </Text>
             </VStack>
             <Spacer />
@@ -650,8 +653,7 @@ export function AddAccountSheet(props: {
               >
                 <HStack spacing={4}>
                   <Text font="subheadline" foregroundStyle="secondaryLabel">
-                    更换
-                  </Text>
+                    {localize("更换")}</Text>
                   <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
                 </HStack>
               </Button>
@@ -659,24 +661,23 @@ export function AddAccountSheet(props: {
           </HStack>
 
           <TextField
-            title="备注名称"
+            title={localize("备注名称")}
             value={displayName}
-            prompt={`默认：${defaultDisplayName}`}
+            prompt={localize(`默认：${defaultDisplayName}`)}
             onChanged={setDisplayName}
           />
         </Section>
 
         {meta.requiresGatewayAddress ? (
           <Section
-            header={<Text>网关地址</Text>}
+            header={<Text>{localize("网关地址")}</Text>}
             footer={
               <Text>
-                远程网关要求 HTTPS 协议（仅 localhost / 127.0.0.1 允许 HTTP）
-              </Text>
+                {localize("远程网关要求 HTTPS 协议（仅 localhost / 127.0.0.1 允许 HTTP）")}</Text>
             }
           >
             <TextField
-              title="服务器地址"
+              title={localize("服务器地址")}
               value={serverAddress}
               prompt={`https://api.example.com:${meta.gatewayDefaultPort ?? "3000"}`}
               keyboardType="URL"
@@ -688,15 +689,15 @@ export function AddAccountSheet(props: {
         ) : null}
 
         {meta.requiresRegion && meta.regions ? (
-          <Section header={<Text>服务地域</Text>}>
+          <Section header={<Text>{localize("服务地域")}</Text>}>
             <Picker
-              title="接入地域"
+              title={localize("接入地域")}
               value={selectedRegion}
               onChanged={setSelectedRegion}
             >
               {meta.regions.map((reg) => (
                 <Text key={reg.id} tag={reg.id}>
-                  {reg.label}
+                  {localize(reg.label)}
                 </Text>
               ))}
             </Picker>
@@ -704,7 +705,7 @@ export function AddAccountSheet(props: {
         ) : null}
 
         {hasAnyOnlineFlow ? (
-          <Section header={<Text>在线登录授权</Text>}>
+          <Section header={<Text>{localize("在线登录授权")}</Text>}>
             <VStack
               alignment="leading"
               spacing={10}
@@ -728,12 +729,12 @@ export function AddAccountSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isPresentingBuiltInBrowser
+                      {localize(isPresentingBuiltInBrowser
                         ? "正在等待授权…"
-                        : "Google 网页登录授权"}
+                        : "Google 网页登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -759,12 +760,12 @@ export function AddAccountSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isPresentingBuiltInBrowser
+                      {localize(isPresentingBuiltInBrowser
                         ? "正在等待登录…"
-                        : "Trae 网页登录授权"}
+                        : "Trae 网页登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -791,12 +792,12 @@ export function AddAccountSheet(props: {
                       <Text
                         font="subheadline"
                         fontWeight="semibold"
-                        lineLimit={1}
+                        lineLimit={isEnglish ? undefined : 1}
                         multilineTextAlignment="center"
                       >
-                        {isPresentingBuiltInBrowser
+                        {localize(isPresentingBuiltInBrowser
                           ? "正在等待登录…"
-                          : "OpenAI 网页登录授权 (推荐)"}
+                          : "OpenAI 网页登录授权 (推荐)")}
                       </Text>
                     </HStack>
                   </Button>
@@ -829,11 +830,10 @@ export function AddAccountSheet(props: {
                       <Text
                         font="subheadline"
                         fontWeight="medium"
-                        lineLimit={1}
+                        lineLimit={isEnglish ? undefined : 1}
                         multilineTextAlignment="center"
                       >
-                        设备码授权登录 (CLI 方式)
-                      </Text>
+                        {localize("设备码授权登录 (CLI 方式)")}</Text>
                     </HStack>
                   </Button>
                 </>
@@ -870,10 +870,10 @@ export function AddAccountSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isTrueDeviceCode ? "设备码授权登录" : "网页登录授权"}
+                      {localize(isTrueDeviceCode ? "设备码授权登录" : "网页登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -907,12 +907,12 @@ export function AddAccountSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isPresentingBuiltInBrowser
+                      {localize(isPresentingBuiltInBrowser
                         ? "正在等待登录完成…"
-                        : "网页登录获取凭证"}
+                        : "网页登录获取凭证")}
                     </Text>
                   </HStack>
                 </Button>
@@ -935,17 +935,16 @@ export function AddAccountSheet(props: {
                   <Text
                     font="subheadline"
                     fontWeight="medium"
-                    lineLimit={1}
+                    lineLimit={isEnglish ? undefined : 1}
                     multilineTextAlignment="center"
                   >
-                    从钥匙串导入凭据
-                  </Text>
+                    {localize("从钥匙串导入凭据")}</Text>
                 </HStack>
               </Button>
             </VStack>
           </Section>
         ) : (
-          <Section header={<Text>登录与凭据导入</Text>}>
+          <Section header={<Text>{localize("登录与凭据导入")}</Text>}>
             <VStack
               alignment="leading"
               spacing={10}
@@ -967,11 +966,10 @@ export function AddAccountSheet(props: {
                   <Text
                     font="subheadline"
                     fontWeight="medium"
-                    lineLimit={1}
+                    lineLimit={isEnglish ? undefined : 1}
                     multilineTextAlignment="center"
                   >
-                    从钥匙串导入凭据
-                  </Text>
+                    {localize("从钥匙串导入凭据")}</Text>
                 </HStack>
               </Button>
             </VStack>
@@ -979,39 +977,39 @@ export function AddAccountSheet(props: {
         )}
 
         <Section
-          header={<Text>{meta.credentialLabel}</Text>}
+          header={<Text>{localize(meta.credentialLabel)}</Text>}
           footer={
-            meta.credentialHelp ? <Text>{meta.credentialHelp}</Text> : undefined
+            meta.credentialHelp ? <Text>{localize(meta.credentialHelp)}</Text> : undefined
           }
         >
           {showPlainCredential ? (
             <TextField
-              title={meta.credentialLabel}
+              title={localize(meta.credentialLabel)}
               value={rawCredential}
-              prompt={meta.credentialPrompt}
+              prompt={localize(meta.credentialPrompt)}
               textInputAutocapitalization="never"
               autocorrectionDisabled={true}
               onChanged={setRawCredential}
             />
           ) : (
             <SecureField
-              title={meta.credentialLabel}
+              title={localize(meta.credentialLabel)}
               value={rawCredential}
-              prompt={meta.credentialPrompt}
+              prompt={localize(meta.credentialPrompt)}
               onChanged={setRawCredential}
             />
           )}
 
           <HStack>
             <Button
-              title="粘贴剪贴板"
+              title={localize("粘贴剪贴板")}
               systemImage="doc.on.clipboard"
               buttonStyle="borderless"
               action={handlePasteClipboard}
             />
             <Spacer />
             <Button
-              title={showPlainCredential ? "隐藏明文" : "显示明文"}
+              title={localize(showPlainCredential ? "隐藏明文" : "显示明文")}
               systemImage={showPlainCredential ? "eye.slash" : "eye"}
               buttonStyle="borderless"
               action={() => setShowPlainCredential(!showPlainCredential)}
@@ -1020,8 +1018,8 @@ export function AddAccountSheet(props: {
         </Section>
 
         {errorMessage ? (
-          <Section header={<Text>提示</Text>}>
-            <Text foregroundStyle="systemRed">{errorMessage}</Text>
+          <Section header={<Text>{localize("提示")}</Text>}>
+            <Text foregroundStyle="systemRed">{localize(errorMessage)}</Text>
           </Section>
         ) : null}
       </Form>
@@ -1087,9 +1085,11 @@ export function ProviderPickerSheet(props: {
     nonce: number
   } | null>(null)
 
+  const isEnglish = getDashboardLanguage() === "en"
+  const HeadingLayout = isEnglish ? FlowLayout : HStack
   const filteredProviders = useMemo(
     () => searchProviders(searchText, routeFilter),
-    [searchText, routeFilter]
+    [searchText, routeFilter, getDashboardLanguage()]
   )
   const grouped = useMemo(
     () => groupProvidersAlphabetically(filteredProviders),
@@ -1105,7 +1105,7 @@ export function ProviderPickerSheet(props: {
 
   const listContent = (
     <List
-      navigationTitle={`选择供应商 (${filteredProviders.length})`}
+      navigationTitle={localize(`选择供应商 (${filteredProviders.length})`)}
       navigationBarTitleDisplayMode="inline"
       navigationTransition={embedded ? props.navigationTransition : undefined}
       listStyle="insetGroup"
@@ -1113,11 +1113,11 @@ export function ProviderPickerSheet(props: {
       searchable={{
         value: searchText,
         onChanged: setSearchText,
-        prompt: "搜索 79 家 AI 供应商名称或域名",
+        prompt: localize("搜索 79 家 AI 供应商名称或域名"),
       }}
       toolbar={{
         cancellationAction: embedded ? undefined : (
-          <Button title="关闭" action={onClose} />
+          <Button title={localize("关闭")} action={onClose} />
         ),
       }}
       navigationDestination={{
@@ -1156,18 +1156,18 @@ export function ProviderPickerSheet(props: {
     >
       <Section>
         <Picker
-          title="接入路径筛选"
+          title={localize("接入路径筛选")}
           value={routeFilter}
           onChanged={(v: string) =>
             setRouteFilter(v as ProviderRouteCategory | "all")
           }
         >
-          <Text tag="all">全部路径 (79)</Text>
-          <Text tag="direct_api">直连 API 密钥 (39)</Text>
-          <Text tag="gateway">自建/聚合网关 (5)</Text>
-          <Text tag="device_oauth">OAuth 设备码与轮询 (7)</Text>
-          <Text tag="google_oauth">Google 原生 OAuth (2)</Text>
-          <Text tag="web_session">Web 会话与工作台 (25)</Text>
+          <Text tag="all">{localize("全部路径 (79)")}</Text>
+          <Text tag="direct_api">{localize("直连 API 密钥 (39)")}</Text>
+          <Text tag="gateway">{localize("自建/聚合网关 (5)")}</Text>
+          <Text tag="device_oauth">{localize("OAuth 设备码与轮询 (7)")}</Text>
+          <Text tag="google_oauth">{localize("Google 原生 OAuth (2)")}</Text>
+          <Text tag="web_session">{localize("Web 会话与工作台 (25)")}</Text>
         </Picker>
       </Section>
 
@@ -1184,9 +1184,9 @@ export function ProviderPickerSheet(props: {
                 <HStack alignment="center" spacing={12}>
                   <ProviderIconView provider={item.id} size={38} />
                   <VStack alignment="leading" spacing={3}>
-                    <HStack spacing={6} alignment="center">
-                      <Text font="headline" lineLimit={1}>
-                        {item.displayName}
+                    <HeadingLayout spacing={6}>
+                      <Text font={isEnglish ? "subheadline" : "headline"} lineLimit={isEnglish ? undefined : 1}>
+                        {localize(item.displayName)}
                       </Text>
                       <Text
                         font="caption2"
@@ -1194,17 +1194,17 @@ export function ProviderPickerSheet(props: {
                         foregroundStyle="secondaryLabel"
                         padding={{ horizontal: 6, vertical: 1 }}
                         background={<Capsule fill="quaternarySystemFill" />}
-                        lineLimit={1}
+                        lineLimit={isEnglish ? undefined : 1}
                       >
-                        {loginMethodBadgeText(item.loginMethod)}
+                        {localize(loginMethodBadgeText(item.loginMethod))}
                       </Text>
-                    </HStack>
+                    </HeadingLayout>
                     <Text
                       font="caption"
                       foregroundStyle="secondaryLabel"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? 2 : 1}
                     >
-                      {item.endpointSummary}
+                      {localize(item.endpointSummary)}
                     </Text>
                   </VStack>
                   <Spacer />
@@ -1226,25 +1226,25 @@ export function ProviderPickerSheet(props: {
                 frame={{ maxWidth: "infinity", alignment: "leading" }}
               >
                 <LabeledContent
-                  title="接入分类"
-                  value={routeCategoryTitle(item.routeCategory)}
+                  title={localize("接入分类")}
+                  value={localize(routeCategoryTitle(item.routeCategory))}
                 />
                 <LabeledContent
-                  title="凭证类型"
-                  value={item.credentialLabel}
+                  title={localize("凭证类型")}
+                  value={localize(item.credentialLabel)}
                 />
                 <LabeledContent
-                  title="认证机制"
-                  value={item.authSummary}
+                  title={localize("认证机制")}
+                  value={localize(item.authSummary)}
                 />
                 <LabeledContent
-                  title="直连端点"
-                  value={item.endpointSummary}
+                  title={localize("直连端点")}
+                  value={localize(item.endpointSummary)}
                 />
 
                 {item.webSessionProfile ? (
                   <LabeledContent
-                    title="Cookie 白名单"
+                    title={localize("Cookie 白名单")}
                     value={item.webSessionProfile.cookieNames.join(", ")}
                   />
                 ) : null}
@@ -1272,10 +1272,10 @@ export function ProviderPickerSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {`添加 ${item.displayName} 账号`}
+                      {localize(`添加 ${item.displayName} 账号`)}
                     </Text>
                   </HStack>
                 </Button>

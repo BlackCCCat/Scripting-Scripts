@@ -1,3 +1,4 @@
+import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Divider,
@@ -9,9 +10,9 @@ import {
   ProgressView,
   Section,
   Text,
-  VStack,
   useEffect,
   useState,
+  VStack,
 } from "scripting"
 import {
   beginDeviceOrPollLogin,
@@ -41,6 +42,7 @@ export function DeviceCodeLoginSheet(props: {
   const meta = getProviderMeta(provider)
   const isTrueDevice =
     provider === "copilot" || provider === "kimiCode" || provider === "codex"
+  const isEnglish = getDashboardLanguage() === "en"
   const [session, setSession] = useState<ProviderLoginSession | null>(null)
   const [statusText, setStatusText] = useState<string>(
     "正在申请授权会话…"
@@ -129,11 +131,11 @@ export function DeviceCodeLoginSheet(props: {
   const content = (
     <Form
       navigationTransition={props.navigationTransition}
-      navigationTitle={`${meta.displayName} ${session?.userCode || isTrueDevice ? "设备码授权" : "网页授权"}`}
+      navigationTitle={localize(`${meta.displayName} ${session?.userCode || isTrueDevice ? "设备码授权" : "网页授权"}`)}
       navigationBarTitleDisplayMode="inline"
       toolbar={{
         cancellationAction: props.embedded ? undefined : (
-          <Button title="关闭" action={onCancel} />
+          <Button title={localize("关闭")} action={onCancel} />
         ),
       }}
     >
@@ -141,9 +143,9 @@ export function DeviceCodeLoginSheet(props: {
           <HStack alignment="center" spacing={12}>
             <ProviderIconView provider={provider} size={40} />
             <VStack alignment="leading" spacing={2}>
-              <Text font="headline">{meta.displayName}</Text>
+              <Text font="headline">{localize(meta.displayName)}</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                {statusText}
+                {localize(statusText)}
               </Text>
             </VStack>
           </HStack>
@@ -153,7 +155,7 @@ export function DeviceCodeLoginSheet(props: {
           <Section
             header={
               <Text>
-                {session.userCode ? "设备授权码与在线验证" : "网页授权在线验证"}
+                {localize(session.userCode ? "设备授权码与在线验证" : "网页授权在线验证")}
               </Text>
             }
           >
@@ -165,7 +167,7 @@ export function DeviceCodeLoginSheet(props: {
             >
               {session.userCode ? (
                 <LabeledContent
-                  title="设备授权码"
+                  title={localize("设备授权码")}
                   value={session.userCode}
                 />
               ) : null}
@@ -188,11 +190,10 @@ export function DeviceCodeLoginSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="medium"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      复制授权码
-                    </Text>
+                      {localize("复制授权码")}</Text>
                   </HStack>
                 </Button>
               ) : null}
@@ -214,10 +215,10 @@ export function DeviceCodeLoginSheet(props: {
                   <Text
                     font="subheadline"
                     fontWeight="semibold"
-                    lineLimit={1}
+                    lineLimit={isEnglish ? undefined : 1}
                     multilineTextAlignment="center"
                   >
-                    {session.userCode ? "打开授权页面" : "打开网页登录"}
+                    {localize(session.userCode ? "打开授权页面" : "打开网页登录")}
                   </Text>
                 </HStack>
               </Button>
@@ -240,10 +241,10 @@ export function DeviceCodeLoginSheet(props: {
                   <Text
                     font="subheadline"
                     fontWeight="medium"
-                    lineLimit={1}
+                    lineLimit={isEnglish ? undefined : 1}
                     multilineTextAlignment="center"
                   >
-                    {isPolling ? "正在核对授权结果…" : "已完成授权，立即验证"}
+                    {localize(isPolling ? "正在核对授权结果…" : "已完成授权，立即验证")}
                   </Text>
                 </HStack>
               </Button>
@@ -253,14 +254,14 @@ export function DeviceCodeLoginSheet(props: {
           <Section>
             <HStack spacing={10}>
               <ProgressView progressViewStyle="circular" />
-              <Text foregroundStyle="secondaryLabel">{statusText}</Text>
+              <Text foregroundStyle="secondaryLabel">{localize(statusText)}</Text>
             </HStack>
           </Section>
         )}
 
         {errorText ? (
-          <Section header={<Text>错误详情</Text>}>
-            <Text foregroundStyle="systemRed">{errorText}</Text>
+          <Section header={<Text>{localize("错误详情")}</Text>}>
+            <Text foregroundStyle="systemRed">{localize(errorText)}</Text>
           </Section>
         ) : null}
       </Form>

@@ -1,3 +1,5 @@
+import { localizeAccountName } from "../../utils/providers_catalog"
+import { localize } from "../../utils/localization"
 import {
   Capsule,
   HStack,
@@ -29,7 +31,7 @@ export function WidgetHeader(props: {
           foregroundStyle="label"
           lineLimit={1}
         >
-          {account.displayName}
+          {localizeAccountName(account.provider, account.displayName)}
         </Text>
 
         {account.planName ? (
@@ -41,7 +43,7 @@ export function WidgetHeader(props: {
             background={<Capsule fill="quaternarySystemFill" />}
             lineLimit={1}
           >
-            {account.planName}
+            {localize(account.planName)}
           </Text>
         ) : null}
 
@@ -66,7 +68,7 @@ export function WidgetHeader(props: {
       <HStack alignment="center" spacing={4}>
         {showCountdown && account.earliestResetCountdown ? (
           <Text font={8} foregroundStyle="secondaryLabel" lineLimit={1}>
-            {account.earliestResetCountdown}
+            {localize(account.earliestResetCountdown)}
           </Text>
         ) : null}
         <WidgetQuotaStatusDot

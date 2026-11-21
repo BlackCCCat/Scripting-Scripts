@@ -1,3 +1,4 @@
+import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Form,
@@ -11,11 +12,11 @@ import {
   Text,
   TextField,
   Toggle,
-  VStack,
-  VirtualNode,
-  ZStack,
   useEffect,
   useState,
+  VirtualNode,
+  VStack,
+  ZStack,
 } from "scripting"
 import {
   AccountQuotaState,
@@ -48,7 +49,7 @@ import {
   removeEnvelopeFromKeychain,
   saveEnvelopeToKeychain,
 } from "../utils/credential_store"
-import { getProviderMeta } from "../utils/providers_catalog"
+import { getProviderMeta, localizeAccountName } from "../utils/providers_catalog"
 import {
   formatShortDateTime,
   formatWalletAmount,
@@ -154,6 +155,7 @@ export function AccountDetailSheet(props: {
     onRefreshAccount,
   } = props
 
+  const isEnglish = getDashboardLanguage() === "en"
   const meta = getProviderMeta(account.provider)
   const existingEnvelope = !isDemoMode
     ? loadEnvelopeFromKeychain(
@@ -228,8 +230,8 @@ export function AccountDetailSheet(props: {
   const handleImportFromKeychain = async () => {
     try {
       const picked = await Keychain.pick({
-        title: "从钥匙串导入",
-        prompt: `选择要更新到 ${meta.displayName} 的新凭据或 API 密钥`,
+        title: localize("从钥匙串导入"),
+        prompt: localize(`选择要更新到 ${meta.displayName} 的新凭据或 API 密钥`),
       })
       if (!picked || !picked.trim()) return
       const trimmed = picked.trim()
@@ -424,7 +426,7 @@ export function AccountDetailSheet(props: {
       const authUrl = buildAntigravityAuthURL()
       void controller.loadURL(authUrl)
       await controller.present({
-        navigationTitle: "Google 授权登录",
+        navigationTitle: localize("Google 授权登录"),
         fullscreen: false,
       })
       if (capturedCode) {
@@ -492,7 +494,7 @@ export function AccountDetailSheet(props: {
     try {
       void controller.loadURL(authPlan.url)
       await controller.present({
-        navigationTitle: `登录 TRAE (${region === "global" ? "国际站" : "中国站"})`,
+        navigationTitle: localize(`登录 TRAE (${region === "global" ? "国际站" : "中国站"})`),
         fullscreen: false,
       })
       if (capturedRefreshToken) {
@@ -557,7 +559,7 @@ export function AccountDetailSheet(props: {
     try {
       void controller.loadURL(authPlan.url)
       await controller.present({
-        navigationTitle: "OpenAI 授权登录",
+        navigationTitle: localize("OpenAI 授权登录"),
         fullscreen: false,
       })
       if (capturedCode) {
@@ -606,7 +608,7 @@ export function AccountDetailSheet(props: {
     try {
       void controller.loadURL(meta.webSessionProfile.loginURL)
       await controller.present({
-        navigationTitle: `重新登录 ${meta.displayName}`,
+        navigationTitle: localize(`重新登录 ${meta.displayName}`),
         fullscreen: false,
       })
       const updatedEnvelope = await extractWebSessionFromController(
@@ -629,31 +631,31 @@ export function AccountDetailSheet(props: {
 
   const formContent = (
     <Form
-      navigationTitle="账号详情与设置"
+      navigationTitle={localize("账号详情与设置")}
       navigationBarTitleDisplayMode="inline"
       navigationTransition={props.navigationTransition}
       toast={{
         isPresented: isToastPresented,
         onChanged: setIsToastPresented,
-        message: toastMessage,
+        message: localize(toastMessage),
         duration: 2,
         position: "bottom",
       }}
       toolbar={{
-        cancellationAction: props.embedded ? undefined : <Button title="关闭" action={onClose} />,
+        cancellationAction: props.embedded ? undefined : <Button title={localize("关闭")} action={onClose} />,
         confirmationAction: (
-          <Button title="保存" action={handleSaveChanges} />
+          <Button title={localize("保存")} action={handleSaveChanges} />
         ),
       }}
       confirmationDialog={{
-        title: `确认删除「${account.displayName}」？`,
+        title: localize(`确认删除「${localizeAccountName(account.provider, account.displayName)}」？`),
         titleVisibility: "visible",
         isPresented: isDeleteConfirmPresented,
         onChanged: setIsDeleteConfirmPresented,
-        message: <Text>删除后将同时清除钥匙串中的凭证与本地缓存快照。</Text>,
+        message: <Text>{localize("删除后将同时清除钥匙串中的凭证与本地缓存快照。")}</Text>,
         actions: (
           <Button
-            title="删除账号"
+            title={localize("删除账号")}
             role="destructive"
             action={() => {
               setIsDeleteConfirmPresented(false)
@@ -712,44 +714,44 @@ export function AccountDetailSheet(props: {
             }
       }
     >
-        <Section header={<Text>基本资料</Text>}>
+        <Section header={<Text>{localize("基本资料")}</Text>}>
           <HStack alignment="center" spacing={12}>
             <ProviderIconView provider={account.provider} size={42} />
             <VStack alignment="leading" spacing={2}>
-              <Text font="headline">{meta.displayName}</Text>
+              <Text font="headline">{localize(meta.displayName)}</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                {`${routeCategoryTitle(meta.routeCategory)} · ${loginMethodBadgeText(meta.loginMethod)}`}
+                {`${localize(routeCategoryTitle(meta.routeCategory))} · ${localize(loginMethodBadgeText(meta.loginMethod))}`}
               </Text>
             </VStack>
           </HStack>
 
           <TextField
-            title="显示名称"
+            title={localize("显示名称")}
             value={displayName}
-            prompt={meta.displayName}
+            prompt={localize(meta.displayName)}
             keyboardType="default"
             onChanged={setDisplayName}
           />
 
           <TextField
-            title="小组件序号"
+            title={localize("小组件序号")}
             value={widgetOrder}
-            prompt="可选排序数字 (用于同供应商合并展示，如 1, 2...)"
+            prompt={localize("可选排序数字 (用于同供应商合并展示，如 1, 2...)")}
             keyboardType="numberPad"
             onChanged={setWidgetOrder}
           />
 
           <Toggle
-            title="参与全局一键刷新"
+            title={localize("参与全局一键刷新")}
             value={isEnabled}
             onChanged={setIsEnabled}
           />
         </Section>
 
         {meta.requiresGatewayAddress ? (
-          <Section header={<Text>网关地址</Text>}>
+          <Section header={<Text>{localize("网关地址")}</Text>}>
             <TextField
-              title="服务器地址"
+              title={localize("服务器地址")}
               value={serverAddress}
               prompt="https://api.example.com"
               keyboardType="URL"
@@ -762,11 +764,10 @@ export function AccountDetailSheet(props: {
 
         {isApiKeyAccount && apiKeyToDisplay ? (
           <Section
-            header={<Text>API 凭据</Text>}
+            header={<Text>{localize("API 凭据")}</Text>}
             footer={
               <Text>
-                点击密钥区域即可复制完整密钥；默认以掩码保护，点击右侧按钮可切换明文
-              </Text>
+                {localize("点击密钥区域即可复制完整密钥；默认以掩码保护，点击右侧按钮可切换明文")}</Text>
             }
           >
             <HStack alignment="center" spacing={8}>
@@ -784,11 +785,10 @@ export function AccountDetailSheet(props: {
                   <VStack alignment="leading" spacing={3}>
                     <HStack alignment="center" spacing={4}>
                       <Text font="caption2" foregroundStyle="secondaryLabel">
-                        {meta.credentialLabel || "API 密钥"}
+                        {localize(meta.credentialLabel || "API 密钥")}
                       </Text>
                       <Text font="caption2" foregroundStyle="accentColor">
-                        (点击复制)
-                      </Text>
+                        {localize("(点击复制)")}</Text>
                     </HStack>
                     <Text
                       font="subheadline"
@@ -829,7 +829,7 @@ export function AccountDetailSheet(props: {
                     foregroundStyle="accentColor"
                   />
                   <Text font="caption" foregroundStyle="accentColor">
-                    {isApiKeyRevealed ? "隐藏" : "查看"}
+                    {localize(isApiKeyRevealed ? "隐藏" : "查看")}
                   </Text>
                 </HStack>
               </Button>
@@ -838,48 +838,47 @@ export function AccountDetailSheet(props: {
         ) : null}
 
         <Section
-          header={<Text>安全信封与凭证指纹</Text>}
+          header={<Text>{localize("安全信封与凭证指纹")}</Text>}
           footer={
             <Text>
-              当旋转密钥或变更网关地址时，SHA-256 指纹会自动更新并立即淘汰旧额度快照
-            </Text>
+              {localize("当旋转密钥或变更网关地址时，SHA-256 指纹会自动更新并立即淘汰旧额度快照")}</Text>
           }
         >
           <LabeledContent
-            title="凭证存储位置"
+            title={localize("凭证存储位置")}
             value={
-              isDemoMode
+              localize(isDemoMode
                 ? "演示内存沙箱"
                 : account.preferssynchronizableKeychain
                   ? "iCloud 钥匙串"
-                  : "本机钥匙串 (Keychain)"
+                  : "本机钥匙串 (Keychain)")
             }
           />
           {!isDemoMode ? (
             <LabeledContent
-              title="钥匙串 UID (键名)"
+              title={localize("钥匙串 UID (键名)")}
               value={account.credentialKeychainKey}
             />
           ) : null}
-          <LabeledContent title="SHA-256 指纹前缀" value={fingerprintPreview} />
+          <LabeledContent title={localize("SHA-256 指纹前缀")} value={fingerprintPreview} />
           {snapshot?.accountIdentity ? (
             <LabeledContent
-              title="远端身份标识"
-              value={snapshot.accountIdentity}
+              title={localize("远端身份标识")}
+              value={isDemoMode ? localize(snapshot.accountIdentity) : snapshot.accountIdentity}
             />
           ) : null}
           {snapshot?.providerPlanName ? (
             <LabeledContent
-              title="订阅套餐层级"
-              value={snapshot.providerPlanName}
+              title={localize("订阅套餐层级")}
+              value={localize(snapshot.providerPlanName)}
             />
           ) : null}
         </Section>
 
         {!isDemoMode ? (
           <Section
-            header={<Text>更新 / 重新获取凭证 (可选)</Text>}
-            footer={<Text>留空则保留当前钥匙串中的原凭证不变</Text>}
+            header={<Text>{localize("更新 / 重新获取凭证 (可选)")}</Text>}
+            footer={<Text>{localize("留空则保留当前钥匙串中的原凭证不变")}</Text>}
           >
             {isGoogleOAuth ? (
               <FormActionButtonRow>
@@ -900,12 +899,12 @@ export function AccountDetailSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isPresentingBuiltInBrowser
+                      {localize(isPresentingBuiltInBrowser
                         ? "正在等待授权…"
-                        : "Google 重新登录授权"}
+                        : "Google 重新登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -934,12 +933,12 @@ export function AccountDetailSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isPresentingBuiltInBrowser
+                      {localize(isPresentingBuiltInBrowser
                         ? "正在等待登录…"
-                        : "Trae 重新登录授权"}
+                        : "Trae 重新登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -969,12 +968,12 @@ export function AccountDetailSheet(props: {
                       <Text
                         font="subheadline"
                         fontWeight="semibold"
-                        lineLimit={1}
+                        lineLimit={isEnglish ? undefined : 1}
                         multilineTextAlignment="center"
                       >
-                        {isPresentingBuiltInBrowser
+                        {localize(isPresentingBuiltInBrowser
                           ? "正在等待登录…"
-                          : "OpenAI 网页重新登录授权 (推荐)"}
+                          : "OpenAI 网页重新登录授权 (推荐)")}
                       </Text>
                     </HStack>
                   </Button>
@@ -1008,11 +1007,10 @@ export function AccountDetailSheet(props: {
                       <Text
                         font="subheadline"
                         fontWeight="medium"
-                        lineLimit={1}
+                        lineLimit={isEnglish ? undefined : 1}
                         multilineTextAlignment="center"
                       >
-                        设备码重新授权登录 (CLI 方式)
-                      </Text>
+                        {localize("设备码重新授权登录 (CLI 方式)")}</Text>
                     </HStack>
                   </Button>
                 </FormActionButtonRow>
@@ -1052,10 +1050,10 @@ export function AccountDetailSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isTrueDeviceCode ? "设备码重新授权登录" : "重新登录授权"}
+                      {localize(isTrueDeviceCode ? "设备码重新授权登录" : "重新登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -1085,10 +1083,10 @@ export function AccountDetailSheet(props: {
                     <Text
                       font="subheadline"
                       fontWeight="semibold"
-                      lineLimit={1}
+                      lineLimit={isEnglish ? undefined : 1}
                       multilineTextAlignment="center"
                     >
-                      {isReauthenticating ? "正在登录…" : "网页重新登录授权"}
+                      {localize(isReauthenticating ? "正在登录…" : "网页重新登录授权")}
                     </Text>
                   </HStack>
                 </Button>
@@ -1112,19 +1110,18 @@ export function AccountDetailSheet(props: {
                   <Text
                     font="subheadline"
                     fontWeight="medium"
-                    lineLimit={1}
+                    lineLimit={isEnglish ? undefined : 1}
                     multilineTextAlignment="center"
                   >
-                    从钥匙串导入新凭据
-                  </Text>
+                    {localize("从钥匙串导入新凭据")}</Text>
                 </HStack>
               </Button>
             </FormActionButtonRow>
 
             <TextField
-              title={meta.credentialLabel}
+              title={localize(meta.credentialLabel)}
               value={newCredentialInput}
-              prompt="输入新密钥或令牌以覆盖旧凭证"
+              prompt={localize("输入新密钥或令牌以覆盖旧凭证")}
               keyboardType="default"
               autocorrectionDisabled={true}
               textInputAutocapitalization="never"
@@ -1132,7 +1129,7 @@ export function AccountDetailSheet(props: {
             />
 
             <Button
-              title="从剪贴板粘贴新凭证"
+              title={localize("从剪贴板粘贴新凭证")}
               systemImage="doc.on.clipboard"
               buttonStyle="borderless"
               action={async () => {
@@ -1150,32 +1147,31 @@ export function AccountDetailSheet(props: {
         codexResetStatus &&
         hasVisibleCodexResetPreview(codexResetStatus) ? (
           <Section
-            header={<Text>Codex 重置预告 (第三方源)</Text>}
+            header={<Text>{localize("Codex 重置预告 (第三方源)")}</Text>}
             footer={
               <Text>
-                数据来源于 codex-resets.com 公开状态流，结合社区 AI 概率模型预测，非官方保证。
-              </Text>
+                {localize("数据来源于 codex-resets.com 公开状态流，结合社区 AI 概率模型预测，非官方保证。")}</Text>
             }
           >
             {codexResetStatus.data.scheduledReset ? (
               <LabeledContent
-                title="预定重置时间"
+                title={localize("预定重置时间")}
                 value={
-                  codexResetStatus.data.scheduledReset.scheduledFor
+                  localize(codexResetStatus.data.scheduledReset.scheduledFor
                     ? `${formatCodexResetLocalTime(codexResetStatus.data.scheduledReset.scheduledFor)} · 北京时间 (${formatScheduledResetHeadline(codexResetStatus.data.scheduledReset.scheduledFor)})`
-                    : "时间待定"
+                    : "时间待定")
                 }
               />
             ) : null}
             {codexResetStatus.data.scheduledReset?.text ? (
               <LabeledContent
-                title="公告内容"
-                value={codexResetStatus.data.scheduledReset.text}
+                title={localize("公告内容")}
+                value={localize(codexResetStatus.data.scheduledReset.text)}
               />
             ) : null}
             {codexResetStatus.data.activeWatch ? (
               <LabeledContent
-                title="AI 预测概率"
+                title={localize("AI 预测概率")}
                 value={
                   codexResetStatus.data.activeWatch.resetChancePercent != null
                     ? `${codexResetStatus.data.activeWatch.resetChancePercent}% (${codexResetStatus.data.activeWatch.forecastWindow})`
@@ -1185,7 +1181,7 @@ export function AccountDetailSheet(props: {
             ) : null}
             {codexResetStatus.data.latestReset?.announcedAt ? (
               <LabeledContent
-                title="上次重置记录"
+                title={localize("上次重置记录")}
                 value={formatCodexResetLocalTime(
                   codexResetStatus.data.latestReset.announcedAt
                 )}
@@ -1196,10 +1192,10 @@ export function AccountDetailSheet(props: {
 
         {snapshot ? (
           <Section
-            header={<Text>最新采集额度明细 ({snapshot.windows.length})</Text>}
+            header={<Text>{`${localize("最新采集额度明细")} (${snapshot.windows.length})`}</Text>}
             footer={
               <Text>
-                {`采集时间：${formatShortDateTime(snapshot.collectedAt) ?? snapshot.collectedAt}`}
+                {localize(`采集时间：${formatShortDateTime(snapshot.collectedAt) ?? snapshot.collectedAt}`)}
               </Text>
             }
           >
@@ -1208,7 +1204,7 @@ export function AccountDetailSheet(props: {
                 return (
                   <LabeledContent
                     key={win.id}
-                    title={win.name}
+                    title={localize(win.name)}
                     value={formatWalletAmount(win.wallet.total, win.wallet)}
                   />
                 )
@@ -1227,7 +1223,7 @@ export function AccountDetailSheet(props: {
                   frame={{ maxWidth: "infinity", alignment: "leading" }}
                 >
                   <HStack>
-                    <Text font="subheadline">{formatWindowTitle(win)}</Text>
+                    <Text font="subheadline">{localize(formatWindowTitle(win))}</Text>
                     <Spacer />
                     <Text
                       font="caption"
@@ -1237,7 +1233,7 @@ export function AccountDetailSheet(props: {
                         win.isUnlimited ? "systemGreen" : statusColor
                       }
                     >
-                      {breakdown.primaryRemainingText}
+                      {localize(breakdown.primaryRemainingText)}
                     </Text>
                   </HStack>
                   {remFrac !== null ? (
@@ -1249,7 +1245,7 @@ export function AccountDetailSheet(props: {
                     />
                   ) : null}
                   <Text font="caption2" foregroundStyle="secondaryLabel">
-                    {breakdown.secondaryUsedText}
+                    {localize(breakdown.secondaryUsedText)}
                   </Text>
                 </VStack>
               )
@@ -1258,14 +1254,14 @@ export function AccountDetailSheet(props: {
         ) : null}
 
         {errorMessage ? (
-          <Section header={<Text>提示</Text>}>
-            <Text foregroundStyle="systemRed">{errorMessage}</Text>
+          <Section header={<Text>{localize("提示")}</Text>}>
+            <Text foregroundStyle="systemRed">{localize(errorMessage)}</Text>
           </Section>
         ) : null}
 
         <Section>
           <Button
-            title="立即刷新此账号额度"
+            title={localize("立即刷新此账号额度")}
             systemImage="arrow.clockwise"
             action={() => {
               onRefreshAccount(account)
@@ -1274,7 +1270,7 @@ export function AccountDetailSheet(props: {
           />
 
           <Button
-            title="删除此账号"
+            title={localize("删除此账号")}
             systemImage="trash"
             role="destructive"
             action={() => setIsDeleteConfirmPresented(true)}
@@ -1319,7 +1315,7 @@ export function AccountDetailSheet(props: {
                 fontWeight="medium"
                 foregroundStyle="label"
               >
-                {toastMessage}
+                {localize(toastMessage)}
               </Text>
             </HStack>
           </VStack>

@@ -1,3 +1,4 @@
+import { getDashboardLanguage } from "../utils/localization"
 export interface CodexResetAnnouncement {
   id: string
   resetType: string
@@ -234,6 +235,16 @@ export function formatCodexResetLocalTime(isoString: string): string {
   const ms = Date.parse(isoString)
   if (Number.isNaN(ms)) return isoString
   const d = new Date(ms)
+  if (getDashboardLanguage() === "en") {
+    return new Intl.DateTimeFormat("en", {
+      timeZone: "Asia/Shanghai",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(d)
+  }
   try {
     const formatter = new Intl.DateTimeFormat("zh-CN", {
       timeZone: "Asia/Shanghai",

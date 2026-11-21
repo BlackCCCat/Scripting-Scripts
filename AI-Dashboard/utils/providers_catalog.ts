@@ -4,6 +4,8 @@ import {
   ProviderRouteCategory,
 } from "../models/types"
 
+import { getDashboardLanguage, localize } from "./localization"
+
 export const PROVIDERS_CATALOG: ProviderMeta[] = [
   // ==================== 1. 直连 API 密钥 / 令牌 (39 家) ====================
   {
@@ -1280,6 +1282,15 @@ export function getProviderMeta(id: ProviderId): ProviderMeta {
   }
 }
 
+export function localizeAccountName(provider: ProviderId, name: string): string {
+  const defaultName = getProviderMeta(provider).displayName
+  if (name === defaultName) return localize(defaultName)
+  if (name.startsWith(`${defaultName} (`) && name.endsWith(")")) {
+    return localize(defaultName) + name.slice(defaultName.length)
+  }
+  return name
+}
+
 export function searchProviders(
   query: string,
   routeFilter?: ProviderRouteCategory | "all"
@@ -1295,12 +1306,15 @@ export function searchProviders(
     }
     if (!normalized) return true
     if (item.displayName.toLowerCase().includes(normalized)) return true
+    if (localize(item.displayName).toLowerCase().includes(normalized)) return true
     if (item.id.toLowerCase().includes(normalized)) return true
     if (item.endpointSummary.toLowerCase().includes(normalized)) return true
+    if (localize(item.endpointSummary).toLowerCase().includes(normalized)) return true
+    if (localize(item.authSummary).toLowerCase().includes(normalized)) return true
     return item.aliases.some((alias) =>
       alias.toLowerCase().includes(normalized)
     )
-  }).sort((a, b) => a.displayName.localeCompare(b.displayName, "en"))
+  }).sort((a, b) => localize(a.displayName).localeCompare(localize(b.displayName), "en"))
 }
 
 const PINYIN_FIRST_LETTERS: Record<string, string> = {
@@ -1325,7 +1339,7 @@ export function groupProvidersAlphabetically(
 ): { letter: string; items: ProviderMeta[] }[] {
   const buckets = new Map<string, ProviderMeta[]>()
   for (const provider of providers) {
-    const rawChar = provider.displayName.trim().charAt(0)
+    const rawChar = localize(provider.displayName).trim().charAt(0)
     const upper = rawChar.toUpperCase()
     const mapped = PINYIN_FIRST_LETTERS[rawChar] ?? upper
     const letter = /^[A-Z]$/.test(mapped) ? mapped : "#"
@@ -1342,7 +1356,7 @@ export function groupProvidersAlphabetically(
     .map(([letter, items]) => ({
       letter,
       items: items.sort((a, b) =>
-        a.displayName.localeCompare(b.displayName, "zh-Hans-CN")
+        localize(a.displayName).localeCompare(localize(b.displayName), getDashboardLanguage())
       ),
     }))
 }

@@ -1,3 +1,4 @@
+import { localize } from "../../utils/localization"
 import {
   Capsule,
   GeometryReader,
@@ -68,8 +69,8 @@ export function QuotaProgressBar(props: {
 
   const countStr = hasCount
     ? item.totalCount !== undefined
-      ? `${item.remainingCount}/${item.totalCount}${compact ? "" : ` ${item.unit || "积分"}`}`
-      : `${item.remainingCount} ${item.unit || "积分"}`.trim()
+      ? `${item.remainingCount}/${item.totalCount}${compact ? "" : ` ${localize(item.unit || "积分")}`}`
+      : `${item.remainingCount} ${localize(item.unit || "积分")}`.trim()
     : null
 
   // 纯余额/积分类型（例如 Codex Credits 余额、Token 钱包）：直接展示数值，不渲染伪进度条
@@ -103,7 +104,7 @@ export function QuotaProgressBar(props: {
             monospaced={true}
             lineLimit={1}
           >
-            {balText}
+            {localize(balText)}
           </Text>
         </HStack>
       )
@@ -129,7 +130,7 @@ export function QuotaProgressBar(props: {
           monospaced={true}
           lineLimit={1}
         >
-          {balText}
+          {localize(balText)}
         </Text>
       </HStack>
     )
@@ -199,7 +200,7 @@ export function QuotaProgressBar(props: {
             monospaced={true}
             lineLimit={1}
           >
-            {item.isUnlimited ? "无限额" : isExhausted ? "0%" : `${Math.round(remPct)}%`}
+            {localize(item.isUnlimited ? "无限额" : isExhausted ? "0%" : `${Math.round(remPct)}%`)}
           </Text>
         </HStack>
       </HStack>
@@ -228,7 +229,7 @@ export function QuotaProgressBar(props: {
                 foregroundStyle="secondaryLabel"
                 lineLimit={1}
               >
-                {`⏱️ ${countdownText}`}
+                {localize(`⏱️ ${countdownText}`)}
               </Text>
             ) : null}
           </HStack>
@@ -243,7 +244,7 @@ export function QuotaProgressBar(props: {
               monospaced={true}
               lineLimit={1}
             >
-              {countStr}
+              {localize(countStr)}
             </Text>
           ) : null}
           <Text
@@ -253,7 +254,7 @@ export function QuotaProgressBar(props: {
             monospaced={true}
             lineLimit={1}
           >
-            {item.isUnlimited
+            {localize(item.isUnlimited
               ? "无限额"
               : isExhausted
                 ? "0%"
@@ -263,7 +264,7 @@ export function QuotaProgressBar(props: {
                     : `(${Math.round(remPct)}%)`
                   : compact
                     ? `${Math.round(remPct)}%`
-                    : `剩余 ${Math.round(remPct)}%`}
+                    : `剩余 ${Math.round(remPct)}%`)}
           </Text>
         </HStack>
       </HStack>

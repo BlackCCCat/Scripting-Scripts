@@ -1,4 +1,10 @@
-import { Image, Path, RoundedRectangle, Script, ZStack } from "scripting"
+import {
+  Image,
+  Path,
+  RoundedRectangle,
+  Script,
+  ZStack,
+} from "scripting"
 import { ProviderId } from "../models/types"
 import { PROVIDER_ICON_BASE64 } from "../utils/provider_icons_data"
 import { getProviderMeta } from "../utils/providers_catalog"

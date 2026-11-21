@@ -1,3 +1,4 @@
+import { getDashboardLanguage, localize, setLocalizationPreference } from "../utils/localization"
 import {
   AppEvents,
   Button,
@@ -18,12 +19,12 @@ import {
   Tab,
   TabView,
   Text,
-  VStack,
   useEffect,
   useMemo,
   useObservable,
   useRef,
   useState,
+  VStack,
 } from "scripting"
 import {
   QuotaQueryError,
@@ -227,9 +228,11 @@ export function DashboardRootView(props: {
   const [homeRoute, setHomeRoute] = useState<DashboardHomeRoute>(null)
 
   const [activeTab, setActiveTab] = useState<number>(0)
-  const [settings, setSettings] = useState<DashboardSettings>(() =>
-    loadDashboardSettings()
-  )
+  const [settings, setSettings] = useState<DashboardSettings>(() => {
+    const saved = loadDashboardSettings()
+    setLocalizationPreference(saved.languagePreference)
+    return saved
+  })
   const [keychainSyncBusy, setKeychainSyncBusy] = useState(false)
   const [keychainSyncProgress, setKeychainSyncProgress] = useState<{
     completed: number
@@ -363,7 +366,7 @@ export function DashboardRootView(props: {
         {TAB_ITEMS.map((item) => (
           <Button
             key={item.id}
-            title={item.title}
+            title={localize(item.title)}
             systemImage={item.icon}
             action={() => {
               setActiveTab(item.id)
@@ -424,11 +427,11 @@ export function DashboardRootView(props: {
     return currentAccounts.filter((acc) => {
       const meta = getProviderMeta(acc.provider)
       if (acc.displayName.toLowerCase().includes(q)) return true
-      if (meta.displayName.toLowerCase().includes(q)) return true
+      if (meta.displayName.toLowerCase().includes(q) || localize(meta.displayName).toLowerCase().includes(q)) return true
       if (acc.provider.toLowerCase().includes(q)) return true
       return meta.aliases.some((a) => a.toLowerCase().includes(q))
     })
-  }, [currentAccounts, searchQuery])
+  }, [currentAccounts, searchQuery, settings.languagePreference])
 
   // 与下方卡片列表完全一致的账号顺序（供柱状图横坐标严格对齐跟随）
   const displayedAccounts = useMemo(() => {
@@ -447,8 +450,8 @@ export function DashboardRootView(props: {
   }
 
   const updateSettings = (next: DashboardSettings) => {
+    if (!saveDashboardSettings(next)) return
     setSettings(next)
-    saveDashboardSettings(next)
     reloadAllWidgets()
   }
 
@@ -955,20 +958,20 @@ export function DashboardRootView(props: {
           allowsFullSwipe: true,
           actions: [
             <Button
-              title="删除"
+              title={localize("删除")}
               systemImage="trash"
               role="destructive"
               tint="red"
               action={() => handleDeleteAccount(acc.id)}
             />,
             <Button
-              title="设置"
+              title={localize("设置")}
               systemImage="slider.horizontal.3"
               tint="systemBlue"
               action={() => openAccountDetail(acc, `account-card-${acc.id}`)}
             />,
             <Button
-              title="刷新"
+              title={localize("刷新")}
               systemImage="arrow.clockwise"
               tint="systemTeal"
               action={() => refreshSingleAccount(acc)}
@@ -1070,14 +1073,14 @@ export function DashboardRootView(props: {
 
   const dashboardList = (
     <List
-      navigationTitle="AI 额度看板"
+      navigationTitle={localize("AI 额度看板")}
       listStyle="insetGroup"
       listRowSpacing={10}
       listRowSeparator="hidden"
       searchable={{
         value: searchQuery,
         onChanged: setSearchQuery,
-        prompt: "筛选账号名称或 AI 供应商",
+        prompt: localize("筛选账号名称或 AI 供应商"),
       }}
       refreshable={() => refreshAllAccounts({ isManual: true })}
       toolbar={{
@@ -1087,13 +1090,13 @@ export function DashboardRootView(props: {
               renderTabSwitchMenu()
             ) : (
               <Button
-                title="退出"
+                title={localize("退出")}
                 systemImage="xmark"
                 action={() => dismiss()}
               />
             )}
             <Button
-              title="编辑"
+              title={localize("编辑")}
               systemImage="pencil"
               matchedTransitionSource={homeZoomSource("dashboard-edit-accounts")}
               action={() => openEditAccountsSheet("dashboard-edit-accounts")}
@@ -1103,13 +1106,13 @@ export function DashboardRootView(props: {
         topBarTrailing: (
           <HStack spacing={12}>
             <Button
-              title="全部刷新"
+              title={localize("全部刷新")}
               systemImage="arrow.clockwise"
               disabled={isRefreshingAll || currentAccounts.length === 0}
               action={() => refreshAllAccounts({ isManual: true })}
             />
             <Button
-              title="添加账号"
+              title={localize("添加账号")}
               systemImage="plus"
               matchedTransitionSource={homeZoomSource("dashboard-add-account")}
               action={() => openAddAccountFlow(undefined, "dashboard-add-account")}
@@ -1183,7 +1186,7 @@ export function DashboardRootView(props: {
                     onRefreshAccount={refreshSingleAccount}
                   />
                 ) : (
-                  <Text>未选择账号</Text>
+                  <Text>{localize("未选择账号")}</Text>
                 ),
               },
             ]
@@ -1224,15 +1227,15 @@ export function DashboardRootView(props: {
           >
             <ContentUnavailableView
               title={
-                searchQuery.trim()
+                localize(searchQuery.trim()
                   ? "没有匹配的供应商账号"
-                  : "尚未添加 AI 供应商账号"
+                  : "尚未添加 AI 供应商账号")
               }
               systemImage="sparkles.rectangle.stack"
               description={
-                searchQuery.trim()
+                localize(searchQuery.trim()
                   ? "请尝试更换搜索关键词，或在「供应商目录」中添加新平台"
-                  : "支持 DeepSeek、OpenAI Codex、Claude、Anthropic、WorkBuddy、火山方舟、MiniMax、New API 等 79 家 AI 平台"
+                  : "支持 DeepSeek、OpenAI Codex、Claude、Anthropic、WorkBuddy、火山方舟、MiniMax、New API 等 79 家 AI 平台")
               }
             />
             <Button
@@ -1251,11 +1254,10 @@ export function DashboardRootView(props: {
                 <Text
                   font="subheadline"
                   fontWeight="semibold"
-                  lineLimit={1}
+                  lineLimit={getDashboardLanguage() === "en" ? undefined : 1}
                   multilineTextAlignment="center"
                 >
-                  添加第一个 AI 供应商账号
-                </Text>
+                  {localize("添加第一个 AI 供应商账号")}</Text>
               </HStack>
             </Button>
           </VStack>
@@ -1277,11 +1279,10 @@ export function DashboardRootView(props: {
                     font="caption"
                     foregroundStyle="accentColor"
                   />
-                  <Text>{`${routeCategoryTitle(category)} (${groupItems.length})`}</Text>
+                  <Text>{localize(`${routeCategoryTitle(category)} (${groupItems.length})`)}</Text>
                   <Spacer />
                   <Text font="caption2" foregroundStyle="secondaryLabel">
-                    长按拖动排序
-                  </Text>
+                    {localize("长按拖动排序")}</Text>
                 </HStack>
               }
               items={groupItems}
@@ -1301,11 +1302,10 @@ export function DashboardRootView(props: {
                 font="caption"
                 foregroundStyle="accentColor"
               />
-              <Text>订阅额度与 API 钱包</Text>
+              <Text>{localize("订阅额度与 API 钱包")}</Text>
               <Spacer />
               <Text font="caption2" foregroundStyle="secondaryLabel">
-                长按卡片拖动排序
-              </Text>
+                {localize("长按卡片拖动排序")}</Text>
             </HStack>
           }
           items={filteredAccounts}
@@ -1407,13 +1407,13 @@ export function DashboardRootView(props: {
         },
       ]}
     >
-      <Tab title="额度看板" systemImage="chart.bar.doc.horizontal.fill" value={0}>
+      <Tab title={localize("额度看板")} systemImage="chart.bar.doc.horizontal.fill" value={0}>
         <NavigationStack>
           {dashboardList}
         </NavigationStack>
       </Tab>
 
-      <Tab title="供应商目录" systemImage="square.grid.2x2.fill" value={1}>
+      <Tab title={localize("供应商目录")} systemImage="square.grid.2x2.fill" value={1}>
         <ProviderCatalogView
           isDemoMode={settings.isDemoMode}
           defaultSynchronizable={settings.prefersICloudKeychain}
@@ -1422,7 +1422,7 @@ export function DashboardRootView(props: {
         />
       </Tab>
 
-      <Tab title="设置" systemImage="gearshape.fill" value={2}>
+      <Tab title={localize("设置")} systemImage="gearshape.fill" value={2}>
         <SettingsView
           settings={settings}
           realAccountCount={realAccounts.length}

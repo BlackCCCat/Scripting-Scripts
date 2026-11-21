@@ -7,6 +7,7 @@ import {
   type MarkdownProps,
   type PresentationDetent,
 } from "scripting"
+import { getDashboardLanguage, localize } from "../utils/localization"
 
 const WIDGET_GUIDE_MARKDOWN = `
 # 桌面小组件使用指南
@@ -116,6 +117,69 @@ const WIDGET_GUIDE_MARKDOWN = `
 - 脚本将在后台静默拉取所有启用账号最新额度并原地重载小组件，实现全天候无感的自动化更新。
 `
 
+const WIDGET_GUIDE_MARKDOWN_EN = `
+# Home Screen Widget Guide
+
+AI Dashboard supports Small, Medium, and Large widgets on iPhone and iPad, plus Extra Large widgets on iPad. View provider quotas, wallet balances, and reset countdowns without opening the app.
+
+---
+
+## Get Started
+
+1. Touch and hold an empty area on the Home Screen, tap **Add Widget**, and choose **Scripting**.
+2. Select the **AI Dashboard** script and a widget size, then add it.
+3. Optionally, touch and hold the widget, choose **Edit Widget**, and enter provider IDs in **Parameters**.
+
+## Widget Parameters
+
+Leave Parameters blank to follow the account order on the dashboard. Small and Medium show the first account; Large shows the first two; Extra Large shows the first three.
+
+You can enter provider IDs such as \`deepseek\`, \`codex\`, \`claude\`, \`workbuddy\`, \`antigravity\`, \`volcengine\`, \`minimax\`, or \`newapi\`. Provider names and aliases are also supported. Separate multiple providers with commas or spaces.
+
+Large widgets accept two provider IDs. Extra Large widgets accept three. If you enter one provider with several accounts, Large can combine up to four accounts and Extra Large up to six.
+
+## Widget Sizes
+
+### Small
+
+- Multi-quota providers show a quota ring, remaining amount, and reset information.
+- Providers with multiple single-quota accounts can combine the first two accounts.
+- Wallet providers show the available balance and its status.
+
+### Medium
+
+- Shows the provider, plan, account identity, reset status, and quota bars.
+- Multiple single-quota accounts from one provider can share a card.
+
+### Large and Extra Large
+
+- Stack two or three Medium cards vertically.
+- Set provider IDs in Parameters to choose which cards appear.
+- Accounts from one provider are combined in widget order when supported.
+
+## Refresh and Account Order
+
+Tap the update time or status at the top of a widget to refresh. The widget shows an immediate refresh state, then updates the displayed accounts first.
+
+To order accounts from the same provider, open the account card, tap **Settings**, and set an optional **Widget Order** number. Lower numbers appear first.
+
+## Privacy
+
+Turn on **Hide Account Details in Widgets** in Settings to mask email addresses and usernames when a widget shows multiple accounts from one provider. Dashboard account masking is controlled separately.
+
+## Transparent Backgrounds
+
+The **Adapt Usage Indicators for Transparent Backgrounds** setting changes status dot size as quota decreases. The largest dot represents healthy quota; smaller dots indicate lower quota, and an outlined ring indicates depletion.
+
+## Refresh Schedule
+
+Choose a refresh interval in Settings. WidgetKit may adjust the actual schedule to meet iOS energy and network budgets. The app also reloads widgets after account or quota data changes.
+
+## Shortcuts Automation
+
+The project includes an intent entry point for refreshing all enabled accounts. In the Shortcuts app, create a personal automation and add **Run Intent Script**, then choose **AI Dashboard**. You can run it at a time of day or when closing an app.
+`
+
 export function WidgetGuideSheet(props: {
   theme?: MarkdownProps["theme"]
   detents?: PresentationDetent[]
@@ -130,7 +194,7 @@ export function WidgetGuideSheet(props: {
     <ScrollView
       background="clear"
       scrollContentBackground="hidden"
-      navigationTitle="小组件使用说明"
+      navigationTitle={localize("小组件使用说明")}
       navigationBarTitleDisplayMode="inline"
       toolbarBackgroundVisibility="hidden"
       presentationDragIndicator="visible"
@@ -141,14 +205,18 @@ export function WidgetGuideSheet(props: {
       toolbar={{
         topBarTrailing: (
           <Button
-            title="完成"
+            title={localize("完成")}
             action={props.onDismiss}
           />
         ),
       }}
     >
       <Markdown
-        content={WIDGET_GUIDE_MARKDOWN.trim()}
+        content={
+          getDashboardLanguage() === "en"
+            ? WIDGET_GUIDE_MARKDOWN_EN.trim()
+            : WIDGET_GUIDE_MARKDOWN.trim()
+        }
         theme={props.theme ?? "basic"}
         useDefaultHighlighterTheme={true}
         scrollable={false}

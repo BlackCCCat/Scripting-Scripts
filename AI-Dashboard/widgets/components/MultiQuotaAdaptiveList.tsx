@@ -1,4 +1,8 @@
-import { Text, VStack } from "scripting"
+import { localize } from "../../utils/localization"
+import {
+  Text,
+  VStack,
+} from "scripting"
 import type { WidgetQuotaItem } from "../types"
 import { QuotaProgressBar } from "./QuotaProgressBar"
 
@@ -25,8 +29,7 @@ export function MultiQuotaAdaptiveList(props: {
     return (
       <VStack alignment="leading" spacing={2}>
         <Text font={10} foregroundStyle="secondaryLabel">
-          暂无配额数据
-        </Text>
+          {localize("暂无配额数据")}</Text>
       </VStack>
     )
   }

@@ -1,3 +1,4 @@
+import { localize } from "../../utils/localization"
 import {
   Capsule,
   HStack,
@@ -34,7 +35,7 @@ export function CodexForecastPill(props: {
         foregroundStyle="systemIndigo"
         lineLimit={1}
       >
-        {text}
+        {localize(text)}
       </Text>
     </HStack>
   )

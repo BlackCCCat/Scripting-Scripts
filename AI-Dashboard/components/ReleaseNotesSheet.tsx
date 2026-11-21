@@ -4,23 +4,23 @@ import {
   Markdown,
   NavigationStack,
   Path,
-  ScrollView,
   Script,
-  useEffect,
-  useState,
+  ScrollView,
   type MarkdownProps,
   type PresentationDetent,
+  useEffect,
+  useState,
 } from "scripting"
+import { localize } from "../utils/localization"
 
 export type ReleaseNotesSheetConfig = {
-  markdownFile?: string
   storageKey?: string
   title?: string
   theme?: MarkdownProps["theme"]
   detents?: PresentationDetent[]
 }
 
-const DEFAULT_CHANGELOG_FILE = "changelog.md"
+const CHANGELOG_FILE = "changelog.md"
 
 function normalizeMarkdownContent(content: string): string {
   return content.replace(/\r\n/g, "\n").trim()
@@ -52,7 +52,7 @@ export function ReleaseNotesSheet(props: {
       <ScrollView
         background="clear"
         scrollContentBackground="hidden"
-        navigationTitle={props.title ?? "更新说明"}
+        navigationTitle={localize(props.title ?? "更新说明")}
         navigationBarTitleDisplayMode="inline"
         toolbarBackgroundVisibility="hidden"
         presentationDragIndicator="visible"
@@ -62,7 +62,7 @@ export function ReleaseNotesSheet(props: {
         toolbar={{
           topBarTrailing: (
             <Button
-              title="完成"
+              title={localize("完成")}
               action={props.onDismiss}
             />
           ),
@@ -81,37 +81,35 @@ export function ReleaseNotesSheet(props: {
 }
 
 export function useReleaseNotesSheet(config: ReleaseNotesSheetConfig = {}) {
-  const markdownFile = config.markdownFile ?? DEFAULT_CHANGELOG_FILE
   const storageKey =
     config.storageKey ??
-    `ai-dashboard:release-notes:${markdownFile}:last-seen-hash`
+    `ai-dashboard:release-notes:${CHANGELOG_FILE}:last-seen-hash`
 
-  const [content, setContent] = useState<string>("")
-  const [contentHash, setContentHash] = useState<string>("")
+  const [notes, setNotes] = useState<{ text: string; hash: string } | null>(null)
+  const content = notes?.text ?? ""
+  const contentHash = notes?.hash ?? ""
   const [isPresented, setIsPresented] = useState<boolean>(false)
+
+  async function readNotes() {
+    const filePath = Path.join(Script.directory, CHANGELOG_FILE)
+    if (!(await FileManager.exists(filePath))) return null
+    const text = normalizeMarkdownContent(await FileManager.readAsString(filePath))
+    if (!text) return null
+
+    return { text, hash: hashString(text) }
+  }
 
   useEffect(() => {
     let isCancelled = false
     async function loadReleaseNotes() {
       try {
-        const filePath = Path.join(Script.directory, markdownFile)
-        const exists = await FileManager.exists(filePath)
-        if (!exists) return
-
-        const nextContent = normalizeMarkdownContent(
-          await FileManager.readAsString(filePath)
-        )
-        if (!nextContent) return
-
-        const nextHash = hashString(nextContent)
+        const next = await readNotes()
+        if (!next || isCancelled) return
         const lastSeen = Storage.get<string>(storageKey)
 
-        if (!isCancelled) {
-          setContent(nextContent)
-          setContentHash(nextHash)
-          if (lastSeen !== nextHash) {
-            setIsPresented(true)
-          }
+        setNotes(next)
+        if (lastSeen !== next.hash) {
+          setIsPresented(true)
         }
       } catch (err) {
         console.warn("loadReleaseNotes error:", err)
@@ -122,7 +120,7 @@ export function useReleaseNotesSheet(config: ReleaseNotesSheetConfig = {}) {
     return () => {
       isCancelled = true
     }
-  }, [])
+  }, [storageKey])
 
   function handlePresentedChange(nextValue: boolean) {
     if (!nextValue && contentHash) {
@@ -139,17 +137,8 @@ export function useReleaseNotesSheet(config: ReleaseNotesSheetConfig = {}) {
     if (!content) {
       void (async () => {
         try {
-          const filePath = Path.join(Script.directory, markdownFile)
-          const exists = await FileManager.exists(filePath)
-          if (exists) {
-            const nextContent = normalizeMarkdownContent(
-              await FileManager.readAsString(filePath)
-            )
-            if (nextContent) {
-              setContent(nextContent)
-              setContentHash(hashString(nextContent))
-            }
-          }
+          const next = await readNotes()
+          if (next) setNotes(next)
         } catch (err) {
           console.warn("showManually loadReleaseNotes error:", err)
         }

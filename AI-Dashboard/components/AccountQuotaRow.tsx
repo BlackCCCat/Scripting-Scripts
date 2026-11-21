@@ -1,15 +1,17 @@
+import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Capsule,
   DisclosureGroup,
+  FlowLayout,
   HStack,
   Image,
   ProgressView,
   RoundedRectangle,
   Spacer,
   Text,
-  VStack,
   useState,
+  VStack,
 } from "scripting"
 import {
   AccountQuotaState,
@@ -23,7 +25,7 @@ import {
   formatScheduledResetHeadline,
   hasVisibleCodexResetPreview,
 } from "../services/codex_reset_feed"
-import { getProviderMeta } from "../utils/providers_catalog"
+import { getProviderMeta, localizeAccountName } from "../utils/providers_catalog"
 import {
   formatFailureDescription,
   formatPeriodBadgeText,
@@ -62,6 +64,9 @@ export function AccountQuotaRow(props: {
     onOpenDetail,
   } = props
   const meta = getProviderMeta(account.provider)
+  const isEnglish = getDashboardLanguage() === "en"
+  const HeaderLayout = isEnglish ? FlowLayout : HStack
+  const wrapText = isEnglish ? { horizontal: false, vertical: true } : undefined
 
   const snapshot: QuotaSnapshot | undefined =
     state.type === "loaded"
@@ -105,7 +110,9 @@ export function AccountQuotaRow(props: {
   const hiddenQuotaWindows = quotaWindows.slice(5)
   const [isMoreQuotaExpanded, setIsMoreQuotaExpanded] = useState(false)
 
-  const identity = snapshot?.accountIdentity?.trim() || null
+  const identity = account.id.startsWith("demo-")
+    ? localize(snapshot?.accountIdentity)?.trim() || null
+    : snapshot?.accountIdentity?.trim() || null
   const [maskOverride, setMaskOverride] = useState<boolean | null>(null)
   const isMasked =
     maskOverride !== null ? maskOverride : protectAccountIdentity
@@ -124,22 +131,27 @@ export function AccountQuotaRow(props: {
       matchedTransitionSource={props.zoomSource}
     >
       {/* 卡片头部：品牌图标 + [供应商名称 + 区域胶囊 + 账户类型胶囊] + 次行仅展示钱包/余量状态 */}
-      <HStack alignment="center" spacing={12}>
+      <HStack alignment="center" spacing={isEnglish ? 8 : 12}>
         <ProviderIconView
           provider={account.provider}
           size={42}
           dimmed={!account.isEnabled}
         />
 
-        <VStack alignment="leading" spacing={4}>
-          <HStack alignment="center" spacing={6}>
+        <VStack
+          alignment="leading"
+          spacing={4}
+          frame={isEnglish ? { maxWidth: "infinity", alignment: "leading" } : undefined}
+        >
+          <HeaderLayout spacing={6}>
             <Text
-              font="headline"
+              font={isEnglish ? "subheadline" : "headline"}
               fontWeight="semibold"
               foregroundStyle={account.isEnabled ? "label" : "secondaryLabel"}
-              lineLimit={1}
+              fixedSize={wrapText}
+              lineLimit={isEnglish ? undefined : 1}
             >
-              {titleText}
+              {localizeAccountName(account.provider, titleText)}
             </Text>
 
             {regionBadge ? (
@@ -149,11 +161,11 @@ export function AccountQuotaRow(props: {
                 foregroundStyle="secondaryLabel"
                 padding={{ horizontal: 6, vertical: 1.5 }}
                 background={<Capsule fill="quaternarySystemFill" />}
-                lineLimit={1}
-                fixedSize={{ horizontal: true, vertical: false }}
-                layoutPriority={2}
+                lineLimit={isEnglish ? undefined : 1}
+                fixedSize={wrapText ?? { horizontal: true, vertical: false }}
+                layoutPriority={isEnglish ? undefined : 2}
               >
-                {regionBadge}
+                {localize(regionBadge)}
               </Text>
             ) : null}
 
@@ -163,22 +175,23 @@ export function AccountQuotaRow(props: {
               foregroundStyle="accentColor"
               padding={{ horizontal: 7, vertical: 2 }}
               background={<Capsule fill="tertiarySystemFill" />}
-              lineLimit={1}
-              fixedSize={{ horizontal: true, vertical: false }}
-              layoutPriority={2}
+              lineLimit={isEnglish ? undefined : 1}
+              fixedSize={wrapText ?? { horizontal: true, vertical: false }}
+              layoutPriority={isEnglish ? undefined : 2}
             >
-              {accountTypeBadge}
+              {localize(accountTypeBadge)}
             </Text>
-          </HStack>
+          </HeaderLayout>
 
-          <HStack alignment="center" spacing={6}>
+          <HeaderLayout spacing={6}>
             <Text
-              font="caption"
+              font={isEnglish ? "caption2" : "caption"}
               fontWeight="medium"
               foregroundStyle={health.color}
-              lineLimit={1}
+              fixedSize={wrapText}
+              lineLimit={isEnglish ? undefined : 1}
             >
-              {`● ${health.label}`}
+              {localize(`● ${health.label}`)}
             </Text>
 
             {snapshot?.codexResetCards?.availableCount !== undefined ? (
@@ -188,17 +201,18 @@ export function AccountQuotaRow(props: {
                 foregroundStyle="systemIndigo"
                 padding={{ horizontal: 6, vertical: 1 }}
                 background={<Capsule fill="quaternarySystemFill" />}
-                lineLimit={1}
+                fixedSize={wrapText}
+                lineLimit={isEnglish ? undefined : 1}
               >
-                {`🎟️ 重置卡 ${snapshot.codexResetCards.availableCount} 次`}
+                {localize(`🎟️ 重置卡 ${snapshot.codexResetCards.availableCount} 次`)}
               </Text>
             ) : null}
-          </HStack>
+          </HeaderLayout>
         </VStack>
 
-        <Spacer />
+        {!isEnglish ? <Spacer /> : null}
 
-        <HStack alignment="center" spacing={8}>
+        <HStack alignment="center" spacing={isEnglish ? 6 : 8}>
           {isLoading ? (
             <ProgressView
               progressViewStyle="circular"
@@ -207,7 +221,7 @@ export function AccountQuotaRow(props: {
             />
           ) : (
             <Button
-              title="刷新"
+              title={localize("刷新")}
               systemImage="arrow.clockwise"
               labelStyle="iconOnly"
               buttonStyle={adaptiveSecondaryButtonStyle()}
@@ -217,7 +231,7 @@ export function AccountQuotaRow(props: {
             />
           )}
           <Button
-            title="设置"
+            title={localize("设置")}
             systemImage="slider.horizontal.3"
             labelStyle="iconOnly"
             buttonStyle={adaptiveSecondaryButtonStyle()}
@@ -270,7 +284,7 @@ export function AccountQuotaRow(props: {
               ))}
               {hiddenQuotaWindows.length > 0 ? (
                 <DisclosureGroup
-                  title={`其余 ${hiddenQuotaWindows.length} 项配额`}
+                  title={localize(`其余 ${hiddenQuotaWindows.length} 项配额`)}
                   isExpanded={isMoreQuotaExpanded}
                   onChanged={setIsMoreQuotaExpanded}
                 >
@@ -303,7 +317,7 @@ export function AccountQuotaRow(props: {
               }
             >
               <Text font="caption2" fontWeight="semibold" foregroundStyle="accentColor">
-                Additional Tokens
+                {localize("额外 Tokens")}
               </Text>
               {snapshot.museAdditionalTokens.remainingPercentage !== undefined ? (
                 <ProgressView
@@ -317,7 +331,7 @@ export function AccountQuotaRow(props: {
                 />
               ) : null}
               <Text font="subheadline" fontWeight="medium" foregroundStyle="label" lineLimit={2}>
-                {snapshot.museAdditionalTokens.value}
+                {localize(snapshot.museAdditionalTokens.value)}
               </Text>
             </VStack>
           ) : null}
@@ -371,7 +385,8 @@ export function AccountQuotaRow(props: {
                     font="caption2"
                     fontWeight="medium"
                     foregroundStyle="secondaryLabel"
-                    lineLimit={1}
+                    fixedSize={wrapText}
+                    lineLimit={isEnglish ? undefined : 1}
                   >
                     {displayedIdentity}
                   </Text>
@@ -385,7 +400,7 @@ export function AccountQuotaRow(props: {
             ) : null}
             <Spacer />
             <Text font="caption2" foregroundStyle="secondaryLabel">
-              {`数据同步于 ${formatShortDateTime(snapshot.collectedAt) ?? "刚刚"}`}
+              {localize(`数据同步于 ${formatShortDateTime(snapshot.collectedAt) ?? "刚刚"}`)}
             </Text>
           </HStack>
         </VStack>
@@ -412,7 +427,7 @@ export function AccountQuotaRow(props: {
           </Text>
           <HStack spacing={12}>
             <Button
-              title="立即重试"
+              title={localize("立即重试")}
               systemImage="arrow.clockwise"
               buttonStyle="borderless"
               font="caption"
@@ -420,7 +435,7 @@ export function AccountQuotaRow(props: {
             />
             <Spacer />
             <Button
-              title="检查凭证或重登"
+              title={localize("检查凭证或重登")}
               systemImage="key.fill"
               buttonStyle="borderless"
               font="caption"
@@ -441,9 +456,9 @@ export function AccountQuotaRow(props: {
           }
         >
           <Text font="subheadline" foregroundStyle="secondaryLabel">
-            {isLoading
+            {localize(isLoading
               ? "正在直连供应商接口拉取实时配额…"
-              : "尚无快照数据，点击右上角刷新按钮拉取"}
+              : "尚无快照数据，点击右上角刷新按钮拉取")}
           </Text>
           <Spacer />
         </HStack>
@@ -462,6 +477,9 @@ function WalletMetricTile(props: {
 
   const hasBreakdown =
     wallet.toppedUp !== undefined || wallet.granted !== undefined
+  const isEnglish = getDashboardLanguage() === "en"
+  const wrapText = isEnglish ? { horizontal: false, vertical: true } : undefined
+  const BreakdownLayout = isEnglish ? FlowLayout : HStack
 
   return (
     <VStack
@@ -480,20 +498,20 @@ function WalletMetricTile(props: {
       <HStack alignment="center" spacing={8}>
         <ProviderIconView provider={provider} size={20} />
         <Text
-          font="subheadline"
+          font={isEnglish ? "footnote" : "subheadline"}
           fontWeight="medium"
           foregroundStyle="label"
-          lineLimit={1}
+          lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
         >
-          {window.name}
+          {localize(window.name)}
         </Text>
         <Spacer />
         <Text
-          font="title3"
+          font={isEnglish ? "headline" : "title3"}
           fontWeight="bold"
           monospacedDigit={true}
           foregroundStyle="label"
-          lineLimit={1}
+          lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
         >
           {formatWalletAmount(wallet.total, wallet)}
         </Text>
@@ -501,29 +519,29 @@ function WalletMetricTile(props: {
 
       <HStack alignment="center" spacing={10}>
         {hasBreakdown ? (
-          <HStack spacing={12}>
+          <BreakdownLayout spacing={12}>
             {wallet.toppedUp !== undefined ? (
               <Text
                 font="caption2"
                 foregroundStyle="secondaryLabel"
-                lineLimit={1}
+                lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
               >
-                {`充值 ${formatWalletAmount(wallet.toppedUp, wallet)}`}
+                {localize(`充值 ${formatWalletAmount(wallet.toppedUp, wallet)}`)}
               </Text>
             ) : null}
             {wallet.granted !== undefined ? (
               <Text
                 font="caption2"
                 foregroundStyle="secondaryLabel"
-                lineLimit={1}
+                lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
               >
-                {`赠送 ${formatWalletAmount(wallet.granted, wallet)}`}
+                {localize(`赠送 ${formatWalletAmount(wallet.granted, wallet)}`)}
               </Text>
             ) : null}
-          </HStack>
+          </BreakdownLayout>
         ) : (
-          <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-            {wallet.isMonetary ? "实时可用资金池" : "周期内可用计算点数"}
+          <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}>
+            {localize(wallet.isMonetary ? "实时可用资金池" : "周期内可用计算点数")}
           </Text>
         )}
 
@@ -536,7 +554,7 @@ function WalletMetricTile(props: {
           padding={{ horizontal: 6, vertical: 1 }}
           background={<Capsule fill="tertiarySystemFill" />}
         >
-          {wallet.isMonetary ? "可用余额" : "可用点数"}
+          {localize(wallet.isMonetary ? "可用余额" : "可用点数")}
         </Text>
       </HStack>
     </VStack>
@@ -553,6 +571,8 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
   )
   const periodLabel = formatPeriodBadgeText(window)
   const subtitle = formatWindowSubtitle(window)
+  const isEnglish = getDashboardLanguage() === "en"
+  const wrapText = isEnglish ? { horizontal: false, vertical: true } : undefined
   const statusColor = remainingQuotaColor(
     breakdown.remainingPercent,
     window.isExhausted
@@ -572,7 +592,12 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
         />
       }
     >
-      {/* 第一行：周期标签 +（仅在有区分度的子套餐时显示的简短标题）+ 右侧重置倒计时 */}
+      {isEnglish && subtitle ? (
+        <Text font="footnote" fontWeight="medium" fixedSize={wrapText}>
+          {localize(subtitle)}
+        </Text>
+      ) : null}
+      {/* 周期标签和重置倒计时 */}
       <HStack alignment="center" spacing={6}>
         <Text
           font="caption2"
@@ -581,22 +606,22 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
           padding={{ horizontal: 7, vertical: 2 }}
           background={<Capsule fill="tertiarySystemFill" />}
         >
-          {periodLabel}
+          {localize(periodLabel)}
         </Text>
-        {subtitle ? (
+        {!isEnglish && subtitle ? (
           <Text
             font="subheadline"
             fontWeight="medium"
             foregroundStyle="label"
             lineLimit={1}
           >
-            {subtitle}
+            {localize(subtitle)}
           </Text>
         ) : null}
         <Spacer />
         {countdown ? (
-          <Text font="caption2" foregroundStyle="secondaryLabel">
-            {countdown}
+          <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={wrapText}>
+            {localize(countdown)}
           </Text>
         ) : null}
       </HStack>
@@ -614,20 +639,22 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
       {/* 第三行：左侧突出显示「剩余可用」，右侧明确显示「已用 / 总额」 */}
       <HStack alignment="center">
         <Text
-          font="caption"
+          font={isEnglish ? "caption2" : "caption"}
+          fixedSize={wrapText}
           fontWeight="semibold"
           monospacedDigit={true}
           foregroundStyle={window.spentAmount !== undefined ? "systemBlue" : window.isUnlimited ? "systemGreen" : statusColor}
         >
-          {breakdown.primaryRemainingText}
+          {localize(breakdown.primaryRemainingText)}
         </Text>
         <Spacer />
         <Text
-          font="caption"
+          font={isEnglish ? "caption2" : "caption"}
+          fixedSize={wrapText}
           monospacedDigit={true}
           foregroundStyle="secondaryLabel"
         >
-          {breakdown.secondaryUsedText}
+          {localize(breakdown.secondaryUsedText)}
         </Text>
       </HStack>
     </VStack>
@@ -666,8 +693,7 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
             foregroundStyle="systemOrange"
           />
           <Text font="caption" fontWeight="semibold" foregroundStyle="label">
-            Codex 重置预告
-          </Text>
+            {localize("Codex 重置预告")}</Text>
           <Spacer />
           <Text
             font="caption2"
@@ -682,19 +708,18 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
               />
             }
           >
-            {headline}
+            {localize(headline)}
           </Text>
         </HStack>
 
         <HStack spacing={6} alignment="center">
           {localTimeText ? (
             <Text font="caption2" foregroundStyle="secondaryLabel">
-              {localTimeText}
+              {localize(localTimeText)}
             </Text>
           ) : null}
           <Text font="caption2" foregroundStyle="tertiaryLabel">
-            第三方预告 · Codex Resets
-          </Text>
+            {localize("第三方预告 · Codex Resets")}</Text>
         </HStack>
       </VStack>
     )
@@ -726,8 +751,7 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
             foregroundStyle="systemIndigo"
           />
           <Text font="caption" fontWeight="semibold" foregroundStyle="label">
-            Codex 重置预测
-          </Text>
+            {localize("Codex 重置预测")}</Text>
           <Spacer />
           <Text
             font="caption2"
@@ -742,16 +766,16 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
               />
             }
           >
-            {chanceText}
+            {localize(chanceText)}
           </Text>
         </HStack>
 
         <HStack spacing={6} alignment="center">
           <Text font="caption2" foregroundStyle="secondaryLabel">
-            {watch.forecastWindow}
+            {localize(watch.forecastWindow)}
           </Text>
           <Text font="caption2" foregroundStyle="tertiaryLabel">
-            有效至 {formatCodexResetLocalTime(watch.expiresAt)} · 非官方
+            {`${localize("有效至")}${formatCodexResetLocalTime(watch.expiresAt)} ${localize("· 非官方")}`}
           </Text>
         </HStack>
       </VStack>

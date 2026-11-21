@@ -1,7 +1,9 @@
+import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Capsule,
   DisclosureGroup,
+  FlowLayout,
   HStack,
   Image,
   LabeledContent,
@@ -10,10 +12,10 @@ import {
   Picker,
   Section,
   Text,
-  VStack,
-  VirtualNode,
   useMemo,
   useState,
+  VirtualNode,
+  VStack,
 } from "scripting"
 import {
   ProviderCredentialEnvelope,
@@ -80,7 +82,7 @@ export function ProviderCatalogView(props: {
 
   const filtered = useMemo(
     () => searchProviders(searchText, selectedCategory),
-    [searchText, selectedCategory]
+    [searchText, selectedCategory, getDashboardLanguage()]
   )
 
   const groupedAlphabetical = useMemo(
@@ -109,20 +111,20 @@ export function ProviderCatalogView(props: {
 
   const listContent = (
     <List
-      navigationTitle={`供应商目录 (${filtered.length})`}
+      navigationTitle={localize(`供应商目录 (${filtered.length})`)}
       listStyle="insetGroup"
       listSectionIndexVisibility="automatic"
       searchable={{
         value: searchText,
         onChanged: setSearchText,
-        prompt: "搜索供应商、认证协议或 API 端点",
+        prompt: localize("搜索供应商、认证协议或 API 端点"),
       }}
       toolbar={{
         topBarLeading: isHomeScreen
           ? tabSwitchMenu
           : (
             <Button
-              title="退出"
+              title={localize("退出")}
               systemImage="xmark"
               action={onDismiss}
             />
@@ -170,37 +172,36 @@ export function ProviderCatalogView(props: {
       }
     >
         <Section
-          header={<Text>分类与排序</Text>}
+          header={<Text>{localize("分类与排序")}</Text>}
           footer={
             <Text>
-              所有供应商均采用客户端直连，不经过任何第三方中转后端
-            </Text>
+              {localize("所有供应商均采用客户端直连，不经过任何第三方中转后端")}</Text>
           }
         >
           <Picker
-            title="排序与分组"
+            title={localize("排序与分组")}
             value={sortGroupingMode}
             onChanged={(val: string) =>
               setSortGroupingMode(val as "alphabet" | "category")
             }
           >
-            <Text tag="alphabet">首字母快速索引 (A-Z)</Text>
-            <Text tag="category">接入路径分类</Text>
+            <Text tag="alphabet">{localize("首字母快速索引 (A-Z)")}</Text>
+            <Text tag="category">{localize("接入路径分类")}</Text>
           </Picker>
 
           <Picker
-            title="接入路径筛选"
+            title={localize("接入路径筛选")}
             value={selectedCategory}
             onChanged={(val: string) =>
               setSelectedCategory(val as ProviderRouteCategory | "all")
             }
           >
-            <Text tag="all">{`全部供应商 (${PROVIDERS_CATALOG.length})`}</Text>
-            <Text tag="direct_api">直连 API 密钥 / 令牌 (39)</Text>
-            <Text tag="gateway">自建与聚合网关 (5)</Text>
-            <Text tag="device_oauth">OAuth 设备码与轮询 (7)</Text>
-            <Text tag="google_oauth">Google 原生 OAuth (2)</Text>
-            <Text tag="web_session">Web 会话与工作台 (25)</Text>
+            <Text tag="all">{localize(`全部供应商 (${PROVIDERS_CATALOG.length})`)}</Text>
+            <Text tag="direct_api">{localize("直连 API 密钥 / 令牌 (39)")}</Text>
+            <Text tag="gateway">{localize("自建与聚合网关 (5)")}</Text>
+            <Text tag="device_oauth">{localize("OAuth 设备码与轮询 (7)")}</Text>
+            <Text tag="google_oauth">{localize("Google 原生 OAuth (2)")}</Text>
+            <Text tag="web_session">{localize("Web 会话与工作台 (25)")}</Text>
           </Picker>
         </Section>
 
@@ -239,7 +240,7 @@ export function ProviderCatalogView(props: {
                       font="caption"
                       foregroundStyle="accentColor"
                     />
-                    <Text>{`${routeCategoryTitle(group.category)} (${group.items.length})`}</Text>
+                    <Text>{localize(`${routeCategoryTitle(group.category)} (${group.items.length})`)}</Text>
                   </HStack>
                 }
               >
@@ -278,6 +279,8 @@ function ProviderCatalogRow(props: {
   onAdd: () => void
 }) {
   const { meta, isDemoMode, zoomSource, onAdd } = props
+  const isEnglish = getDashboardLanguage() === "en"
+  const HeadingLayout = isEnglish ? FlowLayout : HStack
 
   return (
     <DisclosureGroup
@@ -285,9 +288,9 @@ function ProviderCatalogRow(props: {
         <HStack alignment="center" spacing={12}>
           <ProviderIconView provider={meta.id} size={38} />
           <VStack alignment="leading" spacing={3}>
-            <HStack spacing={6} alignment="center">
-              <Text font="headline" lineLimit={1}>
-                {meta.displayName}
+            <HeadingLayout spacing={6}>
+              <Text font={isEnglish ? "subheadline" : "headline"} lineLimit={isEnglish ? undefined : 1}>
+                {localize(meta.displayName)}
               </Text>
               <Text
                 font="caption2"
@@ -295,17 +298,17 @@ function ProviderCatalogRow(props: {
                 foregroundStyle="secondaryLabel"
                 padding={{ horizontal: 6, vertical: 1 }}
                 background={<Capsule fill="quaternarySystemFill" />}
-                lineLimit={1}
+                lineLimit={isEnglish ? undefined : 1}
               >
-                {loginMethodBadgeText(meta.loginMethod)}
+                {localize(loginMethodBadgeText(meta.loginMethod))}
               </Text>
-            </HStack>
+            </HeadingLayout>
             <Text
               font="caption"
               foregroundStyle="secondaryLabel"
-              lineLimit={1}
+              lineLimit={isEnglish ? 2 : 1}
             >
-              {meta.endpointSummary}
+              {localize(meta.endpointSummary)}
             </Text>
           </VStack>
         </HStack>
@@ -318,16 +321,16 @@ function ProviderCatalogRow(props: {
         frame={{ maxWidth: "infinity", alignment: "leading" }}
       >
         <LabeledContent
-          title="接入分类"
-          value={routeCategoryTitle(meta.routeCategory)}
+          title={localize("接入分类")}
+          value={localize(routeCategoryTitle(meta.routeCategory))}
         />
-        <LabeledContent title="凭证类型" value={meta.credentialLabel} />
-        <LabeledContent title="认证机制" value={meta.authSummary} />
-        <LabeledContent title="直连端点" value={meta.endpointSummary} />
+        <LabeledContent title={localize("凭证类型")} value={localize(meta.credentialLabel)} />
+        <LabeledContent title={localize("认证机制")} value={localize(meta.authSummary)} />
+        <LabeledContent title={localize("直连端点")} value={localize(meta.endpointSummary)} />
 
         {meta.webSessionProfile ? (
           <LabeledContent
-            title="Cookie 白名单"
+            title={localize("Cookie 白名单")}
             value={meta.webSessionProfile.cookieNames.join(", ")}
           />
         ) : null}
@@ -348,12 +351,12 @@ function ProviderCatalogRow(props: {
             <Text
               font="subheadline"
               fontWeight="semibold"
-              lineLimit={1}
+              lineLimit={isEnglish ? undefined : 1}
               multilineTextAlignment="center"
             >
-              {isDemoMode
+              {localize(isDemoMode
                 ? `添加 ${meta.displayName} 演示卡片`
-                : `添加 ${meta.displayName} 账号`}
+                : `添加 ${meta.displayName} 账号`)}
             </Text>
           </HStack>
         </Button>

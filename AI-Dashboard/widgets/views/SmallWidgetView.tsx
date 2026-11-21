@@ -1,3 +1,4 @@
+import { localize } from "../../utils/localization"
 import {
   Button,
   Capsule,
@@ -41,12 +42,10 @@ export function SmallWidgetView(props: {
           foregroundStyle="accentColor"
         />
         <Text font="headline" fontWeight="bold">
-          AI 额度看板
-        </Text>
+          {localize("AI 额度看板")}</Text>
         <Spacer />
         <Text font="caption2" foregroundStyle="secondaryLabel">
-          请在小组件参数中指定供应商（如 codex）或在应用内添加账号
-        </Text>
+          {localize("请在小组件参数中指定供应商（如 codex）或在应用内添加账号")}</Text>
       </VStack>
     )
   }
@@ -101,8 +100,7 @@ export function SmallWidgetView(props: {
           <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity" }}>
             <HStack alignment="center" spacing={4}>
               <Text font={10.5} fontWeight="bold" foregroundStyle="secondaryLabel">
-                可用账户余额
-              </Text>
+                {localize("可用账户余额")}</Text>
               <Text
                 font={8}
                 fontWeight="bold"
@@ -110,8 +108,7 @@ export function SmallWidgetView(props: {
                 padding={{ horizontal: 4.5, vertical: 1 }}
                 background={<Capsule fill="quaternarySystemFill" />}
               >
-                充足
-              </Text>
+                {localize("充足")}</Text>
             </HStack>
 
             <Text
@@ -126,12 +123,11 @@ export function SmallWidgetView(props: {
 
             {account.wallet?.toppedUp !== undefined || account.wallet?.granted !== undefined ? (
               <Text font={8} foregroundStyle="secondaryLabel" lineLimit={1}>
-                {`${account.wallet?.toppedUp !== undefined ? `充值 ¥${account.wallet.toppedUp.toFixed(0)} ` : ""}${account.wallet?.granted !== undefined ? `· 赠金 ¥${account.wallet.granted.toFixed(0)}` : ""}`.trim()}
+                {localize(`${account.wallet?.toppedUp !== undefined ? `充值 ¥${account.wallet.toppedUp.toFixed(0)} ` : ""}${account.wallet?.granted !== undefined ? `· 赠金 ¥${account.wallet.granted.toFixed(0)}` : ""}`.trim())}
               </Text>
             ) : (
               <Text font={8} foregroundStyle="secondaryLabel">
-                实时直连结算 · 预付费账户
-              </Text>
+                {localize("实时直连结算 · 预付费账户")}</Text>
             )}
           </VStack>
         ) : quotaCount === 1 ? (
@@ -206,7 +202,7 @@ export function SmallWidgetView(props: {
                   }
                   lineLimit={1}
                 >
-                  {account.updateStatusText || `更新于 ${lastUpdatedAt}`}
+                  {localize(account.updateStatusText || `更新于 ${lastUpdatedAt}`)}
                 </Text>
                 <Image
                   systemName="arrow.triangle.2.circlepath"

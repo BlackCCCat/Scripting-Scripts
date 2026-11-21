@@ -1,3 +1,4 @@
+import { localize } from "../../utils/localization"
 import {
   Divider,
   Image,
@@ -34,12 +35,10 @@ export function LargeWidgetView(props: {
           foregroundStyle="accentColor"
         />
         <Text font="headline" fontWeight="bold">
-          AI 额度看板
-        </Text>
+          {localize("AI 额度看板")}</Text>
         <Spacer />
         <Text font="caption2" foregroundStyle="secondaryLabel">
-          暂未配置监控账号，请在应用内添加供应商
-        </Text>
+          {localize("暂未配置监控账号，请在应用内添加供应商")}</Text>
       </VStack>
     )
   }
