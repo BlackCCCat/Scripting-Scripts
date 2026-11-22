@@ -40,6 +40,8 @@ import { glassCardSurface } from "./GlassCardSurface"
 import { providerCardFill } from "./ProviderCardBackground"
 import { AddAccountSheet } from "./AddAccountSheet"
 
+const providerCardShape = { type: "rect", cornerRadius: 16, style: "continuous" } as const
+
 const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
   "direct_api",
   "gateway",
@@ -155,7 +157,10 @@ export function ProviderCatalogView(props: {
     <List
       tint="systemIndigo"
       navigationTitle={localize(`供应商目录 (${filtered.length})`)}
-      listStyle="insetGroup"
+      listStyle="plain"
+      contentMargins={{ edges: "horizontal", insets: 20, placement: "scrollContent" }}
+      listSectionSpacing={24}
+      listSectionSeparator="hidden"
       listSectionIndexVisibility="automatic"
       searchable={{
         value: searchText,
@@ -309,7 +314,7 @@ function ProviderCatalogRow(props: {
         padding={{ horizontal: 14, vertical: 9 }}
         frame={{ maxWidth: "infinity", alignment: "leading" }}
         contentShape="rect"
-        {...glassCardSurface(providerCardFill(meta.id), 16)}
+        {...glassCardSurface(providerCardFill(meta.id), providerCardShape.cornerRadius)}
       >
         <ProviderIconView provider={meta.id} size={38} />
         <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", alignment: "leading" }}>
@@ -364,7 +369,7 @@ function ProviderCatalogDetails(props: {
       frame={{ maxWidth: "infinity", alignment: "leading" }}
       background={{
         style: "secondarySystemGroupedBackground",
-        shape: { type: "rect", cornerRadius: 16, style: "continuous" },
+        shape: providerCardShape,
       }}
     >
       <LabeledContent title={localize("接入分类")} value={localize(routeCategoryTitle(meta.routeCategory))} />
