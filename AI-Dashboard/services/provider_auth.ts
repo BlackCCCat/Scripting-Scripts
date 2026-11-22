@@ -1516,10 +1516,7 @@ export async function refreshCredentialIfNeeded(
     }
   }
 
-  if (
-    (envelope.provider === "antigravity" || envelope.provider === "gemini") &&
-    envelope.refreshToken
-  ) {
+  if (envelope.provider === "antigravity" && envelope.refreshToken) {
     const body = new URLSearchParams({
       grant_type: "refresh_token",
       client_id: GOOGLE_OAUTH_CLIENT_ID,

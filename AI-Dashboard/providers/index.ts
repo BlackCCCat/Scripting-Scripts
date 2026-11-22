@@ -34,7 +34,6 @@ import { queryDevinQuota } from "./devin"
 import { queryDevPassQuota } from "./devPass"
 import { queryElevenLabsQuota } from "./elevenLabs"
 import { queryFactoryQuota } from "./factory"
-import { queryGeminiQuota } from "./gemini"
 import { queryGitKrakenQuota } from "./gitKraken"
 import { queryGrokBotQuota } from "./grokBot"
 import { queryHuggingFaceQuota } from "./huggingFace"
@@ -93,7 +92,7 @@ import { queryZoomMateQuota } from "./zoomMate"
 
 export { QuotaQueryError }
 
-export const PROVIDER_HANDLERS: Record<ProviderId, ProviderQuotaHandler> = {
+export const PROVIDER_HANDLERS: Partial<Record<ProviderId, ProviderQuotaHandler>> = {
   abacus: queryAbacusQuota,
   aixy: queryAixyQuota,
   alibabaCodingPlan: queryAlibabaCodingPlanQuota,
@@ -119,7 +118,6 @@ export const PROVIDER_HANDLERS: Record<ProviderId, ProviderQuotaHandler> = {
   devPass: queryDevPassQuota,
   elevenLabs: queryElevenLabsQuota,
   factory: queryFactoryQuota,
-  gemini: queryGeminiQuota,
   gitKraken: queryGitKrakenQuota,
   grokBot: queryGrokBotQuota,
   huggingFace: queryHuggingFaceQuota,

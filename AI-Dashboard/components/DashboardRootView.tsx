@@ -1189,7 +1189,7 @@ export function DashboardRootView(props: {
               description={
                 localize(searchQuery.trim()
                   ? "请尝试更换搜索关键词，或在「供应商目录」中添加新平台"
-                  : "支持 DeepSeek、OpenAI Codex、Claude、Anthropic、WorkBuddy、火山方舟、MiniMax、New API 等 79 家 AI 平台")
+                  : "支持 DeepSeek、OpenAI Codex、Claude、Anthropic、WorkBuddy、火山方舟、MiniMax、New API 等 78 家 AI 平台")
               }
             />
             <Button

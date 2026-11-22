@@ -245,7 +245,7 @@ export function ProviderCatalogView(props: {
             <Text tag="direct_api">{localize("直连 API 密钥 / 令牌 (39)")}</Text>
             <Text tag="gateway">{localize("自建与聚合网关 (5)")}</Text>
             <Text tag="device_oauth">{localize("OAuth 设备码与轮询 (7)")}</Text>
-            <Text tag="google_oauth">{localize("Google 原生 OAuth (2)")}</Text>
+            <Text tag="google_oauth">{localize("Google 原生 OAuth (1)")}</Text>
             <Text tag="web_session">{localize("Web 会话与工作台 (25)")}</Text>
           </Picker>
         </Section>

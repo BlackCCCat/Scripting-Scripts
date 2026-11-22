@@ -371,8 +371,7 @@ export function AccountDetailSheet(props: {
     }
   }
 
-  const isGoogleOAuth =
-    account.provider === "antigravity" || account.provider === "gemini"
+  const isGoogleOAuth = account.provider === "antigravity"
   const isTraeAuth = account.provider === "trae"
   const isCodexAuth = account.provider === "codex"
   const supportsDeviceOrPollFlow =

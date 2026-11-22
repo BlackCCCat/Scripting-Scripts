@@ -827,21 +827,7 @@ export const PROVIDERS_CATALOG: ProviderMeta[] = [
     authSummary: "CLI OAuth State 轮询 + X-Refresh-Token 自动续期",
   },
 
-  // ==================== 4. Google 原生 OAuth 授权码 (2 家) ====================
-  {
-    id: "gemini",
-    displayName: "Gemini Code Assist",
-    aliases: ["gemini", "gemini code assist", "google gemini"],
-    routeCategory: "google_oauth",
-    credentialKind: "oauth",
-    loginMethod: "authorizationCode",
-    symbolName: "wand.and.stars",
-    credentialLabel: "Google OAuth Access Token",
-    credentialPrompt: "粘贴 Google Cloud / Code Assist OAuth 令牌",
-    endpointSummary:
-      "POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-    authSummary: "Google OAuth 2.0 Bearer Token (cloud-platform scope)",
-  },
+  // ==================== 4. Google 原生 OAuth 授权码 (1 家) ====================
   {
     id: "antigravity",
     displayName: "Antigravity",

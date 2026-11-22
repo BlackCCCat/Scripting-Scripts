@@ -518,8 +518,7 @@ export function AddAccountSheet(props: {
     }
   }
 
-  const isGoogleOAuth =
-    selectedProviderId === "antigravity" || selectedProviderId === "gemini"
+  const isGoogleOAuth = selectedProviderId === "antigravity"
   const isTraeAuth = selectedProviderId === "trae"
   const isCodexAuth = selectedProviderId === "codex"
   const supportsDeviceOrPollFlow =
@@ -1116,7 +1115,7 @@ export function ProviderPickerSheet(props: {
       searchable={{
         value: searchText,
         onChanged: setSearchText,
-        prompt: localize("搜索 79 家 AI 供应商名称或域名"),
+        prompt: localize("搜索 78 家 AI 供应商名称或域名"),
       }}
       toolbar={{
         cancellationAction: embedded ? undefined : (
@@ -1165,11 +1164,11 @@ export function ProviderPickerSheet(props: {
             setRouteFilter(v as ProviderRouteCategory | "all")
           }
         >
-          <Text tag="all">{localize("全部路径 (79)")}</Text>
+          <Text tag="all">{localize("全部路径 (78)")}</Text>
           <Text tag="direct_api">{localize("直连 API 密钥 (39)")}</Text>
           <Text tag="gateway">{localize("自建/聚合网关 (5)")}</Text>
           <Text tag="device_oauth">{localize("OAuth 设备码与轮询 (7)")}</Text>
-          <Text tag="google_oauth">{localize("Google 原生 OAuth (2)")}</Text>
+          <Text tag="google_oauth">{localize("Google 原生 OAuth (1)")}</Text>
           <Text tag="web_session">{localize("Web 会话与工作台 (25)")}</Text>
         </Picker>
       </Section>
