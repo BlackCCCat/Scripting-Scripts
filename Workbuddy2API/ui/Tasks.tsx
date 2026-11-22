@@ -116,67 +116,68 @@ export function TasksPage({ revision }: { revision: number }) {
     ]
     return { account, tasks: ownAll, summary: parts.join(" · "), note: scanNotes[account.uid] }
   })
-  return <VStack spacing={0} navigationTitle="任务" navigationBarTitleDisplayMode="large" background={<PageBackdrop />}
+  return <List navigationTitle="任务" navigationBarTitleDisplayMode="large" background={<PageBackdrop />}
+    listStyle="insetGroup" scrollContentBackground="hidden" contentMargins={pageMargins}
+    safeAreaInset={{ bottom: { spacing: 0, content: <HStack padding={{ horizontal: 18, top: 4, bottom: 12 }}>
+      <Button buttonStyle={glass ? "glassProminent" : primaryButton} tint={barFill} controlSize="large"
+        disabled={busy} action={() => void runAll()}>
+        <Label title={activeSince ? "正在执行…" : "一键执行任务"} systemImage="play.fill" frame={{ maxWidth: "infinity" }} />
+      </Button>
+    </HStack> } }}
     toolbar={{ topBarTrailing: <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void scan()} /> }}>
-    <List listStyle="insetGroup" scrollContentBackground="hidden" contentMargins={pageMargins}>
-      <Section>
-        <VStack listRowInsets={0} listRowSeparator="hidden" listRowBackground={<Rectangle fill="clear" />}>
-          <Panel hero>
-            <HStack alignment="top" spacing={10}>
-              <Metric label="未领取" value={String(pending.length)} valueFirst />
-              <Divider frame={{ height: 38 }} />
-              <Metric label="可执行" value={String(runnable.length)} valueFirst />
-              <Divider frame={{ height: 38 }} />
-              <Metric label="可领奖" value={String(runnable.filter(task => task.claimable).length)} valueFirst />
-            </HStack>
-            <Divider />
-            <Hint>跳过需手动完成的任务。首只 Buddy 会同意领养协议；GLM-5.2 对话可能消耗额度。</Hint>
-            {activeSince !== null && <Hint>{`开始于 ${new Date(activeSince).toLocaleTimeString("zh-CN")}`}</Hint>}
-            {busy && <Busy text={activeSince ? "正在执行任务…" : "正在读取任务…"} />}
-            {!!error && <Failure error={error} />}
-          </Panel>
-        </VStack>
-      </Section>
-      {hasRun && <Section title="本轮结果">
-        <Hint>{`${doneCount} 项已处理 · ${pendingCount} 项待上游确认 · ${failedCount} 项失败 · ${skipped.length} 项跳过`}</Hint>
-        {creditChanges.map(item => <Hint key={item.uid}>{`${item.nickname} · 积分 ${formatCredit(item.before)} → ${formatCredit(item.after)}（执行期间净变化 ${item.after > item.before ? "+" : ""}${formatCredit(item.after - item.before)}）`}</Hint>)}
-        {!busy && !runEntries.length && !error && <Hint>本轮没有待执行的任务。</Hint>}
-        {runEntries.filter(entry => entry.status !== "skipped").map((entry, index) => <HStack key={`${entry.uid}:${entry.code}:${index}`} spacing={8}>
-          <Image systemName={entry.status === "done" ? "checkmark.circle.fill" : entry.status === "failed" ? "xmark.circle.fill" : "clock.fill"}
-            foregroundStyle={entry.status === "done" ? "systemGreen" : entry.status === "failed" ? "systemRed" : "systemOrange"} />
-          <VStack alignment="leading" spacing={2}><Text>{`${entry.nickname} · ${entry.title}`}</Text><Hint>{entry.message}</Hint></VStack>
-        </HStack>)}
-        {!!skipped.length && <DisclosureGroup title={`已跳过 · ${skipped.length} 项`}>
-          {skipped.map((entry, index) => <VStack key={`${entry.uid}:${entry.code}:${index}`} alignment="leading" spacing={2}>
-            <Text>{`${entry.nickname} · ${entry.title}`}</Text><Hint>{`${entry.code ? `${entry.code} · ` : ""}${entry.message}`}</Hint>
-          </VStack>)}
-        </DisclosureGroup>}
-      </Section>}
-      <Section title="账号任务" listSectionSeparator={hideTopSeparator}>
-        {!accountStates.length && <Hint>还没有账号</Hint>}
-        {accountStates.map(({ account, tasks, summary, note }, index) => <DisclosureGroup key={account.uid}
-          label={<HStack spacing={10} padding={{ vertical: 3 }}>
-            <SymbolTile symbol={account.site === "cn" ? "person.crop.circle" : "globe"} />
-            <VStack alignment="leading" spacing={3}>
-              <Text font="headline">{account.nickname || account.uid}</Text>
-              <Hint>{busy && !rows.length ? "正在读取任务…" : summary}</Hint>
-            </VStack>
-          </HStack>}
-          listRowSeparator={index === 0 ? hideTopSeparator : "visible"}
-          isExpanded={expandedAccounts.includes(account.uid)}
-          onChanged={value => setExpandedAccounts(current => value ? [...current, account.uid] : current.filter(uid => uid !== account.uid))}>
-          {!!note && <Hint>{note}</Hint>}
-          <AccountTaskDashboard uid={account.uid} tasks={tasks}
-            canWrite={account.site === "cn" && !account.enterpriseId} busy={busy} refreshKey={extrasRevision}
-            active={expandedAccounts.includes(account.uid)} />
-        </DisclosureGroup>)}
-      </Section>
-    </List>
-    <Button buttonStyle={glass ? "glassProminent" : primaryButton} tint={barFill} controlSize="large"
-      padding={{ horizontal: 16 }} disabled={busy} action={() => void runAll()}>
-      <Label title={activeSince ? "正在执行…" : "一键执行任务"} systemImage="play.fill" frame={{ maxWidth: "infinity" }} />
-    </Button>
-  </VStack>
+    <Section>
+      <VStack listRowInsets={0} listRowSeparator="hidden" listRowBackground={<Rectangle fill="clear" />}>
+        <Panel hero>
+          <HStack alignment="top" spacing={10}>
+            <Metric label="未领取" value={String(pending.length)} valueFirst />
+            <Divider frame={{ height: 38 }} />
+            <Metric label="可执行" value={String(runnable.length)} valueFirst />
+            <Divider frame={{ height: 38 }} />
+            <Metric label="可领奖" value={String(runnable.filter(task => task.claimable).length)} valueFirst />
+          </HStack>
+          <Divider />
+          <Hint>跳过需手动完成的任务。首只 Buddy 会同意领养协议；GLM-5.2 对话可能消耗额度。</Hint>
+          {activeSince !== null && <Hint>{`开始于 ${new Date(activeSince).toLocaleTimeString("zh-CN")}`}</Hint>}
+          {busy && <Busy text={activeSince ? "正在执行任务…" : "正在读取任务…"} />}
+          {!!error && <Failure error={error} />}
+        </Panel>
+      </VStack>
+    </Section>
+    {hasRun && <Section title="本轮结果">
+      <Hint>{`${doneCount} 项已处理 · ${pendingCount} 项待上游确认 · ${failedCount} 项失败 · ${skipped.length} 项跳过`}</Hint>
+      {creditChanges.map(item => <Hint key={item.uid}>{`${item.nickname} · 积分 ${formatCredit(item.before)} → ${formatCredit(item.after)}（执行期间净变化 ${item.after > item.before ? "+" : ""}${formatCredit(item.after - item.before)}）`}</Hint>)}
+      {!busy && !runEntries.length && !error && <Hint>本轮没有待执行的任务。</Hint>}
+      {runEntries.filter(entry => entry.status !== "skipped").map((entry, index) => <HStack key={`${entry.uid}:${entry.code}:${index}`} spacing={8}>
+        <Image systemName={entry.status === "done" ? "checkmark.circle.fill" : entry.status === "failed" ? "xmark.circle.fill" : "clock.fill"}
+          foregroundStyle={entry.status === "done" ? "systemGreen" : entry.status === "failed" ? "systemRed" : "systemOrange"} />
+        <VStack alignment="leading" spacing={2}><Text>{`${entry.nickname} · ${entry.title}`}</Text><Hint>{entry.message}</Hint></VStack>
+      </HStack>)}
+      {!!skipped.length && <DisclosureGroup title={`已跳过 · ${skipped.length} 项`}>
+        {skipped.map((entry, index) => <VStack key={`${entry.uid}:${entry.code}:${index}`} alignment="leading" spacing={2}>
+          <Text>{`${entry.nickname} · ${entry.title}`}</Text><Hint>{`${entry.code ? `${entry.code} · ` : ""}${entry.message}`}</Hint>
+        </VStack>)}
+      </DisclosureGroup>}
+    </Section>}
+    <Section title="账号任务" listSectionSeparator={hideTopSeparator}>
+      {!accountStates.length && <Hint>还没有账号</Hint>}
+      {accountStates.map(({ account, tasks, summary, note }, index) => <DisclosureGroup key={account.uid}
+        label={<HStack spacing={10} padding={{ vertical: 3 }}>
+          <SymbolTile symbol={account.site === "cn" ? "person.crop.circle" : "globe"} />
+          <VStack alignment="leading" spacing={3}>
+            <Text font="headline">{account.nickname || account.uid}</Text>
+            <Hint>{busy && !rows.length ? "正在读取任务…" : summary}</Hint>
+          </VStack>
+        </HStack>}
+        listRowSeparator={index === 0 ? hideTopSeparator : "visible"}
+        isExpanded={expandedAccounts.includes(account.uid)}
+        onChanged={value => setExpandedAccounts(current => value ? [...current, account.uid] : current.filter(uid => uid !== account.uid))}>
+        {!!note && <Hint>{note}</Hint>}
+        <AccountTaskDashboard uid={account.uid} tasks={tasks}
+          canWrite={account.site === "cn" && !account.enterpriseId} busy={busy} refreshKey={extrasRevision}
+          active={expandedAccounts.includes(account.uid)} />
+      </DisclosureGroup>)}
+    </Section>
+  </List>
 }
 
 export function AccountTasksPage({ account }: { account: Account }) {

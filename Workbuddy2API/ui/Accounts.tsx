@@ -50,7 +50,17 @@ export function AccountsPage({ revision, onChanged }: { revision: number; onChan
     try { updateAccount(item.uid, { enabled: item.enabled === false }); refresh() }
     catch (error) { void alertError(error) }
   }
-  return <VStack spacing={0} navigationTitle="账号" navigationBarTitleDisplayMode="large" background={<PageBackdrop />}
+  return <List navigationTitle="账号" navigationBarTitleDisplayMode="large" background={<PageBackdrop />}
+    listStyle="insetGroup" scrollContentBackground="hidden" contentMargins={pageMargins}
+    searchable={{ value: search, onChanged: setSearch, prompt: "搜索昵称或 UID", placement: "navigationBarDrawerAlwaysDisplay" }}
+    safeAreaInset={{ bottom: { spacing: 0, content: <HStack padding={{ horizontal: 18, top: 4, bottom: 12 }}>
+      <Spacer />
+      <NavigationLink destination={<LoginPage onChanged={refresh} />} buttonStyle={glass ? "glassProminent" : primaryButton}
+        tint={barFill} controlSize="large">
+        <Label title="添加账号" systemImage="plus" />
+      </NavigationLink>
+      <Spacer />
+    </HStack> } }}
     toolbar={{
       topBarTrailing: [
         <Menu title="排序方式" systemImage="arrow.up.arrow.down">
@@ -62,39 +72,34 @@ export function AccountsPage({ revision, onChanged }: { revision: number; onChan
         <Button title="刷新" systemImage="arrow.clockwise" disabled={busy} action={() => void refreshAll()} />,
       ],
     }}>
-    <List listStyle="insetGroup" scrollContentBackground="hidden" contentMargins={pageMargins}
-      searchable={{ value: search, onChanged: setSearch, prompt: "搜索昵称或 UID", placement: "navigationBarDrawerAlwaysDisplay" }}>
-      <Section listSectionSeparator={hideTopSeparator}
-        header={<Hint>{`${items.length} 个账号 · ${availableCount} 个可用${visible.length !== items.length ? ` · 显示 ${visible.length} 个` : ""}${availableOnly ? " · 仅可用" : ""}`}</Hint>}
-        footer={lastUpdated > 0 ? <Hint>{`更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}`}</Hint> : undefined}>
-        {visible.map((item, index) => <NavigationLink key={item.uid} destination={<AccountPage account={item} onChanged={refresh} />}
-          listRowSeparator={index === 0 ? hideTopSeparator : "visible"} listRowInsets={{ top: 12, bottom: 12, leading: 14, trailing: 12 }}
-          trailingSwipeActions={{ allowsFullSwipe: false, actions: [<Button title={item.enabled === false ? "启用" : "停用"}
-            systemImage={item.enabled === false ? "checkmark.circle" : "pause.circle"}
-            tint={item.enabled === false ? "systemGreen" : "systemOrange"} action={() => toggleAccount(item)} />] }}>
-          <VStack alignment="leading" spacing={9} opacity={item.enabled === false ? 0.65 : 1}
-            frame={{ maxWidth: "infinity", alignment: "leading" }}>
-            <HStack spacing={10}>
-              <SymbolTile symbol={item.enterpriseId ? "building.2" : item.site === "cn" ? "person.crop.circle" : "globe"} />
-              <VStack alignment="leading" spacing={3}>
-                <Text font="headline" lineLimit={2}>{item.nickname || item.uid.slice(0, 8)}</Text>
-                <HStack spacing={5}>
-                  <StatusDot color={item.enabled === false ? "systemGray" : item.error ? "systemOrange" : "systemGreen"} />
-                  <Hint>{`${item.site === "cn" ? "国内版" : "国际版"} · ${item.enabled === false ? "已停用" : item.error ? "需检查" : "可用"}`}</Hint>
-                </HStack>
-              </VStack>
-            </HStack>
-            <CreditBalance account={item} />
-          </VStack>
-        </NavigationLink>)}
-        {!visible.length && <Hint>{items.length ? "没有匹配的账号" : "尚未添加账号，点击底部添加。"}</Hint>}
-      </Section>
-    </List>
-    <NavigationLink destination={<LoginPage onChanged={refresh} />} buttonStyle={glass ? "glassProminent" : primaryButton}
-      tint={barFill} controlSize="large" padding={{ horizontal: 18 }}>
-      <Label title="添加账号" systemImage="plus" frame={{ maxWidth: "infinity" }} />
-    </NavigationLink>
-  </VStack>
+    <Section listSectionSeparator="hidden"
+      header={<Hint>{`${items.length} 个账号 · ${availableCount} 个可用${visible.length !== items.length ? ` · 显示 ${visible.length} 个` : ""}${availableOnly ? " · 仅可用" : ""}`}</Hint>}
+      footer={lastUpdated > 0 ? <Hint>{`更新于 ${new Date(lastUpdated).toLocaleString("zh-CN")}`}</Hint> : undefined}>
+      {visible.map((item, index) => <NavigationLink key={item.uid} destination={<AccountPage account={item} onChanged={refresh} />}
+        listRowSeparator={visible.length === 1 ? "hidden" : index === 0 ? hideTopSeparator
+          : index === visible.length - 1 ? { visibility: "hidden", edges: "bottom" } : "visible"}
+        listRowInsets={{ top: 12, bottom: 12, leading: 14, trailing: 12 }}
+        trailingSwipeActions={{ allowsFullSwipe: false, actions: [<Button title={item.enabled === false ? "启用" : "停用"}
+          systemImage={item.enabled === false ? "checkmark.circle" : "pause.circle"}
+          tint={item.enabled === false ? "systemGreen" : "systemOrange"} action={() => toggleAccount(item)} />] }}>
+        <VStack alignment="leading" spacing={9} opacity={item.enabled === false ? 0.65 : 1}
+          frame={{ maxWidth: "infinity", alignment: "leading" }}>
+          <HStack spacing={10}>
+            <SymbolTile symbol={item.enterpriseId ? "building.2" : item.site === "cn" ? "person.crop.circle" : "globe"} />
+            <VStack alignment="leading" spacing={3}>
+              <Text font="headline" lineLimit={2}>{item.nickname || item.uid.slice(0, 8)}</Text>
+              <HStack spacing={5}>
+                <StatusDot color={item.enabled === false ? "systemGray" : item.error ? "systemOrange" : "systemGreen"} />
+                <Hint>{`${item.site === "cn" ? "国内版" : "国际版"} · ${item.enabled === false ? "已停用" : item.error ? "需检查" : "可用"}`}</Hint>
+              </HStack>
+            </VStack>
+          </HStack>
+          <CreditBalance account={item} />
+        </VStack>
+      </NavigationLink>)}
+      {!visible.length && <Hint>{items.length ? "没有匹配的账号" : "尚未添加账号，点击底部添加。"}</Hint>}
+    </Section>
+  </List>
 }
 
 function AccountPage({ account, onChanged }: { account: Account; onChanged: () => void }) {

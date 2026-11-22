@@ -8,7 +8,7 @@ const compact = (value: number) => new Intl.NumberFormat("en", { notation: "comp
 
 export function DataPage({ revision }: { revision: number }) {
   const [entries, setEntries] = useState<RequestRecord[]>(records)
-  const [days, setDays] = useState(0)
+  const [days, setDays] = useState(-1)
   const [group, setGroup] = useState<Group>("account")
   useEffect(() => { setEntries(records()) }, [revision])
   const now = Date.now()
