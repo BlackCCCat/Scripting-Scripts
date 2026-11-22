@@ -12,7 +12,6 @@ import {
   Menu,
   Navigation,
   NavigationStack,
-  RoundedRectangle,
   Script,
   Section,
   Spacer,
@@ -71,6 +70,8 @@ import { AccountDetailSheet } from "./AccountDetailSheet"
 import { AccountOrderEditSheet } from "./AccountOrderEditSheet"
 import { AccountQuotaRow } from "./AccountQuotaRow"
 import { AddAccountSheet } from "./AddAccountSheet"
+import { glassCardSurface } from "./GlassCardSurface"
+import { providerCardFill } from "./ProviderCardBackground"
 import { DashboardOverviewSection } from "./DashboardOverviewSection"
 import { ProviderCatalogView } from "./ProviderCatalogView"
 import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
@@ -122,25 +123,6 @@ function reorderSublistInMasterByItems(
     }
     return item
   })
-}
-
-function reorderSublistInMaster(
-  master: SubscriptionAccount[],
-  sublist: SubscriptionAccount[],
-  indices: number[],
-  newOffset: number
-): SubscriptionAccount[] {
-  const moving = indices
-    .map((i) => sublist[i])
-    .filter((item): item is SubscriptionAccount => item !== undefined)
-  if (moving.length === 0) return master
-
-  const restSub = sublist.filter((_, idx) => !indices.includes(idx))
-  const insertAt = Math.max(0, Math.min(restSub.length, newOffset))
-  const reorderedSub = [...restSub]
-  reorderedSub.splice(insertAt, 0, ...moving)
-
-  return reorderSublistInMasterByItems(master, sublist, reorderedSub)
 }
 
 interface DashboardAccountListSectionProps {
@@ -344,10 +326,6 @@ export function DashboardRootView(props: {
       return
     }
     setSelectedAccountForDetail(account)
-  }
-
-  const openChangelog = () => {
-    releaseNotes.show()
   }
 
   const renderTabSwitchMenu = () => {
@@ -824,30 +802,6 @@ export function DashboardRootView(props: {
     reloadAllWidgets()
   }
 
-  const handleMoveSublist = (
-    sublist: SubscriptionAccount[],
-    indices: number[],
-    newOffset: number
-  ) => {
-    if (settings.isDemoMode) {
-      setDemoAccounts((prev) =>
-        reorderSublistInMaster(prev, sublist, indices, newOffset)
-      )
-      HapticFeedback.lightImpact()
-      return
-    }
-    const next = reorderSublistInMaster(
-      realAccounts,
-      sublist,
-      indices,
-      newOffset
-    )
-    setRealAccounts(next)
-    saveStoredAccounts(next)
-    HapticFeedback.lightImpact()
-    reloadAllWidgets()
-  }
-
   const handleMoveAccountsInEdit = (indices: number[], newOffset: number) => {
     if (settings.isDemoMode) {
       setDemoAccounts((prev) => {
@@ -942,14 +896,6 @@ export function DashboardRootView(props: {
         listRowInsets={0}
         listRowSeparator="hidden"
         listRowBackground={<EmptyView />}
-        padding={{ horizontal: 16, vertical: 10 }}
-        background={
-          <RoundedRectangle
-            cornerRadius={16}
-            style="continuous"
-            fill="secondarySystemGroupedBackground"
-          />
-        }
         contentShape={{
           kind: "dragPreview",
           shape: { type: "rect", cornerRadius: 16, style: "continuous" },
@@ -979,15 +925,22 @@ export function DashboardRootView(props: {
           ],
         }}
       >
-        <AccountQuotaRow
-          account={acc}
-          state={state}
-          protectAccountIdentity={settings.protectAccountIdentity}
-          codexResetStatus={codexResetStatus}
-          zoomSource={homeZoomSource(`account-card-${acc.id}`)}
-          onRefresh={() => refreshSingleAccount(acc)}
-          onOpenDetail={() => openAccountDetail(acc, `account-card-${acc.id}`)}
-        />
+        <VStack
+          alignment="leading"
+          padding={{ horizontal: 16, vertical: 10 }}
+          frame={{ maxWidth: "infinity", alignment: "leading" }}
+          {...glassCardSurface(providerCardFill(acc.provider), 16)}
+        >
+          <AccountQuotaRow
+            account={acc}
+            state={state}
+            protectAccountIdentity={settings.protectAccountIdentity}
+            codexResetStatus={codexResetStatus}
+            zoomSource={homeZoomSource(`account-card-${acc.id}`)}
+            onRefresh={() => refreshSingleAccount(acc)}
+            onOpenDetail={() => openAccountDetail(acc, `account-card-${acc.id}`)}
+          />
+        </VStack>
       </VStack>
     )
   }
@@ -1046,7 +999,6 @@ export function DashboardRootView(props: {
         <AccountOrderEditSheet
           accounts={currentAccounts}
           embedded={true}
-          zoomNamespace={homeZoomNamespace}
           navigationTransition={homeZoomTransition(homeRoute.zoomSourceID)}
           onReorderAccounts={(reordered) => {
             if (settings.isDemoMode) {
@@ -1074,6 +1026,7 @@ export function DashboardRootView(props: {
   const dashboardList = (
     <List
       navigationTitle={localize("AI 额度看板")}
+      tint="systemIndigo"
       listStyle="insetGroup"
       listRowSpacing={10}
       listRowSeparator="hidden"
@@ -1212,6 +1165,7 @@ export function DashboardRootView(props: {
         accounts={displayedAccounts}
         accountStates={accountStates}
         isDemoMode={settings.isDemoMode}
+        protectAccountIdentity={settings.protectAccountIdentity}
         zoomNamespace={homeZoomNamespace}
         onSelectAccount={(acc) => openAccountDetail(acc, `overview-account-${acc.id}`)}
         onOpenEditSheet={() => openEditAccountsSheet("overview-edit-accounts")}
@@ -1326,6 +1280,7 @@ export function DashboardRootView(props: {
       return (
         <ProviderCatalogView
           isDemoMode={settings.isDemoMode}
+          configuredAccounts={currentAccounts}
           defaultSynchronizable={settings.prefersICloudKeychain}
           isHomeScreen={true}
           zoomNamespace={homeZoomNamespace}
@@ -1374,7 +1329,6 @@ export function DashboardRootView(props: {
           saveStoredSnapshots({})
           setAccountStates({})
         }}
-        onOpenChangelog={openChangelog}
         onDismiss={() => {}}
       />
     )
@@ -1384,7 +1338,7 @@ export function DashboardRootView(props: {
     <TabView
       tabIndex={activeTab}
       onTabIndexChanged={setActiveTab}
-      tint="accentColor"
+      tint="systemIndigo"
       sheet={[
         {
           isPresented: isAddSheetPresented,
@@ -1416,6 +1370,7 @@ export function DashboardRootView(props: {
       <Tab title={localize("供应商目录")} systemImage="square.grid.2x2.fill" value={1}>
         <ProviderCatalogView
           isDemoMode={settings.isDemoMode}
+          configuredAccounts={currentAccounts}
           defaultSynchronizable={settings.prefersICloudKeychain}
           onQuickAddAccount={handleQuickAddFromCatalog}
           onDismiss={() => dismiss()}
@@ -1427,7 +1382,6 @@ export function DashboardRootView(props: {
           settings={settings}
           realAccountCount={realAccounts.length}
           demoAccountCount={demoAccounts.length}
-          changelogContent={releaseNotes.rawContent}
           onUpdateSettings={updateSettings}
           keychainSyncBusy={keychainSyncBusy}
           keychainSyncProgress={keychainSyncProgress}

@@ -192,6 +192,7 @@ export function WidgetGuideSheet(props: {
 
   const content = (
     <ScrollView
+      tint="systemIndigo"
       background="clear"
       scrollContentBackground="hidden"
       navigationTitle={localize("小组件使用说明")}

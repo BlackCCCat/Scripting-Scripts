@@ -20,7 +20,6 @@ import { ProviderIconView } from "./ProviderIconView"
 export type AccountOrderEditSheetProps = {
   accounts: SubscriptionAccount[]
   embedded?: boolean
-  zoomNamespace?: any
   navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
   onMoveAccounts?: (indices: number[], newOffset: number) => void
   onReorderAccounts?: (reordered: SubscriptionAccount[]) => void
@@ -91,6 +90,7 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
 
   const content = (
     <List
+      tint="systemIndigo"
       navigationTitle={localize("编辑账号卡片")}
       listStyle="insetGroup"
       navigationTransition={props.navigationTransition}

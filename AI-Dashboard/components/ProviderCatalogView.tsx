@@ -2,7 +2,7 @@ import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Capsule,
-  DisclosureGroup,
+  EmptyView,
   FlowLayout,
   HStack,
   Image,
@@ -36,6 +36,8 @@ import {
   routeCategoryTitle,
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
+import { glassCardSurface } from "./GlassCardSurface"
+import { providerCardFill } from "./ProviderCardBackground"
 import { AddAccountSheet } from "./AddAccountSheet"
 
 const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
@@ -48,6 +50,7 @@ const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
 
 export function ProviderCatalogView(props: {
   isDemoMode: boolean
+  configuredAccounts?: readonly SubscriptionAccount[]
   defaultSynchronizable: boolean
   isHomeScreen?: boolean
   zoomNamespace?: any
@@ -61,6 +64,7 @@ export function ProviderCatalogView(props: {
 }) {
   const {
     isDemoMode,
+    configuredAccounts = [],
     isHomeScreen = false,
     zoomNamespace,
     tabSwitchMenu,
@@ -79,27 +83,34 @@ export function ProviderCatalogView(props: {
     provider: ProviderId
     nonce: number
   } | null>(null)
+  const [expandedProviders, setExpandedProviders] = useState<ReadonlySet<ProviderId>>(() => new Set())
 
   const filtered = useMemo(
     () => searchProviders(searchText, selectedCategory),
     [searchText, selectedCategory, getDashboardLanguage()]
   )
 
-  const groupedAlphabetical = useMemo(
-    () => groupProvidersAlphabetically(filtered),
-    [filtered]
-  )
-
-  const groupedByRoute = useMemo(() => {
-    const categories =
-      selectedCategory === "all" ? ALL_ROUTE_CATEGORIES : [selectedCategory]
-    return categories
-      .map((cat) => ({
-        category: cat,
-        items: filtered.filter((item) => item.routeCategory === cat),
-      }))
-      .filter((group) => group.items.length > 0)
-  }, [filtered, selectedCategory])
+  const {
+    configured,
+    groupedAlphabetical,
+    groupedByRoute,
+  } = useMemo(() => {
+    const configuredIds = new Set(configuredAccounts.map((account) => account.provider))
+    const configured = filtered.filter((provider) => configuredIds.has(provider.id))
+    const unconfigured = filtered.filter((provider) => !configuredIds.has(provider.id))
+    return {
+      configured,
+      groupedAlphabetical: sortGroupingMode === "alphabet"
+        ? groupProvidersAlphabetically(unconfigured)
+        : [],
+      groupedByRoute: sortGroupingMode === "category"
+        ? ALL_ROUTE_CATEGORIES.map((category) => ({
+            category,
+            items: filtered.filter((provider) => provider.routeCategory === category),
+          })).filter((group) => group.items.length > 0)
+        : [],
+    }
+  }, [configuredAccounts, filtered, sortGroupingMode])
 
   const handleAdd = (provider: ProviderId) => {
     if (isHomeScreen) {
@@ -109,8 +120,40 @@ export function ProviderCatalogView(props: {
     }
   }
 
+  function renderProvider(item: ProviderMeta) {
+    const expanded = expandedProviders.has(item.id)
+    return [
+      <ProviderCatalogRow
+        key={item.id}
+        meta={item}
+        expanded={expanded}
+        onToggle={() => setExpandedProviders((previous) => {
+          const next = new Set(previous)
+          if (next.has(item.id)) {
+            next.delete(item.id)
+          } else {
+            next.add(item.id)
+          }
+          return next
+        })}
+      />,
+      ...(expanded ? [
+        <ProviderCatalogDetails
+          key={`${item.id}-details`}
+          meta={item}
+          isDemoMode={isDemoMode}
+          zoomSource={zoomNamespace
+            ? { id: `catalog-add-${item.id}`, namespace: zoomNamespace }
+            : undefined}
+          onAdd={() => handleAdd(item.id)}
+        />,
+      ] : []),
+    ]
+  }
+
   const listContent = (
     <List
+      tint="systemIndigo"
       navigationTitle={localize(`供应商目录 (${filtered.length})`)}
       listStyle="insetGroup"
       listSectionIndexVisibility="automatic"
@@ -180,6 +223,7 @@ export function ProviderCatalogView(props: {
         >
           <Picker
             title={localize("排序与分组")}
+            systemImage="arrow.up.arrow.down"
             value={sortGroupingMode}
             onChanged={(val: string) =>
               setSortGroupingMode(val as "alphabet" | "category")
@@ -191,6 +235,7 @@ export function ProviderCatalogView(props: {
 
           <Picker
             title={localize("接入路径筛选")}
+            systemImage="line.3.horizontal.decrease"
             value={selectedCategory}
             onChanged={(val: string) =>
               setSelectedCategory(val as ProviderRouteCategory | "all")
@@ -205,63 +250,31 @@ export function ProviderCatalogView(props: {
           </Picker>
         </Section>
 
-        {sortGroupingMode === "alphabet"
-          ? groupedAlphabetical.map((group) => (
-              <Section
-                key={group.letter}
-                header={<Text>{group.letter}</Text>}
-                sectionIndexLabel={group.letter}
-              >
-                {group.items.map((item) => (
-                  <ProviderCatalogRow
-                    key={item.id}
-                    meta={item}
-                    isDemoMode={isDemoMode}
-                    zoomSource={
-                      zoomNamespace
-                        ? {
-                            id: `catalog-add-${item.id}`,
-                            namespace: zoomNamespace,
-                          }
-                        : undefined
-                    }
-                    onAdd={() => handleAdd(item.id)}
-                  />
-                ))}
-              </Section>
-            ))
-          : groupedByRoute.map((group) => (
-              <Section
-                key={group.category}
-                header={
-                  <HStack spacing={6}>
-                    <Image
-                      systemName={routeCategorySymbol(group.category)}
-                      font="caption"
-                      foregroundStyle="accentColor"
-                    />
-                    <Text>{localize(`${routeCategoryTitle(group.category)} (${group.items.length})`)}</Text>
-                  </HStack>
-                }
-              >
-                {group.items.map((item) => (
-                  <ProviderCatalogRow
-                    key={item.id}
-                    meta={item}
-                    isDemoMode={isDemoMode}
-                    zoomSource={
-                      zoomNamespace
-                        ? {
-                            id: `catalog-add-${item.id}`,
-                            namespace: zoomNamespace,
-                          }
-                        : undefined
-                    }
-                    onAdd={() => handleAdd(item.id)}
-                  />
-                ))}
-              </Section>
-            ))}
+        {sortGroupingMode === "alphabet" && configured.length > 0 ? (
+          <Section header={<Text>{localize(isDemoMode ? "演示供应商" : "已配置供应商")}</Text>}>
+            {configured.flatMap(renderProvider)}
+          </Section>
+        ) : null}
+
+        {groupedAlphabetical.map((group) => (
+          <Section
+            key={group.letter}
+            header={<Text>{group.letter}</Text>}
+            sectionIndexLabel={group.letter}
+          >
+            {group.items.flatMap(renderProvider)}
+          </Section>
+        ))}
+        {groupedByRoute.map((group) => (
+          <Section key={group.category} header={
+            <HStack spacing={6}>
+              <Image systemName={routeCategorySymbol(group.category)} font="caption" foregroundStyle="systemIndigo" />
+              <Text>{localize(`${routeCategoryTitle(group.category)} (${group.items.length})`)}</Text>
+            </HStack>
+          }>
+            {group.items.flatMap(renderProvider)}
+          </Section>
+        ))}
       </List>
   )
 
@@ -274,93 +287,123 @@ export function ProviderCatalogView(props: {
 
 function ProviderCatalogRow(props: {
   meta: ProviderMeta
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const { meta, expanded, onToggle } = props
+  const isEnglish = getDashboardLanguage() === "en"
+  const HeadingLayout = isEnglish ? FlowLayout : HStack
+
+  return (
+    <Button
+      buttonStyle="plain"
+      listRowInsets={{ top: 4, bottom: 4, leading: 0, trailing: 0 }}
+      listRowSeparator="hidden"
+      listRowBackground={<EmptyView />}
+      accessibilityValue={localize(expanded ? "已展开" : "已折叠")}
+      action={onToggle}
+    >
+      <HStack
+        alignment="center"
+        spacing={12}
+        padding={{ horizontal: 14, vertical: 9 }}
+        frame={{ maxWidth: "infinity", alignment: "leading" }}
+        contentShape="rect"
+        {...glassCardSurface(providerCardFill(meta.id), 16)}
+      >
+        <ProviderIconView provider={meta.id} size={38} />
+        <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+          <HeadingLayout spacing={6}>
+            <Text font={isEnglish ? "subheadline" : "headline"} lineLimit={isEnglish ? undefined : 1}>
+              {localize(meta.displayName)}
+            </Text>
+            <Text
+              font="caption2"
+              fontWeight="medium"
+              foregroundStyle="secondaryLabel"
+              padding={{ horizontal: 6, vertical: 1 }}
+              background={<Capsule fill="quaternarySystemFill" />}
+              lineLimit={isEnglish ? undefined : 1}
+            >
+              {localize(loginMethodBadgeText(meta.loginMethod))}
+            </Text>
+          </HeadingLayout>
+          <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={isEnglish ? 2 : 1}>
+            {localize(meta.endpointSummary)}
+          </Text>
+        </VStack>
+        <Image
+          systemName={expanded ? "chevron.down" : "chevron.right"}
+          font="caption"
+          foregroundStyle="secondaryLabel"
+          frame={{ width: 14 }}
+          accessibilityHidden={true}
+        />
+      </HStack>
+    </Button>
+  )
+}
+
+function ProviderCatalogDetails(props: {
+  meta: ProviderMeta
   isDemoMode: boolean
   zoomSource?: { id: string | number; namespace: any }
   onAdd: () => void
 }) {
   const { meta, isDemoMode, zoomSource, onAdd } = props
   const isEnglish = getDashboardLanguage() === "en"
-  const HeadingLayout = isEnglish ? FlowLayout : HStack
 
   return (
-    <DisclosureGroup
-      label={
-        <HStack alignment="center" spacing={12}>
-          <ProviderIconView provider={meta.id} size={38} />
-          <VStack alignment="leading" spacing={3}>
-            <HeadingLayout spacing={6}>
-              <Text font={isEnglish ? "subheadline" : "headline"} lineLimit={isEnglish ? undefined : 1}>
-                {localize(meta.displayName)}
-              </Text>
-              <Text
-                font="caption2"
-                fontWeight="medium"
-                foregroundStyle="secondaryLabel"
-                padding={{ horizontal: 6, vertical: 1 }}
-                background={<Capsule fill="quaternarySystemFill" />}
-                lineLimit={isEnglish ? undefined : 1}
-              >
-                {localize(loginMethodBadgeText(meta.loginMethod))}
-              </Text>
-            </HeadingLayout>
-            <Text
-              font="caption"
-              foregroundStyle="secondaryLabel"
-              lineLimit={isEnglish ? 2 : 1}
-            >
-              {localize(meta.endpointSummary)}
-            </Text>
-          </VStack>
-        </HStack>
-      }
+    <VStack
+      alignment="leading"
+      spacing={10}
+      listRowInsets={{ top: 0, bottom: 4, leading: 0, trailing: 0 }}
+      listRowSeparator="hidden"
+      listRowBackground={<EmptyView />}
+      padding={14}
+      frame={{ maxWidth: "infinity", alignment: "leading" }}
+      background={{
+        style: "secondarySystemGroupedBackground",
+        shape: { type: "rect", cornerRadius: 16, style: "continuous" },
+      }}
     >
-      <VStack
-        alignment="leading"
-        spacing={10}
-        padding={{ top: 8, bottom: 4 }}
-        frame={{ maxWidth: "infinity", alignment: "leading" }}
-      >
+      <LabeledContent title={localize("接入分类")} value={localize(routeCategoryTitle(meta.routeCategory))} />
+      <LabeledContent title={localize("凭证类型")} value={localize(meta.credentialLabel)} />
+      <LabeledContent title={localize("认证机制")} value={localize(meta.authSummary)} />
+      <LabeledContent title={localize("直连端点")} value={localize(meta.endpointSummary)} />
+
+      {meta.webSessionProfile ? (
         <LabeledContent
-          title={localize("接入分类")}
-          value={localize(routeCategoryTitle(meta.routeCategory))}
+          title={localize("Cookie 白名单")}
+          value={meta.webSessionProfile.cookieNames.join(", ")}
         />
-        <LabeledContent title={localize("凭证类型")} value={localize(meta.credentialLabel)} />
-        <LabeledContent title={localize("认证机制")} value={localize(meta.authSummary)} />
-        <LabeledContent title={localize("直连端点")} value={localize(meta.endpointSummary)} />
+      ) : null}
 
-        {meta.webSessionProfile ? (
-          <LabeledContent
-            title={localize("Cookie 白名单")}
-            value={meta.webSessionProfile.cookieNames.join(", ")}
-          />
-        ) : null}
-
-        <Button
-          buttonStyle={adaptiveProminentButtonStyle()}
+      <Button
+        buttonStyle={adaptiveProminentButtonStyle()}
+        frame={{ maxWidth: "infinity", alignment: "center" }}
+        matchedTransitionSource={zoomSource}
+        action={onAdd}
+      >
+        <HStack
           frame={{ maxWidth: "infinity", alignment: "center" }}
-          matchedTransitionSource={zoomSource}
-          action={onAdd}
+          alignment="center"
+          spacing={6}
+          padding={{ vertical: 2 }}
         >
-          <HStack
-            frame={{ maxWidth: "infinity", alignment: "center" }}
-            alignment="center"
-            spacing={6}
-            padding={{ vertical: 2 }}
+          <Image systemName="plus.circle.fill" font="subheadline" />
+          <Text
+            font="subheadline"
+            fontWeight="semibold"
+            lineLimit={isEnglish ? undefined : 1}
+            multilineTextAlignment="center"
           >
-            <Image systemName="plus.circle.fill" font="subheadline" />
-            <Text
-              font="subheadline"
-              fontWeight="semibold"
-              lineLimit={isEnglish ? undefined : 1}
-              multilineTextAlignment="center"
-            >
-              {localize(isDemoMode
-                ? `添加 ${meta.displayName} 演示卡片`
-                : `添加 ${meta.displayName} 账号`)}
-            </Text>
-          </HStack>
-        </Button>
-      </VStack>
-    </DisclosureGroup>
+            {localize(isDemoMode
+              ? `添加 ${meta.displayName} 演示卡片`
+              : `添加 ${meta.displayName} 账号`)}
+          </Text>
+        </HStack>
+      </Button>
+    </VStack>
   )
 }

@@ -12,7 +12,7 @@ import { providerBrandBadgeBgColor } from "../utils/theme"
 
 const uiImageCache = new Map<ProviderId, UIImage>()
 
-function getProviderUIImage(provider: ProviderId): UIImage | null {
+export function getProviderUIImage(provider: ProviderId): UIImage | null {
   const cached = uiImageCache.get(provider)
   if (cached) return cached
 
@@ -47,9 +47,8 @@ export function ProviderIconView(props: {
   dimmed?: boolean
   rawEmblemOnly?: boolean
   opacity?: number
-  tintColor?: any
 }) {
-  const { provider, size = 38, dimmed = false, rawEmblemOnly = false, opacity, tintColor } = props
+  const { provider, size = 38, dimmed = false, rawEmblemOnly = false, opacity } = props
   const meta = getProviderMeta(provider)
   const uiImage = getProviderUIImage(provider)
   const cornerRadius = Math.round(size * 0.26)
@@ -62,8 +61,7 @@ export function ProviderIconView(props: {
       return (
         <Image
           image={uiImage}
-          renderingMode={tintColor ? "template" : "original"}
-          foregroundStyle={tintColor}
+          renderingMode="original"
           resizable={true}
           scaleToFit={true}
           interpolation="high"
@@ -77,7 +75,7 @@ export function ProviderIconView(props: {
       <Image
         systemName={meta.symbolName}
         font={Math.round(size * 0.75)}
-        foregroundStyle={tintColor || providerBrandBadgeBgColor(provider)}
+        foregroundStyle={providerBrandBadgeBgColor(provider)}
         opacity={dimmed ? watermarkOpacity : 1}
       />
     )

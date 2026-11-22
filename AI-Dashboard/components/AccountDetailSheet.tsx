@@ -1,9 +1,11 @@
 import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
+  EmptyView,
   Form,
   HStack,
   Image,
+  Label,
   LabeledContent,
   NavigationStack,
   ProgressView,
@@ -60,10 +62,12 @@ import {
 import {
   adaptiveProminentButtonStyle,
   adaptiveSecondaryButtonStyle,
+  computeAccountOverallQuota,
   loginMethodBadgeText,
   remainingQuotaColor,
   routeCategoryTitle,
 } from "../utils/theme"
+import { ProviderCardBackground } from "./ProviderCardBackground"
 import { ProviderIconView } from "./ProviderIconView"
 import { DeviceCodeLoginSheet } from "./DeviceCodeLoginSheet"
 
@@ -279,10 +283,12 @@ export function AccountDetailSheet(props: {
           ? state.previous
           : undefined
 
+  const overall = computeAccountOverallQuota(snapshot)
+
   const fingerprintPreview =
     existingEnvelope?.metadata.sourceCredentialFingerprint?.slice(0, 16) ??
     snapshot?.sourceCredentialFingerprint?.slice(0, 16) ??
-    "未生成"
+    localize("未生成")
 
   const handleSaveChanges = () => {
     try {
@@ -631,6 +637,7 @@ export function AccountDetailSheet(props: {
 
   const formContent = (
     <Form
+      tint="systemIndigo"
       navigationTitle={localize("账号详情与设置")}
       navigationBarTitleDisplayMode="inline"
       navigationTransition={props.navigationTransition}
@@ -714,17 +721,109 @@ export function AccountDetailSheet(props: {
             }
       }
     >
-        <Section header={<Text>{localize("基本资料")}</Text>}>
-          <HStack alignment="center" spacing={12}>
+        <Section>
+          <HStack
+            alignment="center"
+            spacing={10}
+            padding={12}
+            listRowInsets={0}
+            listRowBackground={<ProviderCardBackground provider={account.provider} />}
+          >
             <ProviderIconView provider={account.provider} size={42} />
-            <VStack alignment="leading" spacing={2}>
-              <Text font="headline">{localize(meta.displayName)}</Text>
-              <Text font="caption" foregroundStyle="secondaryLabel">
-                {`${localize(routeCategoryTitle(meta.routeCategory))} · ${localize(loginMethodBadgeText(meta.loginMethod))}`}
+            <VStack alignment="leading" spacing={3} layoutPriority={1}>
+              <Text font="headline" fixedSize={{ horizontal: false, vertical: true }}>
+                {localizeAccountName(account.provider, account.displayName || meta.displayName)}
+              </Text>
+              <Text font="caption" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}>
+                {localize(snapshot?.providerPlanName) || localize(loginMethodBadgeText(meta.loginMethod))}
               </Text>
             </VStack>
+            <Spacer minLength={0} />
+            {snapshot ? (
+              <VStack alignment="trailing" spacing={2}>
+                <Text font="caption" fontWeight="semibold" foregroundStyle="label" multilineTextAlignment="trailing"
+                  fixedSize={{ horizontal: false, vertical: true }}
+                >
+                  {localize(overall.label)}
+                </Text>
+                <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
+                  fixedSize={{ horizontal: false, vertical: true }}
+                >
+                  {localize(isDemoMode
+                    ? "演示内存沙箱"
+                    : account.preferssynchronizableKeychain
+                      ? "iCloud 钥匙串"
+                      : "本机钥匙串 (Keychain)")}
+                </Text>
+              </VStack>
+            ) : null}
           </HStack>
+        </Section>
 
+        {snapshot ? (
+          <Section
+            header={<Text>{`${localize("最新采集额度明细")} (${snapshot.windows.length})`}</Text>}
+            footer={
+              <Text>
+                {localize(`采集时间：${formatShortDateTime(snapshot.collectedAt) ?? snapshot.collectedAt}`)}
+              </Text>
+            }
+          >
+            {snapshot.windows.map((win) => {
+              if (win.wallet) {
+                return (
+                  <LabeledContent
+                    key={win.id}
+                    title={localize(win.name)}
+                    value={formatWalletAmount(win.wallet.total, win.wallet)}
+                  />
+                )
+              }
+              const remFrac = formatWindowRemainingFraction(win)
+              const breakdown = formatWindowQuotaBreakdown(win)
+              const statusColor = remainingQuotaColor(
+                breakdown.remainingPercent,
+                win.isExhausted
+              )
+              return (
+                <VStack
+                  key={win.id}
+                  alignment="leading"
+                  spacing={6}
+                  frame={{ maxWidth: "infinity", alignment: "leading" }}
+                >
+                  <HStack>
+                    <Text font="subheadline">{localize(formatWindowTitle(win))}</Text>
+                    <Spacer />
+                    <Text
+                      font="caption"
+                      fontWeight="semibold"
+                      monospacedDigit={true}
+                      foregroundStyle={
+                        win.isUnlimited ? "systemGreen" : statusColor
+                      }
+                    >
+                      {localize(breakdown.primaryRemainingText)}
+                    </Text>
+                  </HStack>
+                  {remFrac !== null ? (
+                    <ProgressView
+                      value={remFrac}
+                      total={1}
+                      progressViewStyle="linear"
+                      tint={statusColor}
+                    />
+                  ) : null}
+                  <Text font="caption2" foregroundStyle="secondaryLabel">
+                    {localize(breakdown.secondaryUsedText)}
+                  </Text>
+                </VStack>
+              )
+            })}
+          </Section>
+        ) : null}
+
+        <Section header={<Text>{localize("基本资料")}</Text>}>
           <TextField
             title={localize("显示名称")}
             value={displayName}
@@ -844,6 +943,14 @@ export function AccountDetailSheet(props: {
               {localize("当旋转密钥或变更网关地址时，SHA-256 指纹会自动更新并立即淘汰旧额度快照")}</Text>
           }
         >
+          <LabeledContent
+            title={localize("接入分类")}
+            value={localize(routeCategoryTitle(meta.routeCategory))}
+          />
+          <LabeledContent
+            title={localize("认证机制")}
+            value={localize(loginMethodBadgeText(meta.loginMethod))}
+          />
           <LabeledContent
             title={localize("凭证存储位置")}
             value={
@@ -1190,69 +1297,6 @@ export function AccountDetailSheet(props: {
           </Section>
         ) : null}
 
-        {snapshot ? (
-          <Section
-            header={<Text>{`${localize("最新采集额度明细")} (${snapshot.windows.length})`}</Text>}
-            footer={
-              <Text>
-                {localize(`采集时间：${formatShortDateTime(snapshot.collectedAt) ?? snapshot.collectedAt}`)}
-              </Text>
-            }
-          >
-            {snapshot.windows.map((win) => {
-              if (win.wallet) {
-                return (
-                  <LabeledContent
-                    key={win.id}
-                    title={localize(win.name)}
-                    value={formatWalletAmount(win.wallet.total, win.wallet)}
-                  />
-                )
-              }
-              const remFrac = formatWindowRemainingFraction(win)
-              const breakdown = formatWindowQuotaBreakdown(win)
-              const statusColor = remainingQuotaColor(
-                breakdown.remainingPercent,
-                win.isExhausted
-              )
-              return (
-                <VStack
-                  key={win.id}
-                  alignment="leading"
-                  spacing={6}
-                  frame={{ maxWidth: "infinity", alignment: "leading" }}
-                >
-                  <HStack>
-                    <Text font="subheadline">{localize(formatWindowTitle(win))}</Text>
-                    <Spacer />
-                    <Text
-                      font="caption"
-                      fontWeight="semibold"
-                      monospacedDigit={true}
-                      foregroundStyle={
-                        win.isUnlimited ? "systemGreen" : statusColor
-                      }
-                    >
-                      {localize(breakdown.primaryRemainingText)}
-                    </Text>
-                  </HStack>
-                  {remFrac !== null ? (
-                    <ProgressView
-                      value={remFrac}
-                      total={1}
-                      progressViewStyle="linear"
-                      tint={statusColor}
-                    />
-                  ) : null}
-                  <Text font="caption2" foregroundStyle="secondaryLabel">
-                    {localize(breakdown.secondaryUsedText)}
-                  </Text>
-                </VStack>
-              )
-            })}
-          </Section>
-        ) : null}
-
         {errorMessage ? (
           <Section header={<Text>{localize("提示")}</Text>}>
             <Text foregroundStyle="systemRed">{localize(errorMessage)}</Text>
@@ -1260,21 +1304,32 @@ export function AccountDetailSheet(props: {
         ) : null}
 
         <Section>
-          <Button
-            title={localize("立即刷新此账号额度")}
-            systemImage="arrow.clockwise"
-            action={() => {
-              onRefreshAccount(account)
-              onClose()
-            }}
-          />
-
-          <Button
-            title={localize("删除此账号")}
-            systemImage="trash"
-            role="destructive"
-            action={() => setIsDeleteConfirmPresented(true)}
-          />
+          <VStack spacing={8} listRowInsets={0} listRowSeparator="hidden" listRowBackground={<EmptyView />}>
+            <Button
+              buttonStyle="bordered"
+              buttonBorderShape="roundedRectangle"
+              tint="systemBlue"
+              action={() => {
+                onRefreshAccount(account)
+                onClose()
+              }}
+            >
+              <Label title={localize("立即刷新此账号额度")} systemImage="arrow.clockwise"
+                frame={{ maxWidth: "infinity", minHeight: 34 }}
+              />
+            </Button>
+            <Button
+              buttonStyle="bordered"
+              buttonBorderShape="roundedRectangle"
+              role="destructive"
+              tint="systemRed"
+              action={() => setIsDeleteConfirmPresented(true)}
+            >
+              <Label title={localize("删除此账号")} systemImage="trash"
+                frame={{ maxWidth: "infinity", minHeight: 34 }}
+              />
+            </Button>
+          </VStack>
         </Section>
       </Form>
   )

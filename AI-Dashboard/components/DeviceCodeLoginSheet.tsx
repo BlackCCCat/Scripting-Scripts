@@ -5,7 +5,6 @@ import {
   Form,
   HStack,
   Image,
-  LabeledContent,
   NavigationStack,
   ProgressView,
   Section,
@@ -24,6 +23,7 @@ import {
   ProviderLoginSession,
 } from "../models/types"
 import { getProviderMeta } from "../utils/providers_catalog"
+import { ProviderCardBackground } from "./ProviderCardBackground"
 import { ProviderIconView } from "./ProviderIconView"
 import {
   adaptiveProminentButtonStyle,
@@ -130,6 +130,7 @@ export function DeviceCodeLoginSheet(props: {
 
   const content = (
     <Form
+      tint="systemIndigo"
       navigationTransition={props.navigationTransition}
       navigationTitle={localize(`${meta.displayName} ${session?.userCode || isTrueDevice ? "设备码授权" : "网页授权"}`)}
       navigationBarTitleDisplayMode="inline"
@@ -140,10 +141,16 @@ export function DeviceCodeLoginSheet(props: {
       }}
     >
         <Section>
-          <HStack alignment="center" spacing={12}>
-            <ProviderIconView provider={provider} size={40} />
+          <HStack
+            alignment="center"
+            spacing={10}
+            listRowInsets={0}
+            padding={12}
+            listRowBackground={<ProviderCardBackground provider={provider} />}
+          >
+            <ProviderIconView provider={provider} size={46} />
             <VStack alignment="leading" spacing={2}>
-              <Text font="headline">{localize(meta.displayName)}</Text>
+              <Text font="title3" fontWeight="semibold">{localize(meta.displayName)}</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
                 {localize(statusText)}
               </Text>
@@ -166,10 +173,15 @@ export function DeviceCodeLoginSheet(props: {
               frame={{ maxWidth: "infinity", alignment: "leading" }}
             >
               {session.userCode ? (
-                <LabeledContent
-                  title={localize("设备授权码")}
-                  value={session.userCode}
-                />
+                <VStack spacing={5} padding={{ vertical: 10 }} frame={{ maxWidth: "infinity" }}>
+                  <Text font="caption" foregroundStyle="secondaryLabel">{localize("设备授权码")}</Text>
+                  <Text font="title" fontWeight="semibold" monospaced={true}
+                    foregroundStyle="label" multilineTextAlignment="center"
+                    fixedSize={{ horizontal: false, vertical: true }}
+                  >
+                    {session.userCode}
+                  </Text>
+                </VStack>
               ) : null}
 
               {session.userCode ? <Divider /> : null}

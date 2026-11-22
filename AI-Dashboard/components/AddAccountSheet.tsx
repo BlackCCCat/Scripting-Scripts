@@ -4,6 +4,7 @@ import {
   Capsule,
   DisclosureGroup,
   Divider,
+  EmptyView,
   Form,
   FlowLayout,
   HStack,
@@ -55,6 +56,8 @@ import {
   loginMethodBadgeText,
   routeCategoryTitle,
 } from "../utils/theme"
+import { glassCardSurface } from "./GlassCardSurface"
+import { providerCardFill } from "./ProviderCardBackground"
 import { ProviderIconView } from "./ProviderIconView"
 import { DeviceCodeLoginSheet } from "./DeviceCodeLoginSheet"
 import { validateMuseAccount } from "../providers/muse"
@@ -135,20 +138,6 @@ export function AddAccountSheet(props: {
   const defaultDisplayName = isWorkBuddyGlobal
     ? "Workbuddy AI"
     : meta.displayName
-
-  const handleSelectProvider = (newId: ProviderId) => {
-    setSelectedProviderId(newId)
-    setHasUserSelectedProvider(true)
-    const nextMeta = getProviderMeta(newId)
-    if (nextMeta.regions && nextMeta.regions.length > 0) {
-      setSelectedRegion(nextMeta.regions[0].id)
-    }
-    setDisplayName("")
-    setServerAddress("")
-    setRawCredential("")
-    setErrorMessage(null)
-    setIsPickingProvider(false)
-  }
 
   const handlePasteClipboard = async () => {
     const text = await Pasteboard.getString()
@@ -553,8 +542,37 @@ export function AddAccountSheet(props: {
     supportsDeviceOrPollFlow ||
     supportsWebViewFlow
 
+  if (isEmbeddedPickerFlow) {
+    return (
+      <ProviderPickerSheet
+        selectedId={selectedProviderId}
+        defaultSynchronizable={defaultSynchronizable}
+        embedded={true}
+        zoomNamespace={props.zoomNamespace}
+        navigationTransition={props.navigationTransition}
+        onAccountCreated={onAccountCreated}
+        onClose={onCancel}
+      />
+    )
+  }
+
+  if (isPickingProvider) {
+    return (
+      <ProviderPickerSheet
+        selectedId={hasUserSelectedProvider ? selectedProviderId : null}
+        defaultSynchronizable={defaultSynchronizable}
+        embedded={props.embedded}
+        zoomNamespace={props.zoomNamespace}
+        navigationTransition={props.navigationTransition}
+        onAccountCreated={onAccountCreated}
+        onClose={onCancel}
+      />
+    )
+  }
+
   const formContent = (
     <Form
+      tint="systemIndigo"
       navigationTitle={localize("添加 AI 供应商")}
       navigationBarTitleDisplayMode="inline"
       navigationTransition={props.navigationTransition}
@@ -631,41 +649,56 @@ export function AddAccountSheet(props: {
       }
     >
         <Section header={<Text>{localize("服务提供商")}</Text>}>
-          <HStack alignment="center" spacing={12}>
-            <ProviderIconView provider={selectedProviderId} size={40} />
-            <VStack alignment="leading" spacing={2}>
-              <Text font="headline" foregroundStyle="label" lineLimit={isEnglish ? undefined : 1}>
-                {localize(meta.displayName)}
-              </Text>
-              <Text
-                font="caption"
-                foregroundStyle="secondaryLabel"
-                lineLimit={isEnglish ? undefined : 1}
+          <VStack
+            alignment="leading"
+            spacing={0}
+            listRowInsets={0}
+            listRowSeparator="hidden"
+            listRowBackground={<EmptyView />}
+            padding={{ top: 12, horizontal: 14, bottom: 2 }}
+            frame={{ maxWidth: "infinity", alignment: "leading" }}
+            {...glassCardSurface(providerCardFill(selectedProviderId), 16)}
+          >
+            <HStack alignment="center" spacing={10} padding={{ bottom: 10 }}>
+              <ProviderIconView provider={selectedProviderId} size={46} />
+              <VStack
+                alignment="leading"
+                spacing={3}
+                frame={{ maxWidth: "infinity", alignment: "leading" }}
               >
-                {`${localize(routeCategoryTitle(meta.routeCategory))} · ${localize(loginMethodBadgeText(meta.loginMethod))}`}
-              </Text>
-            </VStack>
-            <Spacer />
-            {!props.embedded ? (
-              <Button
-                buttonStyle="plain"
-                action={() => setIsPickingProvider(true)}
-              >
-                <HStack spacing={4}>
-                  <Text font="subheadline" foregroundStyle="secondaryLabel">
-                    {localize("更换")}</Text>
-                  <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
-                </HStack>
-              </Button>
-            ) : null}
-          </HStack>
-
-          <TextField
-            title={localize("备注名称")}
-            value={displayName}
-            prompt={localize(`默认：${defaultDisplayName}`)}
-            onChanged={setDisplayName}
-          />
+                <Text font="title3" fontWeight="semibold" foregroundStyle="label" fixedSize={{ horizontal: false, vertical: true }}>
+                  {localize(meta.displayName)}
+                </Text>
+                <Text
+                  font="caption"
+                  foregroundStyle="secondaryLabel"
+                  fixedSize={{ horizontal: false, vertical: true }}
+                >
+                  {`${localize(routeCategoryTitle(meta.routeCategory))} · ${localize(loginMethodBadgeText(meta.loginMethod))}`}
+                </Text>
+              </VStack>
+              {!props.embedded ? (
+                <Button
+                  buttonStyle="plain"
+                  action={() => setIsPickingProvider(true)}
+                >
+                  <HStack spacing={4} frame={{ minHeight: 44 }} contentShape="rect">
+                    <Text font="subheadline" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: true, vertical: false }}>
+                      {localize("更换")}</Text>
+                    <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
+                  </HStack>
+                </Button>
+              ) : null}
+            </HStack>
+            <Divider />
+            <TextField
+              title={localize("备注名称")}
+              value={displayName}
+              prompt={localize(`默认：${defaultDisplayName}`)}
+              onChanged={setDisplayName}
+              frame={{ maxWidth: "infinity", minHeight: 44, alignment: "leading" }}
+            />
+          </VStack>
         </Section>
 
         {meta.requiresGatewayAddress ? (
@@ -1025,36 +1058,6 @@ export function AddAccountSheet(props: {
       </Form>
   )
 
-  if (isEmbeddedPickerFlow) {
-    return (
-      <ProviderPickerSheet
-        selectedId={selectedProviderId}
-        defaultSynchronizable={defaultSynchronizable}
-        embedded={true}
-        zoomNamespace={props.zoomNamespace}
-        navigationTransition={props.navigationTransition}
-        onAccountCreated={onAccountCreated}
-        onSelect={handleSelectProvider}
-        onClose={onCancel}
-      />
-    )
-  }
-
-  if (isPickingProvider) {
-    return (
-      <ProviderPickerSheet
-        selectedId={hasUserSelectedProvider ? selectedProviderId : null}
-        defaultSynchronizable={defaultSynchronizable}
-        embedded={props.embedded}
-        zoomNamespace={props.zoomNamespace}
-        navigationTransition={props.navigationTransition}
-        onAccountCreated={onAccountCreated}
-        onSelect={handleSelectProvider}
-        onClose={onCancel}
-      />
-    )
-  }
-
   if (props.embedded || props.isPushed) {
     return formContent
   }
@@ -1072,10 +1075,9 @@ export function ProviderPickerSheet(props: {
     account: SubscriptionAccount,
     envelope: ProviderCredentialEnvelope
   ) => void
-  onSelect: (id: ProviderId) => void
   onClose: () => void
 }) {
-  const { selectedId, onSelect, onClose, onAccountCreated, embedded = false } = props
+  const { selectedId, onClose, onAccountCreated, embedded = false } = props
   const [searchText, setSearchText] = useState<string>("")
   const [routeFilter, setRouteFilter] = useState<
     ProviderRouteCategory | "all"
@@ -1106,6 +1108,7 @@ export function ProviderPickerSheet(props: {
   const listContent = (
     <List
       navigationTitle={localize(`选择供应商 (${filteredProviders.length})`)}
+      tint="systemIndigo"
       navigationBarTitleDisplayMode="inline"
       navigationTransition={embedded ? props.navigationTransition : undefined}
       listStyle="insetGroup"

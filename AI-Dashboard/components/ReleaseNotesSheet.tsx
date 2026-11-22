@@ -50,6 +50,7 @@ export function ReleaseNotesSheet(props: {
       presentationBackground={useGlassPresentation ? "clear" : undefined}
     >
       <ScrollView
+        tint="systemIndigo"
         background="clear"
         scrollContentBackground="hidden"
         navigationTitle={localize(props.title ?? "更新说明")}

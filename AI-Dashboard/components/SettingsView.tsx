@@ -82,6 +82,7 @@ export function SettingsView(props: {
   const formContent = (
     <Form
       navigationTitle={localize("设置")}
+      tint="systemIndigo"
       sheet={
         isHomeScreen
           ? {
@@ -189,9 +190,15 @@ export function SettingsView(props: {
           ),
         }}
       >
-        <Section>
+        <Section
+          header={<Text>{localize("偏好")}</Text>}
+          footer={
+            <Text>{localize("演示模式提供覆盖 6 大接入路径的本地样例看板；关闭演示模式即可切换至真实 Keychain 凭证与直连 HTTP 查询。")}</Text>
+          }
+        >
           <Picker
             title={localize("语言")}
+            systemImage="globe"
             value={settings.languagePreference}
             onChanged={(value: string) => {
               if (value === "system" || value === "zh" || value === "en") {
@@ -203,17 +210,25 @@ export function SettingsView(props: {
             <Text tag="zh">中文</Text>
             <Text tag="en">English</Text>
           </Picker>
-        </Section>
-
-        <Section
-          header={<Text>{localize("数据源与演示模式")}</Text>}
-          footer={
-            <Text>
-              {localize("演示模式提供覆盖 6 大接入路径的本地样例看板；关闭演示模式即可切换至真实 Keychain 凭证与直连 HTTP 查询。")}</Text>
-          }
-        >
+          <Toggle
+            title={localize("分组显示")}
+            systemImage="square.grid.2x2"
+            value={settings.groupByRouteCategory}
+            onChanged={(val) =>
+              onUpdateSettings({ ...settings, groupByRouteCategory: val })
+            }
+          />
+          <Toggle
+            title={localize("启动脚本时自动刷新已启用账号")}
+            systemImage="arrow.clockwise"
+            value={settings.autoRefreshOnLaunch}
+            onChanged={(val) =>
+              onUpdateSettings({ ...settings, autoRefreshOnLaunch: val })
+            }
+          />
           <Toggle
             title={localize("演示模式 (Demo Mode)")}
+            systemImage="rectangle.on.rectangle"
             value={settings.isDemoMode}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, isDemoMode: val })
@@ -229,25 +244,12 @@ export function SettingsView(props: {
         </Section>
 
         <Section
-          header={<Text>{localize("看板布局与刷新策略")}</Text>}
+          header={<Text>{localize("钥匙串与同步")}</Text>}
           footer={<Text>{localize("开启后会将现有账号的登录凭据转存到 iCloud 钥匙串，并同步以后新增的账号；关闭后会在本机保留可读取的凭据。")}</Text>}
         >
           <Toggle
-            title={localize("分组显示")}
-            value={settings.groupByRouteCategory}
-            onChanged={(val) =>
-              onUpdateSettings({ ...settings, groupByRouteCategory: val })
-            }
-          />
-          <Toggle
-            title={localize("启动脚本时自动刷新已启用账号")}
-            value={settings.autoRefreshOnLaunch}
-            onChanged={(val) =>
-              onUpdateSettings({ ...settings, autoRefreshOnLaunch: val })
-            }
-          />
-          <Toggle
             title={localize("iCloud 钥匙串同步")}
+            systemImage="icloud"
             value={settings.prefersICloudKeychain}
             disabled={keychainSyncBusy}
             onChanged={(val) => void onSetKeychainSync(val)}
@@ -285,6 +287,7 @@ export function SettingsView(props: {
         >
           <Toggle
             title={localize("小组件账号隐私保护")}
+            systemImage="lock.shield"
             value={settings.widgetPrivacyEnabled ?? true}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, widgetPrivacyEnabled: val })
@@ -292,46 +295,12 @@ export function SettingsView(props: {
           />
           <Toggle
             title={localize("主看板账号保护显示")}
+            systemImage="eye.slash"
             value={settings.protectAccountIdentity}
             onChanged={(val) =>
               onUpdateSettings({ ...settings, protectAccountIdentity: val })
             }
           />
-        </Section>
-
-        <Section
-          header={<Text>{localize("客户端直连与钥匙串状态")}</Text>}
-          footer={
-            <Text>
-              {localize("所有 API Key、OAuth 令牌与 Web 会话 Cookie 均封装为带 SHA-256 指纹的信封存入 iOS 系统钥匙串，网络层默认拦截跨域重定向以防止凭证泄漏。")}</Text>
-          }
-        >
-          <LabeledContent
-            title={localize("支持 AI 供应商总数")}
-            value={localize(`${PROVIDERS_CATALOG.length} 家`)}
-          />
-          <LabeledContent
-            title={localize("已配置真实账号")}
-            value={localize(`${realAccountCount} 个`)}
-          />
-          <LabeledContent
-            title={localize("当前演示账号")}
-            value={localize(`${demoAccountCount} 个`)}
-          />
-
-          {onOpenChangelog || isHomeScreen ? (
-            <Button
-              title={localize("查看更新说明 (Changelog)")}
-              systemImage="newspaper"
-              action={() => {
-                if (isHomeScreen) {
-                  setIsChangelogPresented(true)
-                } else {
-                  onOpenChangelog?.()
-                }
-              }}
-            />
-          ) : null}
         </Section>
 
         <Section
@@ -343,6 +312,7 @@ export function SettingsView(props: {
         >
           <Picker
             title={localize("小组件刷新间隔")}
+            systemImage="clock"
             value={String(settings.widgetRefreshIntervalMinutes ?? 30)}
             onChanged={(val: string) => {
               const minutes = Number.parseInt(val, 10) || 30
@@ -362,6 +332,7 @@ export function SettingsView(props: {
 
           <Toggle
             title={localize("用量标识适配透明模式")}
+            systemImage="rectangle.grid.1x2"
             value={settings.widgetQuotaAdaptTransparent ?? false}
             onChanged={(val) => {
               onUpdateSettings({
@@ -411,6 +382,41 @@ export function SettingsView(props: {
               }
             }}
           />
+        </Section>
+
+        <Section
+          header={<Text>{localize("客户端直连与钥匙串状态")}</Text>}
+          footer={
+            <Text>
+              {localize("所有 API Key、OAuth 令牌与 Web 会话 Cookie 均封装为带 SHA-256 指纹的信封存入 iOS 系统钥匙串，网络层默认拦截跨域重定向以防止凭证泄漏。")}</Text>
+          }
+        >
+          <LabeledContent
+            title={localize("支持 AI 供应商总数")}
+            value={localize(`${PROVIDERS_CATALOG.length} 家`)}
+          />
+          <LabeledContent
+            title={localize("已配置真实账号")}
+            value={localize(`${realAccountCount} 个`)}
+          />
+          <LabeledContent
+            title={localize("当前演示账号")}
+            value={localize(`${demoAccountCount} 个`)}
+          />
+
+          {onOpenChangelog || isHomeScreen ? (
+            <Button
+              title={localize("查看更新说明 (Changelog)")}
+              systemImage="newspaper"
+              action={() => {
+                if (isHomeScreen) {
+                  setIsChangelogPresented(true)
+                } else {
+                  onOpenChangelog?.()
+                }
+              }}
+            />
+          ) : null}
         </Section>
 
         <Section header={<Text>{localize("缓存维护")}</Text>}>
