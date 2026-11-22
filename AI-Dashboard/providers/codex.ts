@@ -1,10 +1,76 @@
-import { ProviderQuotaHandler, QuotaWindow } from "../models/types"
+import { ProviderCredentialEnvelope, ProviderQuotaHandler, QuotaWindow } from "../models/types"
 import {
   QuotaQueryError,
   fetchJsonStrict,
   normalizeEpochDate,
   toFiniteNumber,
 } from "./_shared/http"
+
+const resetCreditsURL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+
+function resetCreditsHeaders(envelope: ProviderCredentialEnvelope): Record<string, string> {
+  const headers = {
+    Authorization: `Bearer ${envelope.accessToken.trim()}`,
+    Accept: "application/json",
+    "User-Agent":
+      "Codex Desktop/0.147.0-alpha.6.5 (Mac OS 27.0.0; arm64) unknown (Codex Desktop; 26.803.61601)",
+    originator: "Codex Desktop",
+  }
+  const accountID = envelope.metadata.accountID || envelope.accountID
+  return accountID ? { ...headers, "ChatGPT-Account-Id": accountID } : headers
+}
+
+export async function redeemCodexResetCredit(
+  envelope: ProviderCredentialEnvelope,
+  creditID: string,
+  requestID: string
+) {
+  if (envelope.provider !== "codex" || !envelope.accessToken.trim() || !creditID.trim() || !requestID.trim()) {
+    throw new QuotaQueryError("invalidCredential")
+  }
+  const result = await fetchJsonStrict(`${resetCreditsURL}/consume`, {
+    method: "POST",
+    headers: { ...resetCreditsHeaders(envelope), "Content-Type": "application/json" },
+    body: JSON.stringify({ credit_id: creditID, redeem_request_id: requestID }),
+  })
+  switch (result.code) {
+    case "reset":
+    case "nothing_to_reset":
+    case "no_credit":
+    case "already_redeemed":
+      return result.code
+    default:
+      throw new QuotaQueryError("unreadableResponse")
+  }
+}
+
+function parseResetCredits(raw: unknown) {
+  if (!raw || typeof raw !== "object") return {}
+  const payload = raw as Record<string, unknown>
+  const container = (payload.rate_limit_reset_credits ??
+    payload.rateLimitResetCredits ?? payload) as Record<string, unknown>
+  const count = toFiniteNumber(container.available_count ?? container.availableCount)
+  const items = container.credits ?? container.items ?? container.reset_credits ?? container.resetCredits
+  const availableCredits = Array.isArray(items) ? items.flatMap((item: unknown) => {
+    if (!item || typeof item !== "object") return []
+    const credit = item as Record<string, unknown>
+    if (credit.status !== "available") return []
+    const expiration = [credit.expires_at, credit.expiresAt, credit.expiration_at, credit.expirationAt]
+      .find((value) => value !== undefined)
+    const id = typeof credit.id === "string" && credit.id.trim() ? credit.id : undefined
+    let expiresAt: string | null | undefined
+    try {
+      expiresAt = expiration === null ? null : normalizeEpochDate(expiration)
+    } catch {
+      expiresAt = undefined
+    }
+    return id || expiresAt !== undefined ? [{ id, expiresAt }] : []
+  }) : undefined
+  return {
+    availableCount: count === undefined ? undefined : Math.max(0, Math.floor(count)),
+    availableCredits,
+  }
+}
 
 export const queryCodexQuota: ProviderQuotaHandler = async (
   accountID,
@@ -139,78 +205,25 @@ export const queryCodexQuota: ProviderQuotaHandler = async (
     throw new QuotaQueryError("noQuotaWindows")
   }
 
-  // 解析可用重置卡/充值卡数据 (Reset Credits)
-  let resetCardsCount: number | undefined
-  let resetCardExpirations: string[] = []
-
-  // 1. 优先从 usage 响应内置字段中提取
-  const embeddedReset =
-    (json.rate_limit_reset_credits as Record<string, unknown> | undefined) ||
-    (json.rateLimitResetCredits as Record<string, unknown> | undefined)
-
-  if (embeddedReset) {
-    const countVal = toFiniteNumber(
-      embeddedReset.available_count ?? embeddedReset.availableCount
-    )
-    if (countVal !== undefined && countVal !== null) {
-      resetCardsCount = Math.max(0, Math.floor(countVal))
-    }
-  }
+  const embeddedReset = parseResetCredits(json)
+  let resetCardsCount = embeddedReset.availableCount
+  let availableCredits = embeddedReset.availableCredits
 
   // 2. 主动尝试请求独立 rate-limit-reset-credits 端点以获取精准可用卡数与到期时间
   try {
-    const resetCreditsHeaders: Record<string, string> = {
-      Authorization: `Bearer ${envelope.accessToken.trim()}`,
-      Accept: "application/json",
-      "User-Agent":
-        "Codex Desktop/0.147.0-alpha.6.5 (Mac OS 27.0.0; arm64) unknown (Codex Desktop; 26.803.61601)",
-      originator: "Codex Desktop",
-    }
-    if (chatgptAccountId) {
-      resetCreditsHeaders["ChatGPT-Account-Id"] = String(chatgptAccountId)
-    }
-
     const resetResp = await fetch(
-      "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+      resetCreditsURL,
       {
-        headers: resetCreditsHeaders,
+        headers: resetCreditsHeaders(envelope),
         timeout: 4,
         handleRedirect: async () => null,
       }
     )
     if (resetResp.ok) {
-      const resetPayload = (await resetResp.json()) as Record<string, unknown>
-      const container =
-        (resetPayload.rate_limit_reset_credits as Record<string, unknown> | undefined) ||
-        (resetPayload.rateLimitResetCredits as Record<string, unknown> | undefined) ||
-        resetPayload
-
-      const countVal = toFiniteNumber(
-        container.available_count ?? container.availableCount
-      )
-      if (countVal !== undefined && countVal !== null) {
-        resetCardsCount = Math.max(0, Math.floor(countVal))
-      }
-
-      const rawItems = (
-        container.credits ||
-        container.items ||
-        container.reset_credits ||
-        container.resetCredits
-      ) as unknown[] | undefined
-
-      if (Array.isArray(rawItems)) {
-        resetCardExpirations = rawItems
-          .map((item) => {
-            const obj = item as Record<string, unknown>
-            const exp =
-              obj.expires_at ??
-              obj.expiresAt ??
-              obj.expiration_at ??
-              obj.expirationAt
-            return normalizeEpochDate(exp)
-          })
-          .filter((item): item is string => Boolean(item))
+      const details = parseResetCredits(await resetResp.json())
+      resetCardsCount = details.availableCount ?? resetCardsCount
+      if (details.availableCredits || resetCardsCount !== embeddedReset.availableCount) {
+        availableCredits = details.availableCredits
       }
     }
   } catch {
@@ -254,7 +267,7 @@ export const queryCodexQuota: ProviderQuotaHandler = async (
       resetCardsCount !== undefined
         ? {
             availableCount: resetCardsCount,
-            expirations: resetCardExpirations,
+            availableCredits,
           }
         : undefined,
   }

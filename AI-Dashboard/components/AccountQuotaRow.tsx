@@ -46,6 +46,8 @@ import {
   remainingQuotaColor,
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
+import { CodexResetCardsBadge } from "./CodexResetCardsBadge"
+import type { RedeemCodexResetCard } from "./CodexResetCardsBadge"
 
 export function AccountQuotaRow(props: {
   account: SubscriptionAccount
@@ -55,6 +57,7 @@ export function AccountQuotaRow(props: {
   zoomSource?: { id: string | number; namespace: any }
   onRefresh: () => void
   onOpenDetail: () => void
+  onRedeemCodexResetCard?: RedeemCodexResetCard
 }) {
   const {
     account,
@@ -197,18 +200,12 @@ export function AccountQuotaRow(props: {
               </Text>
             </HStack>
 
-            {snapshot?.codexResetCards?.availableCount !== undefined ? (
-              <Text
-                font="caption2"
-                fontWeight="bold"
-                foregroundStyle="systemIndigo"
-                padding={{ horizontal: 6, vertical: 1 }}
-                background={<Capsule fill="quaternarySystemFill" />}
-                fixedSize={wrapText}
-                lineLimit={isEnglish ? undefined : 1}
-              >
-                {localize(`🎟️ 重置卡 ${snapshot.codexResetCards.availableCount} 次`)}
-              </Text>
+            {account.provider === "codex" && snapshot?.codexResetCards ? (
+              <CodexResetCardsBadge
+                cards={snapshot.codexResetCards}
+                isEnglish={isEnglish}
+                onRedeem={props.onRedeemCodexResetCard}
+              />
             ) : null}
           </HeaderLayout>
         </VStack>

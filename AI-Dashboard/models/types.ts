@@ -168,7 +168,8 @@ export interface QuotaSnapshot {
   region?: string
   codexResetCards?: {
     availableCount: number
-    expirations?: string[]
+    availableExpirations?: (string | null)[]
+    availableCredits?: { id?: string; expiresAt?: string | null }[]
   }
 }
 

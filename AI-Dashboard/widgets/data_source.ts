@@ -15,6 +15,7 @@ import {
 } from "../utils/demo_mode"
 import { getProviderMeta } from "../utils/providers_catalog"
 import { formatMoney } from "../utils/quota_formatting"
+import { formatNearestCodexResetExpiry } from "../utils/codex_reset_cards"
 import { CODEX_RESET_CACHE_KEY } from "../services/codex_reset_feed"
 import { ACTIVE_WALLET_KEY } from "../services/app_intents"
 import {
@@ -316,6 +317,7 @@ function buildWidgetAccountData(
     earliestResetCountdown: formatWidgetCountdown(earliestResetISO),
     codexResetForecast,
     codexResetCardsCount: snapshot?.codexResetCards?.availableCount,
+    codexResetCardExpiry: formatNearestCodexResetExpiry(snapshot?.codexResetCards),
     widgetOrder: acc.widgetOrder,
     updateStatusText: isRefreshing ? "正在刷新..." : statusInfo.text,
     isUpdateWarning: !isRefreshing && statusInfo.isWarning,

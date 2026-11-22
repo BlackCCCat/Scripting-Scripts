@@ -29,6 +29,8 @@ import {
   QuotaQueryError,
   queryProviderQuota,
 } from "../providers"
+import { redeemCodexResetCredit } from "../providers/codex"
+import { refreshCredentialIfNeeded } from "../services/provider_auth"
 import {
   AccountQuotaState,
   DashboardSettings,
@@ -464,6 +466,8 @@ export function DashboardRootView(props: {
     void changeKeychainSync(true)
   }, [])
 
+  const codexRedeemRequestIDs = useRef(new Map<string, string>())
+
   const refreshSingleAccount = async (
     account: SubscriptionAccount,
     forceRealAccount = false
@@ -555,6 +559,42 @@ export function DashboardRootView(props: {
           previous: prevSnapshot,
         },
       }))
+    }
+  }
+
+  const redeemAccountResetCredit = async (account: SubscriptionAccount, creditID: string) => {
+    if (keychainSyncBusyRef.current || loadDashboardSettings().isDemoMode) {
+      throw new Error(localize("当前无法使用重置卡，请稍后再试"))
+    }
+    const current = loadStoredAccounts().find((item) => item.id === account.id && item.provider === "codex")
+    if (!current || current.credentialKeychainKey !== account.credentialKeychainKey) {
+      throw new Error(localize("账号已变更，请重新打开重置卡明细"))
+    }
+    const { credentialKeychainKey, preferssynchronizableKeychain } = current
+    const envelope = loadEnvelopeFromKeychain(credentialKeychainKey, preferssynchronizableKeychain)
+    if (!envelope || envelope.provider !== "codex" || !envelope.accessToken.trim()) {
+      throw new QuotaQueryError("missingCredential")
+    }
+    const refreshed = await refreshCredentialIfNeeded(envelope)
+    if (keychainSyncBusyRef.current ||
+        loadEnvelopeFromKeychain(credentialKeychainKey, preferssynchronizableKeychain)?.accessToken !== envelope.accessToken) {
+      throw new Error(localize("账号已变更，请重新打开重置卡明细"))
+    }
+    if (refreshed) {
+      saveEnvelopeToKeychain(credentialKeychainKey, refreshed, preferssynchronizableKeychain)
+    }
+
+    const requestKey = JSON.stringify([account.id, creditID])
+    const requestID = codexRedeemRequestIDs.current.get(requestKey) ?? UUID.string()
+    codexRedeemRequestIDs.current.set(requestKey, requestID)
+    try {
+      const outcome = await redeemCodexResetCredit(refreshed ?? envelope, creditID, requestID)
+      if (outcome === "nothing_to_reset" || outcome === "no_credit") {
+        codexRedeemRequestIDs.current.delete(requestKey)
+      }
+      return outcome
+    } finally {
+      void refreshSingleAccount(current, true)
     }
   }
 
@@ -939,6 +979,9 @@ export function DashboardRootView(props: {
             zoomSource={homeZoomSource(`account-card-${acc.id}`)}
             onRefresh={() => refreshSingleAccount(acc)}
             onOpenDetail={() => openAccountDetail(acc, `account-card-${acc.id}`)}
+            onRedeemCodexResetCard={acc.provider === "codex" && !settings.isDemoMode
+              ? (creditID) => redeemAccountResetCredit(acc, creditID)
+              : undefined}
           />
         </VStack>
       </VStack>

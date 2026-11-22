@@ -172,7 +172,7 @@ function getProviderDemoWindows(
   planName?: string
   identity?: string
   windows: QuotaWindow[]
-  codexResetCards?: { availableCount: number; expirations?: string[] }
+  codexResetCards?: QuotaSnapshot["codexResetCards"]
 } {
   switch (provider) {
     case "deepSeek":
@@ -215,6 +215,7 @@ function getProviderDemoWindows(
           identity: "pro_dev@example.com",
           codexResetCards: {
             availableCount: 2,
+            availableExpirations: [in3Hours, in22Days],
           },
           windows: [
             {
@@ -244,6 +245,7 @@ function getProviderDemoWindows(
         identity: "plus_dev@example.com",
         codexResetCards: {
           availableCount: 1,
+          availableExpirations: [in5Days],
         },
         windows: [
           {

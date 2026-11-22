@@ -43,6 +43,7 @@ export type WidgetAccountData = {
     status: "active" | "forecast" | "normal"
   }
   codexResetCardsCount?: number
+  codexResetCardExpiry?: string
   widgetOrder?: number
   updateStatusText?: string
   isUpdateWarning?: boolean

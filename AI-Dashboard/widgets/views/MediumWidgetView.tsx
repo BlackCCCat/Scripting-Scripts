@@ -117,11 +117,12 @@ export function MediumAccountCard(props: {
               font={isCompact ? 7 : 7.5}
               fontWeight="bold"
               foregroundStyle="systemIndigo"
+              layoutPriority={account.codexResetCardExpiry ? 1 : undefined}
               padding={{ horizontal: 3.5, vertical: 0.8 }}
               background={<Capsule fill="quaternarySystemFill" />}
               lineLimit={1}
             >
-              {`🎟️ x${account.codexResetCardsCount}`}
+              {`🎟️ x${account.codexResetCardsCount}${account.codexResetCardExpiry ? ` · ${account.codexResetCardExpiry}` : ""}`}
             </Text>
           ) : null}
 
