@@ -2,7 +2,6 @@ import { getDashboardLanguage, localize } from "../utils/localization"
 import {
   Button,
   Capsule,
-  Divider,
   EmptyView,
   FlowLayout,
   HStack,
@@ -13,12 +12,10 @@ import {
   Picker,
   Section,
   Text,
-  UnevenRoundedRectangle,
   useMemo,
   useState,
   VirtualNode,
   VStack,
-  ZStack,
 } from "scripting"
 import {
   ProviderCredentialEnvelope,
@@ -44,7 +41,7 @@ import { providerCardFill } from "./ProviderCardBackground"
 import { AddAccountSheet } from "./AddAccountSheet"
 
 const providerCardShape = { type: "rect", cornerRadius: 16, style: "continuous" } as const
-const filterRowInsets = { top: 0, bottom: 0, leading: 14, trailing: 14 }
+const providerCardHorizontalInset = 8
 
 const ALL_ROUTE_CATEGORIES: ProviderRouteCategory[] = [
   "direct_api",
@@ -161,11 +158,7 @@ export function ProviderCatalogView(props: {
     <List
       tint="systemIndigo"
       navigationTitle={localize(`供应商目录 (${filtered.length})`)}
-      listStyle="plain"
-      contentMargins={{ edges: "horizontal", insets: 20, placement: "scrollContent" }}
-      listRowSpacing={0}
-      listSectionSpacing={24}
-      listSectionSeparator="hidden"
+      listStyle="insetGroup"
       listSectionIndexVisibility="automatic"
       searchable={{
         value: searchText,
@@ -234,20 +227,6 @@ export function ProviderCatalogView(props: {
           <Picker
             title={localize("排序与分组")}
             systemImage="arrow.up.arrow.down"
-            listRowInsets={filterRowInsets}
-            listRowSeparator="hidden"
-            listRowBackground={
-              <ZStack alignment="bottomLeading">
-                <UnevenRoundedRectangle
-                  topLeadingRadius={providerCardShape.cornerRadius}
-                  topTrailingRadius={providerCardShape.cornerRadius}
-                  bottomLeadingRadius={0}
-                  bottomTrailingRadius={0}
-                  fill="secondarySystemGroupedBackground"
-                />
-                <Divider padding={{ horizontal: filterRowInsets.leading }} />
-              </ZStack>
-            }
             value={sortGroupingMode}
             onChanged={(val: string) =>
               setSortGroupingMode(val as "alphabet" | "category")
@@ -260,17 +239,6 @@ export function ProviderCatalogView(props: {
           <Picker
             title={localize("接入路径筛选")}
             systemImage="line.3.horizontal.decrease"
-            listRowInsets={filterRowInsets}
-            listRowSeparator="hidden"
-            listRowBackground={
-              <UnevenRoundedRectangle
-                topLeadingRadius={0}
-                topTrailingRadius={0}
-                bottomLeadingRadius={providerCardShape.cornerRadius}
-                bottomTrailingRadius={providerCardShape.cornerRadius}
-                fill="secondarySystemGroupedBackground"
-              />
-            }
             value={selectedCategory}
             onChanged={(val: string) =>
               setSelectedCategory(val as ProviderRouteCategory | "all")
@@ -332,7 +300,7 @@ function ProviderCatalogRow(props: {
   return (
     <Button
       buttonStyle="plain"
-      listRowInsets={{ top: 4, bottom: 4, leading: 0, trailing: 0 }}
+      listRowInsets={{ top: 4, bottom: 4, leading: providerCardHorizontalInset, trailing: providerCardHorizontalInset }}
       listRowSeparator="hidden"
       listRowBackground={<EmptyView />}
       accessibilityValue={localize(expanded ? "已展开" : "已折叠")}
@@ -392,7 +360,7 @@ function ProviderCatalogDetails(props: {
     <VStack
       alignment="leading"
       spacing={10}
-      listRowInsets={{ top: 0, bottom: 4, leading: 0, trailing: 0 }}
+      listRowInsets={{ top: 0, bottom: 4, leading: providerCardHorizontalInset, trailing: providerCardHorizontalInset }}
       listRowSeparator="hidden"
       listRowBackground={<EmptyView />}
       padding={14}
