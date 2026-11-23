@@ -73,7 +73,7 @@ export function CalendarSettingsView(props: {
         </GlassSection>
       </Form>
 
-      {props.isRefreshing ? <BlockingProgressOverlay message="正在刷新节假日日历..." /> : null}
+      {props.isRefreshing ? <BlockingProgressOverlay message="正在刷新节假日日历..." glass /> : null}
     </GradientPage>
   )
 }
