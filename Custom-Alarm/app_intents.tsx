@@ -1,6 +1,6 @@
 import { AppIntentManager, AppIntentProtocol, Script, Widget } from "scripting"
 
-import type { AlarmRecord, HolidayCalendarSource } from "./types"
+import type { AlarmRecord } from "./types"
 import { DEFAULT_SOUND_NAME } from "./utils/alarm_sounds"
 import {
   DEFAULT_HOLIDAY_SOURCE_ID,
@@ -8,7 +8,7 @@ import {
   mergeManagedSystemAlarmIds,
   saveCustomAlarmState,
 } from "./utils/storage"
-import { buildHolidayDayMap } from "./utils/holiday_calendar"
+import { resolveHolidayOccurrence } from "./utils/holiday_calendar"
 
 type StopIntentParams = {
   alarmId: string
@@ -35,69 +35,10 @@ function occurrenceLimitForRecord(record: AlarmRecord): number | null {
   }
 }
 
-function dateKey(date: Date): string {
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, "0")
-  const dd = String(date.getDate()).padStart(2, "0")
-  return `${yyyy}-${mm}-${dd}`
-}
-
 function startOfToday(fromTimestamp = Date.now()): Date {
   const date = new Date(fromTimestamp)
   date.setHours(0, 0, 0, 0)
   return date
-}
-
-function endOfYear(year: number): Date {
-  return new Date(year + 1, 0, 1, 0, 0, 0, 0)
-}
-
-function buildHolidaySets(source: HolidayCalendarSource): { offSet: Set<string>; workSet: Set<string> } {
-  const dayMap = buildHolidayDayMap(source)
-  const offSet = new Set<string>()
-  const workSet = new Set<string>()
-
-  for (const [key, info] of dayMap.entries()) {
-    if (info.kind === "off") offSet.add(key)
-    else if (info.kind === "work") workSet.add(key)
-  }
-
-  return { offSet, workSet }
-}
-
-function shouldRingForHolidayMode(
-  key: string,
-  weekday: number,
-  matchMode: "holiday" | "nonHoliday",
-  offSet: Set<string>,
-  workSet: Set<string>
-): boolean {
-  if (offSet.has(key)) return matchMode === "holiday"
-  if (workSet.has(key)) return matchMode === "nonHoliday"
-  const isRegularWeekday = weekday >= 1 && weekday <= 5
-  return matchMode === "nonHoliday" ? isRegularWeekday : !isRegularWeekday
-}
-
-function nextHolidayFireDate(record: AlarmRecord, source: HolidayCalendarSource, now = Date.now()): Date | null {
-  if (record.repeatRule.kind !== "holiday") return null
-
-  const today = startOfToday(now)
-  const end = endOfYear(today.getFullYear())
-  const { offSet, workSet } = buildHolidaySets(source)
-  const cursor = new Date(today.getTime())
-
-  while (cursor.getTime() < end.getTime()) {
-    const key = dateKey(cursor)
-    const weekday = cursor.getDay()
-    if (shouldRingForHolidayMode(key, weekday, record.repeatRule.matchMode, offSet, workSet)) {
-      const fireDate = new Date(cursor.getTime())
-      fireDate.setHours(record.repeatRule.hour, record.repeatRule.minute, 0, 0)
-      if (fireDate.getTime() > now) return fireDate
-    }
-    cursor.setDate(cursor.getDate() + 1)
-  }
-
-  return null
 }
 
 function nextDailyFireDate(record: AlarmRecord, now = Date.now()): Date | null {
@@ -391,7 +332,8 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
       }
 
       let nextRecord = baseRecord
-      let nextManagedIds = state.managedSystemAlarmIds
+      let nextAlarmId: string | undefined
+      let syncedSource: typeof state.holidaySources[number] | undefined
 
       if (record.enabled) {
         const occurrenceLimit = occurrenceLimitForRecord(record)
@@ -423,7 +365,19 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
             const source = state.holidaySources.find((item) => item.id === repeatRule.sourceId)
               ?? state.holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID)
               ?? null
-            if (source) nextDate = nextHolidayFireDate(record, source, Date.now())
+            if (source) {
+              try {
+                const result = await resolveHolidayOccurrence(repeatRule, source)
+                if (result.source !== source) syncedSource = result.source
+                if (result.timestamp !== null) nextDate = new Date(result.timestamp)
+                else console.warn("节假日日历缺少续排所需的班休安排")
+              } catch (error) {
+                console.warn("续排前刷新节假日日历失败", error)
+              }
+              // 同步期间若已编辑、关闭或删除闹钟，旧的停止操作无需续排。
+              const current = loadCustomAlarmState().alarms.find((item) => item.id === record.id)
+              if (!current?.enabled || current.updatedAt !== record.updatedAt) return
+            }
           } else if (repeatRule.kind === "custom") {
             nextDate = nextCustomFireDate(record, Date.now())
           } else if (repeatRule.kind === "daily") {
@@ -435,12 +389,12 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
           }
 
           if (nextDate) {
-            const nextAlarmId = UUID.string()
+            const alarmId = UUID.string()
             try {
               await AlarmManager.schedule(
-                nextAlarmId,
+                alarmId,
                 buildRollingAlarmConfiguration({
-                  alarmId: nextAlarmId,
+                  alarmId,
                   logicalAlarmId: record.id,
                   title: record.title,
                   snoozeMinutes: record.snoozeMinutes,
@@ -450,11 +404,11 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
               )
               nextRecord = {
                 ...baseRecord,
-                systemAlarmIds: [nextAlarmId],
+                systemAlarmIds: [alarmId],
                 lastScheduledAt: Date.now(),
                 updatedAt: Date.now(),
               }
-              nextManagedIds = mergeManagedSystemAlarmIds(state.managedSystemAlarmIds, [nextAlarmId])
+              nextAlarmId = alarmId
             } catch {
               nextRecord = {
                 ...baseRecord,
@@ -474,13 +428,25 @@ export const StopCustomAlarmIntent = AppIntentManager.register<StopIntentParams>
         }
       }
 
+      const latest = loadCustomAlarmState()
+      if (syncedSource) {
+        const source = syncedSource
+        latest.holidaySources = latest.holidaySources.map((item) => (
+          item.id === source.id && (source.lastSyncedAt ?? 0) > (item.lastSyncedAt ?? 0) ? source : item
+        ))
+      }
+      if (!latest.alarms.some((item) => item.id === record.id && item.updatedAt === record.updatedAt)) {
+        if (nextAlarmId) await AlarmManager.cancel(nextAlarmId)
+        return
+      }
       saveCustomAlarmState({
-        ...state,
-        alarms: state.alarms.map((item) => (
+        ...latest,
+        alarms: latest.alarms.map((item) => (
           item.id === params.logicalAlarmId ? nextRecord : item
         )),
-        managedSystemAlarmIds: nextManagedIds,
-        cleanupCandidateAlarmIds: state.cleanupCandidateAlarmIds,
+        managedSystemAlarmIds: nextAlarmId
+          ? mergeManagedSystemAlarmIds(latest.managedSystemAlarmIds, [nextAlarmId])
+          : latest.managedSystemAlarmIds,
       })
 
       try {

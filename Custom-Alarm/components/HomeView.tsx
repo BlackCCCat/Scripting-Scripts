@@ -506,7 +506,8 @@ export function HomeView() {
     storageKey: "custom-alarm:release-notes:release-notes.md:last-seen-hash",
   })
   const [initialState] = useState(() => loadCustomAlarmState())
-  const [records, setRecords] = useState<AlarmRecord[]>(() => initialState.alarms)
+  const alarmRecords = useObservable<AlarmRecord[]>(() => initialState.alarms)
+  const records = alarmRecords.value
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
   const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
   const [alarmCardGradientEnabled, setAlarmCardGradientEnabled] = useState<boolean>(() => initialState.alarmCardGradientEnabled)
@@ -569,6 +570,10 @@ export function HomeView() {
 
     return { totalOff, remainingOff, totalWork, remainingWork }
   }, [selectedHolidaySource])
+
+  function setRecords(update: AlarmRecord[] | ((current: AlarmRecord[]) => AlarmRecord[])) {
+    alarmRecords.setValue(typeof update === "function" ? update(alarmRecords.value) : update)
+  }
 
   function saveStateSnapshot(
     nextRecords: AlarmRecord[],
@@ -784,8 +789,14 @@ export function HomeView() {
       }
     }
     try {
-      const storedState = loadCustomAlarmState()
       const alarms = await AlarmManager.alarms()
+      const storedState = loadCustomAlarmState()
+      const latestSource = storedState.holidaySources[0]
+      setHolidaySources((current) => (
+        (latestSource?.lastSyncedAt ?? 0) > (current[0]?.lastSyncedAt ?? 0)
+          ? storedState.holidaySources
+          : current
+      ))
       setSystemAlarms(alarms)
       const alarmMap = new Map(alarms.map((item) => [item.id, item]))
       let nextRecordsSnapshot: AlarmRecord[] = []
@@ -844,17 +855,6 @@ export function HomeView() {
       const nextManagedIds = mergeManagedSystemAlarmIds(managedSystemAlarmIds, collectRecordSystemAlarmIds(next))
       setManagedSystemAlarmIds(nextManagedIds)
       saveStateSnapshot(next, holidaySources, availableSounds, nextManagedIds, cleanupCandidateAlarmIds)
-      return next
-    })
-  }
-
-  function moveRecords(indices: number[], newOffset: number) {
-    if (skipMutationInProgress.current) return
-    setRecords((current) => {
-      const movingItems = indices.map((index) => current[index]).filter(Boolean)
-      const next = current.filter((_, index) => !indices.includes(index))
-      next.splice(newOffset, 0, ...movingItems)
-      saveStateSnapshot(next, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds)
       return next
     })
   }
@@ -1194,14 +1194,13 @@ export function HomeView() {
             <Text foregroundStyle="secondaryLabel">当前系统不支持 AlarmManager。</Text>
           ) : records.length ? (
             <ForEach
-              count={records.length}
-              onMove={moveRecords}
-              itemBuilder={(index) => {
-                const record = records[index]
-                if (!record) return <Text> </Text>
+              data={alarmRecords}
+              editActions="move"
+              builder={(record) => {
                 return (
                   <VStack
-                    key={`${record.id}-${record.updatedAt}`}
+                    key={record.id}
+                    moveDisabled={globalBusy || busyRecordId !== null}
                     frame={{ maxWidth: "infinity", alignment: "leading" as any }}
                     background="rgba(0,0,0,0.001)"
                     contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}

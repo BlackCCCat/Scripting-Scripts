@@ -2,7 +2,7 @@ import type { AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../typ
 import { SnoozeCustomAlarmIntent, StopCustomAlarmIntent } from "../app_intents"
 import { DEFAULT_SOUND_NAME } from "./alarm_sounds"
 import { nextSearchStart, pendingSkippedOccurrences } from "./alarm_skip"
-import { buildHolidayDayMap } from "./holiday_calendar"
+import { buildHolidayDayMap, nextHolidayOccurrence } from "./holiday_calendar"
 
 export const EXPANDED_RULE_HORIZON_DAYS = 365
 
@@ -142,7 +142,7 @@ export function nextOccurrenceTimestamp(
     case "holiday": {
       const source = sourceMap.get(record.repeatRule.sourceId)
       if (!source) return null
-      return buildNextHolidayTimestamp(record.repeatRule, source, after)
+      return nextHolidayOccurrence(record.repeatRule, source, after, new Date(now).getFullYear())
     }
     case "custom": {
       const limit = effectiveOccurrenceLimit(record.repeatRule)
@@ -318,12 +318,6 @@ function dateKey(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-function startOfToday(): Date {
-  const date = new Date()
-  date.setHours(0, 0, 0, 0)
-  return date
-}
-
 function effectiveOccurrenceLimit(rule: LimitedRepeatRule): number | null {
   const limit = Number(rule.occurrenceLimit)
   if (!Number.isFinite(limit) || limit <= 0) return null
@@ -373,15 +367,6 @@ function shouldRingForHolidayMode(
 
   const isRegularWeekday = weekday >= 1 && weekday <= 5
   return matchMode === "nonHoliday" ? isRegularWeekday : !isRegularWeekday
-}
-
-function buildNextHolidayTimestamp(
-  rule: Extract<AlarmRepeatRule, { kind: "holiday" }>,
-  source: HolidayCalendarSource,
-  now = Date.now()
-): number | null {
-  const timestamps = buildHolidayTimestamps(rule, source, now)
-  return timestamps[0] ?? null
 }
 
 function buildNextCustomTimestamp(
@@ -444,32 +429,6 @@ function buildNextMonthlyTimestamp(
   }
 
   return null
-}
-
-function buildHolidayTimestamps(
-  rule: Extract<AlarmRepeatRule, { kind: "holiday" }>,
-  source: HolidayCalendarSource,
-  now = Date.now()
-): number[] {
-  const today = startOfToday()
-  const end = endOfYear(today.getFullYear())
-  const { offSet, workSet } = buildHolidaySets(source)
-  const timestamps: number[] = []
-
-  const cursor = new Date(today.getTime())
-  while (cursor.getTime() < end.getTime()) {
-    const key = dateKey(cursor)
-    const weekday = cursor.getDay()
-    const shouldRing = shouldRingForHolidayMode(key, weekday, rule.matchMode, offSet, workSet)
-    if (shouldRing) {
-      const fireDate = new Date(cursor.getTime())
-      fireDate.setHours(rule.hour, rule.minute, 0, 0)
-      if (fireDate.getTime() > now) timestamps.push(fireDate.getTime())
-    }
-    cursor.setDate(cursor.getDate() + 1)
-  }
-
-  return timestamps
 }
 
 function buildDailyTimestamps(
@@ -835,7 +794,7 @@ export async function scheduleAlarm(
         }
         const nextTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, scheduledAt)
         if (!nextTimestamp) {
-          throw new Error("今年剩余时间内没有可安排的班休日闹钟。")
+          throw new Error("节假日日历中没有可安排的下一次闹钟，请先刷新日历。")
         }
         const systemId = UUID.string()
         const configuration = buildConfiguration(

@@ -331,6 +331,17 @@ export function loadCustomAlarmState(): CustomAlarmState {
 }
 
 export function saveCustomAlarmState(state: CustomAlarmState): void {
+  const source = builtinHolidaySource(state.holidaySources)
+  // 前台仍持有旧快照时，保留停止 Intent 刚同步的日历。
+  let holidaySource = source
+  try {
+    const raw = readStorage(STORAGE_KEY)
+    const storedSource = raw ? JSON.parse(raw).holidaySources?.[0] : null
+    if (Number(storedSource?.lastSyncedAt) > (source.lastSyncedAt ?? 0)) {
+      const normalized = normalizeHolidaySource(storedSource)
+      if (normalized?.id === DEFAULT_HOLIDAY_SOURCE_ID) holidaySource = normalized
+    }
+  } catch {}
   const managedSystemAlarmIds = mergeManagedSystemAlarmIds(
     normalizeStringIdList(state.managedSystemAlarmIds),
     collectRecordSystemAlarmIds(state.alarms)
@@ -339,7 +350,7 @@ export function saveCustomAlarmState(state: CustomAlarmState): void {
     STORAGE_KEY,
     JSON.stringify({
       alarms: state.alarms,
-      holidaySources: [builtinHolidaySource(state.holidaySources)],
+      holidaySources: [holidaySource],
       availableSounds: normalizeSoundNames(state.availableSounds),
       alarmCardGradientEnabled: Boolean(state.alarmCardGradientEnabled),
       pageGradientEnabled: Boolean(state.pageGradientEnabled),

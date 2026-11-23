@@ -1,6 +1,9 @@
-import type { HolidayCalendarSource } from "../types"
+import type { AlarmRepeatRule, HolidayCalendarSource } from "../types"
 
-declare const fetch: (input: string, init?: any) => Promise<any>
+declare const fetch: typeof import("scripting").fetch
+
+type HolidayRule = Extract<AlarmRepeatRule, { kind: "holiday" }>
+const officialDayMarker = /[（(]\s*([休班])\s*[）)]/
 
 export type HolidayDayInfo = {
   kind: "off" | "work" | "unknown"
@@ -53,6 +56,8 @@ function parseDateValue(value: string): Date | null {
 export function classifyHolidayKind(summary: string): "off" | "work" | "unknown" {
   const text = String(summary).trim()
   if (!text) return "unknown"
+  const marker = text.match(officialDayMarker)?.[1]
+  if (marker) return marker === "休" ? "off" : "work"
   if (/(补班|上班|调班|工作日|值班|班)/.test(text)) return "work"
   if (/(放假|休假|休息|假期|除夕|元旦|春节|清明节?|劳动节?|五一|端午节?|中秋节?|国庆节?)/.test(text)) {
     return "off"
@@ -156,14 +161,61 @@ export function parseHolidayCalendarSource(
 }
 
 export async function syncHolidayCalendarSource(
-  source: HolidayCalendarSource
+  source: HolidayCalendarSource,
+  timeout?: number
 ): Promise<HolidayCalendarSource> {
-  const response = await fetch(source.url)
+  const response = await fetch(source.url, { timeout })
   if (!response.ok) {
     throw new Error(`节假日日历下载失败：HTTP ${response.status}`)
   }
-  const text = await response.text()
-  return parseHolidayCalendarSource(source, text)
+  const calendar = parseHolidayCalendarSource(source, await response.text())
+  if (!calendar.holidayItems.length) throw new Error("节假日日历未返回可用条目")
+  return calendar
+}
+
+export function nextHolidayOccurrence(
+  rule: HolidayRule,
+  source: HolidayCalendarSource,
+  after: number,
+  currentYear: number
+): number | null {
+  // 远期的节日名称不代表班休安排已经发布。
+  const publishedYears = new Set(source.holidayItems
+    .filter((item) => officialDayMarker.test(item.title))
+    .map((item) => Number(item.dateKey.slice(0, 4))))
+  const cursor = new Date(after)
+  cursor.setHours(0, 0, 0, 0)
+  const days = buildHolidayDayMap(source)
+  while (cursor.getFullYear() <= currentYear + 1) {
+    if (!publishedYears.has(cursor.getFullYear())) return null
+    const kind = days.get(dateKey(cursor))?.kind
+    const weekday = cursor.getDay()
+    const isWorkday = kind === "work" || kind !== "off" && weekday >= 1 && weekday <= 5
+    if (isWorkday === (rule.matchMode === "nonHoliday")) {
+      const fireDate = new Date(cursor)
+      fireDate.setHours(rule.hour, rule.minute, 0, 0)
+      if (fireDate.getTime() > after) return fireDate.getTime()
+    }
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return null
+}
+
+export async function resolveHolidayOccurrence(
+  rule: HolidayRule,
+  source: HolidayCalendarSource,
+  now: () => number = Date.now,
+  sync = syncHolidayCalendarSource
+): Promise<{ timestamp: number | null; source: HolidayCalendarSource }> {
+  const next = (calendar: HolidayCalendarSource) => {
+    const after = now()
+    return nextHolidayOccurrence(rule, calendar, after, new Date(after).getFullYear())
+  }
+  const cached = next(source)
+  if (cached !== null) return { timestamp: cached, source }
+
+  const refreshed = await sync(source, 8)
+  return { timestamp: next(refreshed), source: refreshed }
 }
 
 function holidayKindPriority(kind: "off" | "work" | "unknown"): number {
