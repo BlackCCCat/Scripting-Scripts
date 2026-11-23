@@ -26,7 +26,7 @@ function expirationColor(remainingMs: number) {
   return "systemGreen"
 }
 
-function CodexResetCardsSheet(props: {
+export function CodexResetCardsSheet(props: {
   cards: CodexResetCards
   onRedeem?: RedeemCodexResetCard
   onDismiss: () => void
@@ -107,77 +107,80 @@ function CodexResetCardsSheet(props: {
           topBarTrailing: <Button title={localize("完成")} disabled={isUsingCard} action={onDismiss} />,
         }}
       >
-        <Section header={<Text>{localize("北京时间")}</Text>}>
-          {credits.map(({ id, expiresAt, timestamp }, index) => {
-            const remainingMs = timestamp - now
-            const hasDate = Number.isFinite(timestamp)
-            const color = expiresAt === null ? "systemGreen" : hasDate ? expirationColor(remainingMs) : "systemGray"
-            const expirationText = expiresAt === null
-              ? localize("长期有效")
-              : hasDate ? dateFormat.format(timestamp) : localize("到期时间未知")
-            const canUse = onRedeem && id && (!hasDate || remainingMs > 0)
-            return (
-              <HStack
-                key={id ?? `${expiresAt}-${index}`}
-                alignment="center"
-                spacing={10}
-                listRowInsets={{ top: 4, bottom: 4, leading: 0, trailing: 0 }}
-                listRowSeparator="hidden"
-                listRowBackground={<EmptyView />}
-                padding={12}
-                background={<RoundedRectangle cornerRadius={12} fill={color} opacity={0.16} />}
-              >
-                <Circle fill={color} frame={{ width: 9, height: 9 }} accessibilityHidden={true} />
-                <VStack alignment="leading" spacing={3}>
-                  <Text font="headline" fixedSize={{ horizontal: false, vertical: true }}>{expirationText}</Text>
-                  {hasDate && expiresAt ? (
-                    <Text font="subheadline" foregroundStyle="secondaryLabel">
-                      {localize(remainingMs <= 0
-                        ? "已到期"
-                        : formatRelativeCountdown(expiresAt, "nonResettingAllowance"))}
-                    </Text>
-                  ) : null}
-                </VStack>
-                <Spacer minLength={0} />
-                {canUse ? (
-                  <Button
-                    title={localize("使用")}
-                    buttonStyle="bordered"
-                    disabled={isUsingCard || unavailableIDs.has(id)}
-                    action={() => useCredit(id, hasDate ? `${expirationText} · ${localize("北京时间")}` : expirationText)}
-                  />
-                ) : null}
-              </HStack>
-            )
-          })}
-          {missing > 0 ? (
-            <Text foregroundStyle="secondaryLabel">
-              {localize(`${missing} 张重置卡暂无到期明细`)}
+        {cards.availableCount === 0 ? (
+          <Section>
+            <Text foregroundStyle="secondaryLabel" listRowSeparator="hidden">
+              {localize("暂无可用重置卡")}
             </Text>
-          ) : null}
-          {cards.availableCount === 0 ? (
-            <Text foregroundStyle="secondaryLabel">{localize("暂无可用重置卡")}</Text>
-          ) : null}
-        </Section>
+          </Section>
+        ) : (
+          <Section>
+            {credits.map(({ id, expiresAt, timestamp }, index) => {
+              const remainingMs = timestamp - now
+              const hasDate = Number.isFinite(timestamp)
+              const color = expiresAt === null ? "systemGreen" : hasDate ? expirationColor(remainingMs) : "systemGray"
+              const expirationText = expiresAt === null
+                ? localize("长期有效")
+                : hasDate ? dateFormat.format(timestamp) : localize("到期时间未知")
+              const canUse = onRedeem && id && (!hasDate || remainingMs > 0)
+              return (
+                <HStack
+                  key={id ?? `${expiresAt}-${index}`}
+                  alignment="center"
+                  spacing={10}
+                  listRowInsets={{ top: 4, bottom: 4, leading: 0, trailing: 0 }}
+                  listRowSeparator="hidden"
+                  listRowBackground={<EmptyView />}
+                  padding={12}
+                  background={<RoundedRectangle cornerRadius={12} fill={color} opacity={0.16} />}
+                >
+                  <Circle fill={color} frame={{ width: 9, height: 9 }} accessibilityHidden={true} />
+                  <VStack alignment="leading" spacing={3}>
+                    <Text font="headline" fixedSize={{ horizontal: false, vertical: true }}>{expirationText}</Text>
+                    {hasDate && expiresAt ? (
+                      <Text font="subheadline" foregroundStyle="secondaryLabel">
+                        {localize(remainingMs <= 0
+                          ? "已到期"
+                          : formatRelativeCountdown(expiresAt, "nonResettingAllowance"))}
+                      </Text>
+                    ) : null}
+                  </VStack>
+                  <Spacer minLength={0} />
+                  {canUse ? (
+                    <Button
+                      title={localize("使用")}
+                      buttonStyle="bordered"
+                      disabled={isUsingCard || unavailableIDs.has(id)}
+                      action={() => useCredit(id, expirationText)}
+                    />
+                  ) : null}
+                </HStack>
+              )
+            })}
+            {missing > 0 ? (
+              <Text foregroundStyle="secondaryLabel">
+                {localize(`${missing} 张重置卡暂无到期明细`)}
+              </Text>
+            ) : null}
+          </Section>
+        )}
       </List>
     </NavigationStack>
   )
 }
 
-export function CodexResetCardsBadge(props: { cards: CodexResetCards; isEnglish: boolean; onRedeem?: RedeemCodexResetCard }) {
-  const { cards, isEnglish, onRedeem } = props
-  const [isPresented, setIsPresented] = useState(false)
+export function CodexResetCardsBadge(props: {
+  availableCount: number
+  isEnglish: boolean
+  onOpen: () => void
+}) {
+  const { availableCount, isEnglish, onOpen } = props
 
   return (
     <Button
       buttonStyle="plain"
       accessibilityHint={localize("查看重置卡到期时间")}
-      action={() => setIsPresented(true)}
-      sheet={{
-        isPresented,
-        onChanged: setIsPresented,
-        content: <CodexResetCardsSheet cards={cards} onRedeem={onRedeem} onDismiss={() => setIsPresented(false)} />,
-      }}
+      action={onOpen}
     >
       <Text
         font="caption2"
@@ -188,7 +191,7 @@ export function CodexResetCardsBadge(props: { cards: CodexResetCards; isEnglish:
         fixedSize={isEnglish ? { horizontal: false, vertical: true } : undefined}
         lineLimit={isEnglish ? undefined : 1}
       >
-        {localize(`🎟️ 重置卡 ${cards.availableCount} 次`)}
+        {localize(`🎟️ 重置卡 ${availableCount} 次`)}
       </Text>
     </Button>
   )

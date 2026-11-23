@@ -47,7 +47,7 @@ import {
 } from "../utils/theme"
 import { ProviderIconView } from "./ProviderIconView"
 import { CodexResetCardsBadge } from "./CodexResetCardsBadge"
-import type { RedeemCodexResetCard } from "./CodexResetCardsBadge"
+import type { CodexResetCards } from "../utils/codex_reset_cards"
 
 export function AccountQuotaRow(props: {
   account: SubscriptionAccount
@@ -57,7 +57,7 @@ export function AccountQuotaRow(props: {
   zoomSource?: { id: string | number; namespace: any }
   onRefresh: () => void
   onOpenDetail: () => void
-  onRedeemCodexResetCard?: RedeemCodexResetCard
+  onOpenCodexResetCards: (cards: CodexResetCards) => void
 }) {
   const {
     account,
@@ -81,6 +81,7 @@ export function AccountQuotaRow(props: {
           ? state.previous
           : undefined
 
+  const resetCards = account.provider === "codex" ? snapshot?.codexResetCards : undefined
   const isLoading = state.type === "loading"
   const health = accountHealthSummary(snapshot)
   const accountTypeBadge = formatAccountTypeBadge(
@@ -200,11 +201,11 @@ export function AccountQuotaRow(props: {
               </Text>
             </HStack>
 
-            {account.provider === "codex" && snapshot?.codexResetCards ? (
+            {resetCards ? (
               <CodexResetCardsBadge
-                cards={snapshot.codexResetCards}
+                availableCount={resetCards.availableCount}
                 isEnglish={isEnglish}
-                onRedeem={props.onRedeemCodexResetCard}
+                onOpen={() => props.onOpenCodexResetCards(resetCards)}
               />
             ) : null}
           </HeaderLayout>

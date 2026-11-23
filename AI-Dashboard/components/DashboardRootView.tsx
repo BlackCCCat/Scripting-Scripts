@@ -71,6 +71,8 @@ import {
 import { AccountDetailSheet } from "./AccountDetailSheet"
 import { AccountOrderEditSheet } from "./AccountOrderEditSheet"
 import { AccountQuotaRow } from "./AccountQuotaRow"
+import { CodexResetCardsSheet } from "./CodexResetCardsBadge"
+import type { CodexResetCards } from "../utils/codex_reset_cards"
 import { AddAccountSheet } from "./AddAccountSheet"
 import { glassCardSurface } from "./GlassCardSurface"
 import { providerCardFill } from "./ProviderCardBackground"
@@ -272,6 +274,10 @@ export function DashboardRootView(props: {
   const [addSheetNonce, setAddSheetNonce] = useState<number>(0)
   const [selectedAccountForDetail, setSelectedAccountForDetail] =
     useState<SubscriptionAccount | null>(null)
+  const [selectedResetCards, setSelectedResetCards] = useState<{
+    account: SubscriptionAccount
+    cards: CodexResetCards
+  } | null>(null)
 
   // 更新日志弹窗 (Changelog Sheet)
   const releaseNotes = useReleaseNotesSheet()
@@ -979,9 +985,7 @@ export function DashboardRootView(props: {
             zoomSource={homeZoomSource(`account-card-${acc.id}`)}
             onRefresh={() => refreshSingleAccount(acc)}
             onOpenDetail={() => openAccountDetail(acc, `account-card-${acc.id}`)}
-            onRedeemCodexResetCard={acc.provider === "codex" && !settings.isDemoMode
-              ? (creditID) => redeemAccountResetCredit(acc, creditID)
-              : undefined}
+            onOpenCodexResetCards={(cards) => setSelectedResetCards({ account: acc, cards })}
           />
         </VStack>
       </VStack>
@@ -1066,6 +1070,28 @@ export function DashboardRootView(props: {
     return <Text> </Text>
   }
 
+  const resetCardsState = selectedResetCards ? accountStates[selectedResetCards.account.id] : undefined
+  const resetCardsSnapshot = resetCardsState?.type === "loaded" ? resetCardsState.snapshot
+    : resetCardsState?.type === "loading" || resetCardsState?.type === "failed" ? resetCardsState.previous
+      : undefined
+  const closeResetCards = () => setSelectedResetCards((current) => current === selectedResetCards ? null : current)
+  const resetCardsSheet = {
+    isPresented: selectedResetCards !== null,
+    onChanged: (open: boolean) => {
+      if (!open) closeResetCards()
+    },
+    content: selectedResetCards ? (
+      <CodexResetCardsSheet
+        key={selectedResetCards.account.id}
+        cards={resetCardsSnapshot?.codexResetCards ?? selectedResetCards.cards}
+        onRedeem={!settings.isDemoMode && resetCardsSnapshot?.codexResetCards
+          ? (creditID) => redeemAccountResetCredit(selectedResetCards.account, creditID)
+          : undefined}
+        onDismiss={closeResetCards}
+      />
+    ) : <EmptyView />,
+  }
+
   const dashboardList = (
     <List
       navigationTitle={localize("AI 额度看板")}
@@ -1118,12 +1144,16 @@ export function DashboardRootView(props: {
       }}
       sheet={
         isHomeScreen
-          ? {
-              isPresented: releaseNotes.isPresented,
-              onChanged: releaseNotes.onChanged,
-              content: releaseNotes.content,
-            }
+          ? [
+              resetCardsSheet,
+              {
+                isPresented: releaseNotes.isPresented,
+                onChanged: releaseNotes.onChanged,
+                content: releaseNotes.content,
+              },
+            ]
           : [
+              resetCardsSheet,
               {
                 isPresented: isEditSheetPresented,
                 onChanged: setIsEditSheetPresented,
