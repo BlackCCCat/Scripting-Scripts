@@ -1,8 +1,8 @@
 import {
   Button,
-  Form,
   HStack,
   Image,
+  List,
   Navigation,
   NavigationStack,
   Path,
@@ -25,6 +25,13 @@ import {
   soundSymbolName,
   soundsDirectoryPath,
 } from "../utils/alarm_sounds"
+import {
+  GlassListNotice,
+  glassListRowAppearance,
+  GradientPage,
+  GRADIENT_SCROLL_APPEARANCE,
+  PlainListText,
+} from "./PageAppearance"
 
 export function SoundSettingsView(props: {
   sounds: string[]
@@ -163,86 +170,94 @@ export function SoundSettingsView(props: {
     }
   }, [])
 
+  const list = (
+    <List
+      navigationTitle="闹钟声音"
+      navigationBarTitleDisplayMode="inline"
+      listStyle="plain"
+      {...GRADIENT_SCROLL_APPEARANCE}
+      toolbar={{
+        topBarLeading: (
+          <Button
+            title=""
+            systemImage="xmark"
+            action={() => {
+              stopPreview()
+              dismiss()
+            }}
+          />
+        ),
+        topBarTrailing: (
+          <Button
+            title=""
+            systemImage="plus"
+            action={() => {
+              void importSounds()
+            }}
+          />
+        ),
+      }}
+    >
+      <Section listSectionSeparator="hidden">
+        <PlainListText heading text="可用声音" />
+        {visibleSounds.length ? (
+          visibleSounds.map((sound) => (
+            <VStack
+              key={sound}
+              frame={{ maxWidth: "infinity", minHeight: 44 }}
+              padding={{ leading: 16, trailing: 16 }}
+              {...glassListRowAppearance()}
+              contentShape="rect"
+              trailingSwipeActions={{
+                allowsFullSwipe: false,
+                actions: [
+                  <Button
+                    title="编辑"
+                    tint="systemOrange"
+                    action={() => {
+                      void editSound(sound)
+                    }}
+                  />,
+                  <Button
+                    title="删除"
+                    tint="red"
+                    action={() => {
+                      void removeSound(sound)
+                    }}
+                  />,
+                ],
+              }}
+            >
+              <HStack spacing={12}>
+                <Image
+                  systemName={soundSymbolName(sound)}
+                  foregroundStyle="#F59E0B"
+                  frame={{ width: 20 }}
+                />
+                <Text>{soundDisplayName(sound)}</Text>
+                <Spacer />
+                <Text foregroundStyle="secondaryLabel">{Path.extname(sound).toUpperCase().replace(".", "")}</Text>
+                <Button
+                  title=""
+                  systemImage={playingSound === sound ? "stop.circle.fill" : "play.circle.fill"}
+                  buttonStyle="plain"
+                  tint={playingSound === sound ? "systemRed" : "accentColor"}
+                  action={() => togglePreview(sound)}
+                />
+              </HStack>
+            </VStack>
+          ))
+        ) : (
+          <GlassListNotice text="暂无自定义声音" />
+        )}
+        <PlainListText text={soundsDirectoryPath()} />
+      </Section>
+    </List>
+  )
+
   return (
     <NavigationStack>
-      <Form
-        navigationTitle="闹钟声音"
-        navigationBarTitleDisplayMode="inline"
-        formStyle="grouped"
-        toolbar={{
-          topBarLeading: (
-            <Button
-              title=""
-              systemImage="xmark"
-              action={() => {
-                stopPreview()
-                dismiss()
-              }}
-            />
-          ),
-          topBarTrailing: (
-            <Button
-              title=""
-              systemImage="plus"
-              action={() => {
-                void importSounds()
-              }}
-            />
-          ),
-        }}
-      >
-        <Section
-          header={<Text>可用声音</Text>}
-          footer={<Text>{soundsDirectoryPath()}</Text>}
-        >
-          {visibleSounds.length ? (
-            visibleSounds.map((sound) => (
-              <VStack
-                key={sound}
-                trailingSwipeActions={{
-                  allowsFullSwipe: false,
-                  actions: [
-                    <Button
-                      title="编辑"
-                      tint="systemOrange"
-                      action={() => {
-                        void editSound(sound)
-                      }}
-                    />,
-                    <Button
-                      title="删除"
-                      tint="red"
-                      action={() => {
-                        void removeSound(sound)
-                      }}
-                    />,
-                  ],
-                }}
-              >
-                <HStack spacing={12}>
-                  <Image
-                    systemName={soundSymbolName(sound)}
-                    foregroundStyle={"#F59E0B" as any}
-                    frame={{ width: 20, alignment: "center" as any }}
-                  />
-                  <Text>{soundDisplayName(sound)}</Text>
-                  <Spacer />
-                  <Text foregroundStyle="secondaryLabel">{Path.extname(sound).toUpperCase().replace(".", "")}</Text>
-                  <Button
-                    title=""
-                    systemImage={playingSound === sound ? "stop.circle.fill" : "play.circle.fill"}
-                    buttonStyle="plain"
-                    tint={playingSound === sound ? "systemRed" : "accentColor"}
-                    action={() => togglePreview(sound)}
-                  />
-                </HStack>
-              </VStack>
-            ))
-          ) : (
-            <Text foregroundStyle="secondaryLabel">暂无自定义声音</Text>
-          )}
-        </Section>
-      </Form>
+      <GradientPage>{list}</GradientPage>
     </NavigationStack>
   )
 }

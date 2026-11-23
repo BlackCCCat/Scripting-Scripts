@@ -68,8 +68,6 @@ function emptyState(): CustomAlarmState {
     alarms: [],
     holidaySources: [defaultHolidaySource()],
     availableSounds: [DEFAULT_SOUND_NAME],
-    alarmCardGradientEnabled: false,
-    pageGradientEnabled: false,
     managedSystemAlarmIds: [],
     cleanupCandidateAlarmIds: [],
     alarmConfigurationVersion: ALARM_CONFIGURATION_VERSION,
@@ -316,8 +314,6 @@ export function loadCustomAlarmState(): CustomAlarmState {
       alarms,
       holidaySources: [builtinHolidaySource(normalizedSources)],
       availableSounds: normalizeSoundNames(Array.isArray(data?.availableSounds) ? data.availableSounds : []),
-      alarmCardGradientEnabled: Boolean(data?.alarmCardGradientEnabled),
-      pageGradientEnabled: Boolean(data?.pageGradientEnabled),
       managedSystemAlarmIds: mergeManagedSystemAlarmIds(
         normalizeStringIdList(data?.managedSystemAlarmIds),
         collectRecordSystemAlarmIds(alarms)
@@ -352,8 +348,6 @@ export function saveCustomAlarmState(state: CustomAlarmState): void {
       alarms: state.alarms,
       holidaySources: [holidaySource],
       availableSounds: normalizeSoundNames(state.availableSounds),
-      alarmCardGradientEnabled: Boolean(state.alarmCardGradientEnabled),
-      pageGradientEnabled: Boolean(state.pageGradientEnabled),
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds: normalizeStringIdList(state.cleanupCandidateAlarmIds),
       alarmConfigurationVersion: Math.max(0, Math.floor(Number(state.alarmConfigurationVersion) || 0)),

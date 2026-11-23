@@ -2,128 +2,78 @@ import {
   Form,
   HStack,
   Image,
-  NavigationStack,
-  ProgressView,
-  Section,
   Text,
-  VStack,
-  ZStack,
-  useColorScheme,
 } from "scripting"
 
 import type { HolidayCalendarSource } from "../types"
 import { formatDateTime } from "../utils/alarm_runtime"
-import { DEFAULT_HOLIDAY_SOURCE_ID } from "../utils/storage"
+import { BlockingProgressOverlay } from "./BlockingProgressOverlay"
 import { HolidayCalendarMonthView } from "./HolidayPreviewView"
-import { PageGradientBackground } from "./PageGradientBackground"
+import { GlassSection, GradientPage, GRADIENT_SCROLL_APPEARANCE } from "./PageAppearance"
 
 export function CalendarSettingsView(props: {
-  sources: HolidayCalendarSource[]
-  embedded?: boolean
-  isRefreshing?: boolean
-  pageGradientEnabled?: boolean
+  source: HolidayCalendarSource | null
+  isRefreshing: boolean
 }) {
-  const colorScheme = useColorScheme()
-  const source = props.sources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? props.sources[0] ?? null
+  const { source } = props
   const now = new Date()
   const currentYear = now.getFullYear()
   const todayKey = `${currentYear}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
-  const offDateKeys = source
-    ? Array.from(
-        new Set(
-          source.holidayDates.filter((dateKey) => String(dateKey).startsWith(`${currentYear}-`))
-        )
-      ).sort((a, b) => a.localeCompare(b))
-    : []
-  const workDateKeys = source
-    ? Array.from(
-        new Set(
-          source.holidayItems
-            .filter((item) => item.kind === "work" && String(item.dateKey).startsWith(`${currentYear}-`))
-            .map((item) => item.dateKey)
-        )
-      ).sort((a, b) => a.localeCompare(b))
-    : []
+  const yearPrefix = `${currentYear}-`
+  const offDateKeys = [...new Set(source?.holidayDates.filter((dateKey) => dateKey.startsWith(yearPrefix)))]
+  const workDateKeys = [...new Set(source?.holidayItems
+    .filter((item) => item.kind === "work" && item.dateKey.startsWith(yearPrefix))
+    .map((item) => item.dateKey))]
   const offCount = offDateKeys.length
   const remainingOffCount = offDateKeys.filter((dateKey) => dateKey >= todayKey).length
   const workCount = workDateKeys.length
   const remainingWorkCount = workDateKeys.filter((dateKey) => dateKey >= todayKey).length
 
-  const content = (
-    <ZStack>
+  return (
+    <GradientPage>
       <Form
         navigationTitle="日历"
-        navigationBarTitleDisplayMode="inline"
+        navigationBarTitleDisplayMode="large"
         formStyle="grouped"
-        background={props.pageGradientEnabled ? <PageGradientBackground /> : undefined}
-        scrollContentBackground={props.pageGradientEnabled ? "hidden" : "automatic"}
+        {...GRADIENT_SCROLL_APPEARANCE}
       >
-          <Section header={<Text>中国节假日</Text>}>
-            <HStack spacing={12}>
-              <Image systemName="calendar.badge.clock" foregroundStyle="#FF9500" />
-              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>数据源</Text>
-              <Text foregroundStyle="secondaryLabel">{source?.title || "中国节假日"}</Text>
-            </HStack>
-            <HStack spacing={12}>
-              <Image systemName="clock.arrow.circlepath" foregroundStyle="#2563EB" />
-              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>上次同步</Text>
-              <Text foregroundStyle="secondaryLabel">{source?.lastSyncedAt ? formatDateTime(source.lastSyncedAt) : "尚未同步"}</Text>
-            </HStack>
-            <HStack spacing={12}>
-              <Image systemName="sun.max.fill" foregroundStyle="#EA580C" />
-              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>休息日</Text>
-              <Text foregroundStyle="secondaryLabel">{`${remainingOffCount}/${offCount}`}</Text>
-            </HStack>
-            <HStack spacing={12}>
-              <Image systemName="briefcase.fill" foregroundStyle="#2563EB" />
-              <Text frame={{ maxWidth: "infinity", alignment: "leading" as any }}>调班日</Text>
-              <Text foregroundStyle="secondaryLabel">{`${remainingWorkCount}/${workCount}`}</Text>
-            </HStack>
-          </Section>
-
-          <Section footer={<Text>底部右侧按钮会刷新内置的中国节假日日历，并自动影响工作日/休息日闹钟规则。</Text>}>
-            {source ? (
-              <HolidayCalendarMonthView source={source} />
-            ) : (
-              <Text foregroundStyle="secondaryLabel">暂无可用日历数据。</Text>
-            )}
-          </Section>
+        <GlassSection>
+          {source ? (
+            <HolidayCalendarMonthView source={source} />
+          ) : (
+            <Text foregroundStyle="secondaryLabel">暂无可用日历数据。</Text>
+          )}
+        </GlassSection>
+        <GlassSection header={<Text>{`${currentYear} 年 · 剩余 / 总数`}</Text>}>
+          <HStack spacing={12}>
+            <Image systemName="sun.max.fill" foregroundStyle="systemOrange" frame={{ width: 20 }} accessibilityHidden />
+            <Text frame={{ maxWidth: "infinity", alignment: "leading" }}>休息日</Text>
+            <Text monospacedDigit foregroundStyle="secondaryLabel">{`${remainingOffCount} / ${offCount}`}</Text>
+          </HStack>
+          <HStack spacing={12}>
+            <Image systemName="briefcase.fill" foregroundStyle="systemTeal" frame={{ width: 20 }} accessibilityHidden />
+            <Text frame={{ maxWidth: "infinity", alignment: "leading" }}>调班日</Text>
+            <Text monospacedDigit foregroundStyle="secondaryLabel">{`${remainingWorkCount} / ${workCount}`}</Text>
+          </HStack>
+        </GlassSection>
+        <GlassSection
+          header={<Text>中国节假日</Text>}
+          footer={<Text>底部右侧按钮会刷新内置的中国节假日日历，并自动影响工作日/休息日闹钟规则。</Text>}
+        >
+          <HStack spacing={12}>
+            <Image systemName="calendar.badge.clock" foregroundStyle="systemOrange" frame={{ width: 20 }} accessibilityHidden />
+            <Text frame={{ maxWidth: "infinity", alignment: "leading" }}>数据源</Text>
+            <Text foregroundStyle="secondaryLabel">{source?.title || "中国节假日"}</Text>
+          </HStack>
+          <HStack spacing={12}>
+            <Image systemName="clock.arrow.circlepath" foregroundStyle="systemBlue" frame={{ width: 20 }} accessibilityHidden />
+            <Text frame={{ maxWidth: "infinity", alignment: "leading" }}>上次同步</Text>
+            <Text foregroundStyle="secondaryLabel">{source?.lastSyncedAt ? formatDateTime(source.lastSyncedAt) : "尚未同步"}</Text>
+          </HStack>
+        </GlassSection>
       </Form>
 
-      {props.isRefreshing ? (
-        <VStack
-          spacing={12}
-          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-          contentShape="rect"
-        >
-          <VStack
-            spacing={12}
-            padding={{ top: 20, bottom: 20, leading: 24, trailing: 24 }}
-            shadow={{
-              color: colorScheme === "dark" ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.12)",
-              radius: 20,
-              y: 8,
-            }}
-            background={{
-              style: colorScheme === "dark" ? "#1F1F22" : "#FFFFFF",
-              shape: { type: "rect", cornerRadius: 20 },
-            }}
-          >
-            <ProgressView progressViewStyle="circular" />
-            <Text font="subheadline" foregroundStyle="secondaryLabel">
-              正在刷新节假日日历...
-            </Text>
-          </VStack>
-        </VStack>
-      ) : null}
-    </ZStack>
-  )
-
-  if (props.embedded) return content
-
-  return (
-    <NavigationStack>
-      {content}
-    </NavigationStack>
+      {props.isRefreshing ? <BlockingProgressOverlay message="正在刷新节假日日历..." /> : null}
+    </GradientPage>
   )
 }

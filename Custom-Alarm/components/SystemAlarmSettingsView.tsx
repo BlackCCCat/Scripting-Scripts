@@ -1,6 +1,6 @@
 import {
   Button,
-  Form,
+  List,
   NavigationStack,
   Section,
   Text,
@@ -9,6 +9,14 @@ import {
   useMemo,
   useState,
 } from "scripting"
+
+import {
+  GlassListNotice,
+  glassListRowAppearance,
+  GradientPage,
+  GRADIENT_SCROLL_APPEARANCE,
+  PlainListText,
+} from "./PageAppearance"
 
 type AdvancedCleanupItem = {
   alarmId: string
@@ -43,6 +51,47 @@ function buildGroups(items: AdvancedCleanupItem[]): AdvancedCleanupGroup[] {
       timeLabel,
       items: groupedItems,
     }))
+}
+
+function renderCleanupGroup(group: AdvancedCleanupGroup, onDelete: () => void, diagnostic = false) {
+  const { timeLabel, items } = group
+  const heading = `${diagnostic ? "全部实例 · " : ""}${timeLabel} · ${items.length}`
+  return (
+    <Section
+      key={`${diagnostic ? "diagnostic" : "cleanup"}-${timeLabel}`}
+      listSectionSeparator="hidden"
+    >
+      <PlainListText heading text={heading} />
+      {items.map((item) => (
+        <VStack
+          key={item.alarmId}
+          alignment="leading"
+          spacing={4}
+          frame={{ maxWidth: "infinity", alignment: "leading" }}
+          padding={{ top: 10, bottom: 10, leading: 16, trailing: 16 }}
+          {...glassListRowAppearance()}
+        >
+          <Text font="subheadline">{item.title}</Text>
+          <Text font="caption" foregroundStyle="secondaryLabel">{item.summary}</Text>
+          <Text font="caption" foregroundStyle="tertiaryLabel">{item.detail}</Text>
+          <Text font="caption2" foregroundStyle="tertiaryLabel">{item.sourceLabel}</Text>
+        </VStack>
+      ))}
+      <VStack
+        frame={{ maxWidth: "infinity", minHeight: 44, alignment: "leading" }}
+        padding={{ leading: 16, trailing: 16 }}
+        {...glassListRowAppearance()}
+      >
+        <Button
+          title={`${diagnostic ? "删除" : "清理"} ${timeLabel} 的全部实例`}
+          buttonStyle="borderless"
+          role="destructive"
+          tint="red"
+          action={onDelete}
+        />
+      </VStack>
+    </Section>
+  )
 }
 
 export function SystemAlarmSettingsView(props: {
@@ -91,114 +140,47 @@ export function SystemAlarmSettingsView(props: {
     applySnapshot(await props.onDeleteIds(group.items.map((item) => item.alarmId)))
   }
 
+  const list = (
+    <List
+      navigationTitle="高级清理"
+      navigationBarTitleDisplayMode="inline"
+      listStyle="plain"
+      {...GRADIENT_SCROLL_APPEARANCE}
+      toolbar={{
+        topBarTrailing: (
+          <Button
+            title=""
+            systemImage="arrow.clockwise"
+            action={() => {
+              void refresh()
+            }}
+          />
+        ),
+      }}
+    >
+      <GlassListNotice text={`当前共发现 ${items.length} 个残留实例`} />
+      <PlainListText text="首页删除后由于意外错误仍残留在系统中的闹钟实例" />
+
+      {groups.length ? (
+        groups.map((group) => renderCleanupGroup(group, () => { void deleteGroup(group) }))
+      ) : (
+        <GlassListNotice text="当前没有需要手动清理的残留闹钟。" />
+      )}
+
+      <GlassListNotice text={`当前共扫描到 ${diagnosticItems.length} 个系统实例`} />
+      <PlainListText text="这里会列出系统接口当前返回的全部闹钟实例。它们不一定都属于首页里的闹钟，删除前请先确认。" />
+
+      {diagnosticGroups.length ? (
+        diagnosticGroups.map((group) => renderCleanupGroup(group, () => { void deleteDiagnosticGroup(group) }, true))
+      ) : (
+        <GlassListNotice text="当前没有扫描到任何系统闹钟实例。" />
+      )}
+    </List>
+  )
+
   return (
     <NavigationStack>
-      <Form
-        navigationTitle="高级清理"
-        navigationBarTitleDisplayMode="inline"
-        formStyle="grouped"
-        toolbar={{
-          topBarTrailing: (
-            <Button
-              title=""
-              systemImage="arrow.clockwise"
-              action={() => {
-                void refresh()
-              }}
-            />
-          ),
-        }}
-      >
-        <Section footer={<Text>首页删除后由于意外错误仍残留在系统中的闹钟实例</Text>}>
-          <Text foregroundStyle="secondaryLabel">
-            当前共发现 {items.length} 个残留实例
-          </Text>
-        </Section>
-
-        {groups.length ? (
-          groups.map((group) => (
-            <Section
-              key={group.timeLabel}
-              header={<Text>{`${group.timeLabel} · ${group.items.length}`}</Text>}
-            >
-              {group.items.map((item) => (
-                <VStack key={item.alarmId} spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                  <Text font="subheadline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.title}
-                  </Text>
-                  <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.summary}
-                  </Text>
-                  <Text font="caption" foregroundStyle="tertiaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.detail}
-                  </Text>
-                  <Text font="caption2" foregroundStyle="tertiaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.sourceLabel}
-                  </Text>
-                </VStack>
-              ))}
-
-              <Button
-                title={`清理 ${group.timeLabel} 的全部实例`}
-                role="destructive"
-                tint="red"
-                action={() => {
-                  void deleteGroup(group)
-                }}
-              />
-            </Section>
-          ))
-        ) : (
-          <Section>
-            <Text foregroundStyle="secondaryLabel">当前没有需要手动清理的残留闹钟。</Text>
-          </Section>
-        )}
-
-        <Section footer={<Text>这里会列出系统接口当前返回的全部闹钟实例。它们不一定都属于首页里的闹钟，删除前请先确认。</Text>}>
-          <Text foregroundStyle="secondaryLabel">
-            当前共扫描到 {diagnosticItems.length} 个系统实例
-          </Text>
-        </Section>
-
-        {diagnosticGroups.length ? (
-          diagnosticGroups.map((group) => (
-            <Section
-              key={`diagnostic-${group.timeLabel}`}
-              header={<Text>{`全部实例 · ${group.timeLabel} · ${group.items.length}`}</Text>}
-            >
-              {group.items.map((item) => (
-                <VStack key={`diagnostic-${item.alarmId}`} spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                  <Text font="subheadline" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.title}
-                  </Text>
-                  <Text font="caption" foregroundStyle="secondaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.summary}
-                  </Text>
-                  <Text font="caption" foregroundStyle="tertiaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.detail}
-                  </Text>
-                  <Text font="caption2" foregroundStyle="tertiaryLabel" frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {item.sourceLabel}
-                  </Text>
-                </VStack>
-              ))}
-
-              <Button
-                title={`删除 ${group.timeLabel} 的全部实例`}
-                role="destructive"
-                tint="red"
-                action={() => {
-                  void deleteDiagnosticGroup(group)
-                }}
-              />
-            </Section>
-          ))
-        ) : (
-          <Section>
-            <Text foregroundStyle="secondaryLabel">当前没有扫描到任何系统闹钟实例。</Text>
-          </Section>
-        )}
-      </Form>
+      <GradientPage>{list}</GradientPage>
     </NavigationStack>
   )
 }

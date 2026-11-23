@@ -5,10 +5,10 @@ import {
   HStack,
   Image,
   List,
+  Menu,
   Navigation,
   NavigationStack,
-  ProgressView,
-  Rectangle,
+  Section,
   Tab,
   TabView,
   Text,
@@ -17,9 +17,7 @@ import {
   ZStack,
   modifiers,
   type Color,
-  type KeywordPoint,
   useEffect,
-  useColorScheme,
   useMemo,
   useObservable,
   useRef,
@@ -28,8 +26,16 @@ import {
 
 import type { AlarmDraft, AlarmRecord, AlarmRepeatRule, HolidayCalendarSource } from "../types"
 import { AddAlarmView } from "./AddAlarmView"
+import { BlockingProgressOverlay } from "./BlockingProgressOverlay"
 import { CalendarSettingsView } from "./CalendarSettingsView"
-import { PageGradientBackground } from "./PageGradientBackground"
+import { HeaderAlarmActionLabel, NextAlarmHeader } from "./NextAlarmHeader"
+import {
+  GLASS_CARD_APPEARANCE,
+  GLASS_CARD_SHAPE,
+  GRADIENT_SCROLL_APPEARANCE,
+  GradientPage,
+  supportsLiquidGlass as usesLiquidGlass,
+} from "./PageAppearance"
 import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
 import { SoundSettingsView } from "./SoundSettingsView"
 import { StatusView } from "./StatusView"
@@ -40,12 +46,14 @@ import {
   disableAlarm,
   displaySubtitle,
   displayTime,
+  formatDateTime,
   nextOccurrenceDateLabel,
   nextOccurrenceTimestamp,
   reconcileAlarmRecords,
   scheduleAlarm,
 } from "../utils/alarm_runtime"
 import { canSkipAlarm, pendingSkippedOccurrences, skipOccurrence, undoSkippedOccurrence } from "../utils/alarm_skip"
+import { ALARM_TYPE_SYMBOLS, nextAlarmForDisplay } from "../utils/alarm_summary"
 import { buildHolidayDayMap, syncHolidayCalendarSource } from "../utils/holiday_calendar"
 import { DEFAULT_SOUND_NAME, loadAvailableSoundNames, soundDisplayName } from "../utils/alarm_sounds"
 import {
@@ -61,6 +69,10 @@ const STATUS_TAB = 0
 const ALARMS_TAB = 1
 const CALENDARS_TAB = 2
 const ACTION_TAB = 3
+const ALARM_CARD_PREVIEW = modifiers()
+  .contentShape({ kind: "interaction", shape: GLASS_CARD_SHAPE })
+  .contentShape({ kind: "dragPreview", shape: GLASS_CARD_SHAPE })
+  .contentShape({ kind: "contextMenuPreview", shape: GLASS_CARD_SHAPE })
 
 type ContentTab = typeof STATUS_TAB | typeof ALARMS_TAB | typeof CALENDARS_TAB
 type RootTab = ContentTab | typeof ACTION_TAB
@@ -237,21 +249,20 @@ function rowSwipeActions(props: {
 function AlarmMetaTag(props: {
   icon: string
   text: string
-  tint?: string
+  tint?: Color
 }) {
-  const tint = (props.tint ?? "#FF9500") as any
   return (
-    <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+    <HStack spacing={8} frame={{ maxWidth: "infinity", alignment: "leading" }}>
       <Image
         systemName={props.icon}
-        foregroundStyle={tint}
-        frame={{ width: 12, alignment: "center" as any }}
+        foregroundStyle={props.tint ?? "systemOrange"}
+        frame={{ width: 12, alignment: "center" }}
       />
       <Text
         font="caption"
         foregroundStyle="secondaryLabel"
         lineLimit={2}
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        frame={{ maxWidth: "infinity", alignment: "leading" }}
       >
         {props.text}
       </Text>
@@ -259,247 +270,68 @@ function AlarmMetaTag(props: {
   )
 }
 
-type AlarmCardGradientConfig = {
-  lightColors: Color[]
-  darkColors: Color[]
-  startPoint: KeywordPoint
-  endPoint: KeywordPoint
-}
-
-const ALARM_CARD_GRADIENT_POINTS = {
-  startPoint: "topLeading" as KeywordPoint,
-  endPoint: "bottomTrailing" as KeywordPoint,
-}
-
-const ALARM_CARD_GRADIENTS: Record<AlarmRepeatRule["kind"], AlarmCardGradientConfig> = {
-  once: {
-    ...ALARM_CARD_GRADIENT_POINTS,
-    lightColors: ["#FFF7ED", "#FED7AA", "#FDBA74"],
-    darkColors: ["#21120A", "#5C2D0C", "#9A3412"],
-  },
-  daily: {
-    ...ALARM_CARD_GRADIENT_POINTS,
-    lightColors: ["#ECFDF5", "#A7F3D0", "#6EE7B7"],
-    darkColors: ["#061C14", "#064E3B", "#047857"],
-  },
-  weekly: {
-    ...ALARM_CARD_GRADIENT_POINTS,
-    lightColors: ["#EFF6FF", "#BFDBFE", "#93C5FD"],
-    darkColors: ["#071527", "#1E3A8A", "#2563EB"],
-  },
-  monthly: {
-    ...ALARM_CARD_GRADIENT_POINTS,
-    lightColors: ["#F5F3FF", "#DDD6FE", "#C4B5FD"],
-    darkColors: ["#181226", "#4C1D95", "#7C3AED"],
-  },
-  holiday: {
-    ...ALARM_CARD_GRADIENT_POINTS,
-    lightColors: ["#FFF1F2", "#FDA4AF", "#FB7185"],
-    darkColors: ["#260B12", "#881337", "#BE123C"],
-  },
-  custom: {
-    ...ALARM_CARD_GRADIENT_POINTS,
-    lightColors: ["#ECFEFF", "#A5F3FC", "#67E8F9"],
-    darkColors: ["#061C22", "#155E75", "#0891B2"],
-  },
-}
-
-const ALARM_WATERMARK_SYMBOLS: Record<AlarmRepeatRule["kind"], string> = {
-  once: "clock",
-  daily: "arrow.clockwise",
-  weekly: "calendar",
-  monthly: "calendar.circle",
-  holiday: "calendar.badge.clock",
-  custom: "repeat",
-}
-
-function AlarmCardGradient(props: {
-  kind: AlarmRepeatRule["kind"]
-}) {
-  const gradientConfig = ALARM_CARD_GRADIENTS[props.kind]
-
-  return (
-    <Rectangle
-      fill={{
-        light: {
-          colors: gradientConfig.lightColors,
-          startPoint: gradientConfig.startPoint,
-          endPoint: gradientConfig.endPoint,
-        },
-        dark: {
-          colors: gradientConfig.darkColors,
-          startPoint: gradientConfig.startPoint,
-          endPoint: gradientConfig.endPoint,
-        },
-      }}
-      allowsHitTesting={false}
-    />
-  )
-}
-
 function AlarmRow(props: {
   record: AlarmRecord
   subtitle: string
   nextDateText: string
-  gradientEnabled: boolean
-  darkMode: boolean
   busy: boolean
   onToggle: (record: AlarmRecord, enabled: boolean) => void | Promise<void>
-  onSkip: (record: AlarmRecord) => void | Promise<void>
-  onUndoSkip: (record: AlarmRecord) => void | Promise<void>
 }) {
   const titleText = props.record.title.trim()
   const showsTitle = titleText.length > 0 && titleText !== "闹钟"
-  const supportsSkip = canSkipAlarm(props.record)
-  const canUndoSkip = pendingSkippedOccurrences(props.record, Date.now()).length > 0
-  const canSkip = supportsSkip && props.record.enabled && props.nextDateText !== "未安排" && !props.busy
-  const gradient = ALARM_CARD_GRADIENTS[props.record.repeatRule.kind]
-  const actionBackground: Color = props.gradientEnabled
-    ? props.darkMode ? gradient.lightColors[1] : gradient.darkColors[1]
-    : props.darkMode ? "#FED7AA" : "#9A3412"
-  const cancelBackground: Color = props.darkMode ? "#F8FAFC" : "#1F2937"
-  const buttonTextColor: Color = props.darkMode ? "#0F172A" : "#FFFFFF"
+  const once = props.record.repeatRule.kind === "once"
 
   return (
-    <ZStack
-      alignment="bottomTrailing"
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-      glassEffect={{ type: "rect", cornerRadius: 22 } as any}
-      clipShape={{ type: "rect", cornerRadius: 22 } as any}
-      modifiers={
-        modifiers()
-          .contentShape({
-            kind: "interaction",
-            shape: {
-              type: "rect",
-              cornerRadius: 22,
-            },
-          })
-          .contentShape({
-            kind: "dragPreview",
-            shape: {
-              type: "rect",
-              cornerRadius: 22,
-            },
-          })
-      }
+    <HStack
+      alignment="top"
+      spacing={12}
+      frame={{ maxWidth: "infinity", alignment: "leading" }}
+      padding={{ top: 12, bottom: 12, leading: 16, trailing: 16 }}
+      background={{
+        alignment: "bottomLeading",
+        content: (
+          <Image
+            systemName={ALARM_TYPE_SYMBOLS[props.record.repeatRule.kind]}
+            font={56}
+            foregroundStyle={{ light: "rgba(60,90,105,0.07)", dark: "rgba(225,235,240,0.07)" }}
+            allowsHitTesting={false}
+            accessibilityHidden
+          />
+        ),
+      }}
     >
-      {props.gradientEnabled ? <AlarmCardGradient kind={props.record.repeatRule.kind} /> : null}
-      <HStack
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        allowsHitTesting={false}
-      >
-        <Image
-          systemName={ALARM_WATERMARK_SYMBOLS[props.record.repeatRule.kind]}
-          font={96}
-          foregroundStyle={{ light: "rgba(60,90,105,0.09)", dark: "rgba(225,235,240,0.08)" }}
-          frame={{ width: 116, height: 116, alignment: "bottomLeading" as any }}
-          accessibilityHidden
+      <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+        <Text
+          font="largeTitle"
+          fontWeight="semibold"
+          monospacedDigit
+          lineLimit={1}
+          minScaleFactor={0.75}
+          foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
+        >
+          {displayTime(props.record)}
+        </Text>
+        {showsTitle ? <Text font="subheadline" lineLimit={1}>{titleText}</Text> : null}
+        <AlarmMetaTag
+          icon={once ? "clock" : "arrow.trianglehead.2.clockwise"}
+          text={once ? `单次 · ${props.subtitle}` : props.subtitle}
         />
-      </HStack>
-      <HStack
-        spacing={10}
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        padding={{ top: 16, bottom: 16, leading: 16, trailing: 12 }}
-      >
-        <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={10}>
-          <HStack spacing={10} frame={{ maxWidth: "infinity", alignment: "top" as any }}>
-            <VStack frame={{ maxWidth: "infinity", alignment: "topLeading" as any }} spacing={3}>
-              <Text
-                font="largeTitle"
-                fontWeight="semibold"
-                monospacedDigit
-                foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
-                frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-              >
-                {displayTime(props.record)}
-              </Text>
-              {showsTitle ? (
-                <Text
-                  font="subheadline"
-                  foregroundStyle={props.record.enabled ? "label" : "secondaryLabel"}
-                  lineLimit={1}
-                  frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                >
-                  {titleText}
-                </Text>
-              ) : null}
-            </VStack>
-            <VStack frame={{ width: 104, alignment: "trailing" as any }}>
-              <Toggle
-                title=""
-                value={props.record.enabled}
-                disabled={props.busy}
-                onChanged={(value: boolean) => props.onToggle(props.record, value)}
-                toggleStyle="switch"
-                controlSize="large"
-                scaleEffect={{ x: 1.3, y: 1.3, anchor: "trailing" }}
-              />
-            </VStack>
-          </HStack>
-          <VStack
-            spacing={6}
-            frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-            padding={{ trailing: supportsSkip || canUndoSkip ? 112 : 0 }}
-          >
-            <AlarmMetaTag
-              icon="arrow.trianglehead.2.clockwise"
-              text={props.subtitle}
-            />
-            <AlarmMetaTag
-              icon="calendar"
-              text={`下次 ${props.nextDateText}`}
-              tint="#2563EB"
-            />
-            <AlarmMetaTag
-              icon="speaker.wave.2"
-              text={`声音 ${soundDisplayName(props.record.soundName)}`}
-            />
-          </VStack>
-        </VStack>
-      </HStack>
-      {supportsSkip || canUndoSkip ? (
-        <VStack spacing={4} padding={{ bottom: 16, trailing: 12 }}>
-          {supportsSkip ? (
-            <Button
-              buttonStyle="plain"
-              disabled={!canSkip}
-              action={() => props.onSkip(props.record)}
-            >
-              <Text
-                font="subheadline"
-                foregroundStyle={buttonTextColor}
-                frame={{ width: 104, height: 36 }}
-                background={{ style: actionBackground, shape: "capsule" }}
-                contentShape="capsule"
-              >
-                跳过闹钟
-              </Text>
-            </Button>
-          ) : null}
-          <Button
-            buttonStyle="plain"
-            disabled={!canUndoSkip || props.busy}
-            action={() => props.onUndoSkip(props.record)}
-          >
-            <Text
-              font="subheadline"
-              foregroundStyle={buttonTextColor}
-              frame={{ width: 104, height: 36 }}
-              background={{ style: cancelBackground, shape: "capsule" }}
-              contentShape="capsule"
-            >
-              取消跳过
-            </Text>
-          </Button>
-        </VStack>
-      ) : null}
-    </ZStack>
+        <AlarmMetaTag icon="calendar" text={`下次 ${props.nextDateText}`} tint="#2563EB" />
+        <AlarmMetaTag icon="speaker.wave.2" text={`声音 ${soundDisplayName(props.record.soundName)}`} />
+      </VStack>
+      <Toggle
+        title="启用闹钟"
+        labelsHidden
+        value={props.record.enabled}
+        disabled={props.busy}
+        onChanged={(value: boolean) => props.onToggle(props.record, value)}
+        toggleStyle="switch"
+      />
+    </HStack>
   )
 }
 
 export function HomeView() {
-  const colorScheme = useColorScheme()
   const releaseNotesSheet = useReleaseNotesSheet({
     title: "更新说明",
     // Legacy identifier retained so renaming the Markdown file does not reset read state.
@@ -510,8 +342,6 @@ export function HomeView() {
   const records = alarmRecords.value
   const [holidaySources, setHolidaySources] = useState<HolidayCalendarSource[]>(() => initialState.holidaySources)
   const [availableSounds, setAvailableSounds] = useState<string[]>(() => initialState.availableSounds)
-  const [alarmCardGradientEnabled, setAlarmCardGradientEnabled] = useState<boolean>(() => initialState.alarmCardGradientEnabled)
-  const [pageGradientEnabled, setPageGradientEnabled] = useState<boolean>(() => initialState.pageGradientEnabled)
   const [managedSystemAlarmIds, setManagedSystemAlarmIds] = useState<string[]>(() => initialState.managedSystemAlarmIds)
   const [cleanupCandidateAlarmIds, setCleanupCandidateAlarmIds] = useState<string[]>(() => initialState.cleanupCandidateAlarmIds)
   const [alarmConfigurationVersion, setAlarmConfigurationVersion] = useState<number>(() => initialState.alarmConfigurationVersion)
@@ -529,8 +359,8 @@ export function HomeView() {
   const holidaySourceMap = useMemo(() => {
     return new Map(holidaySources.map((item) => [item.id, item]))
   }, [holidaySources])
-  const systemAlarmIdSet = useMemo(() => {
-    return new Set(systemAlarms.map((item) => item.id))
+  const systemAlarmMap = useMemo(() => {
+    return new Map(systemAlarms.map((alarm) => [alarm.id, alarm]))
   }, [systemAlarms])
 
   const enabledCount = useMemo(() => records.filter((item) => item.enabled).length, [records])
@@ -538,11 +368,11 @@ export function HomeView() {
     const activeIds = new Set<string>()
     for (const record of records) {
       for (const id of record.systemAlarmIds) {
-        if (systemAlarmIdSet.has(id)) activeIds.add(id)
+        if (systemAlarmMap.has(id)) activeIds.add(id)
       }
     }
     return activeIds.size
-  }, [records, systemAlarmIdSet])
+  }, [records, systemAlarmMap])
   const selectedHolidaySource = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
   const currentMonthSummary = useMemo(() => {
     if (!selectedHolidaySource) return { totalOff: 0, remainingOff: 0, totalWork: 0, remainingWork: 0 }
@@ -587,8 +417,6 @@ export function HomeView() {
       alarms: nextRecords,
       holidaySources: nextHolidaySources,
       availableSounds: nextAvailableSounds,
-      alarmCardGradientEnabled,
-      pageGradientEnabled,
       managedSystemAlarmIds: nextManagedSystemAlarmIds,
       cleanupCandidateAlarmIds: nextCleanupCandidateAlarmIds,
       alarmConfigurationVersion: nextAlarmConfigurationVersion,
@@ -705,13 +533,11 @@ export function HomeView() {
       alarms: records,
       holidaySources,
       availableSounds,
-      alarmCardGradientEnabled,
-      pageGradientEnabled,
       managedSystemAlarmIds,
       cleanupCandidateAlarmIds,
       alarmConfigurationVersion,
     })
-  }, [records, holidaySources, availableSounds, alarmCardGradientEnabled, pageGradientEnabled, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
+  }, [records, holidaySources, availableSounds, managedSystemAlarmIds, cleanupCandidateAlarmIds, alarmConfigurationVersion])
 
   useEffect(() => {
     if (!AlarmManager.isAvailable) return
@@ -739,7 +565,7 @@ export function HomeView() {
     const isJanFirst = today.getMonth() === 0 && today.getDate() === 1
     if (!isJanFirst) return
 
-    const source = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
+    const source = selectedHolidaySource
     if (!source) return
 
     const lastSyncedAt = source.lastSyncedAt ? new Date(source.lastSyncedAt) : null
@@ -917,8 +743,7 @@ export function HomeView() {
     }
   }
 
-  async function applyHolidaySources(updatedSources: HolidayCalendarSource[], options?: { muteBusy?: boolean }) {
-    // 节假日日历更新后，只重新排期受影响的节假日闹钟，避免把其他规则的闹钟也重排一遍。
+  async function applyHolidaySources(updatedSources: HolidayCalendarSource[]) {
     setHolidaySources(updatedSources)
 
     const holidaySourceMapAfterUpdate = new Map(updatedSources.map((item) => [item.id, item]))
@@ -931,9 +756,7 @@ export function HomeView() {
       ? markCleanupCandidates(replacingIds)
       : cleanupCandidateAlarmIds
 
-    if (!options?.muteBusy) setGlobalBusy(true)
     try {
-      const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
       const updatedRecords: AlarmRecord[] = []
       for (const record of records) {
         if (record.repeatRule.kind !== "holiday" || !record.enabled) {
@@ -953,8 +776,6 @@ export function HomeView() {
       await refreshSystemState()
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
-    } finally {
-      if (!options?.muteBusy) setGlobalBusy(false)
     }
   }
 
@@ -1045,7 +866,6 @@ export function HomeView() {
       const nextCleanupCandidateIds = !enabled && record.systemAlarmIds.length
         ? markCleanupCandidates(record.systemAlarmIds)
         : cleanupCandidateAlarmIds
-      const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
       const optimisticRecord: AlarmRecord = {
         ...record,
         enabled,
@@ -1074,25 +894,33 @@ export function HomeView() {
     }
   }
 
-  async function changeSkippedAlarm(record: AlarmRecord, undo: boolean) {
+  async function changeSkippedAlarm(record: AlarmRecord, skipTimestamp: number | null) {
     if (!AlarmManager.isAvailable || globalBusy || busyRecordId || skipMutationInProgress.current) return
+    const undo = skipTimestamp === null
     if (undo ? !pendingSkippedOccurrences(record, Date.now()).length : !canSkipAlarm(record)) return
 
     setBusyRecordId(record.id)
     skipMutationInProgress.current = true
     try {
-      const now = Date.now()
       const currentAlarms = new Map((await AlarmManager.alarms()).map((alarm) => [alarm.id, alarm]))
-      if (record.systemAlarmIds.some((id) => currentAlarms.get(id)?.state !== "scheduled")) {
+      const now = Date.now()
+      const latestRecord = alarmRecords.value.find((item) => item.id === record.id)
+      if (latestRecord?.updatedAt !== record.updatedAt
+        || record.systemAlarmIds.some((id) => currentAlarms.get(id)?.state !== "scheduled")) {
         throw new Error("当前闹钟状态已变化，请刷新后重试。")
       }
 
-      const currentTimestamp = nextOccurrenceTimestamp(record, holidaySourceMap, now)
-      const changed = undo
+      if (skipTimestamp !== null) {
+        const scheduled = nextAlarmForDisplay(
+          [record], currentAlarms, (item) => nextOccurrenceTimestamp(item, holidaySourceMap, now), now
+        )
+        if (scheduled?.timestamp !== skipTimestamp) {
+          throw new Error("下一次响铃时间已变化，请重试。")
+        }
+      }
+      const changed = skipTimestamp === null
         ? undoSkippedOccurrence(record, now)
-        : record.enabled && currentTimestamp
-          ? skipOccurrence(record, currentTimestamp, now)
-          : null
+        : skipOccurrence(record, skipTimestamp, now)
       if (!changed) return
 
       const limit = "occurrenceLimit" in record.repeatRule ? record.repeatRule.occurrenceLimit : null
@@ -1130,21 +958,10 @@ export function HomeView() {
     }
   }
 
-  function updateAlarmCardGradientEnabled(enabled: boolean) {
-    if (enabled === alarmCardGradientEnabled) return
-    setAlarmCardGradientEnabled(enabled)
-  }
-
-  function updatePageGradientEnabled(enabled: boolean) {
-    if (enabled === pageGradientEnabled) return
-    setPageGradientEnabled(enabled)
-  }
-
   function renderStatusTab() {
     return (
       <NavigationStack>
         <StatusView
-          embedded
           logicalAlarmCount={records.length}
           enabledCount={enabledCount}
           managedInstanceCount={managedInstanceCount}
@@ -1157,84 +974,152 @@ export function HomeView() {
           currentMonthRemainingWorkCount={currentMonthSummary.remainingWork}
           lastSyncedAt={selectedHolidaySource?.lastSyncedAt ?? null}
           availableSoundCount={Math.max(0, availableSounds.length - 1)}
-          alarmCardGradientEnabled={alarmCardGradientEnabled}
-          pageGradientEnabled={pageGradientEnabled}
           onOpenSoundSettings={() => {
             void openSoundSettings()
           }}
-          onAlarmCardGradientEnabledChange={updateAlarmCardGradientEnabled}
-          onPageGradientEnabledChange={updatePageGradientEnabled}
         />
       </NavigationStack>
     )
   }
 
+  const previewTime = Date.now()
+  const next = nextAlarmForDisplay(
+    records,
+    systemAlarmMap,
+    (record) => nextOccurrenceTimestamp(record, holidaySourceMap, previewTime),
+    previewTime
+  )
+  const skipTarget = next && canSkipAlarm(next.record) ? next : null
+  const pending = records.flatMap((record) => {
+    const timestamp = pendingSkippedOccurrences(record, previewTime).at(-1)
+    return timestamp === undefined ? [] : [{ record, timestamp }]
+  })
+  const directUndo = pending.length === 1 && pending[0].record.id === next?.record.id
+    ? pending[0].record : null
+  const disablesHeaderActions = globalBusy || busyRecordId !== null
+
   function renderAlarmsTab() {
     return (
       <NavigationStack>
-        <List
-          navigationTitle="闹钟"
-          navigationBarTitleDisplayMode="inline"
-          listStyle="insetGroup"
-          background={pageGradientEnabled ? <PageGradientBackground /> : undefined}
-          scrollContentBackground={pageGradientEnabled ? "hidden" : "automatic"}
-          toolbar={{
-            topBarTrailing: (
-              <Button
-                title=""
-                systemImage="gearshape"
-                action={() => {
-                  void openSystemAlarmSettings()
-                }}
-              />
-            ),
-          }}
-        >
-          {!AlarmManager.isAvailable ? (
-            <Text foregroundStyle="secondaryLabel">当前系统不支持 AlarmManager。</Text>
-          ) : records.length ? (
-            <ForEach
-              data={alarmRecords}
-              editActions="move"
-              builder={(record) => {
-                return (
-                  <VStack
-                    key={record.id}
-                    moveDisabled={globalBusy || busyRecordId !== null}
-                    frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-                    background="rgba(0,0,0,0.001)"
-                    contentShape={{ kind: "interaction", shape: { type: "rect" } } as any}
-                    listRowInsets={{ top: 6, bottom: 6, leading: 12, trailing: 12 }}
-                    listRowSeparator="hidden"
-                    listRowBackground={<EmptyView />}
-                    trailingSwipeActions={rowSwipeActions({
-                      onEdit: () => {
-                        void editAlarm(record)
-                      },
-                      onDelete: () => {
-                        void removeAlarm(record)
-                      },
-                    })}
-                  >
-                    <AlarmRow
-                      record={record}
-                      subtitle={displaySubtitle(record, holidaySourceMap)}
-                      nextDateText={nextOccurrenceDateLabel(record, holidaySourceMap)}
-                      gradientEnabled={alarmCardGradientEnabled}
-                      darkMode={colorScheme === "dark"}
-                      busy={globalBusy || busyRecordId === record.id}
-                      onToggle={toggleAlarm}
-                      onSkip={(item) => changeSkippedAlarm(item, false)}
-                      onUndoSkip={(item) => changeSkippedAlarm(item, true)}
+        <GradientPage>
+          <List
+            navigationTitle="闹钟"
+            navigationBarTitleDisplayMode="large"
+            listStyle="insetGroup"
+            listSectionSpacing="compact"
+            {...GRADIENT_SCROLL_APPEARANCE}
+            toolbar={{
+              topBarTrailing: (
+                <Button
+                  title=""
+                  systemImage="gearshape"
+                  accessibilityLabel="闹钟设置"
+                  action={() => {
+                    void openSystemAlarmSettings()
+                  }}
+                />
+              ),
+            }}
+          >
+            {!AlarmManager.isAvailable ? (
+              <Text foregroundStyle="secondaryLabel">当前系统不支持 AlarmManager。</Text>
+            ) : (
+              <>
+                <Section listSectionMargins={usesLiquidGlass ? 0 : undefined}>
+                  <NextAlarmHeader
+                    alarm={next ? { timestamp: next.timestamp, rule: next.record.repeatRule } : null}
+                    now={previewTime}
+                    actions={skipTarget || pending.length ? (
+                      <VStack alignment="trailing" spacing={8}>
+                        {skipTarget ? (
+                          <Button
+                            buttonStyle={usesLiquidGlass ? "glass" : "bordered"}
+                            buttonBorderShape="capsule"
+                            controlSize="large"
+                            disabled={disablesHeaderActions}
+                            action={() => changeSkippedAlarm(skipTarget.record, skipTarget.timestamp)}
+                          >
+                            <HeaderAlarmActionLabel title="跳过闹钟" accented />
+                          </Button>
+                        ) : null}
+                        {directUndo ? (
+                          <Button
+                            buttonStyle={usesLiquidGlass ? "glass" : "bordered"}
+                            buttonBorderShape="capsule"
+                            controlSize="large"
+                            disabled={disablesHeaderActions}
+                            action={() => changeSkippedAlarm(directUndo, null)}
+                          >
+                            <HeaderAlarmActionLabel title="取消跳过" />
+                          </Button>
+                        ) : pending.length ? (
+                          <Menu
+                            label={
+                              <HeaderAlarmActionLabel
+                                title="取消跳过"
+                                menuSurface={usesLiquidGlass ? "glass" : "standard"}
+                              />
+                            }
+                            menuStyle="borderlessButton"
+                            disabled={disablesHeaderActions}
+                          >
+                            {pending.map(({ record, timestamp }) => (
+                              <Button
+                                key={record.id}
+                                title={`${record.title} · ${formatDateTime(timestamp)}`}
+                                systemImage={ALARM_TYPE_SYMBOLS[record.repeatRule.kind]}
+                                action={() => changeSkippedAlarm(record, null)}
+                              />
+                            ))}
+                          </Menu>
+                        ) : null}
+                      </VStack>
+                    ) : undefined}
+                  />
+                </Section>
+                <Section header={<Text>我的闹钟</Text>}>
+                  {records.length ? (
+                    <ForEach
+                      data={alarmRecords}
+                      editActions="move"
+                      builder={(record) => (
+                        <VStack
+                          key={record.id}
+                          moveDisabled={globalBusy || busyRecordId !== null}
+                          frame={{ maxWidth: "infinity", alignment: "leading" }}
+                          {...GLASS_CARD_APPEARANCE}
+                          clipShape={GLASS_CARD_SHAPE}
+                          modifiers={ALARM_CARD_PREVIEW}
+                          listRowInsets={{ top: 5, bottom: 5, leading: 0, trailing: 0 }}
+                          listRowBackground={<EmptyView />}
+                          listRowSeparator="hidden"
+                          trailingSwipeActions={rowSwipeActions({
+                            onEdit: () => {
+                              void editAlarm(record)
+                            },
+                            onDelete: () => {
+                              void removeAlarm(record)
+                            },
+                          })}
+                        >
+                          <AlarmRow
+                            record={record}
+                            subtitle={displaySubtitle(record, holidaySourceMap)}
+                            nextDateText={nextOccurrenceDateLabel(record, holidaySourceMap)}
+                            busy={globalBusy || busyRecordId === record.id}
+                            onToggle={toggleAlarm}
+                          />
+                        </VStack>
+                      )}
                     />
-                  </VStack>
-                )
-              }}
-            />
-          ) : (
-            <Text foregroundStyle="secondaryLabel">点击底部右侧按钮创建一个闹钟。</Text>
-          )}
-        </List>
+                  ) : (
+                    <Text foregroundStyle="secondaryLabel">点击底部右侧按钮创建一个闹钟。</Text>
+                  )}
+                </Section>
+              </>
+            )}
+          </List>
+        </GradientPage>
       </NavigationStack>
     )
   }
@@ -1243,10 +1128,8 @@ export function HomeView() {
     return (
       <NavigationStack>
         <CalendarSettingsView
-          embedded
-          sources={holidaySources}
+          source={selectedHolidaySource}
           isRefreshing={calendarRefreshing}
-          pageGradientEnabled={pageGradientEnabled}
         />
       </NavigationStack>
     )
@@ -1256,7 +1139,6 @@ export function HomeView() {
     if (globalBusy || busyRecordId) return
     setGlobalBusy(true)
     setAlarmDeleting(true)
-    const systemAlarmMap = new Map(systemAlarms.map((item) => [item.id, item]))
     const nextCleanupCandidateIds = mergeManagedSystemAlarmIds(cleanupCandidateAlarmIds, record.systemAlarmIds)
     const nextRecords = records.filter((item) => item.id !== record.id)
     try {
@@ -1264,7 +1146,6 @@ export function HomeView() {
       setCleanupCandidateAlarmIds(nextCleanupCandidateIds)
       saveStateSnapshot(nextRecords, holidaySources, availableSounds, managedSystemAlarmIds, nextCleanupCandidateIds)
 
-      // 先取消系统里已经注册的实例，再从首页记录里删掉它。
       await deleteAlarm(record, systemAlarmMap)
       await refreshSystemState()
     } catch (error: any) {
@@ -1387,14 +1268,14 @@ export function HomeView() {
 
   async function refreshBuiltinHolidayCalendar(options?: { showLoading?: boolean }) {
     if (busyRecordId) return
-    const source = holidaySources.find((item) => item.id === DEFAULT_HOLIDAY_SOURCE_ID) ?? holidaySources[0] ?? null
+    const source = selectedHolidaySource
     if (!source) return
 
     if (options?.showLoading !== false) setCalendarRefreshing(true)
     try {
       const synced = await syncHolidayCalendarSource(source)
       const updatedSources = holidaySources.map((item) => (item.id === synced.id ? synced : item))
-      await applyHolidaySources(updatedSources, { muteBusy: true })
+      await applyHolidaySources(updatedSources)
     } catch (error: any) {
       await Dialog.alert({ message: String(error?.message ?? error) })
     } finally {
@@ -1411,9 +1292,9 @@ export function HomeView() {
       <TabView
         selection={activeTab as any}
         tint="systemOrange"
-        tabViewStyle="sidebarAdaptable"
-        tabBarMinimizeBehavior="onScrollDown"
-        tabViewSearchActivation="searchTabSelection"
+        tabViewStyle={usesLiquidGlass ? "sidebarAdaptable" : "automatic"}
+        tabBarMinimizeBehavior={usesLiquidGlass ? "onScrollDown" : undefined}
+        tabViewSearchActivation={usesLiquidGlass ? "searchTabSelection" : undefined}
       >
         <Tab
           title="状态"
@@ -1440,10 +1321,10 @@ export function HomeView() {
         </Tab>
 
         <Tab
-          title=""
+          title={usesLiquidGlass ? "" : lastContentTab === ALARMS_TAB ? "添加" : "刷新"}
           systemImage={accessoryIconName()}
           value={ACTION_TAB}
-          role="search"
+          role={usesLiquidGlass ? "search" : undefined}
         >
           {lastContentTab === STATUS_TAB
             ? renderStatusTab()
@@ -1454,30 +1335,7 @@ export function HomeView() {
       </TabView>
 
       {alarmWriting || alarmDeleting ? (
-        <VStack
-          spacing={12}
-          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "center" as any }}
-          contentShape="rect"
-        >
-          <VStack
-            spacing={12}
-            padding={{ top: 20, bottom: 20, leading: 24, trailing: 24 }}
-            shadow={{
-              color: colorScheme === "dark" ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.12)",
-              radius: 20,
-              y: 8,
-            }}
-            background={{
-              style: colorScheme === "dark" ? "#1F1F22" : "#FFFFFF",
-              shape: { type: "rect", cornerRadius: 20 },
-            }}
-          >
-            <ProgressView progressViewStyle="circular" />
-            <Text font="subheadline" foregroundStyle="secondaryLabel">
-              {alarmWriting ? "正在写入闹钟..." : "正在删除闹钟..."}
-            </Text>
-          </VStack>
-        </VStack>
+        <BlockingProgressOverlay message={alarmWriting ? "正在写入闹钟..." : "正在删除闹钟..."} />
       ) : null}
     </ZStack>
   )

@@ -5,14 +5,18 @@ import {
   Spacer,
   Text,
   VStack,
-  useColorScheme,
   useState,
 } from "scripting"
 
 import type { HolidayCalendarSource } from "../types"
-import { buildHolidayDayMap } from "../utils/holiday_calendar"
+import { buildHolidayDayMap, type HolidayDayInfo } from "../utils/holiday_calendar"
+import { supportsLiquidGlass } from "./PageAppearance"
 
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"]
+const HOLIDAY_CELL_COLORS = {
+  off: { background: { light: "#FFE8BF", dark: "#4A2D14" }, text: { light: "#8A350B", dark: "#FFD392" } },
+  work: { background: { light: "#D1EFE8", dark: "#173B36" }, text: { light: "#07594D", dark: "#9BE4D4" } },
+} as const
 
 function parseDateKey(key: string): Date | null {
   const match = String(key).match(/^(\d{4})-(\d{2})-(\d{2})$/)
@@ -34,15 +38,12 @@ function shiftMonth(year: number, month: number, offset: number): { year: number
 }
 
 function buildMonthMap(source: HolidayCalendarSource, year: number, month: number) {
-  const map = new Map<number, { kind: "off" | "work" | "unknown"; label: string }>()
+  const map = new Map<number, HolidayDayInfo>()
   const dayMap = buildHolidayDayMap(source)
   for (const [dateKey, info] of dayMap.entries()) {
     const date = parseDateKey(dateKey)
     if (!date || date.getFullYear() !== year || date.getMonth() + 1 !== month) continue
-    map.set(date.getDate(), {
-      kind: info.kind,
-      label: info.label,
-    })
+    map.set(date.getDate(), info)
   }
   return map
 }
@@ -75,31 +76,31 @@ function buildCells(source: HolidayCalendarSource, year: number, month: number) 
   return cells
 }
 
-function DayCell(props: { day: number | null; kind: "off" | "work" | "unknown" | null; label: string }) {
-  const isOff = props.kind === "off"
-  const isWork = props.kind === "work"
+function DayCell(props: { day: number | null; kind: "off" | "work" | "unknown" | null; label: string; today: boolean }) {
+  const colors = props.kind === "off" || props.kind === "work" ? HOLIDAY_CELL_COLORS[props.kind] : null
+  const background = colors?.background ?? (props.today ? "secondarySystemFill" : undefined)
   return (
     <VStack
       spacing={2}
-      frame={{ maxWidth: "infinity", minHeight: 48, alignment: "top" as any }}
-      padding={{ top: 4, bottom: 4 }}
-      background={isOff
-        ? { style: "#FFF2E8", shape: { type: "rect", cornerRadius: 10 } }
-        : isWork
-          ? { style: "#EFF6FF", shape: { type: "rect", cornerRadius: 10 } }
-          : undefined}
+      frame={{ maxWidth: "infinity", minHeight: 37, alignment: "top" }}
+      padding={{ top: 5, bottom: 3 }}
+      background={background ? { style: background, shape: { type: "rect", cornerRadius: 10 } } : undefined}
     >
       <Text
-        font="caption"
-        foregroundStyle={isOff ? "#C2410C" : isWork ? "#1D4ED8" : "secondaryLabel"}
-        frame={{ maxWidth: "infinity", alignment: "center" as any }}
+        font="subheadline"
+        fontWeight={props.today || colors ? "semibold" : "regular"}
+        monospacedDigit
+        foregroundStyle={colors?.text ?? "label"}
+        frame={{ maxWidth: "infinity", alignment: "center" }}
       >
         {props.day == null ? "" : String(props.day)}
       </Text>
       <Text
         font="caption2"
-        foregroundStyle={isOff ? "#EA580C" : isWork ? "#2563EB" : "clear"}
-        frame={{ maxWidth: "infinity", alignment: "center" as any }}
+        foregroundStyle={colors?.text ?? "clear"}
+        lineLimit={1}
+        minScaleFactor={0.7}
+        frame={{ maxWidth: "infinity", alignment: "center" }}
       >
         {props.label}
       </Text>
@@ -110,84 +111,56 @@ function DayCell(props: { day: number | null; kind: "off" | "work" | "unknown" |
 export function HolidayCalendarMonthView(props: {
   source: HolidayCalendarSource
 }) {
-  const colorScheme = useColorScheme()
+  const monthButtonStyle = supportsLiquidGlass ? "glass" : "bordered"
   const now = new Date()
   const currentYear = now.getFullYear()
   const currentMonth = now.getMonth() + 1
-  const [year, setYear] = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [{ year, month }, setVisibleMonth] = useState({ year: currentYear, month: currentMonth })
   const cells = buildCells(props.source, year, month)
-  const weeks = Array.from({ length: Math.ceil(cells.length / 7) }, (_, index) => {
+  const weeks = Array.from({ length: cells.length / 7 }, (_, index) => {
     return cells.slice(index * 7, index * 7 + 7)
   })
+  const showingCurrentMonth = year === currentYear && month === currentMonth
 
   function step(offset: number) {
-    const next = shiftMonth(year, month, offset)
-    setYear(next.year)
-    setMonth(next.month)
+    setVisibleMonth((current) => shiftMonth(current.year, current.month, offset))
   }
 
   function jumpToCurrentMonth() {
-    setYear(currentYear)
-    setMonth(currentMonth)
+    setVisibleMonth({ year: currentYear, month: currentMonth })
   }
 
   return (
     <VStack
-      spacing={12}
-      padding={{ top: 6, bottom: 4 }}
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+      spacing={11}
+      padding={{ top: 4, bottom: 5 }}
+      frame={{ maxWidth: "infinity", alignment: "leading" }}
     >
-      <HStack
-        spacing={12}
-        padding={{ top: 6, bottom: 6, leading: 4, trailing: 4 }}
-      >
+      <HStack spacing={8}>
         <Button
-          title=""
-          systemImage="chevron.left"
-          buttonStyle="plain"
+          buttonStyle={monthButtonStyle}
+          buttonBorderShape="circle"
+          accessibilityLabel="上个月"
           action={() => step(-1)}
-        />
+        >
+          <Image systemName="chevron.left" font="subheadline" fontWeight="semibold" frame={{ width: 24, height: 24 }} />
+        </Button>
         <Spacer />
-        <VStack spacing={2}>
-          <Text font="headline">{monthTitle(year, month)}</Text>
-          <Text font="caption" foregroundStyle="secondaryLabel">
-            仅显示休息日与调班日
-          </Text>
-        </VStack>
+        <Text font="headline" monospacedDigit>{monthTitle(year, month)}</Text>
         <Spacer />
         <Button
-          title=""
-          systemImage="chevron.right"
-          buttonStyle="plain"
+          buttonStyle={monthButtonStyle}
+          buttonBorderShape="circle"
+          accessibilityLabel="下个月"
           action={() => step(1)}
-        />
+        >
+          <Image systemName="chevron.right" font="subheadline" fontWeight="semibold" frame={{ width: 24, height: 24 }} />
+        </Button>
       </HStack>
 
-      {(year !== currentYear || month !== currentMonth) && (
-        <HStack padding={{ leading: 4, trailing: 4 }}>
-          <Spacer />
-          <Button
-            title="回到本月"
-            buttonStyle="plain"
-            action={jumpToCurrentMonth}
-          />
-        </HStack>
-      )}
-
       <VStack
-        spacing={10}
-        padding={{ top: 12, bottom: 12, leading: 12, trailing: 12 }}
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
-        shadow={{
-          color: colorScheme === "dark" ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.06)",
-          radius: colorScheme === "dark" ? 10 : 14,
-          y: colorScheme === "dark" ? 4 : 6,
-        }}
-        background={{
-          style: colorScheme === "dark" ? "#1C1C1E" : "#F2F2F7",
-          shape: { type: "rect", cornerRadius: 18 },
-        }}
+        spacing={8}
+        frame={{ maxWidth: "infinity", alignment: "leading" }}
       >
         <HStack spacing={0}>
           {WEEKDAY_LABELS.map((label) => (
@@ -195,22 +168,23 @@ export function HolidayCalendarMonthView(props: {
               key={`${year}-${month}-${label}`}
               font="caption"
               foregroundStyle="secondaryLabel"
-              frame={{ maxWidth: "infinity", alignment: "center" as any }}
+              frame={{ maxWidth: "infinity", alignment: "center" }}
             >
               {label}
             </Text>
           ))}
         </HStack>
 
-        <VStack spacing={6}>
+        <VStack spacing={3}>
           {weeks.map((week, index) => (
-            <HStack key={`${year}-${month}-week-${index}`} spacing={0}>
+            <HStack key={`${year}-${month}-week-${index}`} spacing={3}>
               {week.map((cell, cellIndex) => (
                 <DayCell
                   key={`${year}-${month}-${index}-${cellIndex}-${cell.day ?? "empty"}`}
                   day={cell.day}
                   kind={cell.kind}
                   label={cell.label}
+                  today={showingCurrentMonth && cell.day === now.getDate()}
                 />
               ))}
             </HStack>
@@ -219,18 +193,29 @@ export function HolidayCalendarMonthView(props: {
       </VStack>
 
       <HStack
-        spacing={16}
+        spacing={10}
         padding={{ top: 2, leading: 4, trailing: 4 }}
-        frame={{ maxWidth: "infinity", alignment: "leading" as any }}
+        frame={{ maxWidth: "infinity", alignment: "leading" }}
       >
         <HStack spacing={6}>
-          <Image systemName="circle.fill" foregroundStyle="#EA580C" font="caption2" />
+          <Image systemName="circle.fill" foregroundStyle="systemOrange" font="caption2" accessibilityHidden />
           <Text font="caption" foregroundStyle="secondaryLabel">休息日</Text>
         </HStack>
         <HStack spacing={6}>
-          <Image systemName="circle.fill" foregroundStyle="#2563EB" font="caption2" />
+          <Image systemName="circle.fill" foregroundStyle="systemTeal" font="caption2" accessibilityHidden />
           <Text font="caption" foregroundStyle="secondaryLabel">调班日</Text>
         </HStack>
+        <Spacer />
+        <Button
+          title="回到本月"
+          buttonStyle={monthButtonStyle}
+          buttonBorderShape="capsule"
+          tint="systemOrange"
+          opacity={showingCurrentMonth ? 0 : 1}
+          disabled={showingCurrentMonth}
+          accessibilityHidden={showingCurrentMonth}
+          action={jumpToCurrentMonth}
+        />
       </HStack>
     </VStack>
   )
