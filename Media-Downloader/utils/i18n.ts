@@ -73,7 +73,6 @@ const ZH = {
   languageSystem: "跟随系统",
   languageZh: "中文",
   languageEn: "English",
-  chooseLanguage: "选择界面语言",
   about: "关于",
   operationGuide: "操作说明",
   operationGuideItems: [
@@ -169,7 +168,6 @@ const EN: typeof ZH = {
   languageSystem: "Follow System",
   languageZh: "中文",
   languageEn: "English",
-  chooseLanguage: "Choose Interface Language",
   about: "About",
   operationGuide: "How to Use",
   operationGuideItems: [
@@ -204,12 +202,6 @@ export function resolveLanguage(mode: LanguageMode): Language {
 
 export function getI18n(mode: LanguageMode): I18n {
   return resolveLanguage(mode) === "zh" ? ZH : EN
-}
-
-export function languageLabel(mode: LanguageMode, t: I18n): string {
-  if (mode === "zh") return t.languageZh
-  if (mode === "en") return t.languageEn
-  return t.languageSystem
 }
 
 const RUNTIME_EN_REPLACEMENTS: Array<[RegExp, string]> = [

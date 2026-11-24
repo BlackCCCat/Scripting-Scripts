@@ -52,7 +52,7 @@ import {
 } from "./services/file-actions"
 import { getPreferences, persistPreferences, type LanguageMode, type Preferences, type SaveMode } from "./services/preferences"
 import { extractFirstURL, formatBytes, formatDate, sleep } from "./utils/common"
-import { getI18n, languageLabel } from "./utils/i18n"
+import { getI18n } from "./utils/i18n"
 import { useMarkdownReleaseNotesSheet } from "./components/release-notes-sheet"
 import { downloadAccent, DownloadBackdrop, DownloadCardRow, DownloadIconButton, DownloadLogCard, DownloadPanel, DownloadTaskCard, supportsDownloadGlass } from "./components/download-task-card"
 
@@ -334,17 +334,50 @@ function ytDlpStatusText(preferences: Preferences, t: ReturnType<typeof getI18n>
   return t.ytDlpNotChecked
 }
 
-function SettingsAction(props: { title: string; symbol?: string; value?: string; action: () => void }) {
+function SettingsAction(props: { title: string; symbol: string; action: () => void }) {
   return (
     <Button action={props.action} buttonStyle="plain">
-      <HStack spacing={9} frame={{ maxWidth: "infinity", minHeight: 44, alignment: "leading" }}>
-        {props.symbol ? <Image systemName={props.symbol} foregroundStyle={downloadAccent} /> : null}
+      <HStack spacing={9} frame={{ maxWidth: "infinity", minHeight: 44, alignment: "leading" }} contentShape="rect">
+        <Image systemName={props.symbol} foregroundStyle={downloadAccent} />
         <Text>{props.title}</Text>
         <Spacer minLength={3} />
-        {props.value ? <Text font="subheadline" foregroundStyle="secondaryLabel">{props.value}</Text> : null}
         <Image systemName="chevron.right" font="caption" foregroundStyle="secondaryLabel" />
       </HStack>
     </Button>
+  )
+}
+
+function SettingsChoice<Value extends string>(props: {
+  title: string
+  value: Value
+  options: readonly { value: Value; label: string }[]
+  onChanged: (value: Value, label: string) => void
+}) {
+  const selected = props.options.find((option) => option.value === props.value)
+  return (
+    <HStack spacing={9} frame={{ maxWidth: "infinity", minHeight: 44, alignment: "leading" }}>
+      <Text accessibilityHidden>{props.title}</Text>
+      <Spacer minLength={3} />
+      <Button
+        buttonStyle="plain"
+        accessibilityLabel={props.title}
+        accessibilityValue={selected?.label}
+        action={async () => {
+          const index = await Dialog.actionSheet({
+            title: props.title,
+            actions: props.options.map(({ label }) => ({ label })),
+          })
+          if (index == null) return
+          const option = props.options[index]
+          if (option && option.value !== props.value) props.onChanged(option.value, option.label)
+        }}
+      >
+        <HStack spacing={6} frame={{ minHeight: 44 }} contentShape="rect" foregroundStyle="secondaryLabel">
+          {selected ? <Text font="subheadline">{selected.label}</Text> : null}
+          <Image systemName="chevron.up.chevron.down" font="caption" />
+        </HStack>
+      </Button>
+    </HStack>
   )
 }
 
@@ -875,34 +908,6 @@ function View() {
     setStatus(`已清空历史记录，删除 ${deletedFromHistory + deletedResidual} 个本地文件。`)
   }
 
-  const chooseDefaultSaveMode = async () => {
-    const result = await Dialog.actionSheet({
-      title: t.defaultSaveMode,
-      message: "下载成功后默认如何处理文件？",
-      actions: [
-        { label: t.askEveryTime },
-        { label: t.saveToPhotos },
-        { label: t.exportToFiles },
-      ],
-      cancelButton: true,
-    })
-
-    if (result == null) return
-
-    const nextMode: SaveMode = result === 1 ? "photos" : result === 2 ? "files" : "ask"
-    updatePreferences({
-      ...preferences,
-      defaultSaveMode: nextMode,
-    })
-    setStatus(`${t.defaultSaveMode}：${saveModeLabel(nextMode)}`)
-  }
-
-  const saveModeLabel = (mode: SaveMode) => {
-    if (mode === "photos") return t.saveToPhotos
-    if (mode === "files") return t.exportToFiles
-    return t.askEveryTime
-  }
-
   const cacheLimitLabel = (value: number | null) => {
     return value == null ? t.unlimited : `${value} MB`
   }
@@ -939,25 +944,6 @@ function View() {
       if (cleanup.deletedRecords > 0 || cleanup.deletedFiles > 0) {
         setStatus(`历史缓存清理完成：删除 ${cleanup.deletedRecords} 条记录、${cleanup.deletedFiles} 个文件。`)
       }
-    })
-  }
-
-  const chooseLanguage = async () => {
-    const result = await Dialog.actionSheet({
-      title: t.chooseLanguage,
-      actions: [
-        { label: t.languageSystem },
-        { label: t.languageZh },
-        { label: t.languageEn },
-      ],
-      cancelButton: true,
-    })
-
-    if (result == null) return
-    const nextLanguage: LanguageMode = result === 1 ? "zh" : result === 2 ? "en" : "system"
-    updatePreferences({
-      ...preferences,
-      language: nextLanguage,
     })
   }
 
@@ -1110,7 +1096,19 @@ function View() {
           <DownloadPanel>
             <Text font="headline" accessibilityAddTraits="isHeader">{t.preferences}</Text>
             <Divider />
-            <SettingsAction title={t.defaultSaveMode} value={saveModeLabel(preferences.defaultSaveMode)} action={() => void chooseDefaultSaveMode()} />
+            <SettingsChoice<SaveMode>
+              title={t.defaultSaveMode}
+              value={preferences.defaultSaveMode}
+              options={[
+                { value: "ask", label: t.askEveryTime },
+                { value: "photos", label: t.saveToPhotos },
+                { value: "files", label: t.exportToFiles },
+              ]}
+              onChanged={(defaultSaveMode, label) => {
+                updatePreferences({ ...preferences, defaultSaveMode })
+                setStatus(`${t.defaultSaveMode}：${label}`)
+              }}
+            />
             <Divider />
             <Toggle
               title={t.preferNoWatermark}
@@ -1193,7 +1191,16 @@ function View() {
           <DownloadPanel>
             <Text font="headline" accessibilityAddTraits="isHeader">{t.generalSettings}</Text>
             <Divider />
-            <SettingsAction title={t.language} value={languageLabel(preferences.language, t)} action={() => void chooseLanguage()} />
+            <SettingsChoice<LanguageMode>
+              title={t.language}
+              value={preferences.language}
+              options={[
+                { value: "system", label: t.languageSystem },
+                { value: "zh", label: t.languageZh },
+                { value: "en", label: t.languageEn },
+              ]}
+              onChanged={(language) => updatePreferences({ ...preferences, language })}
+            />
             <Divider />
             <SettingsAction title={t.about} symbol="info.circle" action={() => void openAboutPage()} />
           </DownloadPanel>
