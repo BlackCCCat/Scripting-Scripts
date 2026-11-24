@@ -1,3 +1,4 @@
+import { useDashboardMetricAnimation } from "../utils/dashboard_metric_animation"
 import {
   Button, Capsule, Circle, EmptyView, HStack, List, NavigationStack, RoundedRectangle,
   Section, Spacer, Text, useRef, useState, VStack,
@@ -175,10 +176,15 @@ export function CodexResetCardsBadge(props: {
   onOpen: () => void
 }) {
   const { availableCount, isEnglish, onOpen } = props
+  const metrics = useDashboardMetricAnimation({ count: availableCount })
+  const count = Math.round(metrics.value("count"))
+  const countText = localize(`🎟️ 重置卡 ${count} 次`)
 
   return (
     <Button
+      {...metrics.lifecycle}
       buttonStyle="plain"
+      accessibilityLabel={localize(`🎟️ 重置卡 ${availableCount} 次`)}
       accessibilityHint={localize("查看重置卡到期时间")}
       action={onOpen}
     >
@@ -190,8 +196,9 @@ export function CodexResetCardsBadge(props: {
         background={<Capsule fill="quaternarySystemFill" />}
         fixedSize={isEnglish ? { horizontal: false, vertical: true } : undefined}
         lineLimit={isEnglish ? undefined : 1}
+        {...metrics.rollingText("count", countText)}
       >
-        {localize(`🎟️ 重置卡 ${availableCount} 次`)}
+        {countText}
       </Text>
     </Button>
   )

@@ -31,13 +31,13 @@ import {
 } from "../providers"
 import { redeemCodexResetCredit } from "../providers/codex"
 import { refreshCredentialIfNeeded } from "../services/provider_auth"
+import { createDashboardRefreshLimiter, runDashboardRefreshQueue } from "../services/dashboard_refresh_queue"
 import {
   AccountQuotaState,
   DashboardSettings,
   ProviderCredentialEnvelope,
   ProviderId,
   ProviderRouteCategory,
-  QuotaSnapshot,
   SubscriptionAccount,
 } from "../models/types"
 import {
@@ -76,6 +76,7 @@ import type { CodexResetCards } from "../utils/codex_reset_cards"
 import { AddAccountSheet } from "./AddAccountSheet"
 import { glassCardSurface } from "./GlassCardSurface"
 import { providerCardFill } from "./ProviderCardBackground"
+import { DashboardAnimationContext } from "../utils/dashboard_metric_animation"
 import { DashboardOverviewSection } from "./DashboardOverviewSection"
 import { ProviderCatalogView } from "./ProviderCatalogView"
 import { useReleaseNotesSheet } from "./ReleaseNotesSheet"
@@ -93,6 +94,12 @@ const ROUTE_ORDER: ProviderRouteCategory[] = [
   "google_oauth",
   "web_session",
 ]
+
+type AccountRefresh = {
+  account: SubscriptionAccount
+  pending: boolean
+  result: Promise<AccountQuotaState | undefined>
+}
 
 const TAB_ITEMS = [
   { id: 0, title: "额度看板", icon: "chart.bar.doc.horizontal.fill" },
@@ -213,12 +220,28 @@ export function DashboardRootView(props: {
   const dismiss = Navigation.useDismiss()
   const [homeRoute, setHomeRoute] = useState<DashboardHomeRoute>(null)
 
-  const [activeTab, setActiveTab] = useState<number>(0)
-  const [settings, setSettings] = useState<DashboardSettings>(() => {
+  const [{ tab: activeTab, dashboardVisit, homeTabVisible }, setTabSelection] = useState({
+    tab: 0,
+    dashboardVisit: 0,
+    homeTabVisible: true,
+  })
+  const setActiveTab = (tab: number) => setTabSelection((previous) => previous.tab === tab ? previous : {
+    ...previous,
+    tab,
+    dashboardVisit: previous.dashboardVisit + (tab === 0 ? 1 : 0),
+  })
+  const dashboardActive = activeTab === 0 && homeTabVisible
+  const dashboardAnimation = useMemo(() => ({ active: dashboardActive, visit: dashboardVisit }), [dashboardActive, dashboardVisit])
+  const [settings, setSettingsState] = useState<DashboardSettings>(() => {
     const saved = loadDashboardSettings()
     setLocalizationPreference(saved.languagePreference)
     return saved
   })
+  const settingsRef = useRef(settings)
+  const setSettings = (next: DashboardSettings) => {
+    settingsRef.current = next
+    setSettingsState(next)
+  }
   const [keychainSyncBusy, setKeychainSyncBusy] = useState(false)
   const [keychainSyncProgress, setKeychainSyncProgress] = useState<{
     completed: number
@@ -227,7 +250,7 @@ export function DashboardRootView(props: {
   } | null>(null)
   const [keychainSyncError, setKeychainSyncError] = useState<string | null>(null)
   const keychainSyncBusyRef = useRef(false)
-  const [realAccounts, setRealAccounts] = useState<SubscriptionAccount[]>(
+  const [realAccounts, setRealAccountsState] = useState<SubscriptionAccount[]>(
     () => {
       const list = loadStoredAccounts()
       migrateLegacyAccountKeychainKeys(list)
@@ -237,23 +260,37 @@ export function DashboardRootView(props: {
   const [demoAccounts, setDemoAccounts] = useState<SubscriptionAccount[]>(() =>
     createDefaultDemoAccounts()
   )
-  const cachedSnapshotsRef = useRef<Record<string, QuotaSnapshot>>(
-    loadStoredSnapshots()
-  )
+  const demoAccountsRef = useRef(demoAccounts)
+  demoAccountsRef.current = demoAccounts
+  const [latestRealAccounts] = useState(() => new Map(realAccounts.map((account) => [account.id, account])))
+  const setRealAccounts = (accounts: SubscriptionAccount[]) => {
+    latestRealAccounts.clear()
+    for (const account of accounts) latestRealAccounts.set(account.id, account)
+    setRealAccountsState(accounts)
+  }
+  const saveRealAccountOrder = (ordered: SubscriptionAccount[]) => {
+    // Native list moves can hand back copies. Preserve the current account records during a reorder.
+    const next = ordered.map((account) => latestRealAccounts.get(account.id) ?? account)
+    setRealAccounts(next)
+    saveStoredAccounts(next)
+  }
+  const [cachedSnapshotsRef] = useState(() => ({ current: loadStoredSnapshots() }))
+  const [accountRefreshes] = useState(() => new Map<string, AccountRefresh>())
+  const [withRefreshSlot] = useState(createDashboardRefreshLimiter)
+  const allAccountsRefresh = useRef<{ task: Promise<void>; isManual: boolean } | undefined>(undefined)
 
   const [accountStates, setAccountStates] = useState<
     Record<string, AccountQuotaState>
   >(() => {
     const initial: Record<string, AccountQuotaState> = {}
-    for (const acc of createDefaultDemoAccounts()) {
+    for (const acc of demoAccounts) {
       initial[acc.id] = {
         type: "loaded",
         snapshot: generateDemoSnapshot(acc.id, acc.provider, acc.region),
       }
     }
-    const storedSnaps = loadStoredSnapshots()
-    for (const acc of loadStoredAccounts()) {
-      const snap = storedSnaps[acc.id]
+    for (const acc of realAccounts) {
+      const snap = cachedSnapshotsRef.current[acc.id]
       if (snap) {
         initial[acc.id] = { type: "loaded", snapshot: snap }
       }
@@ -447,6 +484,11 @@ export function DashboardRootView(props: {
     setKeychainSyncBusy(true)
     setKeychainSyncError(null)
     try {
+      // Let queries finish saving any rotated credentials before moving them between stores.
+      await Promise.allSettled([
+        allAccountsRefresh.current?.task,
+        ...Array.from(accountRefreshes.values(), (refresh) => refresh.result),
+      ])
       const result = await setDashboardKeychainSyncEnabled(enabled, (completed, total, phase) => {
         setKeychainSyncProgress({ completed, total, phase })
       })
@@ -474,59 +516,27 @@ export function DashboardRootView(props: {
 
   const codexRedeemRequestIDs = useRef(new Map<string, string>())
 
-  const refreshSingleAccount = async (
-    account: SubscriptionAccount,
-    forceRealAccount = false
-  ) => {
-    if (keychainSyncBusyRef.current) return
-    const prevState = accountStates[account.id]
-    const prevSnapshot =
-      prevState?.type === "loaded"
-        ? prevState.snapshot
-        : prevState?.type === "loading"
-          ? prevState.previous
-          : prevState?.type === "failed"
-            ? prevState.previous
-            : cachedSnapshotsRef.current[account.id]
+  const previousSnapshot = (id: string, state?: AccountQuotaState) => (
+    state?.type === "loaded" ? state.snapshot
+      : state?.type === "loading" || state?.type === "failed" ? state.previous
+      : cachedSnapshotsRef.current[id]
+  )
 
-    setAccountStates((prev) => ({
-      ...prev,
-      [account.id]: { type: "loading", previous: prevSnapshot },
-    }))
-
-    if (settings.isDemoMode && !forceRealAccount) {
-      const demoSnap = generateDemoSnapshot(
-        account.id,
-        account.provider,
-        account.region
-      )
-      setAccountStates((prev) => ({
-        ...prev,
-        [account.id]: { type: "loaded", snapshot: demoSnap },
-      }))
-      reloadAllWidgets()
-      return
-    }
-
-    const envelope = loadEnvelopeFromKeychain(
-      account.credentialKeychainKey,
-      account.preferssynchronizableKeychain
-    )
-    if (!envelope) {
-      recordWidgetRefreshFailure(account.id, "missingCredential")
-      setAccountStates((prev) => ({
-        ...prev,
-        [account.id]: {
-          type: "failed",
-          failure: "missingCredential",
-          previous: prevSnapshot,
-        },
-      }))
-      return
-    }
-
+  const fetchAccountState = async (account: SubscriptionAccount): Promise<AccountQuotaState | undefined> => {
+    const isCurrent = () => latestRealAccounts.get(account.id) === account
+    if (!isCurrent()) return
+    const previous = cachedSnapshotsRef.current[account.id]
     try {
+      const envelope = loadEnvelopeFromKeychain(
+        account.credentialKeychainKey,
+        account.preferssynchronizableKeychain
+      )
+      if (!envelope) {
+        recordWidgetRefreshFailure(account.id, "missingCredential")
+        return { type: "failed", failure: "missingCredential", previous }
+      }
       const result = await queryProviderQuota(account, envelope)
+      if (!isCurrent()) return
       if (result.updatedCredential) {
         saveEnvelopeToKeychain(
           account.credentialKeychainKey,
@@ -534,37 +544,55 @@ export function DashboardRootView(props: {
           account.preferssynchronizableKeychain
         )
       }
-      cachedSnapshotsRef.current = {
-        ...cachedSnapshotsRef.current,
-        [account.id]: result.snapshot,
-      }
-      saveStoredSnapshots(cachedSnapshotsRef.current)
+      cachedSnapshotsRef.current[account.id] = result.snapshot
       recordWidgetRefreshSuccess(account.id)
-      setAccountStates((prev) => ({
-        ...prev,
-        [account.id]: { type: "loaded", snapshot: result.snapshot },
-      }))
+      return { type: "loaded", snapshot: result.snapshot }
+    } catch (error) {
+      if (!isCurrent()) return
+      const failure = error instanceof QuotaQueryError ? error.code : "network"
+      const detail = error instanceof QuotaQueryError ? error.detail : error instanceof Error ? error.message : undefined
+      recordWidgetRefreshFailure(account.id, failure, failure === "rateLimited" ? 429 : undefined)
+      return { type: "failed", failure, detail, previous }
+    }
+  }
+
+  const startAccountRefresh = (account: SubscriptionAccount, afterPending = false): AccountRefresh => {
+    const existing = accountRefreshes.get(account.id)
+    if (existing?.pending && !afterPending && existing.account === account) return existing
+    const result = (existing?.pending ? existing.result : Promise.resolve())
+      .then(() => withRefreshSlot(() => fetchAccountState(account)))
+      .finally(() => { refresh.pending = false })
+    const refresh = { account, pending: true, result }
+    accountRefreshes.set(account.id, refresh)
+    return refresh
+  }
+
+  const canPublishRefresh = (refresh: AccountRefresh) => (
+    accountRefreshes.get(refresh.account.id) === refresh && latestRealAccounts.get(refresh.account.id) === refresh.account
+  )
+
+  const refreshSingleAccount = async (account: SubscriptionAccount, forceRealAccount = false) => {
+    if (keychainSyncBusyRef.current) return
+    if (settingsRef.current.isDemoMode && !forceRealAccount) {
+      const snapshot = generateDemoSnapshot(account.id, account.provider, account.region)
+      setAccountStates((prev) => ({ ...prev, [account.id]: { type: "loaded", snapshot } }))
       reloadAllWidgets()
-    } catch (err) {
-      const code =
-        err instanceof QuotaQueryError ? err.code : "network"
-      const detail =
-        err instanceof QuotaQueryError
-          ? err.detail
-          : err instanceof Error
-            ? err.message
-            : undefined
-      const isRateLimit = code === "rateLimited"
-      recordWidgetRefreshFailure(account.id, code, isRateLimit ? 429 : undefined)
-      setAccountStates((prev) => ({
-        ...prev,
-        [account.id]: {
-          type: "failed",
-          failure: code,
-          detail,
-          previous: prevSnapshot,
-        },
-      }))
+      return
+    }
+
+    const current = latestRealAccounts.get(account.id)
+    if (!current) return
+    setAccountStates((prev) => ({
+      ...prev,
+      [current.id]: { type: "loading", previous: previousSnapshot(current.id, prev[current.id]) },
+    }))
+    const refresh = startAccountRefresh(current, forceRealAccount)
+    const state = await refresh.result
+    if (!state || !canPublishRefresh(refresh)) return
+    setAccountStates((prev) => ({ ...prev, [current.id]: state }))
+    if (state.type === "loaded") {
+      saveStoredSnapshots(cachedSnapshotsRef.current)
+      reloadAllWidgets()
     }
   }
 
@@ -604,150 +632,88 @@ export function DashboardRootView(props: {
     }
   }
 
-  // 全部账号刷新（支持手动操作与启动时静默无感拉取）
-  const refreshAllAccounts = async (options?: { isManual?: boolean }) => {
-    if (keychainSyncBusyRef.current) return
+  const refreshAllAccounts = (options?: { isManual?: boolean }): Promise<void> => {
+    if (keychainSyncBusyRef.current) return Promise.resolve()
     const isManual = options?.isManual ?? false
-    if (isRefreshingAll) return
-    const enabledList = currentAccounts.filter((a) => a.isEnabled)
-    if (enabledList.length === 0) return
-
-    if (isManual) {
-      setIsRefreshingAll(true)
+    const pending = allAccountsRefresh.current
+    if (pending) {
+      if (isManual && !pending.isManual) {
+        pending.isManual = true
+        setIsRefreshingAll(true)
+      }
+      return pending.task
     }
+    const isDemoMode = settingsRef.current.isDemoMode
+    const accounts = isDemoMode ? demoAccountsRef.current : [...latestRealAccounts.values()]
+    const enabledAccounts = accounts.filter((account) => account.isEnabled)
+    if (enabledAccounts.length === 0) return Promise.resolve()
+    if (isManual) setIsRefreshingAll(true)
 
-    try {
-      if (currentAccounts.some((a) => a.provider === "codex")) {
-        void fetchCodexResetStatus(true).then((st) => {
-          if (st) setCodexResetStatus(st)
+    const performRefresh = async () => {
+      if (accounts.some((account) => account.provider === "codex")) {
+        void fetchCodexResetStatus(true).then((status) => {
+          if (status) setCodexResetStatus(status)
         })
       }
-
-      if (settings.isDemoMode) {
+      if (isDemoMode) {
         setAccountStates((prev) => {
           const next = { ...prev }
-          for (const acc of enabledList) {
-            next[acc.id] = {
+          for (const account of enabledAccounts) {
+            next[account.id] = {
               type: "loaded",
-              snapshot: generateDemoSnapshot(acc.id, acc.provider, acc.region),
+              snapshot: generateDemoSnapshot(account.id, account.provider, account.region),
             }
           }
           return next
         })
-        reloadAllWidgets()
+      } else {
+        // Keep cached values visible during both manual and automatic refreshes.
         if (isManual) {
-          HapticFeedback.lightImpact()
+          setAccountStates((prev) => {
+            const next = { ...prev }
+            for (const { id } of enabledAccounts) {
+              next[id] = { type: "loading", previous: previousSnapshot(id, prev[id]) }
+            }
+            return next
+          })
         }
-        return
-      }
-
-      // 仅在用户手动触发时设置各卡片为 loading 状态；启动自动刷新保持现有卡片稳定显示，绝不闪烁或重置视图
-      if (isManual) {
-        setAccountStates((prev) => {
-          const next = { ...prev }
-          for (const acc of enabledList) {
-            const prevState = prev[acc.id]
-            const prevSnapshot =
-              prevState?.type === "loaded"
-                ? prevState.snapshot
-                : prevState?.type === "loading"
-                  ? prevState.previous
-                  : prevState?.type === "failed"
-                    ? prevState.previous
-                    : cachedSnapshotsRef.current[acc.id]
-            next[acc.id] = { type: "loading", previous: prevSnapshot }
-          }
-          return next
+        const earlierRefreshes = new Map(accountRefreshes)
+        let hasNewSnapshots = false
+        await runDashboardRefreshQueue(enabledAccounts, async (account) => {
+          if (latestRealAccounts.get(account.id) !== account) return
+          // An individual refresh may have already finished while this account was waiting in line.
+          const latest = accountRefreshes.get(account.id)
+          const refresh = latest?.account === account && latest !== earlierRefreshes.get(account.id)
+            ? latest
+            : startAccountRefresh(account)
+          const state = await refresh.result
+          if (!state) return
+          if (state.type === "loaded") hasNewSnapshots = true
+          return { refresh, state }
+        }, (results) => {
+          setAccountStates((prev) => {
+            let next = prev
+            for (const { refresh, state } of results) {
+              if (!canPublishRefresh(refresh) || prev[refresh.account.id] === state) continue
+              if (next === prev) next = { ...prev }
+              next[refresh.account.id] = state
+            }
+            return next
+          })
         })
+        if (hasNewSnapshots) saveStoredSnapshots(cachedSnapshotsRef.current)
       }
-
-      const updatedSnapshots: Record<string, QuotaSnapshot> = {}
-      const stateUpdates: Record<string, AccountQuotaState> = {}
-
-      await Promise.allSettled(
-        enabledList.map(async (acc) => {
-          const envelope = loadEnvelopeFromKeychain(
-            acc.credentialKeychainKey,
-            acc.preferssynchronizableKeychain
-          )
-          const fallbackSnap =
-            cachedSnapshotsRef.current[acc.id] ??
-            (accountStates[acc.id]?.type === "loaded"
-              ? (accountStates[acc.id] as { snapshot: QuotaSnapshot }).snapshot
-              : undefined)
-
-          if (!envelope) {
-            recordWidgetRefreshFailure(acc.id, "missingCredential")
-            stateUpdates[acc.id] = {
-              type: "failed",
-              failure: "missingCredential",
-              previous: fallbackSnap,
-            }
-            return
-          }
-
-          try {
-            const result = await queryProviderQuota(acc, envelope)
-            if (result.updatedCredential) {
-              saveEnvelopeToKeychain(
-                acc.credentialKeychainKey,
-                result.updatedCredential,
-                acc.preferssynchronizableKeychain
-              )
-            }
-            recordWidgetRefreshSuccess(acc.id)
-            updatedSnapshots[acc.id] = result.snapshot
-            stateUpdates[acc.id] = {
-              type: "loaded",
-              snapshot: result.snapshot,
-            }
-          } catch (err) {
-            const code =
-              err instanceof QuotaQueryError ? err.code : "network"
-            const detail =
-              err instanceof QuotaQueryError
-                ? err.detail
-                : err instanceof Error
-                  ? err.message
-                  : undefined
-            const isRateLimit = code === "rateLimited"
-            recordWidgetRefreshFailure(acc.id, code, isRateLimit ? 429 : undefined)
-
-            stateUpdates[acc.id] = {
-              type: "failed",
-              failure: code,
-              detail,
-              previous: fallbackSnap,
-            }
-          }
-        })
-      )
-
-      // 批量单次落盘快照，消除逐个账号写入带来的数十次磁盘 I/O
-      if (Object.keys(updatedSnapshots).length > 0) {
-        cachedSnapshotsRef.current = {
-          ...cachedSnapshotsRef.current,
-          ...updatedSnapshots,
-        }
-        saveStoredSnapshots(cachedSnapshotsRef.current)
-      }
-
-      // 批量单次更新账号状态，避免列表反复重渲染引发页面重置与滚动归零
-      setAccountStates((prev) => ({
-        ...prev,
-        ...stateUpdates,
-      }))
-
       reloadAllWidgets()
-
-      if (isManual) {
-        HapticFeedback.lightImpact()
-      }
-    } finally {
-      if (isManual) {
-        setIsRefreshingAll(false)
-      }
+      if (refresh.isManual) HapticFeedback.lightImpact()
     }
+
+    const task = Promise.resolve().then(performRefresh).finally(() => {
+      allAccountsRefresh.current = undefined
+      if (refresh.isManual) setIsRefreshingAll(false)
+    })
+    const refresh = { task, isManual }
+    allAccountsRefresh.current = refresh
+    return task
   }
 
   // 脚本运行模式：启动应用时自动刷新已启用账号（受用户设置控制，默认开启，显示加载状态）
@@ -772,15 +738,20 @@ export function DashboardRootView(props: {
     }
   }, [isHomeScreen, settings.isDemoMode, keychainSyncBusy])
 
-  // 首页 UI 模式：监听从其他系统 Tab 切回 Home Tab 事件，自动静默刷新一次额度
+  // 首页 UI 常驻。用宿主 Tab 事件暂停或重播动画，并在切回时静默刷新。
   useEffect(() => {
     if (!isHomeScreen) return
     if (typeof Script === "undefined" || typeof Script.onHomeTabEvent !== "function") return
 
     const unsubscribe = Script.onHomeTabEvent((event) => {
-      if (event === "selected") {
-        void refreshAllAccounts({ isManual: false })
-      }
+      if (event === "reselected") return
+      const visible = event === "selected"
+      setTabSelection((previous) => ({
+        ...previous,
+        homeTabVisible: visible,
+        dashboardVisit: previous.dashboardVisit + (visible && previous.tab === 0 ? 1 : 0),
+      }))
+      if (visible) void refreshAllAccounts({ isManual: false })
     })
     return () => {
       unsubscribe?.()
@@ -808,14 +779,15 @@ export function DashboardRootView(props: {
       reloadAllWidgets()
       return
     }
-    const target = realAccounts.find((a) => a.id === accountId)
+    const target = latestRealAccounts.get(accountId) ?? realAccounts.find((a) => a.id === accountId)
     if (target) {
       removeEnvelopeFromKeychain(
         target.credentialKeychainKey,
         target.preferssynchronizableKeychain
       )
     }
-    const nextAccounts = realAccounts.filter((a) => a.id !== accountId)
+    const nextAccounts = [...latestRealAccounts.values()].filter((a) => a.id !== accountId)
+    accountRefreshes.delete(accountId)
     setRealAccounts(nextAccounts)
     saveStoredAccounts(nextAccounts)
     const copy = { ...cachedSnapshotsRef.current }
@@ -842,8 +814,7 @@ export function DashboardRootView(props: {
       sublist,
       reorderedSublist
     )
-    setRealAccounts(next)
-    saveStoredAccounts(next)
+    saveRealAccountOrder(next)
     HapticFeedback.lightImpact()
     reloadAllWidgets()
   }
@@ -867,8 +838,7 @@ export function DashboardRootView(props: {
     const rest = next.filter((_, i) => !indices.includes(i))
     const insertAt = Math.max(0, Math.min(rest.length, newOffset))
     rest.splice(insertAt, 0, ...moving)
-    setRealAccounts(next)
-    saveStoredAccounts(next)
+    saveRealAccountOrder(next)
     HapticFeedback.lightImpact()
     reloadAllWidgets()
   }
@@ -1007,14 +977,15 @@ export function DashboardRootView(props: {
           zoomNamespace={homeZoomNamespace}
           navigationTransition={homeZoomTransition(homeRoute.zoomSourceID)}
           onClose={() => setHomeRoute(null)}
-          onUpdateAccount={(updated) => {
+          onUpdateAccount={(updated, newEnvelope) => {
             if (settings.isDemoMode) {
               setDemoAccounts((prev) =>
                 prev.map((a) => (a.id === updated.id ? updated : a))
               )
             } else {
+              const nextAccount = newEnvelope ? { ...updated } : updated
               const next = realAccounts.map((a) =>
-                a.id === updated.id ? updated : a
+                a.id === updated.id ? nextAccount : a
               )
               if (!saveStoredAccounts(next)) throw new Error("账号信息保存失败，原登录凭据已保留")
               setRealAccounts(next)
@@ -1051,8 +1022,7 @@ export function DashboardRootView(props: {
             if (settings.isDemoMode) {
               setDemoAccounts(reordered)
             } else {
-              setRealAccounts(reordered)
-              saveStoredAccounts(reordered)
+              saveRealAccountOrder(reordered)
             }
             HapticFeedback.lightImpact()
             reloadAllWidgets()
@@ -1164,8 +1134,7 @@ export function DashboardRootView(props: {
                       if (settings.isDemoMode) {
                         setDemoAccounts(reordered)
                       } else {
-                        setRealAccounts(reordered)
-                        saveStoredAccounts(reordered)
+                        saveRealAccountOrder(reordered)
                       }
                       HapticFeedback.lightImpact()
                       reloadAllWidgets()
@@ -1194,14 +1163,15 @@ export function DashboardRootView(props: {
                     isDemoMode={settings.isDemoMode}
                     codexResetStatus={codexResetStatus}
                     onClose={() => setSelectedAccountForDetail(null)}
-                    onUpdateAccount={(updated) => {
+                    onUpdateAccount={(updated, newEnvelope) => {
                       if (settings.isDemoMode) {
                         setDemoAccounts((prev) =>
                           prev.map((a) => (a.id === updated.id ? updated : a))
                         )
                       } else {
+                        const nextAccount = newEnvelope ? { ...updated } : updated
                         const next = realAccounts.map((a) =>
-                          a.id === updated.id ? updated : a
+                          a.id === updated.id ? nextAccount : a
                         )
                         if (!saveStoredAccounts(next)) throw new Error("账号信息保存失败，原登录凭据已保留")
                         setRealAccounts(next)
@@ -1347,7 +1317,11 @@ export function DashboardRootView(props: {
 
   if (isHomeScreen) {
     if (activeTab === 0) {
-      return dashboardList
+      return (
+        <DashboardAnimationContext.Provider value={dashboardAnimation}>
+          {dashboardList}
+        </DashboardAnimationContext.Provider>
+      )
     }
     if (activeTab === 1) {
       return (
@@ -1436,7 +1410,9 @@ export function DashboardRootView(props: {
     >
       <Tab title={localize("额度看板")} systemImage="chart.bar.doc.horizontal.fill" value={0}>
         <NavigationStack>
-          {dashboardList}
+          <DashboardAnimationContext.Provider value={dashboardAnimation}>
+            {dashboardList}
+          </DashboardAnimationContext.Provider>
         </NavigationStack>
       </Tab>
 

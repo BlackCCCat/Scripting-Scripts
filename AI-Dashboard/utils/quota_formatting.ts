@@ -8,12 +8,26 @@ import {
 } from "../models/types"
 import { getProviderMeta } from "./providers_catalog"
 
+const numberFormats = new Map<string, Intl.NumberFormat>()
+
+function numberFormat(key: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const language = getDashboardLanguage()
+  const cacheKey = `${language}:${key}`
+  const cached = numberFormats.get(cacheKey)
+  if (cached) return cached
+
+  const formatter = new Intl.NumberFormat(language, options)
+  if (numberFormats.size >= 64) numberFormats.clear()
+  numberFormats.set(cacheKey, formatter)
+  return formatter
+}
+
 export function formatAmountNumber(
   value: number,
   maxFractionDigits = 4
 ): string {
   if (!Number.isFinite(value)) return "0"
-  return new Intl.NumberFormat(getDashboardLanguage(), {
+  return numberFormat(`decimal:${maxFractionDigits}`, {
     minimumFractionDigits: 0,
     maximumFractionDigits: maxFractionDigits,
   }).format(value)
@@ -22,11 +36,11 @@ export function formatAmountNumber(
 export function formatMoney(amount: number, currency: string): string {
   const code = (currency || "USD").trim().toUpperCase()
   const absVal = Math.abs(amount)
-  const minFraction =
-    absVal > 0 && absVal < 0.01 ? 4 : absVal < 1 ? 2 : 2
-  const maxFraction = absVal > 0 && absVal < 0.01 ? 6 : 4
+  const isSmallAmount = absVal > 0 && absVal < 0.01
+  const minFraction = isSmallAmount ? 4 : 2
+  const maxFraction = isSmallAmount ? 6 : 4
   try {
-    const formatted = new Intl.NumberFormat(getDashboardLanguage(), {
+    const formatted = numberFormat(`currency:${code}:${maxFraction}`, {
       style: "currency",
       currency: code,
       currencyDisplay: code === "USD" ? "narrowSymbol" : "symbol",
@@ -175,15 +189,25 @@ export function formatRelativeCountdown(
   return `${totalDays} 天后${actionVerb}`
 }
 
-export function formatWindowQuotaBreakdown(window: QuotaWindow): {
+export type QuotaBreakdownMetric = "spent" | "remaining" | "used" | "total" | "remainingPercent" | "usedPercent"
+
+export function formatWindowQuotaBreakdown(
+  window: QuotaWindow,
+  displayValue: (metric: QuotaBreakdownMetric, value: number) => number = (_metric, value) => value
+): {
   primaryRemainingText: string
   secondaryUsedText: string
   usedPercent: number | null
   remainingPercent: number | null
 } {
+  const amount = (metric: QuotaBreakdownMetric, value: number, digits?: number) =>
+    formatAmountNumber(displayValue(metric, value), digits)
+  const percent = (metric: "remainingPercent" | "usedPercent", value: number) =>
+    Math.round(displayValue(metric, value))
+
   if (window.spentAmount !== undefined) {
     return {
-      primaryRemainingText: `已花费 ${formatMoney(window.spentAmount, window.unit ?? "USD")}`,
+      primaryRemainingText: `已花费 ${formatMoney(displayValue("spent", window.spentAmount), window.unit ?? "USD")}`,
       secondaryUsedText: "官方未提供剩余额度",
       usedPercent: null,
       remainingPercent: null,
@@ -218,8 +242,8 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
       }
       const exactUsedPct = 100 - exactRemPct
       return {
-        primaryRemainingText: `剩余 ${formatAmountNumber(remaining)}${unit} (${exactRemPct}%)`,
-        secondaryUsedText: `已用 ${formatAmountNumber(computedUsed)} / 共 ${formatAmountNumber(total)}${unit}`,
+        primaryRemainingText: `剩余 ${amount("remaining", remaining)}${unit} (${percent("remainingPercent", exactRemPct)}%)`,
+        secondaryUsedText: `已用 ${amount("used", computedUsed)} / 共 ${amount("total", total)}${unit}`,
         usedPercent: exactUsedPct,
         remainingPercent: exactRemPct,
       }
@@ -236,8 +260,8 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
       }
       const exactUsedPct = 100 - exactRemPct
       return {
-        primaryRemainingText: `剩余 ${formatAmountNumber(computedRem)}${unit} (${exactRemPct}%)`,
-        secondaryUsedText: `已用 ${formatAmountNumber(used)} / 共 ${formatAmountNumber(total)}${unit}`,
+        primaryRemainingText: `剩余 ${amount("remaining", computedRem)}${unit} (${percent("remainingPercent", exactRemPct)}%)`,
+        secondaryUsedText: `已用 ${amount("used", used)} / 共 ${amount("total", total)}${unit}`,
         usedPercent: exactUsedPct,
         remainingPercent: exactRemPct,
       }
@@ -256,8 +280,8 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
     }
     const exactUsedPct = 100 - exactRemPct
     return {
-      primaryRemainingText: `剩余 ${formatAmountNumber(window.remainingCount, 2)}${unit} (${exactRemPct}%)`,
-      secondaryUsedText: `已用 ${formatAmountNumber(usedCount, 2)} / 共 ${formatAmountNumber(window.totalCount, 2)}${unit}`,
+      primaryRemainingText: `剩余 ${amount("remaining", window.remainingCount, 2)}${unit} (${percent("remainingPercent", exactRemPct)}%)`,
+      secondaryUsedText: `已用 ${amount("used", usedCount, 2)} / 共 ${amount("total", window.totalCount, 2)}${unit}`,
       usedPercent: exactUsedPct,
       remainingPercent: exactRemPct,
     }
@@ -265,9 +289,9 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
 
   if (window.remainingCount !== undefined) {
     return {
-      primaryRemainingText: `剩余 ${formatAmountNumber(window.remainingCount, 2)}${unit}`,
+      primaryRemainingText: `剩余 ${amount("remaining", window.remainingCount, 2)}${unit}`,
       secondaryUsedText:
-        usedPct !== null ? `已消耗 ${usedPct}%` : "可用配额余量",
+        usedPct !== null ? `已消耗 ${percent("usedPercent", usedPct)}%` : "可用配额余量",
       usedPercent: usedPct,
       remainingPercent: remPct,
     }
@@ -275,8 +299,8 @@ export function formatWindowQuotaBreakdown(window: QuotaWindow): {
 
   if (usedPct !== null && remPct !== null) {
     return {
-      primaryRemainingText: `剩余可用 ${remPct}%`,
-      secondaryUsedText: `已消耗 ${usedPct}%`,
+      primaryRemainingText: `剩余可用 ${percent("remainingPercent", remPct)}%`,
+      secondaryUsedText: `已消耗 ${percent("usedPercent", usedPct)}%`,
       usedPercent: usedPct,
       remainingPercent: remPct,
     }

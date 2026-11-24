@@ -11,6 +11,7 @@ import {
   RoundedRectangle,
   Spacer,
   Text,
+  useMemo,
   useState,
   VStack,
 } from "scripting"
@@ -18,6 +19,7 @@ import {
   AccountQuotaState,
   QuotaSnapshot,
   QuotaWindow,
+  WalletBalance,
   SubscriptionAccount,
 } from "../models/types"
 import {
@@ -36,15 +38,19 @@ import {
   formatWindowQuotaBreakdown,
   formatWindowRemainingFraction,
   formatWindowSubtitle,
+  type QuotaBreakdownMetric,
 } from "../utils/quota_formatting"
 import {
-  accountHealthSummary,
+  computeAccountOverallQuota,
+  describeRemainingQuota,
   adaptiveSecondaryButtonStyle,
   formatAccountRegionBadge,
   formatAccountTypeBadge,
   maskIdentity,
-  remainingQuotaColor,
 } from "../utils/theme"
+import { dashboardQuotaColor, useDashboardMetricAnimation } from "../utils/dashboard_metric_animation"
+import { DashboardQuotaProgress } from "./DashboardQuotaProgress"
+import { MuseAdditionalQuotaCard } from "./MuseAdditionalQuotaCard"
 import { ProviderIconView } from "./ProviderIconView"
 import { CodexResetCardsBadge } from "./CodexResetCardsBadge"
 import type { CodexResetCards } from "../utils/codex_reset_cards"
@@ -83,7 +89,6 @@ export function AccountQuotaRow(props: {
 
   const resetCards = account.provider === "codex" ? snapshot?.codexResetCards : undefined
   const isLoading = state.type === "loading"
-  const health = accountHealthSummary(snapshot)
   const accountTypeBadge = formatAccountTypeBadge(
     account.provider,
     snapshot?.providerPlanName,
@@ -107,8 +112,8 @@ export function AccountQuotaRow(props: {
       ? "Workbuddy AI"
       : rawDisplayName || defaultProviderName
 
-  const walletWindows = (snapshot?.windows ?? []).filter((w) =>
-    Boolean(w.wallet)
+  const walletWindows = (snapshot?.windows ?? []).flatMap(({ id, name, wallet }) =>
+    wallet ? [{ id, name, wallet }] : []
   )
   const quotaWindows = (snapshot?.windows ?? []).filter((w) => !w.wallet)
   const visibleQuotaWindows = quotaWindows.slice(0, 5)
@@ -189,17 +194,7 @@ export function AccountQuotaRow(props: {
           </HeaderLayout>
 
           <HeaderLayout spacing={6}>
-            <HStack alignment="center" spacing={4}>
-              <Circle fill={health.color} frame={{ width: 6, height: 6 }} accessibilityHidden={true} />
-              <Text
-                font={isEnglish ? "caption2" : "caption"}
-                fontWeight="semibold"
-                foregroundStyle="label"
-                fixedSize={{ horizontal: false, vertical: true }}
-              >
-                {localize(health.label)}
-              </Text>
-            </HStack>
+            <AccountHealthIndicator snapshot={snapshot} isEnglish={isEnglish} />
 
             {resetCards ? (
               <CodexResetCardsBadge
@@ -263,12 +258,8 @@ export function AccountQuotaRow(props: {
               spacing={8}
               frame={{ maxWidth: "infinity", alignment: "leading" }}
             >
-              {walletWindows.map((win) => (
-                <WalletMetricTile
-                  key={win.id}
-                  provider={account.provider}
-                  window={win}
-                />
+              {walletWindows.map(({ id, name, wallet }) => (
+                <WalletMetricTile key={id} provider={account.provider} name={name} wallet={wallet} />
               ))}
             </VStack>
           ) : null}
@@ -304,37 +295,7 @@ export function AccountQuotaRow(props: {
           ) : null}
 
           {account.provider === "muse" && snapshot.museAdditionalTokens ? (
-            <VStack
-              alignment="leading"
-              spacing={7}
-              padding={12}
-              frame={{ maxWidth: "infinity", alignment: "leading" }}
-              background={
-                <RoundedRectangle
-                  cornerRadius={12}
-                  style="continuous"
-                  fill="quaternarySystemFill"
-                />
-              }
-            >
-              <Text font="caption2" fontWeight="semibold" foregroundStyle="accentColor">
-                {localize("额外 Tokens")}
-              </Text>
-              {snapshot.museAdditionalTokens.remainingPercentage !== undefined ? (
-                <ProgressView
-                  value={snapshot.museAdditionalTokens.remainingPercentage}
-                  total={100}
-                  progressViewStyle="linear"
-                  tint={remainingQuotaColor(
-                    snapshot.museAdditionalTokens.remainingPercentage,
-                    snapshot.museAdditionalTokens.remainingPercentage <= 0
-                  )}
-                />
-              ) : null}
-              <Text font="subheadline" fontWeight="medium" foregroundStyle="label" lineLimit={2}>
-                {localize(snapshot.museAdditionalTokens.value)}
-              </Text>
-            </VStack>
+            <MuseAdditionalQuotaCard tokens={snapshot.museAdditionalTokens} />
           ) : null}
 
           {/* 刷新异常横幅（若上次刷新失败但保留了缓存快照） */}
@@ -468,22 +429,55 @@ export function AccountQuotaRow(props: {
   )
 }
 
+function AccountHealthIndicator(props: { snapshot?: QuotaSnapshot; isEnglish: boolean }) {
+  const { snapshot, isEnglish } = props
+  const health = useMemo(() => computeAccountOverallQuota(snapshot), [snapshot])
+  const percentage = health.hasRemainingPercentage ? health.remainingPercent : null
+  const metrics = useDashboardMetricAnimation({ percentage })
+  const displayed = metrics.value("percentage")
+  const rollingPercent = Math.round(displayed)
+  const text = localize(percentage === null || (percentage === 0 && rollingPercent === 0)
+    ? health.label
+    : describeRemainingQuota(rollingPercent, false).label)
+  const color = percentage === null ? health.color : dashboardQuotaColor(displayed, percentage, health.isExhausted)
+
+  return (
+    <HStack alignment="center" spacing={4} {...metrics.lifecycle}>
+      <Circle fill={color} contentTransition="interpolate" animation={metrics.animate("percentage")} frame={{ width: 6, height: 6 }} accessibilityHidden={true} />
+      <Text
+        font={isEnglish ? "caption2" : "caption"}
+        fontWeight="semibold"
+        foregroundStyle="label"
+        fixedSize={{ horizontal: false, vertical: true }}
+        {...(percentage === null ? {} : metrics.rollingText("percentage", text))}
+      >
+        {text}
+      </Text>
+    </HStack>
+  )
+}
+
 function WalletMetricTile(props: {
   provider: SubscriptionAccount["provider"]
-  window: QuotaWindow
+  name: string
+  wallet: WalletBalance
 }) {
-  const { provider, window } = props
-  const wallet = window.wallet
-  if (!wallet) return null
-
+  const { provider, name, wallet } = props
+  const metrics = useDashboardMetricAnimation({
+    total: wallet.total,
+    toppedUp: wallet.toppedUp,
+    granted: wallet.granted,
+  }, "counter")
   const hasBreakdown =
     wallet.toppedUp !== undefined || wallet.granted !== undefined
   const isEnglish = getDashboardLanguage() === "en"
   const wrapText = isEnglish ? { horizontal: false, vertical: true } : undefined
   const BreakdownLayout = isEnglish ? FlowLayout : HStack
+  const icon = useMemo(() => <ProviderIconView provider={provider} size={20} />, [provider])
 
   return (
     <VStack
+      {...metrics.lifecycle}
       alignment="leading"
       spacing={6}
       padding={12}
@@ -497,14 +491,14 @@ function WalletMetricTile(props: {
       }
     >
       <HStack alignment="center" spacing={8}>
-        <ProviderIconView provider={provider} size={20} />
+        {icon}
         <Text
           font={isEnglish ? "footnote" : "subheadline"}
           fontWeight="medium"
           foregroundStyle="label"
           lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
         >
-          {localize(window.name)}
+          {localize(name)}
         </Text>
         <Spacer />
         <Text
@@ -514,7 +508,7 @@ function WalletMetricTile(props: {
           foregroundStyle="label"
           lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
         >
-          {formatWalletAmount(wallet.total, wallet)}
+          {formatWalletAmount(metrics.value("total"), wallet)}
         </Text>
       </HStack>
 
@@ -527,7 +521,7 @@ function WalletMetricTile(props: {
                 foregroundStyle="secondaryLabel"
                 lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
               >
-                {localize(`充值 ${formatWalletAmount(wallet.toppedUp, wallet)}`)}
+                {localize(`充值 ${formatWalletAmount(metrics.value("toppedUp"), wallet)}`)}
               </Text>
             ) : null}
             {wallet.granted !== undefined ? (
@@ -536,7 +530,7 @@ function WalletMetricTile(props: {
                 foregroundStyle="secondaryLabel"
                 lineLimit={isEnglish ? undefined : 1} fixedSize={wrapText}
               >
-                {localize(`赠送 ${formatWalletAmount(wallet.granted, wallet)}`)}
+                {localize(`赠送 ${formatWalletAmount(metrics.value("granted"), wallet)}`)}
               </Text>
             ) : null}
           </BreakdownLayout>
@@ -564,8 +558,26 @@ function WalletMetricTile(props: {
 
 function QuotaProgressCard(props: { window: QuotaWindow }) {
   const { window } = props
-  const remainingFraction = formatWindowRemainingFraction(window)
-  const breakdown = formatWindowQuotaBreakdown(window)
+  const { remainingFraction, remainingPercent, targets } = useMemo(() => {
+    const remainingFraction = formatWindowRemainingFraction(window)
+    const targets: Partial<Record<QuotaBreakdownMetric, number>> = {}
+    const { remainingPercent } = formatWindowQuotaBreakdown(window, (field, value) => {
+      targets[field] = value
+      return value
+    })
+    return { remainingFraction, remainingPercent, targets }
+  }, [window])
+  const metrics = useDashboardMetricAnimation(targets)
+  const primaryMetric = targets.remainingPercent != null ? "remainingPercent"
+    : targets.spent != null ? "spent" : "remaining"
+  const secondaryMetric = targets.usedPercent != null ? "usedPercent" : "used"
+  const breakdown = formatWindowQuotaBreakdown(window, (field, value) => {
+    if (!Number.isFinite(value)) return value
+    const displayed = metrics.value(field)
+    return field !== "spent" && Number.isInteger(value) ? Math.round(displayed) : displayed
+  })
+  const remainingText = localize(breakdown.primaryRemainingText)
+  const usedText = localize(breakdown.secondaryUsedText)
   const countdown = formatRelativeCountdown(
     window.resetsAt || window.expiresAt,
     window.resetSemantics
@@ -574,13 +586,10 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
   const subtitle = formatWindowSubtitle(window)
   const isEnglish = getDashboardLanguage() === "en"
   const wrapText = isEnglish ? { horizontal: false, vertical: true } : undefined
-  const statusColor = remainingQuotaColor(
-    breakdown.remainingPercent,
-    window.isExhausted
-  )
 
   return (
     <VStack
+      {...metrics.lifecycle}
       alignment="leading"
       spacing={7}
       padding={12}
@@ -629,11 +638,10 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
 
       {/* 第二行：可视化剩余额度进度条（剩余越少越短，颜色由绿平滑过渡到红，耗尽时全灰） */}
       {remainingFraction !== null ? (
-        <ProgressView
-          value={remainingFraction}
-          total={1}
-          progressViewStyle="linear"
-          tint={statusColor}
+        <DashboardQuotaProgress
+          fraction={remainingFraction}
+          remainingPercent={remainingPercent}
+          isExhausted={window.isExhausted}
         />
       ) : null}
 
@@ -645,8 +653,9 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
           fontWeight="semibold"
           monospacedDigit={true}
           foregroundStyle="label"
+          {...metrics.rollingText(primaryMetric, remainingText)}
         >
-          {localize(breakdown.primaryRemainingText)}
+          {remainingText}
         </Text>
         <Spacer />
         <Text
@@ -654,8 +663,9 @@ function QuotaProgressCard(props: { window: QuotaWindow }) {
           fixedSize={wrapText}
           monospacedDigit={true}
           foregroundStyle="secondaryLabel"
+          {...metrics.rollingText(secondaryMetric, usedText)}
         >
-          {localize(breakdown.secondaryUsedText)}
+          {usedText}
         </Text>
       </HStack>
     </VStack>
@@ -727,10 +737,6 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
   }
 
   if (watch) {
-    const chanceText =
-      watch.resetChancePercent != null
-        ? `预测概率 ${watch.resetChancePercent}%`
-        : "AI 重置预测"
     return (
       <VStack
         alignment="leading"
@@ -754,21 +760,7 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
           <Text font="caption" fontWeight="semibold" foregroundStyle="label">
             {localize("Codex 重置预测")}</Text>
           <Spacer />
-          <Text
-            font="caption2"
-            fontWeight="bold"
-            foregroundStyle="systemIndigo"
-            padding={{ horizontal: 6, vertical: 2 }}
-            background={
-              <RoundedRectangle
-                cornerRadius={6}
-                fill="systemIndigo"
-                opacity={0.16}
-              />
-            }
-          >
-            {localize(chanceText)}
-          </Text>
+          <CodexResetChanceBadge chance={watch.resetChancePercent} />
         </HStack>
 
         <HStack spacing={6} alignment="center">
@@ -786,3 +778,22 @@ function CodexResetNoticeView(props: { status: CodexResetStatus }) {
   return null
 }
 
+function CodexResetChanceBadge({ chance }: { chance?: number | null }) {
+  const metrics = useDashboardMetricAnimation({ chance })
+  const text = chance == null
+    ? localize("AI 重置预测")
+    : localize(`预测概率 ${Math.round(metrics.value("chance"))}%`)
+  return (
+    <Text
+      {...metrics.lifecycle}
+      {...(chance == null ? {} : metrics.rollingText("chance", text))}
+      font="caption2"
+      fontWeight="bold"
+      foregroundStyle="systemIndigo"
+      padding={{ horizontal: 6, vertical: 2 }}
+      background={<RoundedRectangle cornerRadius={6} fill="systemIndigo" opacity={0.16} />}
+    >
+      {text}
+    </Text>
+  )
+}

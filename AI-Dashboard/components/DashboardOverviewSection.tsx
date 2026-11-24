@@ -2,6 +2,7 @@ import {
   Button,
   Capsule,
   Circle,
+  Device,
   type Color,
   type DynamicShapeStyle,
   GeometryReader,
@@ -17,6 +18,8 @@ import {
   Spacer,
   Text,
   useMemo,
+  useRef,
+  useState,
   VStack,
   ZStack,
 } from "scripting"
@@ -25,6 +28,7 @@ import { getDashboardLanguage, localize } from "../utils/localization"
 import { formatMoney, formatShortDateTime } from "../utils/quota_formatting"
 import { getProviderMeta, localizeAccountName } from "../utils/providers_catalog"
 import { computeAccountOverallQuota, maskIdentity, remainingQuotaColor } from "../utils/theme"
+import { dashboardQuotaColor, useDashboardMetricAnimation } from "../utils/dashboard_metric_animation"
 import { glassCardSurface } from "./GlassCardSurface"
 import { ProviderIconView } from "./ProviderIconView"
 
@@ -67,6 +71,15 @@ const banknoteAccents: Record<WalletCurrency, readonly (readonly [number, Color]
     [2, "#6C9877"],
     [1, "#568063"],
   ],
+}
+
+function walletAccent(currency: WalletCurrency, balance: number): Color {
+  return banknoteAccents[currency].find(([denomination]) => balance >= denomination)?.[1] ?? neutralCardAccent
+}
+
+const walletPalette = {
+  CNY: ({ balance = 0 }: { balance?: number }) => walletAccent("CNY", balance),
+  USD: ({ balance = 0 }: { balance?: number }) => walletAccent("USD", balance),
 }
 
 function OverviewArcs() {
@@ -204,10 +217,6 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
     }
   }, [accounts, accountStates])
 
-  const average = stats.avgRemainingPercent
-  const quotaGradient = overviewCardGradient(
-    average === null || average === 0 ? neutralCardAccent : remainingQuotaColor(average)
-  )
   const lastUpdated = stats.lastUpdated
     ? formatShortDateTime(new Date(stats.lastUpdated).toISOString())
     : null
@@ -233,70 +242,15 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
       }
       listSectionSeparator="hidden"
     >
-      <Button
-        {...overviewRowProps()}
-        buttonStyle="plain"
-        accessibilityHint={localize("编辑账号卡片")}
-        matchedTransitionSource={props.zoomNamespace
-          ? { id: "overview-edit-accounts", namespace: props.zoomNamespace }
-          : undefined}
-        action={() => onOpenEditSheet?.()}
-      >
-        <VStack
-          alignment="leading"
-          spacing={7}
-          padding={14}
-          frame={{ maxWidth: "infinity", alignment: "leading" }}
-          contentShape="rect"
-          {...glassCardSurface(quotaGradient, 20, <OverviewArcs />)}
-        >
-          <Text font="subheadline" fontWeight="semibold" foregroundStyle="label">
-            {localize("平均剩余配额")}
-          </Text>
-          <HStack alignment="center" spacing={8}>
-            <Text font="largeTitle" fontWeight="bold" monospacedDigit={true} foregroundStyle="label" layoutPriority={1}>
-              {average === null ? "—" : `${average}%`}
-            </Text>
-            <Spacer minLength={0} />
-            <VStack alignment="trailing" spacing={3}>
-              <HStack spacing={3}>
-                <Text font="caption" fontWeight="semibold" foregroundStyle="label" multilineTextAlignment="trailing"
-                  fixedSize={{ horizontal: false, vertical: true }}
-                >
-                  {localize(`${accounts.length} 个`)}
-                </Text>
-                <Image systemName="chevron.right" font="caption2" foregroundStyle="label" />
-              </HStack>
-              <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
-                fixedSize={{ horizontal: false, vertical: true }}
-              >
-                {localize(average === null
-                  ? "暂无可计算的周期配额"
-                  : stats.warningCount > 0
-                    ? `${stats.healthyCount} 正常 · ${stats.warningCount} 预警`
-                    : `全部 ${stats.healthyCount} 个配额健康`)}
-              </Text>
-            </VStack>
-          </HStack>
-          {average !== null || lastUpdated ? (
-            <HStack alignment="top" spacing={5}>
-              {average !== null ? (
-                <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}>
-                  {localize(`平均已消耗 ${Math.max(0, 100 - average)}% 周期额度`)}
-                </Text>
-              ) : null}
-              <Spacer minLength={0} />
-              {lastUpdated ? (
-                <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
-                  fixedSize={{ horizontal: false, vertical: true }}
-                >
-                  {localize(`更新于 ${lastUpdated}`)}
-                </Text>
-              ) : null}
-            </HStack>
-          ) : null}
-        </VStack>
-      </Button>
+      <AverageQuotaOverview
+        average={stats.avgRemainingPercent}
+        accountCount={accounts.length}
+        healthyCount={stats.healthyCount}
+        warningCount={stats.warningCount}
+        lastUpdated={lastUpdated}
+        zoomNamespace={props.zoomNamespace}
+        onOpenEditSheet={onOpenEditSheet}
+      />
 
       <LazyVGrid
         {...overviewRowProps()}
@@ -313,13 +267,122 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
       {stats.chartItems.length > 0 ? (
         <AccountQuotaChart
           items={stats.chartItems}
-          backgroundGradient={quotaGradient}
+          average={stats.avgRemainingPercent}
           protectAccountIdentity={protectAccountIdentity}
           zoomNamespace={props.zoomNamespace}
           onSelectAccount={onSelectAccount}
         />
       ) : null}
     </Section>
+  )
+}
+
+function overviewQuotaGradient(average: number | null, displayed: number) {
+  return overviewCardGradient(
+    average === null || (average === 0 && displayed === 0)
+      ? neutralCardAccent
+      : dashboardQuotaColor(displayed, average)
+  )
+}
+
+function AverageQuotaOverview(props: {
+  average: number | null
+  accountCount: number
+  healthyCount: number
+  warningCount: number
+  lastUpdated: string | null
+  zoomNamespace?: DashboardOverviewSectionProps["zoomNamespace"]
+  onOpenEditSheet?: () => void
+}) {
+  const { average, accountCount, healthyCount, warningCount, lastUpdated, zoomNamespace, onOpenEditSheet } = props
+  const metrics = useDashboardMetricAnimation({
+    average,
+    used: average === null ? null : Math.max(0, 100 - average),
+    accounts: accountCount,
+    healthy: healthyCount,
+    warning: warningCount,
+  })
+  const displayedAverage = metrics.value("average")
+  const averageText = average === null ? "—" : `${Math.round(displayedAverage)}%`
+  const accountCountText = localize(`${Math.round(metrics.value("accounts"))} 个`)
+  const usedText = localize(`平均已消耗 ${Math.round(metrics.value("used"))}% 周期额度`)
+  const healthy = Math.round(metrics.value("healthy"))
+  const warning = Math.round(metrics.value("warning"))
+  const healthText = localize(average === null
+    ? "暂无可计算的周期配额"
+    : warningCount > 0 || warning > 0
+      ? `${healthy} 正常 · ${warning} 预警`
+      : `全部 ${healthy} 个配额健康`)
+  const quotaGradient = overviewQuotaGradient(average, displayedAverage)
+  const arcs = useMemo(() => <OverviewArcs />, [])
+  return (
+    <Button
+      {...overviewRowProps()}
+      {...metrics.lifecycle}
+      buttonStyle="plain"
+      accessibilityHint={localize("编辑账号卡片")}
+      matchedTransitionSource={zoomNamespace
+        ? { id: "overview-edit-accounts", namespace: zoomNamespace }
+        : undefined}
+      action={() => onOpenEditSheet?.()}
+    >
+      <VStack
+        alignment="leading"
+        spacing={7}
+        padding={14}
+        frame={{ maxWidth: "infinity", alignment: "leading" }}
+        contentShape="rect"
+        {...glassCardSurface(quotaGradient, 20, arcs, metrics.animate("average"))}
+      >
+        <Text font="subheadline" fontWeight="semibold" foregroundStyle="label">
+          {localize("平均剩余配额")}
+        </Text>
+        <HStack alignment="center" spacing={8}>
+          <Text font="largeTitle" fontWeight="bold" monospacedDigit={true} foregroundStyle="label" layoutPriority={1}
+            {...metrics.rollingText("average", averageText)}
+          >
+            {averageText}
+          </Text>
+          <Spacer minLength={0} />
+          <VStack alignment="trailing" spacing={3}>
+            <HStack spacing={3}>
+              <Text font="caption" fontWeight="semibold" foregroundStyle="label" multilineTextAlignment="trailing"
+                fixedSize={{ horizontal: false, vertical: true }}
+                {...metrics.rollingText("accounts", accountCountText)}
+              >
+                {accountCountText}
+              </Text>
+              <Image systemName="chevron.right" font="caption2" foregroundStyle="label" />
+            </HStack>
+            <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
+              fixedSize={{ horizontal: false, vertical: true }}
+              {...metrics.rollingText("healthy", healthText)}
+            >
+              {healthText}
+            </Text>
+          </VStack>
+        </HStack>
+        {average !== null || lastUpdated ? (
+          <HStack alignment="top" spacing={5}>
+            {average !== null ? (
+              <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}
+                {...metrics.rollingText("used", usedText)}
+              >
+                {usedText}
+              </Text>
+            ) : null}
+            <Spacer minLength={0} />
+            {lastUpdated ? (
+              <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
+                fixedSize={{ horizontal: false, vertical: true }}
+              >
+                {localize(`更新于 ${lastUpdated}`)}
+              </Text>
+            ) : null}
+          </HStack>
+        ) : null}
+      </VStack>
+    </Button>
   )
 }
 
@@ -331,20 +394,28 @@ function overviewRowProps() {
   } as const
 }
 
-function WalletOverview(props: { currency: WalletCurrency; balance: number; granted: number }) {
+interface WalletOverviewProps {
+  currency: WalletCurrency
+  balance: number
+  granted: number
+}
+
+function WalletOverview(props: WalletOverviewProps) {
   const { currency, balance, granted } = props
   const isCNY = currency === "CNY"
-  const note = Number.isFinite(balance)
-    ? banknoteAccents[currency].find(([denomination]) => balance >= denomination)
-    : undefined
-  const backgroundGradient = overviewCardGradient(note?.[1] ?? neutralCardAccent)
+  const metrics = useDashboardMetricAnimation({ balance }, "palette", { paletteKey: walletPalette[currency] })
+  const backgroundGradient = overviewCardGradient(walletAccent(currency, metrics.value("balance")))
+  const amounts = useMemo(() => (
+    <WalletOverviewAmounts currency={currency} balance={balance} granted={granted} />
+  ), [currency, balance, granted, getDashboardLanguage()])
   return (
     <VStack
       alignment="leading"
       spacing={4}
       padding={10}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
-      {...glassCardSurface(backgroundGradient, 14)}
+      {...glassCardSurface(backgroundGradient, 14, undefined, metrics.animate("balance"))}
+      {...metrics.lifecycle}
     >
       <HStack spacing={4}>
         <Image systemName={isCNY ? "yensign.circle" : "dollarsign.circle"} font="caption" foregroundStyle="label" />
@@ -352,15 +423,26 @@ function WalletOverview(props: { currency: WalletCurrency; balance: number; gran
           {localize(isCNY ? "人民币钱包池" : "美元钱包池")}
         </Text>
       </HStack>
-      <Text font="title3" fontWeight="semibold" monospacedDigit={true} foregroundStyle="label" fixedSize={{ horizontal: false, vertical: true }}>
-        {formatMoney(balance, currency)}
+      {amounts}
+    </VStack>
+  )
+}
+
+function WalletOverviewAmounts({ currency, balance, granted }: WalletOverviewProps) {
+  const metrics = useDashboardMetricAnimation({ balance, granted }, "wallet")
+  const displayedBalance = metrics.value("balance")
+  const displayedGrant = metrics.value("granted")
+  return (
+    <>
+      <Text {...metrics.lifecycle} font="title3" fontWeight="semibold" monospacedDigit={true} foregroundStyle="label" fixedSize={{ horizontal: false, vertical: true }}>
+        {formatMoney(displayedBalance, currency)}
       </Text>
       <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}>
-        {granted > 0
-          ? localize(`含赠送金 ${formatMoney(granted, currency)}`)
-          : localize(isCNY ? "API 预充值可用余额" : "国际平台与网关合计")}
+        {granted > 0 || displayedGrant > 0
+          ? localize(`含赠送金 ${formatMoney(displayedGrant, currency)}`)
+          : localize(currency === "CNY" ? "API 预充值可用余额" : "国际平台与网关合计")}
       </Text>
-    </VStack>
+    </>
   )
 }
 
@@ -376,23 +458,22 @@ const quotaScale: Color[] = ["#FF3B30", ...[15, 40, 60, 100].map((v) => remainin
 
 function AccountQuotaChart(props: {
   items: QuotaChartItem[]
-  backgroundGradient: DynamicShapeStyle
+  average: number | null
   protectAccountIdentity?: boolean
   zoomNamespace?: DashboardOverviewSectionProps["zoomNamespace"]
   onSelectAccount: (account: SubscriptionAccount) => void
 }) {
-  const { items, backgroundGradient, protectAccountIdentity, zoomNamespace, onSelectAccount } = props
-  const columns = useMemo(
-    () => items.map(({ account, remainingPercent, isExhausted }) => {
-      const provider = getProviderMeta(account.provider).displayName
-      const displayName = localizeAccountName(account.provider, account.displayName || provider)
-      const name = protectAccountIdentity && displayName !== localize(provider)
-        ? maskIdentity(displayName)
-        : displayName
-      return { account, remainingPercent, isExhausted, name }
-    }),
-    [items, protectAccountIdentity, getDashboardLanguage()]
-  )
+  const { average, items, protectAccountIdentity, zoomNamespace, onSelectAccount } = props
+  const metrics = useDashboardMetricAnimation({ average })
+  const backgroundGradient = overviewQuotaGradient(average, metrics.value("average"))
+  const chart = useMemo(() => (
+    <QuotaChartContent
+      items={items}
+      protectAccountIdentity={protectAccountIdentity}
+      zoomNamespace={zoomNamespace}
+      onSelectAccount={onSelectAccount}
+    />
+  ), [items, protectAccountIdentity, zoomNamespace, onSelectAccount, getDashboardLanguage()])
   return (
     <VStack
       alignment="leading"
@@ -400,8 +481,19 @@ function AccountQuotaChart(props: {
       padding={10}
       frame={{ maxWidth: "infinity", alignment: "leading" }}
       {...overviewRowProps()}
-      {...glassCardSurface(backgroundGradient, 16)}
+      {...glassCardSurface(backgroundGradient, 16, undefined, metrics.animate("average"))}
+      {...metrics.lifecycle}
     >
+      {chart}
+    </VStack>
+  )
+}
+
+function QuotaChartContent(props: Pick<DashboardOverviewSectionProps,
+  "protectAccountIdentity" | "zoomNamespace" | "onSelectAccount"
+> & { items: QuotaChartItem[] }) {
+  return (
+    <>
       <HStack spacing={6}>
         <Image systemName="chart.bar.xaxis" font="caption" foregroundStyle="label" />
         <Text font="subheadline" fontWeight="semibold" foregroundStyle="label" layoutPriority={1}
@@ -415,7 +507,7 @@ function AccountQuotaChart(props: {
         </Text>
       </HStack>
 
-      <HStack alignment="top" spacing={4}>
+      <HStack alignment="top" spacing={4} frame={{ height: columnHeight, alignment: "topLeading" }}>
         <ZStack frame={{ width: axisWidth, height: valueHeadroom + plotHeight + 8 }} accessibilityHidden={true}>
           {ticks.map((tick) => (
             <Text
@@ -430,59 +522,9 @@ function AccountQuotaChart(props: {
             </Text>
           ))}
         </ZStack>
-        <ScrollView
-          axes="horizontal"
-          frame={{ height: columnHeight }}
-          scrollBounceBehavior={{ behavior: "basedOnSize", axes: "horizontal" }}
-          scrollIndicator="hidden"
-          background={
-            <ZStack
-              frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" }}
-              allowsHitTesting={false}
-              accessibilityHidden={true}
-            >
-              <VStack spacing={0} frame={{ height: plotHeight + 1 }} padding={{ top: valueHeadroom }}>
-                <Rectangle fill="separator" frame={{ height: 1 }} />
-                <Spacer minLength={0} />
-                <Rectangle fill="separator" frame={{ height: 1 }} />
-                <Spacer minLength={0} />
-                <Rectangle fill="separator" frame={{ height: 1 }} />
-              </VStack>
-            </ZStack>
-          }
-        >
-          <LazyHStack alignment="top" spacing={0}>
-            {columns.map(({ account, name, remainingPercent, isExhausted }) => (
-              <Button
-                key={account.id}
-                buttonStyle="plain"
-                accessibilityLabel={name}
-                accessibilityValue={`${remainingPercent}%`}
-                matchedTransitionSource={zoomNamespace
-                  ? { id: `overview-account-${account.id}`, namespace: zoomNamespace }
-                  : undefined}
-                action={() => onSelectAccount(account)}
-              >
-                <VStack spacing={columnSpacing} frame={{ width: columnWidth }} contentShape="rect">
-                  <VStack spacing={2} frame={{ height: valueHeadroom + plotHeight + 1, alignment: "bottom" }}>
-                    <Text font={10} fontWeight="semibold" monospacedDigit={true} foregroundStyle="label">
-                      {`${remainingPercent}%`}
-                    </Text>
-                    <RoundedRectangle
-                      cornerRadius={3}
-                      fill={remainingQuotaColor(remainingPercent, isExhausted)}
-                      frame={{
-                        width: remainingPercent === 0 ? 16 : 28,
-                        height: Math.max(2, plotHeight * remainingPercent / 100),
-                      }}
-                    />
-                  </VStack>
-                  <ProviderIconView provider={account.provider} size={iconSize} />
-                </VStack>
-              </Button>
-            ))}
-          </LazyHStack>
-        </ScrollView>
+        <GeometryReader>
+          {(proxy) => <QuotaChartViewport {...props} width={proxy.size.width} />}
+        </GeometryReader>
       </HStack>
 
       <HStack spacing={5} frame={{ maxWidth: "infinity" }}>
@@ -493,6 +535,153 @@ function AccountQuotaChart(props: {
         <Capsule fill={{ colors: quotaScale, startPoint: "leading", endPoint: "trailing" }} frame={{ width: 52, height: 4 }} />
         <Text font="caption2" foregroundStyle="secondaryLabel">{localize("余量充足")}</Text>
       </HStack>
-    </VStack>
+    </>
+  )
+}
+
+function QuotaChartViewport(props: Parameters<typeof QuotaChartContent>[0] & { width: number }) {
+  const initialEnd = Math.ceil(props.width / columnWidth)
+  const [range, setRange] = useState<{ first: number; end: number } | null>(null)
+  const lastRange = useRef(range)
+  const { first = 0, end = initialEnd } = range ?? {}
+  const supportsScrollGeometry = Number.parseInt(Device.systemVersion, 10) >= 18
+  const { items, protectAccountIdentity, zoomNamespace, onSelectAccount } = props
+  const columns = useMemo(
+    () => items.map(({ account, remainingPercent, isExhausted }, index) => {
+      const provider = getProviderMeta(account.provider).displayName
+      const displayName = localizeAccountName(account.provider, account.displayName || provider)
+      const name = protectAccountIdentity && displayName !== localize(provider)
+        ? maskIdentity(displayName)
+        : displayName
+      return (
+        <QuotaChartColumn
+          key={account.id}
+          account={account}
+          name={name}
+          remainingPercent={remainingPercent}
+          isExhausted={isExhausted}
+          inViewport={index >= first && index < end}
+          animateOnMount={range === null}
+          zoomNamespace={zoomNamespace}
+          onSelectAccount={onSelectAccount}
+        />
+      )
+    }),
+    [items, protectAccountIdentity, zoomNamespace, onSelectAccount, first, end, range === null, getDashboardLanguage()]
+  )
+  return (
+    <ScrollView
+      axes="horizontal"
+      onScrollGeometryChange={supportsScrollGeometry ? {
+        of: "visibleRect",
+        onChanged: (_, rect) => {
+          if (rect.width <= 0) return
+          const left = Math.max(0, Math.min(rect.x, items.length * columnWidth - rect.width))
+          const first = Math.floor(left / columnWidth)
+          const end = Math.ceil((left + rect.width) / columnWidth)
+          const previous = lastRange.current
+          if (first === (previous?.first ?? 0) && end === (previous?.end ?? initialEnd)) return
+          const next = { first, end }
+          lastRange.current = next
+          setRange(next)
+        },
+      } : undefined}
+      frame={{ height: columnHeight }}
+      scrollBounceBehavior={{ behavior: "basedOnSize", axes: "horizontal" }}
+      scrollIndicator="hidden"
+      background={
+        <ZStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "top" }}
+          allowsHitTesting={false}
+          accessibilityHidden={true}
+        >
+          <VStack spacing={0} frame={{ height: plotHeight + 1 }} padding={{ top: valueHeadroom }}>
+            <Rectangle fill="separator" frame={{ height: 1 }} />
+            <Spacer minLength={0} />
+            <Rectangle fill="separator" frame={{ height: 1 }} />
+            <Spacer minLength={0} />
+            <Rectangle fill="separator" frame={{ height: 1 }} />
+          </VStack>
+        </ZStack>
+      }
+    >
+      <LazyHStack alignment="top" spacing={0}>
+        {columns}
+      </LazyHStack>
+    </ScrollView>
+  )
+}
+
+type QuotaChartMotion = { inViewport: boolean; animateOnMount: boolean }
+
+function QuotaChartColumn(props: QuotaChartItem & QuotaChartMotion & {
+  name: string
+  zoomNamespace?: DashboardOverviewSectionProps["zoomNamespace"]
+  onSelectAccount: (account: SubscriptionAccount) => void
+}) {
+  const { account, name, remainingPercent, isExhausted, zoomNamespace, onSelectAccount, inViewport, animateOnMount } = props
+  return (
+    <Button
+      buttonStyle="plain"
+      accessibilityLabel={name}
+      accessibilityValue={`${remainingPercent}%`}
+      matchedTransitionSource={zoomNamespace
+        ? { id: `overview-account-${account.id}`, namespace: zoomNamespace }
+        : undefined}
+      action={() => onSelectAccount(account)}
+    >
+      <VStack spacing={columnSpacing} frame={{ width: columnWidth }} contentShape="rect">
+        <QuotaChartBar
+          remainingPercent={remainingPercent}
+          isExhausted={isExhausted}
+          inViewport={inViewport}
+          animateOnMount={animateOnMount}
+        />
+        <ProviderIconView provider={account.provider} size={iconSize} />
+      </VStack>
+    </Button>
+  )
+}
+
+function QuotaChartBar({ remainingPercent, isExhausted, inViewport, animateOnMount }: Pick<QuotaChartItem,
+  "remainingPercent" | "isExhausted"
+> & QuotaChartMotion) {
+  const metrics = useDashboardMetricAnimation({ remaining: remainingPercent }, "native", { inViewport, animateOnMount })
+  const remaining = metrics.value("remaining")
+  const showExhaustedMarker = remaining === 0 && remainingPercent === 0
+  const height = showExhaustedMarker ? 2 : plotHeight * remaining / 100
+  const animation = metrics.animate("remaining")
+  const label = useMemo(() => (
+    <QuotaChartPercent remainingPercent={remainingPercent} inViewport={inViewport} animateOnMount={animateOnMount} />
+  ), [remainingPercent, inViewport, animateOnMount])
+
+  return (
+    <ZStack
+      alignment="bottom"
+      frame={{ width: columnWidth, height: valueHeadroom + plotHeight + 1, alignment: "bottom" }}
+    >
+      <RoundedRectangle
+        cornerRadius={3}
+        fill={dashboardQuotaColor(remaining, remainingPercent, isExhausted)}
+        frame={{ width: showExhaustedMarker ? 16 : 28, height: plotHeight }}
+        scaleEffect={{ x: 1, y: height / plotHeight, anchor: "bottom" }}
+        contentTransition="interpolate"
+        animation={animation}
+      />
+      <VStack spacing={0} offset={{ x: 0, y: -height - 2 }} animation={animation}>
+        {label}
+      </VStack>
+    </ZStack>
+  )
+}
+
+function QuotaChartPercent({ remainingPercent, inViewport, animateOnMount }: Pick<QuotaChartItem,
+  "remainingPercent"
+> & QuotaChartMotion) {
+  const metrics = useDashboardMetricAnimation({ remaining: remainingPercent }, "wholeNumber", { inViewport, animateOnMount })
+  return (
+    <Text font={10} fontWeight="semibold" monospacedDigit={true} foregroundStyle="label">
+      {`${metrics.value("remaining")}%`}
+    </Text>
   )
 }

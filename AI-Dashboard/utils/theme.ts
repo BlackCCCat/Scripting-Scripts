@@ -98,6 +98,7 @@ import { formatWindowRemainingFraction } from "./quota_formatting"
 
 export interface OverallQuotaSummary {
   remainingPercent: number // 0 ~ 100
+  hasRemainingPercentage?: boolean
   usedPercent: number // 0 ~ 100
   isExhausted: boolean
   isUnlimited: boolean
@@ -275,27 +276,11 @@ export function computeAccountOverallQuota(snapshot?: QuotaSnapshot): OverallQuo
     ? "systemGray"
     : remainingQuotaColor(finalRemPct, false)
 
-  let label: string
-  let symbol: string
-  if (isExhausted) {
-    label = "额度已耗尽 (0%)"
-    symbol = "xmark.octagon.fill"
-  } else if (finalRemPct <= 15) {
-    label = `额度告急 (${finalRemPct}%)`
-    symbol = "exclamationmark.octagon.fill"
-  } else if (finalRemPct <= 40) {
-    label = `余量偏低 (${finalRemPct}%)`
-    symbol = "exclamationmark.triangle.fill"
-  } else if (finalRemPct <= 60) {
-    label = `余量适中 (${finalRemPct}%)`
-    symbol = "exclamationmark.circle.fill"
-  } else {
-    label = `余量充足 (${finalRemPct}%)`
-    symbol = "checkmark.circle.fill"
-  }
+  const { label, symbol } = describeRemainingQuota(finalRemPct)
 
   return {
     remainingPercent: finalRemPct,
+    hasRemainingPercentage: true,
     usedPercent: finalUsedPct,
     isExhausted,
     isUnlimited: false,
@@ -307,17 +292,12 @@ export function computeAccountOverallQuota(snapshot?: QuotaSnapshot): OverallQuo
   }
 }
 
-export function accountHealthSummary(snapshot?: QuotaSnapshot): {
-  label: string
-  color: Color
-  symbol: string
-} {
-  const overall = computeAccountOverallQuota(snapshot)
-  return {
-    label: overall.label,
-    color: overall.color,
-    symbol: overall.symbol,
-  }
+export function describeRemainingQuota(percent: number, isExhausted = percent <= 0): { label: string; symbol: string } {
+  if (isExhausted) return { label: "额度已耗尽 (0%)", symbol: "xmark.octagon.fill" }
+  if (percent <= 15) return { label: `额度告急 (${percent}%)`, symbol: "exclamationmark.octagon.fill" }
+  if (percent <= 40) return { label: `余量偏低 (${percent}%)`, symbol: "exclamationmark.triangle.fill" }
+  if (percent <= 60) return { label: `余量适中 (${percent}%)`, symbol: "exclamationmark.circle.fill" }
+  return { label: `余量充足 (${percent}%)`, symbol: "checkmark.circle.fill" }
 }
 
 export function providerBrandBadgeBgColor(_provider: ProviderId): Color {
