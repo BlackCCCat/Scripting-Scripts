@@ -231,12 +231,16 @@ export function DashboardRootView(props: {
     dashboardVisit: previous.dashboardVisit + (tab === 0 ? 1 : 0),
   })
   const dashboardActive = activeTab === 0 && homeTabVisible
-  const dashboardAnimation = useMemo(() => ({ active: dashboardActive, visit: dashboardVisit }), [dashboardActive, dashboardVisit])
   const [settings, setSettingsState] = useState<DashboardSettings>(() => {
     const saved = loadDashboardSettings()
     setLocalizationPreference(saved.languagePreference)
     return saved
   })
+  const dashboardAnimation = useMemo(() => ({
+    active: dashboardActive,
+    visit: dashboardVisit,
+    enabled: settings.dashboardAnimationsEnabled,
+  }), [dashboardActive, dashboardVisit, settings.dashboardAnimationsEnabled])
   const settingsRef = useRef(settings)
   const setSettings = (next: DashboardSettings) => {
     settingsRef.current = next
@@ -304,7 +308,7 @@ export function DashboardRootView(props: {
   // 弹窗状态：添加账号 Sheet、账号排序编辑 Sheet 与 账号详情 Sheet
   const [isAddSheetPresented, setIsAddSheetPresented] = useState<boolean>(false)
   const [isEditSheetPresented, setIsEditSheetPresented] = useState<boolean>(false)
-  const [accountsBeforeEdit, setAccountsBeforeEdit] = useState<SubscriptionAccount[]>([])
+  const accountsBeforeEdit = useRef<string[] | null>(null)
   const [startAddWithPicker, setStartAddWithPicker] = useState<boolean>(true)
   const [preselectedProviderForAdd, setPreselectedProviderForAdd] =
     useState<ProviderId | undefined>(undefined)
@@ -347,7 +351,7 @@ export function DashboardRootView(props: {
     sourceID: string = "dashboard-edit-accounts"
   ) => {
     const list = settings.isDemoMode ? demoAccounts : realAccounts
-    setAccountsBeforeEdit([...list])
+    accountsBeforeEdit.current = list.map((account) => account.id)
     if (isHomeScreen) {
       setHomeRoute({
         kind: "edit",
@@ -401,16 +405,36 @@ export function DashboardRootView(props: {
     )
   }
 
+  const finishEditAccountsSheet = () => {
+    accountsBeforeEdit.current = null
+    if (isHomeScreen) {
+      setHomeRoute(null)
+    } else {
+      setIsEditSheetPresented(false)
+    }
+  }
+
   const cancelEditAccountsSheet = () => {
-    if (accountsBeforeEdit.length > 0) {
-      if (settings.isDemoMode) {
-        setDemoAccounts(accountsBeforeEdit)
-      } else {
-        setRealAccounts(accountsBeforeEdit)
-        saveStoredAccounts(accountsBeforeEdit)
+    const originalIds = accountsBeforeEdit.current
+    if (originalIds) {
+      const current = settings.isDemoMode ? demoAccountsRef.current : [...latestRealAccounts.values()]
+      const currentById = new Map(current.map((account) => [account.id, account]))
+      // Cancel restores the order of surviving accounts. Deletions have already removed their credentials.
+      const originalOrder = originalIds.flatMap((id) => {
+        const account = currentById.get(id)
+        return account ? [account] : []
+      })
+      const restored = reorderSublistInMasterByItems(current, originalOrder, originalOrder)
+      if (restored.some((account, i) => account.id !== current[i].id)) {
+        if (settings.isDemoMode) {
+          setDemoAccounts(restored)
+        } else {
+          saveRealAccountOrder(restored)
+        }
+        reloadAllWidgets()
       }
     }
-    setIsEditSheetPresented(false)
+    finishEditAccountsSheet()
   }
 
   const currentAccounts = settings.isDemoMode ? demoAccounts : realAccounts
@@ -819,26 +843,12 @@ export function DashboardRootView(props: {
     reloadAllWidgets()
   }
 
-  const handleMoveAccountsInEdit = (indices: number[], newOffset: number) => {
+  const handleEditAccountsReorder = (ordered: SubscriptionAccount[]) => {
     if (settings.isDemoMode) {
-      setDemoAccounts((prev) => {
-        const next = [...prev]
-        const moving = indices.map((i) => next[i]).filter(Boolean)
-        const rest = next.filter((_, i) => !indices.includes(i))
-        const insertAt = Math.max(0, Math.min(rest.length, newOffset))
-        rest.splice(insertAt, 0, ...moving)
-        return rest
-      })
-      HapticFeedback.lightImpact()
-      reloadAllWidgets()
-      return
+      setDemoAccounts(ordered)
+    } else {
+      saveRealAccountOrder(ordered)
     }
-    const next = [...realAccounts]
-    const moving = indices.map((i) => next[i]).filter(Boolean)
-    const rest = next.filter((_, i) => !indices.includes(i))
-    const insertAt = Math.max(0, Math.min(rest.length, newOffset))
-    rest.splice(insertAt, 0, ...moving)
-    saveRealAccountOrder(next)
     HapticFeedback.lightImpact()
     reloadAllWidgets()
   }
@@ -1018,22 +1028,10 @@ export function DashboardRootView(props: {
           accounts={currentAccounts}
           embedded={true}
           navigationTransition={homeZoomTransition(homeRoute.zoomSourceID)}
-          onReorderAccounts={(reordered) => {
-            if (settings.isDemoMode) {
-              setDemoAccounts(reordered)
-            } else {
-              saveRealAccountOrder(reordered)
-            }
-            HapticFeedback.lightImpact()
-            reloadAllWidgets()
-          }}
-          onMoveAccounts={handleMoveAccountsInEdit}
+          onReorderAccounts={handleEditAccountsReorder}
           onDeleteAccount={handleDeleteAccount}
-          onDismiss={() => setHomeRoute(null)}
-          onCancel={() => {
-            cancelEditAccountsSheet()
-            setHomeRoute(null)
-          }}
+          onDismiss={finishEditAccountsSheet}
+          onCancel={cancelEditAccountsSheet}
         />
       )
     }
@@ -1130,18 +1128,9 @@ export function DashboardRootView(props: {
                 content: (
                   <AccountOrderEditSheet
                     accounts={currentAccounts}
-                    onReorderAccounts={(reordered) => {
-                      if (settings.isDemoMode) {
-                        setDemoAccounts(reordered)
-                      } else {
-                        saveRealAccountOrder(reordered)
-                      }
-                      HapticFeedback.lightImpact()
-                      reloadAllWidgets()
-                    }}
-                    onMoveAccounts={handleMoveAccountsInEdit}
+                    onReorderAccounts={handleEditAccountsReorder}
                     onDeleteAccount={handleDeleteAccount}
-                    onDismiss={() => setIsEditSheetPresented(false)}
+                    onDismiss={finishEditAccountsSheet}
                     onCancel={cancelEditAccountsSheet}
                   />
                 ),
@@ -1195,8 +1184,9 @@ export function DashboardRootView(props: {
                 if (!open) {
                   if (homeRoute?.kind === "edit") {
                     cancelEditAccountsSheet()
+                  } else {
+                    setHomeRoute(null)
                   }
-                  setHomeRoute(null)
                 }
               },
               content: renderHomeRouteContent(),

@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   languagePreference: "system",
   isDemoMode: true,
   autoRefreshOnLaunch: true,
+  dashboardAnimationsEnabled: true,
   prefersICloudKeychain: false,
   groupByRouteCategory: false,
   protectAccountIdentity: false,
@@ -553,6 +554,8 @@ export function loadDashboardSettings(): DashboardSettings {
     isDemoMode: saved.isDemoMode ?? DEFAULT_SETTINGS.isDemoMode,
     autoRefreshOnLaunch:
       saved.autoRefreshOnLaunch ?? DEFAULT_SETTINGS.autoRefreshOnLaunch,
+    dashboardAnimationsEnabled:
+      saved.dashboardAnimationsEnabled ?? DEFAULT_SETTINGS.dashboardAnimationsEnabled,
     prefersICloudKeychain:
       saved.prefersICloudKeychain ?? DEFAULT_SETTINGS.prefersICloudKeychain,
     groupByRouteCategory:

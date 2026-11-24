@@ -274,6 +274,7 @@ export interface DashboardSettings {
   languagePreference: DashboardLanguagePreference
   isDemoMode: boolean
   autoRefreshOnLaunch: boolean
+  dashboardAnimationsEnabled: boolean
   prefersICloudKeychain: boolean
   groupByRouteCategory: boolean
   protectAccountIdentity: boolean

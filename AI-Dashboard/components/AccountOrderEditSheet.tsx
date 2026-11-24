@@ -10,7 +10,7 @@ import {
   Text,
   useEffect,
   useObservable,
-  useState,
+  useRef,
   VStack,
 } from "scripting"
 import { SubscriptionAccount } from "../models/types"
@@ -21,72 +21,53 @@ export type AccountOrderEditSheetProps = {
   accounts: SubscriptionAccount[]
   embedded?: boolean
   navigationTransition?: { type: "zoom"; sourceID: string | number; namespace: any }
-  onMoveAccounts?: (indices: number[], newOffset: number) => void
-  onReorderAccounts?: (reordered: SubscriptionAccount[]) => void
+  onReorderAccounts: (reordered: SubscriptionAccount[]) => void
   onDeleteAccount: (accountId: string) => void
   onDismiss: () => void
   onCancel: () => void
 }
 
-/**
- * 账号拖动排序与删除弹窗
- * 使用 Scripting / SwiftUI 官方原生 API：
- * 1. List environments={{ editMode }} 激活原生 EditMode.active()；
- * 2. ForEach 绑定 data={accountsObservable} 与 editActions="all"；
- * 3. 订阅 accountsObservable 实现原生拖动松手后的即时数据同步与持久化，绝不回弹。
- */
 export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
   const {
-    accounts: initialAccounts,
-    onMoveAccounts,
+    accounts,
     onReorderAccounts,
     onDeleteAccount,
     onDismiss,
     onCancel,
   } = props
 
-  const accountsObservable = useObservable<SubscriptionAccount[]>(() => initialAccounts)
+  const accountsObservable = useObservable<SubscriptionAccount[]>(() => accounts)
   const editMode = useObservable(() => EditMode.active())
-  const [skipNextSync] = useState(() => ({ current: false }))
+  const listOrder = useRef(accounts)
+  const actions = useRef({ onReorderAccounts, onDeleteAccount })
+  actions.current = { onReorderAccounts, onDeleteAccount }
 
   useEffect(() => {
-    accountsObservable.setValue(initialAccounts)
-  }, [initialAccounts])
+    const listener = (next: SubscriptionAccount[]) => {
+      const previous = listOrder.current
+      if (next.length === previous.length && next.every((account, i) => account.id === previous[i].id)) return
+      listOrder.current = next
 
-  // 原生 SwiftUI 在拖动完成时会自动更新 accountsObservable 并触发 subscribe
-  useState(() => {
-    accountsObservable.subscribe((nextAccounts) => {
-      if (skipNextSync.current) {
-        skipNextSync.current = false
+      if (next.length < previous.length) {
+        const remainingIds = new Set(next.map((account) => account.id))
+        for (const account of previous) {
+          if (!remainingIds.has(account.id)) actions.current.onDeleteAccount(account.id)
+        }
         return
       }
-      onReorderAccounts?.(nextAccounts)
-    })
-    return true
-  })
+      actions.current.onReorderAccounts(next)
+    }
+    accountsObservable.subscribe(listener)
+    return () => accountsObservable.unsubscribe(listener)
+  }, [accountsObservable])
 
-  const handleMove = (indices: number[], newOffset: number) => {
-    skipNextSync.current = true
-    const current = [...accountsObservable.value]
-    const moving = indices.map((i) => current[i]).filter(Boolean)
-    if (moving.length === 0) return
-    const rest = current.filter((_, i) => !indices.includes(i))
-    const insertAt = Math.max(0, Math.min(rest.length, newOffset))
-    rest.splice(insertAt, 0, ...moving)
-    accountsObservable.setValue(rest)
-    onReorderAccounts?.(rest)
-    onMoveAccounts?.(indices, newOffset)
-  }
-
-  const handleDelete = (indices: number[]) => {
-    skipNextSync.current = true
-    const current = [...accountsObservable.value]
-    const idsToDelete = indices.map((i) => current[i]?.id).filter(Boolean)
-    const rest = current.filter((_, i) => !indices.includes(i))
-    accountsObservable.setValue(rest)
-    onReorderAccounts?.(rest)
-    idsToDelete.forEach((id) => onDeleteAccount(id))
-  }
+  useEffect(() => {
+    // Record the parent order before updating the native binding so it can't echo back as an edit.
+    const previous = listOrder.current
+    listOrder.current = accounts
+    if (accounts.length === previous.length && accounts.every((account, i) => account === previous[i])) return
+    accountsObservable.setValue(accounts)
+  }, [accounts, accountsObservable])
 
   const content = (
     <List
@@ -132,8 +113,6 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
             <ForEach
               data={accountsObservable}
               editActions="all"
-              onMove={handleMove}
-              onDelete={handleDelete}
               builder={(acc) => {
                 return (
                   <HStack
@@ -149,13 +128,7 @@ export function AccountOrderEditSheet(props: AccountOrderEditSheetProps) {
                           systemImage="trash"
                           role="destructive"
                           tint="red"
-                          action={() => {
-                            skipNextSync.current = true
-                            const rest = accountsObservable.value.filter((a) => a.id !== acc.id)
-                            accountsObservable.setValue(rest)
-                            onReorderAccounts?.(rest)
-                            onDeleteAccount(acc.id)
-                          }}
+                          action={() => onDeleteAccount(acc.id)}
                         />,
                       ],
                     }}

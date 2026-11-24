@@ -219,6 +219,14 @@ export function SettingsView(props: {
             }
           />
           <Toggle
+            title={localize("看板动画")}
+            systemImage="chart.bar.xaxis"
+            value={settings.dashboardAnimationsEnabled}
+            onChanged={(val) =>
+              onUpdateSettings({ ...settings, dashboardAnimationsEnabled: val })
+            }
+          />
+          <Toggle
             title={localize("启动脚本时自动刷新已启用账号")}
             systemImage="arrow.clockwise"
             value={settings.autoRefreshOnLaunch}

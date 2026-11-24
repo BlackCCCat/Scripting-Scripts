@@ -58,6 +58,7 @@ const ENGLISH: Record<string, string> = {
   "额外额度": "Additional Allowance",
   "额外 Tokens": "Additional Tokens",
   "分组显示": "Group by Connection Method",
+  "看板动画": "Dashboard Animations",
   "启动脚本时自动刷新已启用账号": "Refresh on Launch",
   "iCloud 钥匙串同步": "iCloud Keychain Sync",
   "重试同步": "Retry Sync",

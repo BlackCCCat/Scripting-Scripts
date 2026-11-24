@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "scripting"
 import { remainingQuotaColor } from "./theme"
 
-export const DashboardAnimationContext = createContext<{ active: boolean; visit: number }>()
+export const DashboardAnimationContext = createContext<{ active: boolean; visit: number; enabled?: boolean }>()
 
 const frameInterval = 16
 const duration = 448
@@ -122,7 +122,7 @@ export function useDashboardMetricAnimation<Key extends string>(
   }
 ) {
   const { paletteKey, inViewport, animateOnMount = true } = options ?? {}
-  const { active, visit } = useContext(DashboardAnimationContext)
+  const { active, visit, enabled = true } = useContext(DashboardAnimationContext)
   const [appearance, setAppearance] = useState<object | null>(null)
   const [frame, setFrame] = useState<Frame<Key> | null>(null)
   const latestFrame = useRef(frame)
@@ -142,13 +142,17 @@ export function useDashboardMetricAnimation<Key extends string>(
       setAppearance(null)
     },
   }), [])
-  const signature = JSON.stringify(targets)
+  const signature = enabled ? JSON.stringify(targets) : ""
   const visible = inViewport ?? (appearance !== null)
-  const useTarget = inViewport !== undefined && (!inViewport || !wasInViewport.current)
+  const useTarget = !enabled || (inViewport !== undefined && (!inViewport || !wasInViewport.current))
 
   useEffect(() => {
-    if (inViewport === false) {
-      wasInViewport.current = false
+    if (inViewport === false) wasInViewport.current = false
+    if (!enabled) {
+      if (latestFrame.current) {
+        latestFrame.current = null
+        setFrame(null)
+      }
       return
     }
     if (!active || !visible || (inViewport === undefined && !isVisible.current)) return
@@ -240,7 +244,7 @@ export function useDashboardMetricAnimation<Key extends string>(
       stop()
       if (cancel.current === stop) cancel.current = undefined
     }
-  }, [active, appearance, visit, signature, motion, paletteKey, inViewport])
+  }, [enabled, active, appearance, visit, signature, motion, paletteKey, inViewport])
 
   const current = frame?.visit === visit ? frame : null
   const value = (key: Key) => {
@@ -249,19 +253,19 @@ export function useDashboardMetricAnimation<Key extends string>(
     if (typeof target !== "number" || !Number.isFinite(target)) return 0
     return motion === "wholeNumber" ? Math.round(target) : target
   }
-  const animation = linearAnimation(!active || !visible || !current || useTarget
+  const animation = !enabled ? undefined : linearAnimation(!active || !visible || !current || useTarget
     ? 0
     : current.transitionMs ?? (motion === "palette" ? 100 : duration))
   return {
     value,
     lifecycle,
-    animate: (key: Key) => ({ animation, value: value(key) }),
-    rollingText: (key: Key, text: string) => ({
+    animate: (key: Key) => animation ? { animation, value: value(key) } : undefined,
+    rollingText: (key: Key, text: string) => animation ? {
       contentTransition: current?.decreasing.has(key)
         ? "numericTextCountsDown" as const
         : "numericTextCountsUp" as const,
       animation: { animation, value: text },
-    }),
+    } : {},
   }
 }
 
