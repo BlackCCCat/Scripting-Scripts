@@ -29,30 +29,22 @@ import { glassCardSurface } from "./GlassCardSurface"
 import { ProviderIconView } from "./ProviderIconView"
 
 const neutralCardAccent = "#8E8E93"
-const cardSecondaryText = "rgba(255,255,255,0.88)"
-const chartGridColor = "rgba(255,255,255,0.22)"
 
-function overviewCardPalette(accent: Color) {
-  const channels = [1, 3, 5].map((offset) => Number.parseInt(accent.slice(offset, offset + 2), 16))
-  // Keep the accent hue while providing contrast for the white title and captions.
-  const shade = (strength: number): Color => {
-    const [red, green, blue] = channels.map((channel) => Math.round(18 + (channel - 18) * strength))
-    return `rgb(${red},${green},${blue})`
-  }
-
-  const fill: DynamicShapeStyle = {
+function overviewCardGradient(accent: Color): DynamicShapeStyle {
+  const [red, green, blue] = [1, 3, 5].map((offset) => Number.parseInt(accent.slice(offset, offset + 2), 16))
+  const tint = (opacity: number): Color => `rgba(${red},${green},${blue},${opacity})`
+  return {
     light: gradient("linear", {
-      colors: [shade(0.26), shade(0.43)],
+      colors: [tint(0.04), tint(0.38)],
       startPoint: "topLeading",
       endPoint: "bottomTrailing",
     }),
     dark: gradient("linear", {
-      colors: [shade(0.20), shade(0.37)],
+      colors: [tint(0.06), tint(0.32)],
       startPoint: "topLeading",
       endPoint: "bottomTrailing",
     }),
   }
-  return { fill, tint: shade(0.36) }
 }
 
 type WalletCurrency = "CNY" | "USD"
@@ -80,27 +72,30 @@ const banknoteAccents: Record<WalletCurrency, readonly (readonly [number, Color]
 function OverviewArcs() {
   return (
     <GeometryReader>
-      {(proxy) => (
-        <RoundedRectangle
-          cornerRadius={20}
-          style="continuous"
-          fill={gradient("radial", {
-            stops: [
-              { color: "clear", location: 0 },
-              { color: "clear", location: 0.70 },
-              { color: "rgba(255,255,255,0.10)", location: 0.70 },
-              { color: "rgba(255,255,255,0.08)", location: 0.78 },
-              { color: "rgba(255,255,255,0.05)", location: 0.78 },
-              { color: "rgba(255,255,255,0.03)", location: 0.92 },
-              { color: "clear", location: 0.92 },
-              { color: "clear", location: 1 },
-            ],
-            center: { x: 1.02, y: 0.35 },
-            startRadius: 0,
-            endRadius: proxy.size.width * 0.76,
-          })}
-        />
-      )}
+      {(proxy) => {
+        const arcGradient = (channel: number) => gradient("radial", {
+          stops: [
+            { color: "clear", location: 0 },
+            { color: "clear", location: 0.70 },
+            { color: `rgba(${channel},${channel},${channel},0.10)`, location: 0.70 },
+            { color: `rgba(${channel},${channel},${channel},0.08)`, location: 0.78 },
+            { color: `rgba(${channel},${channel},${channel},0.05)`, location: 0.78 },
+            { color: `rgba(${channel},${channel},${channel},0.03)`, location: 0.92 },
+            { color: "clear", location: 0.92 },
+            { color: "clear", location: 1 },
+          ],
+          center: { x: 1.02, y: 0.35 },
+          startRadius: 0,
+          endRadius: proxy.size.width * 0.76,
+        })
+        return (
+          <RoundedRectangle
+            cornerRadius={20}
+            style="continuous"
+            fill={{ light: arcGradient(0), dark: arcGradient(255) }}
+          />
+        )
+      }}
     </GeometryReader>
   )
 }
@@ -210,7 +205,7 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
   }, [accounts, accountStates])
 
   const average = stats.avgRemainingPercent
-  const quotaPalette = overviewCardPalette(
+  const quotaGradient = overviewCardGradient(
     average === null || average === 0 ? neutralCardAccent : remainingQuotaColor(average)
   )
   const lastUpdated = stats.lastUpdated
@@ -253,26 +248,26 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
           padding={14}
           frame={{ maxWidth: "infinity", alignment: "leading" }}
           contentShape="rect"
-          {...glassCardSurface(quotaPalette.fill, 20, { decoration: <OverviewArcs />, tint: quotaPalette.tint })}
+          {...glassCardSurface(quotaGradient, 20, <OverviewArcs />)}
         >
-          <Text font="subheadline" fontWeight="semibold" foregroundStyle="white">
+          <Text font="subheadline" fontWeight="semibold" foregroundStyle="label">
             {localize("平均剩余配额")}
           </Text>
           <HStack alignment="center" spacing={8}>
-            <Text font="largeTitle" fontWeight="bold" monospacedDigit={true} foregroundStyle="white" layoutPriority={1}>
+            <Text font="largeTitle" fontWeight="bold" monospacedDigit={true} foregroundStyle="label" layoutPriority={1}>
               {average === null ? "—" : `${average}%`}
             </Text>
             <Spacer minLength={0} />
             <VStack alignment="trailing" spacing={3}>
               <HStack spacing={3}>
-                <Text font="caption" fontWeight="semibold" foregroundStyle="white" multilineTextAlignment="trailing"
+                <Text font="caption" fontWeight="semibold" foregroundStyle="label" multilineTextAlignment="trailing"
                   fixedSize={{ horizontal: false, vertical: true }}
                 >
                   {localize(`${accounts.length} 个`)}
                 </Text>
-                <Image systemName="chevron.right" font="caption2" foregroundStyle="white" />
+                <Image systemName="chevron.right" font="caption2" foregroundStyle="label" />
               </HStack>
-              <Text font="caption2" foregroundStyle={cardSecondaryText} multilineTextAlignment="trailing"
+              <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
                 fixedSize={{ horizontal: false, vertical: true }}
               >
                 {localize(average === null
@@ -286,13 +281,13 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
           {average !== null || lastUpdated ? (
             <HStack alignment="top" spacing={5}>
               {average !== null ? (
-                <Text font="caption2" foregroundStyle={cardSecondaryText} fixedSize={{ horizontal: false, vertical: true }}>
+                <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}>
                   {localize(`平均已消耗 ${Math.max(0, 100 - average)}% 周期额度`)}
                 </Text>
               ) : null}
               <Spacer minLength={0} />
               {lastUpdated ? (
-                <Text font="caption2" foregroundStyle={cardSecondaryText} multilineTextAlignment="trailing"
+                <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing"
                   fixedSize={{ horizontal: false, vertical: true }}
                 >
                   {localize(`更新于 ${lastUpdated}`)}
@@ -318,7 +313,7 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
       {stats.chartItems.length > 0 ? (
         <AccountQuotaChart
           items={stats.chartItems}
-          palette={quotaPalette}
+          backgroundGradient={quotaGradient}
           protectAccountIdentity={protectAccountIdentity}
           zoomNamespace={props.zoomNamespace}
           onSelectAccount={onSelectAccount}
@@ -342,25 +337,25 @@ function WalletOverview(props: { currency: WalletCurrency; balance: number; gran
   const note = Number.isFinite(balance)
     ? banknoteAccents[currency].find(([denomination]) => balance >= denomination)
     : undefined
-  const { fill, tint } = overviewCardPalette(note?.[1] ?? neutralCardAccent)
+  const backgroundGradient = overviewCardGradient(note?.[1] ?? neutralCardAccent)
   return (
     <VStack
       alignment="leading"
       spacing={4}
       padding={10}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" }}
-      {...glassCardSurface(fill, 14, { tint })}
+      {...glassCardSurface(backgroundGradient, 14)}
     >
       <HStack spacing={4}>
-        <Image systemName={isCNY ? "yensign.circle" : "dollarsign.circle"} font="caption" foregroundStyle="white" />
-        <Text font="caption" foregroundStyle={cardSecondaryText} fixedSize={{ horizontal: false, vertical: true }}>
+        <Image systemName={isCNY ? "yensign.circle" : "dollarsign.circle"} font="caption" foregroundStyle="label" />
+        <Text font="caption" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}>
           {localize(isCNY ? "人民币钱包池" : "美元钱包池")}
         </Text>
       </HStack>
-      <Text font="title3" fontWeight="semibold" monospacedDigit={true} foregroundStyle="white" fixedSize={{ horizontal: false, vertical: true }}>
+      <Text font="title3" fontWeight="semibold" monospacedDigit={true} foregroundStyle="label" fixedSize={{ horizontal: false, vertical: true }}>
         {formatMoney(balance, currency)}
       </Text>
-      <Text font="caption2" foregroundStyle={cardSecondaryText} fixedSize={{ horizontal: false, vertical: true }}>
+      <Text font="caption2" foregroundStyle="secondaryLabel" fixedSize={{ horizontal: false, vertical: true }}>
         {granted > 0
           ? localize(`含赠送金 ${formatMoney(granted, currency)}`)
           : localize(isCNY ? "API 预充值可用余额" : "国际平台与网关合计")}
@@ -381,12 +376,12 @@ const quotaScale: Color[] = ["#FF3B30", ...[15, 40, 60, 100].map((v) => remainin
 
 function AccountQuotaChart(props: {
   items: QuotaChartItem[]
-  palette: ReturnType<typeof overviewCardPalette>
+  backgroundGradient: DynamicShapeStyle
   protectAccountIdentity?: boolean
   zoomNamespace?: DashboardOverviewSectionProps["zoomNamespace"]
   onSelectAccount: (account: SubscriptionAccount) => void
 }) {
-  const { items, palette, protectAccountIdentity, zoomNamespace, onSelectAccount } = props
+  const { items, backgroundGradient, protectAccountIdentity, zoomNamespace, onSelectAccount } = props
   const columns = useMemo(
     () => items.map(({ account, remainingPercent, isExhausted }) => {
       const provider = getProviderMeta(account.provider).displayName
@@ -405,17 +400,17 @@ function AccountQuotaChart(props: {
       padding={10}
       frame={{ maxWidth: "infinity", alignment: "leading" }}
       {...overviewRowProps()}
-      {...glassCardSurface(palette.fill, 16, { tint: palette.tint })}
+      {...glassCardSurface(backgroundGradient, 16)}
     >
       <HStack spacing={6}>
-        <Image systemName="chart.bar.xaxis" font="caption" foregroundStyle="white" />
-        <Text font="subheadline" fontWeight="semibold" foregroundStyle="white" layoutPriority={1}
+        <Image systemName="chart.bar.xaxis" font="caption" foregroundStyle="label" />
+        <Text font="subheadline" fontWeight="semibold" foregroundStyle="label" layoutPriority={1}
           fixedSize={{ horizontal: false, vertical: true }}
         >
           {localize("账号剩余额度")}
         </Text>
         <Spacer minLength={0} />
-        <Text font="caption2" foregroundStyle={cardSecondaryText} multilineTextAlignment="trailing" fixedSize={{ horizontal: false, vertical: true }}>
+        <Text font="caption2" foregroundStyle="secondaryLabel" multilineTextAlignment="trailing" fixedSize={{ horizontal: false, vertical: true }}>
           {localize("左右滑动 · 点击图标查看")}
         </Text>
       </HStack>
@@ -426,7 +421,7 @@ function AccountQuotaChart(props: {
             <Text
               key={tick}
               font={10}
-              foregroundStyle={cardSecondaryText}
+              foregroundStyle="secondaryLabel"
               monospacedDigit={true}
               frame={{ width: axisWidth, alignment: "trailing" }}
               position={{ x: axisWidth / 2, y: valueHeadroom + plotHeight * (100 - tick) / 100 }}
@@ -447,11 +442,11 @@ function AccountQuotaChart(props: {
               accessibilityHidden={true}
             >
               <VStack spacing={0} frame={{ height: plotHeight + 1 }} padding={{ top: valueHeadroom }}>
-                <Rectangle fill={chartGridColor} frame={{ height: 1 }} />
+                <Rectangle fill="separator" frame={{ height: 1 }} />
                 <Spacer minLength={0} />
-                <Rectangle fill={chartGridColor} frame={{ height: 1 }} />
+                <Rectangle fill="separator" frame={{ height: 1 }} />
                 <Spacer minLength={0} />
-                <Rectangle fill={chartGridColor} frame={{ height: 1 }} />
+                <Rectangle fill="separator" frame={{ height: 1 }} />
               </VStack>
             </ZStack>
           }
@@ -470,7 +465,7 @@ function AccountQuotaChart(props: {
               >
                 <VStack spacing={columnSpacing} frame={{ width: columnWidth }} contentShape="rect">
                   <VStack spacing={2} frame={{ height: valueHeadroom + plotHeight + 1, alignment: "bottom" }}>
-                    <Text font={10} fontWeight="semibold" monospacedDigit={true} foregroundStyle="white">
+                    <Text font={10} fontWeight="semibold" monospacedDigit={true} foregroundStyle="label">
                       {`${remainingPercent}%`}
                     </Text>
                     <RoundedRectangle
@@ -492,11 +487,11 @@ function AccountQuotaChart(props: {
 
       <HStack spacing={5} frame={{ maxWidth: "infinity" }}>
         <Capsule fill="systemGray" frame={{ width: 9, height: 4 }} />
-        <Text font="caption2" foregroundStyle={cardSecondaryText}>{localize("额度耗尽")}</Text>
+        <Text font="caption2" foregroundStyle="secondaryLabel">{localize("额度耗尽")}</Text>
         <Spacer minLength={3} />
-        <Text font="caption2" foregroundStyle={cardSecondaryText}>{localize("额度告急")}</Text>
+        <Text font="caption2" foregroundStyle="secondaryLabel">{localize("额度告急")}</Text>
         <Capsule fill={{ colors: quotaScale, startPoint: "leading", endPoint: "trailing" }} frame={{ width: 52, height: 4 }} />
-        <Text font="caption2" foregroundStyle={cardSecondaryText}>{localize("余量充足")}</Text>
+        <Text font="caption2" foregroundStyle="secondaryLabel">{localize("余量充足")}</Text>
       </HStack>
     </VStack>
   )

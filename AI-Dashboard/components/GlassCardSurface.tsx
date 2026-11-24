@@ -1,10 +1,10 @@
-import { RoundedRectangle, ZStack, type Color, type DynamicShapeStyle, type VirtualNode } from "scripting"
+import { RoundedRectangle, ZStack, type DynamicShapeStyle, type VirtualNode } from "scripting"
 import { isIOS26OrLater } from "../utils/theme"
 
 export function glassCardSurface(
   fill: DynamicShapeStyle,
   cornerRadius: number,
-  options?: { decoration?: VirtualNode; tint?: Color }
+  decoration?: VirtualNode
 ) {
   const hasGlass = isIOS26OrLater()
   const shape = { type: "rect", cornerRadius, style: "continuous" } as const
@@ -20,11 +20,9 @@ export function glassCardSurface(
           fill={fill}
           opacity={hasGlass ? 0.48 : 1}
         />
-        {options?.decoration}
+        {decoration}
       </ZStack>
     ),
-    glassEffect: hasGlass
-      ? options?.tint ? { glass: UIGlass.regular().tint(options.tint), shape } : shape
-      : undefined,
+    glassEffect: hasGlass ? shape : undefined,
   }
 }
