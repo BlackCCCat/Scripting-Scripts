@@ -4,7 +4,6 @@ import {
   Circle,
   type Color,
   type DynamicShapeStyle,
-  EmptyView,
   GeometryReader,
   gradient,
   HStack,
@@ -218,15 +217,29 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
     ? formatShortDateTime(new Date(stats.lastUpdated).toISOString())
     : null
 
-  const cards = (
-    <VStack
-      alignment="leading"
-      spacing={9}
-      listRowInsets={0}
-      listRowSeparator="hidden"
-      listRowBackground={<EmptyView />}
+  return (
+    <Section
+      header={
+        <HStack alignment="center" spacing={6}>
+          <Image systemName="gauge.with.dots.needle.67percent" font="caption" foregroundStyle="systemIndigo" />
+          <Text font="subheadline" fontWeight="semibold">{localize("全局额度与资产总览")}</Text>
+          <Spacer minLength={4} />
+          <HStack spacing={4}>
+            <Circle
+              fill={isDemoMode ? "secondaryLabel" : "systemGreen"}
+              frame={{ width: 6, height: 6 }}
+              accessibilityHidden={true}
+            />
+            <Text font="caption2" foregroundStyle="secondaryLabel">
+              {localize(isDemoMode ? "演示数据" : "实时直连")}
+            </Text>
+          </HStack>
+        </HStack>
+      }
+      listSectionSeparator="hidden"
     >
       <Button
+        {...overviewRowProps()}
         buttonStyle="plain"
         accessibilityHint={localize("编辑账号卡片")}
         matchedTransitionSource={props.zoomNamespace
@@ -290,10 +303,14 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
         </VStack>
       </Button>
 
-      <LazyVGrid columns={[
-        { size: { type: "flexible", min: 0 }, spacing: 8 },
-        { size: { type: "flexible", min: 0 }, spacing: 8 },
-      ]} spacing={8}>
+      <LazyVGrid
+        {...overviewRowProps()}
+        columns={[
+          { size: { type: "flexible", min: 0 }, spacing: 8 },
+          { size: { type: "flexible", min: 0 }, spacing: 8 },
+        ]}
+        spacing={8}
+      >
         <WalletOverview currency="CNY" balance={stats.totalCny} granted={stats.grantedCny} />
         <WalletOverview currency="USD" balance={stats.totalUsd} granted={stats.grantedUsd} />
       </LazyVGrid>
@@ -307,32 +324,16 @@ export function DashboardOverviewSection(props: DashboardOverviewSectionProps) {
           onSelectAccount={onSelectAccount}
         />
       ) : null}
-    </VStack>
-  )
-
-  return (
-    <Section
-      header={
-        <HStack alignment="center" spacing={6}>
-          <Image systemName="gauge.with.dots.needle.67percent" font="caption" foregroundStyle="systemIndigo" />
-          <Text font="subheadline" fontWeight="semibold">{localize("全局额度与资产总览")}</Text>
-          <Spacer minLength={4} />
-          <HStack spacing={4}>
-            <Circle
-              fill={isDemoMode ? "secondaryLabel" : "systemGreen"}
-              frame={{ width: 6, height: 6 }}
-              accessibilityHidden={true}
-            />
-            <Text font="caption2" foregroundStyle="secondaryLabel">
-              {localize(isDemoMode ? "演示数据" : "实时直连")}
-            </Text>
-          </HStack>
-        </HStack>
-      }
-    >
-      {cards}
     </Section>
   )
+}
+
+function overviewRowProps() {
+  return {
+    listRowInsets: 0,
+    listRowSeparator: "hidden",
+    listRowBackground: <Rectangle fill="clear" />,
+  } as const
 }
 
 function WalletOverview(props: { currency: WalletCurrency; balance: number; granted: number }) {
@@ -403,6 +404,7 @@ function AccountQuotaChart(props: {
       spacing={7}
       padding={10}
       frame={{ maxWidth: "infinity", alignment: "leading" }}
+      {...overviewRowProps()}
       {...glassCardSurface(palette.fill, 16, { tint: palette.tint })}
     >
       <HStack spacing={6}>
