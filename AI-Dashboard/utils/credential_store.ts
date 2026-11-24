@@ -6,7 +6,7 @@ import {
   SubscriptionAccount,
 } from "../models/types"
 import { getProviderMeta, PROVIDERS_CATALOG } from "./providers_catalog"
-import { DASHBOARD_SETTINGS_KEY, setLocalizationPreference } from "./localization"
+import { DASHBOARD_SETTINGS_KEY, isDashboardLanguagePreference, setLocalizationPreference } from "./localization"
 
 const STORAGE_ACCOUNTS_KEY = "ai_dashboard.accounts.v1"
 const STORAGE_SNAPSHOTS_KEY = "ai_dashboard.snapshots.v1"
@@ -548,7 +548,7 @@ export function loadDashboardSettings(): DashboardSettings {
   }
   return {
     languagePreference:
-      saved.languagePreference === "zh" || saved.languagePreference === "en"
+      isDashboardLanguagePreference(saved.languagePreference)
         ? saved.languagePreference
         : "system",
     isDemoMode: saved.isDemoMode ?? DEFAULT_SETTINGS.isDemoMode,

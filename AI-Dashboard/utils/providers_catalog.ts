@@ -1282,6 +1282,7 @@ export function searchProviders(
   routeFilter?: ProviderRouteCategory | "all"
 ): ProviderMeta[] {
   const normalized = query.trim().toLowerCase()
+  const traditional = getDashboardLanguage() === "zh-Hant"
   return PROVIDERS_CATALOG.filter((item) => {
     if (
       routeFilter &&
@@ -1298,9 +1299,12 @@ export function searchProviders(
     if (localize(item.endpointSummary).toLowerCase().includes(normalized)) return true
     if (localize(item.authSummary).toLowerCase().includes(normalized)) return true
     return item.aliases.some((alias) =>
-      alias.toLowerCase().includes(normalized)
+      alias.toLowerCase().includes(normalized) ||
+      (traditional && localize(alias).toLowerCase().includes(normalized))
     )
-  }).sort((a, b) => localize(a.displayName).localeCompare(localize(b.displayName), "en"))
+  }).sort((a, b) => traditional
+    ? a.displayName.localeCompare(b.displayName, "en")
+    : localize(a.displayName).localeCompare(localize(b.displayName), "en"))
 }
 
 const PINYIN_FIRST_LETTERS: Record<string, string> = {
@@ -1323,9 +1327,11 @@ const PINYIN_FIRST_LETTERS: Record<string, string> = {
 export function groupProvidersAlphabetically(
   providers: ProviderMeta[]
 ): { letter: string; items: ProviderMeta[] }[] {
+  const language = getDashboardLanguage()
+  const label = (provider: ProviderMeta) => language === "zh-Hant" ? provider.displayName : localize(provider.displayName)
   const buckets = new Map<string, ProviderMeta[]>()
   for (const provider of providers) {
-    const rawChar = localize(provider.displayName).trim().charAt(0)
+    const rawChar = label(provider).trim().charAt(0)
     const upper = rawChar.toUpperCase()
     const mapped = PINYIN_FIRST_LETTERS[rawChar] ?? upper
     const letter = /^[A-Z]$/.test(mapped) ? mapped : "#"
@@ -1342,7 +1348,7 @@ export function groupProvidersAlphabetically(
     .map(([letter, items]) => ({
       letter,
       items: items.sort((a, b) =>
-        localize(a.displayName).localeCompare(localize(b.displayName), getDashboardLanguage())
+        label(a).localeCompare(label(b), language === "zh-Hant" ? "zh" : language)
       ),
     }))
 }

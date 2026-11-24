@@ -1,5 +1,7 @@
 import type { DashboardLanguagePreference } from "../models/types"
-export type DashboardLanguage = "zh" | "en"
+import { translateTraditionalChinese } from "./traditional_chinese"
+
+export type DashboardLanguage = Exclude<DashboardLanguagePreference, "system">
 
 export const DASHBOARD_SETTINGS_KEY = "ai_dashboard.settings.v1"
 
@@ -816,6 +818,10 @@ const ENGLISH: Record<string, string> = {
   "WebView 查询": "WebView request",
 }
 
+export function isDashboardLanguagePreference(value: unknown): value is DashboardLanguagePreference {
+  return value === "system" || value === "zh" || value === "zh-Hant" || value === "en"
+}
+
 export function setLocalizationPreference(
   preference: DashboardLanguagePreference
 ): void {
@@ -826,17 +832,20 @@ export function getDashboardLanguage(): DashboardLanguage {
   if (languagePreference === undefined) {
     try {
       const settings = Storage.get<{ languagePreference?: DashboardLanguagePreference }>(DASHBOARD_SETTINGS_KEY)
-      languagePreference = settings?.languagePreference ?? "system"
+      const saved = settings?.languagePreference
+      languagePreference = isDashboardLanguagePreference(saved) ? saved : "system"
     } catch {
       languagePreference = "system"
     }
   }
 
-  if (languagePreference === "zh" || languagePreference === "en") return languagePreference
+  if (languagePreference !== "system") return languagePreference
 
   try {
-    const preferredLanguage = Device.preferredLanguages?.[0] ?? Device.systemLanguageCode
-    return /^zh(?:[-_]|$)/i.test(preferredLanguage ?? "") ? "zh" : "en"
+    const preferredLanguage = Device.preferredLanguages?.[0] ?? Device.systemLanguageTag ?? Device.systemLanguageCode
+    const [language, scriptOrRegion] = preferredLanguage.toLowerCase().split(/[-_]/)
+    if (language !== "zh") return "en"
+    return /^(hant|tw|hk|mo)$/.test(scriptOrRegion ?? "") ? "zh-Hant" : "zh"
   } catch {
     return "en"
   }
@@ -965,9 +974,11 @@ export function localize(text: string | undefined): string | undefined
 export function localize(text: string | null): string | null
 export function localize(text: string | null | undefined): string | null | undefined {
   if (!text) return text
-  if (getDashboardLanguage() === "en") return translateEnglish(text)
+  const language = getDashboardLanguage()
+  if (language === "en") return translateEnglish(text)
   const translated = CHINESE[text]
-  return typeof translated === "string" ? translated : text
+  const chinese = typeof translated === "string" ? translated : text
+  return language === "zh-Hant" ? translateTraditionalChinese(chinese) : chinese
 }
 
 function translateEnglish(text: string): string {

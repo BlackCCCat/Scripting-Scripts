@@ -268,7 +268,7 @@ export interface ProviderMeta {
   webSessionProfile?: WebSessionProfile
 }
 
-export type DashboardLanguagePreference = "system" | "zh" | "en"
+export type DashboardLanguagePreference = "system" | "zh" | "zh-Hant" | "en"
 
 export interface DashboardSettings {
   languagePreference: DashboardLanguagePreference

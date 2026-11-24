@@ -12,11 +12,13 @@ const numberFormats = new Map<string, Intl.NumberFormat>()
 
 function numberFormat(key: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
   const language = getDashboardLanguage()
-  const cacheKey = `${language}:${key}`
+  // Keep existing currency symbols and number widths in both Chinese options.
+  const locale = language === "zh-Hant" ? "zh" : language
+  const cacheKey = `${locale}:${key}`
   const cached = numberFormats.get(cacheKey)
   if (cached) return cached
 
-  const formatter = new Intl.NumberFormat(language, options)
+  const formatter = new Intl.NumberFormat(locale, options)
   if (numberFormats.size >= 64) numberFormats.clear()
   numberFormats.set(cacheKey, formatter)
   return formatter
@@ -441,7 +443,8 @@ export function formatFailureDescription(
     }
   })()
   if (!detail) return localize(base)
-  return getDashboardLanguage() === "en"
-    ? `${localize(base)} (${localize(detail)})`
-    : `${base}（${detail}）`
+  const language = getDashboardLanguage()
+  if (language === "en") return `${localize(base)} (${localize(detail)})`
+  const message = `${base}（${detail}）`
+  return language === "zh-Hant" ? localize(message) : message
 }

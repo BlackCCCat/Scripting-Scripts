@@ -1,4 +1,4 @@
-import { localize } from "../utils/localization"
+import { isDashboardLanguagePreference, localize } from "../utils/localization"
 import {
   Button,
   Form,
@@ -201,13 +201,14 @@ export function SettingsView(props: {
             systemImage="globe"
             value={settings.languagePreference}
             onChanged={(value: string) => {
-              if (value === "system" || value === "zh" || value === "en") {
+              if (isDashboardLanguagePreference(value)) {
                 onUpdateSettings({ ...settings, languagePreference: value })
               }
             }}
           >
             <Text tag="system">{localize("跟随系统")}</Text>
             <Text tag="zh">中文</Text>
+            <Text tag="zh-Hant">繁體中文</Text>
             <Text tag="en">English</Text>
           </Picker>
           <Toggle
