@@ -4,19 +4,13 @@ import {
   List,
   Navigation,
   NavigationStack,
-  ProgressView,
-  Rectangle,
-  ScrollView,
-  ScrollViewReader,
   Script,
-  Section,
-  Text,
-  VStack,
   useEffect,
   useRef,
   useState,
 } from "scripting"
-import { type DownloadProgress, type DownloadSuccess } from "./services/douyin"
+import { type DownloadMediaInfo, type DownloadProgress, type DownloadSuccess } from "./services/douyin"
+import { downloadAccent, DownloadBackdrop, DownloadCardRow, DownloadLogCard, DownloadTaskCard } from "./components/download-task-card"
 import { postDownloadAction } from "./services/file-actions"
 import { initDatabase, insertHistory, pruneHistoryStorage } from "./services/history"
 import { downloadMedia } from "./services/media"
@@ -83,19 +77,11 @@ function IntentDownloadView(props: {
 }) {
   const preferences = getPreferences()
   const t = getI18n(preferences.language)
-  const logProxyRef = useRef<any>()
   const logsRef = useRef<string[]>([])
   const [status, setStatus] = useState(t.ready)
-  const [progress, setProgress] = useState<DownloadProgress>({
-    fraction: 0.02,
-    stage: t.preparing,
-  })
-  const latestProgressRef = useRef<DownloadProgress>({
-    fraction: 0.02,
-    stage: t.preparing,
-  })
-  const latestStatusRef = useRef(t.ready)
-  const runningRef = useRef(true)
+  const [taskMedia, setTaskMedia] = useState<DownloadMediaInfo | null>(null)
+  const [phase, setPhase] = useState<"active" | "done" | "error">("active")
+  const [progress, setProgress] = useState<DownloadProgress>({ stage: t.preparing })
   const [logs, setLogs] = useState<string[]>([])
 
   const appendLog = (message: string) => {
@@ -111,44 +97,17 @@ function IntentDownloadView(props: {
   }
 
   useEffect(() => {
-    const scrollLatest = () => {
-      try {
-        logProxyRef.current?.scrollTo?.("intentDownloadLogBottom", "bottom")
-      } catch {}
-    }
-    scrollLatest()
-    const timer = setTimeout(scrollLatest, 120)
-    return () => clearTimeout(timer)
-  }, [logs.length])
-
-  useEffect(() => {
-    let stopped = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const tick = () => {
-      if (stopped) return
-      if (!runningRef.current) return
-      setProgress({ ...latestProgressRef.current })
-      setStatus(latestStatusRef.current || latestProgressRef.current.stage)
-      timer = setTimeout(tick, 250)
-    }
-    timer = setTimeout(tick, 250)
-    return () => {
-      stopped = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [])
-
-  useEffect(() => {
     void (async () => {
       try {
         await initDatabase()
         appendLog(`收到分享下载任务：${props.url}`)
-        latestStatusRef.current = t.analyzing
-        setStatus(latestStatusRef.current)
+        setProgress({ stage: t.analyzing })
+        setStatus(t.analyzing)
 
         const download = await downloadMedia(props.url, {
           preferNoWatermark: preferences.preferNoWatermark,
           ytDlpReady: preferences.ytDlpReady,
+          onMediaInfo: setTaskMedia,
           onYtDlpStatus: (ready, version) => {
             persistPreferences({
               ...getPreferences(),
@@ -158,24 +117,18 @@ function IntentDownloadView(props: {
             })
           },
           onProgress: (nextProgress: DownloadProgress) => {
-            latestProgressRef.current = nextProgress
-            latestStatusRef.current = nextProgress.stage
-            setProgress({ ...nextProgress })
+            setProgress(nextProgress)
             setStatus(nextProgress.stage)
           },
           onLog: appendLog,
         })
 
-        latestProgressRef.current = { fraction: 0.96, stage: t.postAction }
-        latestStatusRef.current = t.postAction
-        setProgress(latestProgressRef.current)
-        setStatus(latestStatusRef.current)
+        setProgress({ stage: t.postAction })
+        setStatus(t.postAction)
         const postResult = await postDownloadAction(download, preferences.defaultSaveMode)
 
-        latestProgressRef.current = { fraction: 0.98, stage: t.writingHistory }
-        latestStatusRef.current = t.writingHistory
-        setProgress(latestProgressRef.current)
-        setStatus(latestStatusRef.current)
+        setProgress({ stage: t.writingHistory })
+        setStatus(t.writingHistory)
         const preserveFiles = preferences.keepHistoryFiles || postResult.keepFilesInHistory
         await insertHistory(download, { preserveFiles })
         if (!preserveFiles) {
@@ -189,11 +142,9 @@ function IntentDownloadView(props: {
         }
         appendLog("历史记录已写入。")
 
-        latestProgressRef.current = { fraction: 1, stage: t.done }
-        latestStatusRef.current = postResult.message
-        runningRef.current = false
-        setProgress(latestProgressRef.current)
-        setStatus(latestStatusRef.current)
+        setProgress({ stage: t.done })
+        setPhase("done")
+        setStatus(postResult.message)
         appendLog(postResult.message)
 
         Script.exit(
@@ -216,6 +167,10 @@ function IntentDownloadView(props: {
           })
         )
       } catch (error) {
+        setPhase("error")
+        const message = error instanceof Error ? error.message : String(error)
+        setProgress({ stage: message })
+        setStatus(message)
         await handleError(error)
       }
     })()
@@ -226,51 +181,33 @@ function IntentDownloadView(props: {
       <List
         navigationTitle={t.appName}
         navigationBarTitleDisplayMode="inline"
+        tint={downloadAccent}
+        listStyle="plain"
+        scrollContentBackground="hidden"
+        background={<DownloadBackdrop />}
         toolbar={{
           cancellationAction: <Button title={t.close} action={() => Script.exit(Intent.text(t.cancel))} />,
         }}
       >
-        {progress.transferFraction !== undefined ? (
-          <Section title={t.progress}>
-            <VStack alignment="leading" spacing={8}>
-              <ProgressView value={progress.transferFraction ?? undefined} total={1} progressViewStyle="linear" />
-              <Text>{localizeRuntimeText(progress.stage, preferences.language)}</Text>
-              {progress.transferFraction != null ? (
-                <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(progress.transferFraction * 100)}%</Text>
-              ) : null}
-            </VStack>
-          </Section>
-        ) : null}
-
-        <Section title={t.status}>
-          <Text foregroundStyle="secondaryLabel">{localizeRuntimeText(status, preferences.language)}</Text>
-        </Section>
-
-        <Section title={t.downloadLog}>
-          <ScrollViewReader>
-            {(proxy: any) => {
-              logProxyRef.current = proxy
-              return (
-                <ScrollView frame={{ maxWidth: "infinity", height: 260 }}>
-                  <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {logs.length === 0 ? (
-                      <Text foregroundStyle="secondaryLabel">{t.noLogs}</Text>
-                    ) : (
-                      logs.map((log, index) => (
-                        <Text key={`${index}-${log}`} font="caption" foregroundStyle="secondaryLabel">{localizeRuntimeText(log, preferences.language)}</Text>
-                      ))
-                    )}
-                    <Rectangle
-                      key="intentDownloadLogBottom"
-                      foregroundStyle="clear"
-                      frame={{ maxWidth: "infinity", height: 1 }}
-                    />
-                  </VStack>
-                </ScrollView>
-              )
-            }}
-          </ScrollViewReader>
-        </Section>
+        <DownloadCardRow>
+          <DownloadTaskCard
+            media={taskMedia}
+            progress={progress}
+            titleFallback={props.url}
+            status={status}
+            language={preferences.language}
+            phase={phase}
+          />
+        </DownloadCardRow>
+        <DownloadCardRow>
+          <DownloadLogCard
+            logs={logs}
+            language={preferences.language}
+            active={phase === "active"}
+            status={status}
+            onCopy={() => void Pasteboard.setString(logsRef.current.join("\n") || t.noLogs)}
+          />
+        </DownloadCardRow>
       </List>
     </NavigationStack>
   )

@@ -6,10 +6,11 @@ import {
   ensureDownloadDirectories,
   MOBILE_SAFARI_UA,
   type DownloadLogFn,
+  type DownloadMediaInfo,
   type DownloadProgressFn,
   type DownloadSuccess,
 } from "./douyin"
-import { formatBytes, sanitizeFileName, sleep } from "../utils/common"
+import { formatBytes, formatEta, sanitizeFileName, sleep } from "../utils/common"
 import { cancelBackgroundDownloads } from "./background-download"
 
 type ShellDownloadResult = {
@@ -572,13 +573,13 @@ async function downloadHLSPlanAsLocalPlaylist(options: {
   let bytesWritten = 0
 
   const reportProgress = () => {
-    const fraction = totalUnits > 0
+    const transferFraction = totalUnits > 0
       ? options.start + (options.end - options.start) * (completedUnits / totalUnits)
       : options.start
     options.onProgress?.({
-      fraction,
       stage: `${options.label} ${completedUnits}/${totalUnits} · ${formatBytes(bytesWritten)}`,
-      transferFraction: fraction,
+      transferFraction,
+      transfer: { bytes: bytesWritten },
     })
   }
 
@@ -868,16 +869,6 @@ function readYtDlpProgress(): YtDlpProgress | null {
   }
 }
 
-function formatEta(seconds?: number | null): string | null {
-  if (seconds == null || seconds < 0 || !Number.isFinite(seconds)) return null
-  const totalSeconds = Math.max(0, Math.round(seconds))
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const secs = totalSeconds % 60
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
-  return `${minutes}:${String(secs).padStart(2, "0")}`
-}
-
 function startYtDlpProgressPolling(options: {
   start: number
   end: number
@@ -892,7 +883,7 @@ function startYtDlpProgressPolling(options: {
     if (progress) {
       const percent = progress.percent ?? null
       const inner = percent != null ? Math.max(0, Math.min(1, percent / 100)) : null
-      const fraction = options.start + (options.end - options.start) * (inner ?? 0)
+      const transferFraction = options.start + (options.end - options.start) * (inner ?? 0)
       const downloaded = progress.downloadedBytes ? formatBytes(progress.downloadedBytes) : null
       const total = progress.totalBytes ? formatBytes(progress.totalBytes) : null
       const speed = progress.speed ? `${formatBytes(progress.speed)}/s` : null
@@ -909,9 +900,14 @@ function startYtDlpProgressPolling(options: {
         fragments,
       ].filter(Boolean).join(" · ")
       options.onProgress?.({
-        fraction,
         stage: detail ? `${options.stage} · ${detail}` : options.stage,
-        transferFraction: inner == null ? null : fraction,
+        transferFraction: inner == null ? null : transferFraction,
+        transfer: {
+          bytes: progress.downloadedBytes ?? 0,
+          total: progress.totalBytes,
+          speed: progress.speed,
+          eta: progress.eta,
+        },
       })
     }
     timer = setTimeout(tick, 500)
@@ -1008,7 +1004,7 @@ async function probeYtDlpMedia(url: string, options: {
   platform: string
   onYtDlpStatus?: (ready: boolean, version: string | null) => void
 }): Promise<YtDlpProbeResult> {
-  options.onProgress?.({ fraction: 0.12, stage: `正在读取 ${options.platform} 媒体信息` })
+  options.onProgress?.({ stage: `正在读取 ${options.platform} 媒体信息` })
   options.onLog?.(`正在读取 ${options.platform} 媒体信息。`)
   let noCheckCertificate = false
   let effectiveURL = url
@@ -1020,7 +1016,7 @@ async function probeYtDlpMedia(url: string, options: {
     logShellResult(options.onLog, label, attempt)
     if (attempt.exitCode !== 0 && isTransientWebViewCleanupFailure(attempt.output) && !FileManager.existsSync(CANCEL_FLAG_PATH)) {
       options.onLog?.("检测到 WebView 清理中的临时异常，等待后自动重试媒体信息读取。")
-      options.onProgress?.({ fraction: 0.13, stage: `正在重试 ${options.platform} 媒体信息` })
+      options.onProgress?.({ stage: `正在重试 ${options.platform} 媒体信息` })
       await sleep(900)
       attempt = await Shell.run(commandLine(buildYtDlpProbeArgs(effectiveURL, noCheckCertificate, httpHeaders, cookieFilePath, extractorArgs)), { timeout: 180 })
       logShellResult(options.onLog, `${label} transient retry`, attempt)
@@ -1032,7 +1028,7 @@ async function probeYtDlpMedia(url: string, options: {
   if (result.exitCode !== 0 && isCertificateVerifyFailure(result.output)) {
     noCheckCertificate = true
     options.onLog?.("检测到 SSL 证书校验失败，使用 nocheckcertificate 自动重试一次。")
-    options.onProgress?.({ fraction: 0.14, stage: `正在重试 ${options.platform} 媒体信息` })
+    options.onProgress?.({ stage: `正在重试 ${options.platform} 媒体信息` })
     result = await runProbe(`yt-dlp ${options.platform} probe nocheckcertificate`)
   }
   if (result.exitCode !== 0 && options.platform === "Instagram" && isInstagramEmptyMediaResponse(result.output)) {
@@ -1040,13 +1036,13 @@ async function probeYtDlpMedia(url: string, options: {
     httpHeaders = instagramBrowserHeaders(effectiveURL)
     cookieFilePath = await writeYtDlpCookieFileForURL(effectiveURL, options.onLog)
     options.onLog?.(`Instagram 返回空媒体数据，去除分享参数并使用浏览器 UA 重试：${effectiveURL}`)
-    options.onProgress?.({ fraction: 0.16, stage: "正在重试 Instagram 媒体信息" })
+    options.onProgress?.({ stage: "正在重试 Instagram 媒体信息" })
     result = await runProbe("yt-dlp Instagram probe browser headers")
   }
   if (result.exitCode !== 0 && options.platform === "TikTok" && isTikTokWebpageUnexpectedFailure(result.output)) {
     options.onLog?.(`yt-dlp 依赖状态：${await getYtDlpDependencyReport()}`)
     options.onLog?.("检测到 TikTok 网页响应兼容问题，正在更新 yt-dlp 后自动重试。")
-    options.onProgress?.({ fraction: 0.16, stage: "正在更新 yt-dlp 并重试 TikTok" })
+    options.onProgress?.({ stage: "正在更新 yt-dlp 并重试 TikTok" })
     const updateOutput = await installOrUpdateYtDlp()
     const updatedVersion = await getYtDlpVersion()
     options.onLog?.(`yt-dlp 更新完成：${updatedVersion || "unknown"}`)
@@ -1057,7 +1053,7 @@ async function probeYtDlpMedia(url: string, options: {
   }
   if (result.exitCode !== 0 && !isTikTokWebpageUnexpectedFailure(result.output) && !cookieFilePath && isCookieAuthProbeFailure(result.output)) {
     options.onLog?.("媒体信息读取提示可能需要登录 Cookie，正在导出 WebView Cookie 后自动重试。")
-    options.onProgress?.({ fraction: 0.17, stage: `正在重试 ${options.platform} 媒体信息` })
+    options.onProgress?.({ stage: `正在重试 ${options.platform} 媒体信息` })
     cookieFilePath = await writeYtDlpCookieFileForURL(effectiveURL, options.onLog)
     if (cookieFilePath) {
       result = await runProbe(`yt-dlp ${options.platform} probe cookies`)
@@ -1160,11 +1156,11 @@ async function ensureYtDlpReadyForDownload(options: {
   onYtDlpStatus?: (ready: boolean, version: string | null) => void
 }) {
   if (options.ytDlpReady === true) {
-    options.onProgress?.({ fraction: 0.06, stage: "正在准备 yt-dlp 下载" })
+    options.onProgress?.({ stage: "正在准备 yt-dlp 下载" })
     return
   }
 
-  options.onProgress?.({ fraction: 0.04, stage: "正在检查 yt-dlp" })
+  options.onProgress?.({ stage: "正在检查 yt-dlp" })
   const version = await getYtDlpVersion()
   if (version) {
     options.onYtDlpStatus?.(true, version)
@@ -1172,7 +1168,7 @@ async function ensureYtDlpReadyForDownload(options: {
   }
 
   options.onYtDlpStatus?.(false, null)
-  options.onProgress?.({ fraction: 0.08, stage: "正在安装 yt-dlp" })
+  options.onProgress?.({ stage: "正在安装 yt-dlp" })
   options.onLog?.("未检测到 yt-dlp，开始自动安装。")
   await installOrUpdateYtDlp()
   options.onYtDlpStatus?.(true, await getYtDlpVersion())
@@ -1196,7 +1192,7 @@ async function mergeAdaptiveMedia(options: {
   onLog?: DownloadLogFn
   isCancelled?: () => boolean
 }): Promise<ShellExecutionResult> {
-  options.onProgress?.({ fraction: 0.84, stage: "正在通过 ffmpeg 合并音视频" })
+  options.onProgress?.({ stage: "正在通过 ffmpeg 合并音视频" })
   options.onLog?.("开始用 ffmpeg 合并音视频。")
   const copyResult = await Shell.run(
     commandLine(["ffmpeg", "-nostdin", "-y", "-i", options.videoPath, "-i", options.audioPath, "-c", "copy", "-movflags", "+faststart", options.finalPath]),
@@ -1209,7 +1205,7 @@ async function mergeAdaptiveMedia(options: {
   if (FileManager.existsSync(CANCEL_FLAG_PATH) || options.isCancelled?.()) return copyResult
 
   await removeIfExists(options.finalPath)
-  options.onProgress?.({ fraction: 0.88, stage: "正在转码为兼容 MP4" })
+  options.onProgress?.({ stage: "正在转码为兼容 MP4" })
   options.onLog?.(`无损合并失败，转码为兼容 MP4：${compactLog(copyResult.output, 700)}`)
   const transcodeResult = await Shell.run(
     commandLine([
@@ -1243,6 +1239,7 @@ async function downloadGenericMedia(
   sourceURL: string,
   options?: {
     platform?: string
+    onMediaInfo?: (info: DownloadMediaInfo) => void
     onProgress?: DownloadProgressFn
     onLog?: DownloadLogFn
     isCancelled?: () => boolean
@@ -1251,7 +1248,7 @@ async function downloadGenericMedia(
   }
 ): Promise<DownloadSuccess> {
   const platform = options?.platform || platformLabel(sourceURL)
-  const report = (fraction: number, stage: string) => options?.onProgress?.({ fraction, stage })
+  const report = (stage: string) => options?.onProgress?.({ stage })
   const log = (message: string) => options?.onLog?.(message)
 
   log(`识别为 ${platform} 链接，切换到通用 yt-dlp 下载器。`)
@@ -1285,6 +1282,12 @@ async function downloadGenericMedia(
     log(`yt-dlp 下载使用规范化链接：${downloadURL}`)
   }
   const choice = buildYtDlpChoice(probe)
+  const videoFormat = choice.kind === "adaptive" ? choice.video : choice.format
+  options?.onMediaInfo?.({
+    title: probe.title,
+    thumbnailURL: probe.thumbnail,
+    detail: [platform, videoFormat.height ? `${videoFormat.height}p` : null, videoFormat.ext?.toUpperCase()].filter(Boolean).join(" · "),
+  })
   log(`已选择 yt-dlp 格式：${choice.label}`)
   if (choice.kind === "progressive") {
     log(`yt-dlp progressive 格式详情：${describeFormat(choice.format)}`)
@@ -1295,7 +1298,7 @@ async function downloadGenericMedia(
 
   let result: ShellDownloadResult
   if (choice.kind === "progressive") {
-    report(0.2, `正在下载 ${platform} 视频`)
+    report(`正在下载 ${platform} 视频`)
     const raw = await runYtDlpDownloadWithProgress({
       args: buildYtDlpRunnerArgs(
         downloadURL,
@@ -1324,7 +1327,7 @@ async function downloadGenericMedia(
     const videoBytes = formatSize(choice.video)
     const audioBytes = formatSize(choice.audio)
     const videoShare = videoBytes > 0 && audioBytes > 0 ? videoBytes / (videoBytes + audioBytes) : 0.75
-    report(0.2, `正在下载 ${platform} 视频流`)
+    report(`正在下载 ${platform} 视频流`)
     const videoRaw = await runYtDlpDownloadWithProgress({
       args: buildYtDlpRunnerArgs(
         downloadURL,
@@ -1350,7 +1353,7 @@ async function downloadGenericMedia(
     }
     registerCurrentTaskPath(videoPath)
 
-    report(0.56, `正在下载 ${platform} 音频流`)
+    report(`正在下载 ${platform} 音频流`)
     const audioRaw = await runYtDlpDownloadWithProgress({
       args: buildYtDlpRunnerArgs(
         downloadURL,
@@ -1409,7 +1412,7 @@ async function downloadGenericMedia(
   }
 
   const filePath = result.paths[result.paths.length - 1]
-  report(0.95, "正在验证下载文件")
+  report("正在验证下载文件")
   await verifyOutputFile(filePath, log)
   const fileName = Path.basename(filePath)
   const bytesWritten = fileSize(filePath)
@@ -1418,7 +1421,7 @@ async function downloadGenericMedia(
   const title = metadataTitle(metadata, Path.basename(fileName, Path.extname(fileName)))
   const pageURL = metadata?.webpage_url || sourceURL
 
-  report(1, `下载完成：${fileName}`)
+  report(`下载完成：${fileName}`)
   log(`${platform} 下载完成：${fileName}，大小 ${formatBytes(bytesWritten)}`)
 
   return {
@@ -1456,22 +1459,6 @@ async function downloadGenericMedia(
   }
 }
 
-async function downloadYouTube(
-  sourceURL: string,
-  options?: {
-    onProgress?: DownloadProgressFn
-    onLog?: DownloadLogFn
-    isCancelled?: () => boolean
-    ytDlpReady?: boolean | null
-    onYtDlpStatus?: (ready: boolean, version: string | null) => void
-  }
-): Promise<DownloadSuccess> {
-  return downloadGenericMedia(sourceURL, {
-    ...options,
-    platform: "YouTube",
-  })
-}
-
 async function downloadM3U8(
   sourceURL: string,
   options?: {
@@ -1480,7 +1467,7 @@ async function downloadM3U8(
     isCancelled?: () => boolean
   }
 ): Promise<DownloadSuccess> {
-  const report = (fraction: number, stage: string) => options?.onProgress?.({ fraction, stage })
+  const report = (stage: string) => options?.onProgress?.({ stage })
   const log = (message: string) => options?.onLog?.(message)
   await ensureDownloadDirectories()
   await ensureTempDirectory()
@@ -1491,7 +1478,7 @@ async function downloadM3U8(
   const selection = await resolveBestM3U8Selection(sourceURL, log)
   const inputURL = selection.videoURL
 
-  report(0.1, "正在解析 m3u8 分片列表")
+  report("正在解析 m3u8 分片列表")
   log("识别为 m3u8 链接，开始解析分片列表。")
   try {
     const videoPlaylistText = await fetchM3U8Text(selection.videoURL)
@@ -1547,7 +1534,7 @@ async function downloadM3U8(
         audioInputPath = audioDownload.playlistPath
       }
 
-      report(0.84, "正在通过 ffmpeg 合并 m3u8 分片")
+      report("正在通过 ffmpeg 合并 m3u8 分片")
       const downloadedBytes = videoDownload.bytesWritten + (audioDownload?.bytesWritten || 0)
       const downloadedSegments = videoDownload.segmentCount + (audioDownload?.segmentCount || 0)
       log(`m3u8 分片下载完成：${downloadedSegments} 个分片，累计 ${formatBytes(downloadedBytes)}。`)
@@ -1572,7 +1559,7 @@ async function downloadM3U8(
 
       const bytesWritten = fileSize(filePath)
       if (!bytesWritten) throw new Error("ffmpeg 输出文件为空")
-      report(1, `下载完成：${Path.basename(filePath)}`)
+      report(`下载完成：${Path.basename(filePath)}`)
       log(`m3u8 下载完成：${Path.basename(filePath)}，大小 ${formatBytes(bytesWritten)}`)
 
       return {
@@ -1620,7 +1607,7 @@ async function downloadM3U8(
     log(`m3u8 分片下载不可用，回退到 ffmpeg：${error instanceof Error ? error.message : String(error)}`)
   }
 
-  report(0.12, "正在通过 ffmpeg 下载 m3u8")
+  report("正在通过 ffmpeg 下载 m3u8")
   log("切换到 ffmpeg 下载器。")
 
   let sizeTimer: ReturnType<typeof setTimeout> | null = null
@@ -1631,9 +1618,9 @@ async function downloadM3U8(
       if (FileManager.existsSync(filePath)) written = FileManager.statSync(filePath).size
     } catch {}
     options?.onProgress?.({
-      fraction: 0.12,
       stage: `正在通过 ffmpeg 下载 m3u8 · ${formatBytes(written)}`,
       transferFraction: null,
+      transfer: { bytes: written },
     })
     sizeTimer = setTimeout(reportSize, 500)
   }
@@ -1678,7 +1665,7 @@ async function downloadM3U8(
 
   const bytesWritten = fileSize(filePath)
   if (!bytesWritten) throw new Error("ffmpeg 输出文件为空")
-  report(1, `下载完成：${Path.basename(filePath)}`)
+  report(`下载完成：${Path.basename(filePath)}`)
   log(`m3u8 下载完成：${Path.basename(filePath)}，大小 ${formatBytes(bytesWritten)}`)
 
   return {
@@ -1721,6 +1708,7 @@ export async function downloadMedia(
   options?: {
     preferNoWatermark?: boolean
     onProgress?: DownloadProgressFn
+    onMediaInfo?: (info: DownloadMediaInfo) => void
     onLog?: DownloadLogFn
     isCancelled?: () => boolean
     ytDlpReady?: boolean | null
@@ -1729,8 +1717,11 @@ export async function downloadMedia(
 ): Promise<DownloadSuccess> {
   if (options?.isCancelled?.()) throw new Error("下载已取消")
   const kind = detectMediaDownloadKind(sourceURL)
-  if (kind === "youtube") return downloadYouTube(sourceURL, options)
-  if (kind === "m3u8") return downloadM3U8(sourceURL, options)
+  if (kind === "youtube") return downloadGenericMedia(sourceURL, { ...options, platform: "YouTube" })
+  if (kind === "m3u8") {
+    options?.onMediaInfo?.({ detail: "M3U8" })
+    return downloadM3U8(sourceURL, options)
+  }
   if (kind === "generic") return downloadGenericMedia(sourceURL, options)
   try {
     return await downloadDouyinVideo(sourceURL, options)

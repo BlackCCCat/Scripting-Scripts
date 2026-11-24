@@ -23,8 +23,6 @@ export async function downloadURLToFileWithProgress(options: {
   url: string
   destination: string
   headers?: Record<string, string>
-  start: number
-  end: number
   stage: string
   onProgress?: DownloadProgressFn
   isCancelled?: () => boolean
@@ -49,6 +47,7 @@ export async function downloadURLToFileWithProgress(options: {
       headers: normalizeHeaders(options.headers),
     })
     backgroundTasks.add(task)
+    const startedAt = Date.now()
 
     task.onProgress = (details) => {
       if (options.isCancelled?.() || options.isCancelFlagSet?.()) {
@@ -58,17 +57,23 @@ export async function downloadURLToFileWithProgress(options: {
 
       const total = details.totalBytesExpectedToWrite
       const downloaded = details.totalBytesWritten
+      const elapsed = (Date.now() - startedAt) / 1000
+      const speed = elapsed >= 1 && downloaded > 0 ? downloaded / elapsed : null
       const inner = total > 0
         ? Math.max(0, Math.min(1, downloaded / total))
         : Math.max(0.02, Math.min(0.96, Math.log2(downloaded / (1024 * 1024) + 1) / 8))
-      const fraction = options.start + (options.end - options.start) * inner
       const detail = total > 0
         ? `${formatBytes(downloaded)} / ${formatBytes(total)}`
         : formatBytes(downloaded)
       options.onProgress?.({
-        fraction,
         stage: `${options.stage} · ${detail}`,
         transferFraction: total > 0 ? inner : null,
+        transfer: {
+          bytes: downloaded,
+          total: total > 0 ? total : null,
+          speed,
+          eta: speed && total > 0 ? Math.max(0, total - downloaded) / speed : null,
+        },
       })
     }
 

@@ -1,6 +1,7 @@
 import {
   Button,
   DirectoryBrowserView,
+  Divider,
   HStack,
   Image,
   Intent,
@@ -8,9 +9,6 @@ import {
   Navigation,
   NavigationStack,
   ProgressView,
-  Rectangle,
-  ScrollView,
-  ScrollViewReader,
   Script,
   Section,
   Slider,
@@ -31,6 +29,7 @@ import {
   IMAGE_DOWNLOAD_DIR,
   ROOT_DIR,
   ensureDownloadDirectories,
+  type DownloadMediaInfo,
   type DownloadProgress,
   type DownloadSuccess,
 } from "./services/douyin"
@@ -53,16 +52,16 @@ import {
 } from "./services/file-actions"
 import { getPreferences, persistPreferences, type LanguageMode, type Preferences, type SaveMode } from "./services/preferences"
 import { extractFirstURL, formatBytes, formatDate, sleep } from "./utils/common"
-import { getI18n, languageLabel, localizeRuntimeText } from "./utils/i18n"
+import { getI18n, languageLabel } from "./utils/i18n"
 import { useMarkdownReleaseNotesSheet } from "./components/release-notes-sheet"
+import { downloadAccent, DownloadBackdrop, DownloadCardRow, DownloadIconButton, DownloadLogCard, DownloadPanel, DownloadTaskCard, supportsDownloadGlass } from "./components/download-task-card"
 
 const HISTORY_TAB = 0
 const DOWNLOAD_TAB = 1
 const SETTINGS_TAB = 2
+const downloadActionMargin = { edges: "bottom", insets: 70, placement: "scrollContent" } as const
 const DESKTOP_BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 const YOINKS_URL = "https://github.com/pablostanley/yoinks"
-
-type ContentTab = typeof HISTORY_TAB | typeof DOWNLOAD_TAB | typeof SETTINGS_TAB
 
 function extractAwemeIDFromURL(url: string): string | null {
   const match = url.match(/(?:video|share\/video|note|share\/note|gallery|share\/gallery|slides|share\/slides)\/(\d{10,})/) || url.match(/[?&](?:aweme_id|item_id|modal_id)=(\d{10,})/)
@@ -327,62 +326,26 @@ function AboutPage(props: {
   )
 }
 
-function FloatingIconButton(props: {
-  systemImage: string
-  onPress: () => void
-  iconSize?: number
-}) {
-  const iconSize = props.iconSize ?? 26
-  return (
-    <Button action={props.onPress} frame={{ width: 58, height: 58 }} glassEffect>
-      <Image systemName={props.systemImage} foregroundStyle="label" frame={{ width: iconSize, height: iconSize }} />
-    </Button>
-  )
-}
-
-function AddButtonCluster(props: {
-  visible: boolean
-  loading: boolean
-  onToggle: () => void
-  onPaste: () => void
-  onManual: () => void
-  onCancel: () => void
-}) {
-  if (props.loading) {
-    return (
-      <VStack
-        spacing={10}
-        padding={{ trailing: 18, bottom: 72 }}
-        frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
-      >
-        <FloatingIconButton systemImage="xmark.circle.fill" iconSize={36} onPress={props.onCancel} />
-      </VStack>
-    )
-  }
-
-  return (
-    <VStack
-      spacing={10}
-      padding={{ trailing: 18, bottom: 72 }}
-      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "bottomTrailing" as any }}
-    >
-      {props.visible ? (
-        <>
-          <FloatingIconButton systemImage="doc.on.clipboard" onPress={props.onPaste} />
-          <FloatingIconButton systemImage="square.and.pencil" onPress={props.onManual} />
-        </>
-      ) : null}
-      <FloatingIconButton systemImage={props.visible ? "xmark" : "plus"} onPress={props.onToggle} />
-    </VStack>
-  )
-}
-
 function ytDlpStatusText(preferences: Preferences, t: ReturnType<typeof getI18n>): string {
   if (preferences.ytDlpReady === true) {
     return preferences.ytDlpVersion ? `${t.ytDlpReady}：${preferences.ytDlpVersion}` : t.ytDlpReady
   }
   if (preferences.ytDlpReady === false) return t.ytDlpMissing
   return t.ytDlpNotChecked
+}
+
+function SettingsAction(props: { title: string; symbol?: string; value?: string; action: () => void }) {
+  return (
+    <Button action={props.action} buttonStyle="plain">
+      <HStack spacing={9} frame={{ maxWidth: "infinity", minHeight: 44, alignment: "leading" }}>
+        {props.symbol ? <Image systemName={props.symbol} foregroundStyle={downloadAccent} /> : null}
+        <Text>{props.title}</Text>
+        <Spacer minLength={3} />
+        {props.value ? <Text font="subheadline" foregroundStyle="secondaryLabel">{props.value}</Text> : null}
+        <Image systemName="chevron.right" font="caption" foregroundStyle="secondaryLabel" />
+      </HStack>
+    </Button>
+  )
 }
 
 function HistoryRow(props: {
@@ -475,10 +438,8 @@ function HistoryRow(props: {
   }
 
   return (
-    <HStack
+    <DownloadCardRow
       key={item.id}
-      alignment="top"
-      spacing={12}
       onTapGesture={openActions}
       trailingSwipeActions={{
         allowsFullSwipe: false,
@@ -495,41 +456,83 @@ function HistoryRow(props: {
         ],
       }}
     >
-      <ThumbnailView url={item.thumbnail_url} />
-      <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-        <Text font="headline" lineLimit={2}>{item.title || item.file_name}</Text>
-        <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={2}>{item.description || item.source_url}</Text>
-        <HStack>
-          <Text font="caption2" foregroundStyle="secondaryLabel">{formatBytes(item.bytes_written)}</Text>
-          <Spacer />
-          <Text font="caption2" foregroundStyle="secondaryLabel">{formatDate(item.created_at)}</Text>
+      <DownloadPanel>
+        <HStack alignment="center" spacing={12}>
+          <ThumbnailView url={item.thumbnail_url} width={86} height={64} />
+          <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+            <Text font="headline" lineLimit={2}>{item.title || item.file_name}</Text>
+            <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={2}>{item.description || item.source_url}</Text>
+            <HStack>
+              <Text font="caption2" foregroundStyle="secondaryLabel">{formatBytes(item.bytes_written)}</Text>
+              <Spacer />
+              <Text font="caption2" foregroundStyle="secondaryLabel">{formatDate(item.created_at)}</Text>
+            </HStack>
+          </VStack>
+          <Image systemName="ellipsis" foregroundStyle="secondaryLabel" />
         </HStack>
-        <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-          {(item.media_type === "image" ? "图文" : "视频")} · 命中策略：{item.matched_candidate_label || "未知"}
-        </Text>
-      </VStack>
-    </HStack>
+      </DownloadPanel>
+    </DownloadCardRow>
+  )
+}
+
+function DownloadActions(props: {
+  activeTab: Observable<number>
+  loading: boolean
+  t: ReturnType<typeof getI18n>
+  onPaste: () => void
+  onEnter: () => void
+  onCancel: () => void
+}) {
+  const { activeTab, loading, t } = props
+  const [showAddActions, setShowAddActions] = useState(false)
+
+  useEffect(() => {
+    const onSelection = (next: number, previous: number) => {
+      if (next !== previous) setShowAddActions(false)
+    }
+    activeTab.subscribe(onSelection)
+    return () => activeTab.unsubscribe(onSelection)
+  }, [activeTab])
+
+  useEffect(() => {
+    if (loading) setShowAddActions(false)
+  }, [loading])
+
+  const expanded = showAddActions && !loading
+  return (
+    <VStack spacing={8} padding={{ trailing: 18, bottom: supportsDownloadGlass ? 60 : 52 }}>
+      {expanded ? (
+        <>
+          <DownloadIconButton large symbol="doc.on.clipboard" label={t.pasteLink} action={() => {
+            setShowAddActions(false)
+            props.onPaste()
+          }} />
+          <DownloadIconButton large symbol="square.and.pencil" label={t.enterLink} action={() => {
+            setShowAddActions(false)
+            props.onEnter()
+          }} />
+        </>
+      ) : null}
+      <DownloadIconButton
+        large
+        symbol={loading ? "stop.fill" : expanded ? "xmark" : "plus"}
+        label={loading ? t.cancelDownload : expanded ? t.close : t.addDownloadLink}
+        action={loading ? props.onCancel : () => setShowAddActions((current) => !current)}
+      />
+    </VStack>
   )
 }
 
 function View() {
   const dismiss = Navigation.useDismiss()
-  const activeTab = useObservable<ContentTab>(DOWNLOAD_TAB)
-  const logProxyRef = useRef<any>()
-  const [showAddActions, setShowAddActions] = useState(false)
+  const activeTab = useObservable<number>(DOWNLOAD_TAB)
   const [inputURL, setInputURL] = useState("")
   const [loading, setLoading] = useState(false)
   const cancelRequestedRef = useRef(false)
   const [status, setStatus] = useState("")
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({
-    fraction: 0,
-    stage: "未开始",
-  })
-  const latestProgressRef = useRef<DownloadProgress>({
-    fraction: 0,
-    stage: "未开始",
-  })
-  const latestStatusRef = useRef("")
+  const [taskMedia, setTaskMedia] = useState<DownloadMediaInfo | null>(null)
+  const [taskResult, setTaskResult] = useState<"idle" | "done" | "error" | "cancelled">("idle")
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({ stage: "" })
   const downloadLogsRef = useRef<string[]>([])
   const [downloadLogs, setDownloadLogs] = useState<string[]>([])
   const [history, setHistory] = useState<HistoryRecord[]>([])
@@ -597,10 +600,10 @@ function View() {
   }
 
   const copyDownloadStatus = async () => {
-    const transferFraction = latestProgressRef.current.transferFraction
+    const transferFraction = downloadProgress.transferFraction
     const statusText = loading
-      ? `${transferFraction == null ? "" : `${Math.round(transferFraction * 100)}% · `}${latestProgressRef.current.stage}`
-      : (latestStatusRef.current || status || t.ready)
+      ? `${transferFraction == null ? "" : `${Math.round(transferFraction * 100)}% · `}${downloadProgress.stage}`
+      : (status || t.ready)
     await copyText(statusText, t.copiedStatus)
   }
 
@@ -613,17 +616,6 @@ function View() {
   }
 
   useEffect(() => {
-    const scrollLatest = () => {
-      try {
-        logProxyRef.current?.scrollTo?.("downloadLogBottom", "bottom")
-      } catch {}
-    }
-    scrollLatest()
-    const timer = setTimeout(scrollLatest, 120)
-    return () => clearTimeout(timer)
-  }, [downloadLogs.length])
-
-  useEffect(() => {
     initDatabase()
       .then(refreshHistory)
       .catch((error: unknown) => {
@@ -634,7 +626,6 @@ function View() {
   useEffect(() => {
     if (!loading) {
       setStatus(t.ready)
-      latestStatusRef.current = t.ready
     }
   }, [preferences.language])
 
@@ -644,30 +635,7 @@ function View() {
     }
   }, [preferences.language, preferences.ytDlpReady, preferences.ytDlpVersion])
 
-  useEffect(() => {
-    if (!loading) return
-    let stopped = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const tick = () => {
-      if (stopped) return
-      const progress = latestProgressRef.current
-      setDownloadProgress({ ...progress })
-      setStatus(latestStatusRef.current || progress.stage)
-      timer = setTimeout(tick, 250)
-    }
-    timer = setTimeout(tick, 250)
-    return () => {
-      stopped = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [loading])
-
-  const toggleAddActions = () => {
-    setShowAddActions((current) => !current)
-  }
-
   const downloadFromClipboard = async () => {
-    setShowAddActions(false)
     const clipboardText = await Pasteboard.getString()
     if (!clipboardText?.trim()) {
       setStatus(t.emptyClipboard)
@@ -681,7 +649,6 @@ function View() {
   }
 
   const openManualAddDialog = async () => {
-    setShowAddActions(false)
     const text = await Dialog.prompt({
       title: t.addDownloadLink,
       message: t.addDownloadMessage,
@@ -775,13 +742,13 @@ function View() {
     const runId = downloadRunIdRef.current + 1
     downloadRunIdRef.current = runId
     cancelRequestedRef.current = false
+    setTaskMedia(null)
+    setTaskResult("idle")
     await clearDownloadCancelFlag()
     downloadLogsRef.current = []
     setDownloadLogs([])
-    latestProgressRef.current = { fraction: 0.01, stage: t.preparing }
-    latestStatusRef.current = t.analyzing
-    setDownloadProgress(latestProgressRef.current)
-    setStatus(latestStatusRef.current)
+    setDownloadProgress({ stage: t.analyzing })
+    setStatus(t.analyzing)
     appendLog(`收到下载任务：${url}`)
     if (url !== rawInput) {
       appendLog("已从分享文本中自动提取 URL。")
@@ -793,11 +760,12 @@ function View() {
         ytDlpReady: preferences.ytDlpReady,
         onYtDlpStatus: updateYtDlpPreference,
         isCancelled: () => cancelRequestedRef.current,
+        onMediaInfo: (info) => {
+          if (downloadRunIdRef.current === runId && !cancelRequestedRef.current) setTaskMedia(info)
+        },
         onProgress: (progress: DownloadProgress) => {
           if (downloadRunIdRef.current !== runId || cancelRequestedRef.current) return
-          latestProgressRef.current = progress
-          latestStatusRef.current = progress.stage
-          setDownloadProgress({ ...progress })
+          setDownloadProgress(progress)
           setStatus(progress.stage)
         },
         onLog: (message: string) => {
@@ -806,14 +774,12 @@ function View() {
       })
       if (downloadRunIdRef.current !== runId || cancelRequestedRef.current) return
       appendLog(`下载成功，命中策略：${download.matchedCandidateLabel}`)
-      latestProgressRef.current = { fraction: 0.96, stage: t.postAction }
-      latestStatusRef.current = t.postAction
-      setDownloadProgress(latestProgressRef.current)
+      setDownloadProgress({ stage: t.postAction })
+      setStatus(t.postAction)
       const postResult = await postDownloadAction(download, preferences.defaultSaveMode)
       appendLog(`下载后动作完成：${postResult.message}`)
-      latestProgressRef.current = { fraction: 0.98, stage: t.writingHistory }
-      latestStatusRef.current = t.writingHistory
-      setDownloadProgress(latestProgressRef.current)
+      setDownloadProgress({ stage: t.writingHistory })
+      setStatus(t.writingHistory)
       const preserveFiles = preferences.keepHistoryFiles || postResult.keepFilesInHistory
       await insertHistory(download, { preserveFiles })
       if (!preserveFiles) {
@@ -823,24 +789,27 @@ function View() {
       await applyHistoryStorageLimits()
       await refreshHistory()
       appendLog("历史记录已写入。")
-      latestProgressRef.current = { fraction: 1, stage: t.done }
-      latestStatusRef.current = `${t.downloadSuccess}：${download.fileName} · ${postResult.message}`
-      setDownloadProgress(latestProgressRef.current)
-      setStatus(latestStatusRef.current)
+      const successStatus = `${t.downloadSuccess}：${download.fileName} · ${postResult.message}`
+      setDownloadProgress({ stage: t.done })
+      setTaskResult("done")
+      setStatus(successStatus)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (cancelRequestedRef.current || message.includes("取消") || message.toLowerCase().includes("cancel")) {
         if (downloadRunIdRef.current === runId) {
           appendLog(t.canceled)
-          latestStatusRef.current = t.ready
+          setTaskResult("cancelled")
+          setDownloadProgress({ stage: t.canceled })
           setStatus(t.ready)
         }
         return
       }
       if (downloadRunIdRef.current !== runId) return
       appendLog(`下载失败：${message}`)
-      latestStatusRef.current = `${t.downloadFailed}：${message}`
-      setStatus(latestStatusRef.current)
+      const failureStatus = `${t.downloadFailed}：${message}`
+      setDownloadProgress({ stage: failureStatus })
+      setTaskResult("error")
+      setStatus(failureStatus)
       if (!retriedAfterCookieLogin && isCookieLoginRequiredError(message)) {
         appendLog("该网站可能需要登录，正在打开内置浏览器。")
         setLoading(false)
@@ -872,13 +841,12 @@ function View() {
     if (!loading) return
     cancelRequestedRef.current = true
     downloadRunIdRef.current += 1
-    setShowAddActions(false)
     setLoading(false)
     setInputURL("")
-    latestProgressRef.current = { fraction: 0, stage: t.preparing }
-    latestStatusRef.current = t.ready
-    setDownloadProgress(latestProgressRef.current)
-    setStatus(latestStatusRef.current)
+    setTaskMedia(null)
+    setTaskResult("cancelled")
+    setDownloadProgress({ stage: t.canceled })
+    setStatus(t.canceled)
     appendLog(t.cancelRequested)
     await requestDownloadCancel()
     void (async () => {
@@ -1043,17 +1011,21 @@ function View() {
       <List
         navigationTitle={t.history}
         navigationBarTitleDisplayMode="inline"
+        listStyle="plain"
+        scrollContentBackground="hidden"
+        contentMargins={downloadActionMargin}
         toolbar={{
           cancellationAction: <Button title={t.close} action={dismiss} />,
-          topBarTrailing: <Button title="" systemImage="folder" action={() => void openSavedFiles()} />,
+          topBarTrailing: <Button title="" systemImage="folder" accessibilityLabel={t.savedFiles} action={() => void openSavedFiles()} />,
         }}
       >
         <Section
           header={<Text>{`${t.historyCount} (${history.length})`}</Text>}
-          footer={<Text font="caption" foregroundStyle="secondaryLabel">{t.historyFooter}</Text>}
         >
           {history.length === 0 ? (
-            <Text foregroundStyle="secondaryLabel">{t.emptyHistory}</Text>
+            <DownloadCardRow>
+              <DownloadPanel><Text foregroundStyle="secondaryLabel">{t.emptyHistory}</Text></DownloadPanel>
+            </DownloadCardRow>
           ) : (
             history.map((item) => (
               <HistoryRow
@@ -1066,192 +1038,175 @@ function View() {
             ))
           )}
         </Section>
-
-        <Section title={t.moreActions}>
-          <Button title={t.clearHistory} role="destructive" action={() => void handleClearHistory()} />
-        </Section>
+        <DownloadCardRow>
+          <DownloadPanel>
+            <Button title={t.clearHistory} systemImage="trash" role="destructive" buttonStyle="borderless" action={() => void handleClearHistory()} />
+          </DownloadPanel>
+        </DownloadCardRow>
       </List>
     </NavigationStack>
   )
 
-  const renderDownloadPage = () => (
-    <NavigationStack>
-      <List
-        navigationTitle={t.download}
-        navigationBarTitleDisplayMode="inline"
-        toolbar={{
-          cancellationAction: <Button title={t.close} action={dismiss} />,
-          topBarTrailing: (
-            <HStack spacing={8}>
-              <Button title="" systemImage="globe" action={() => void openCookieLoginBrowser()} />
-            </HStack>
-          ),
-        }}
-      >
-        <Section
-          header={<Text>{t.currentTask}</Text>}
-          footer={<Text font="caption" foregroundStyle="secondaryLabel">{t.currentTaskFooter}</Text>}
+  const renderDownloadPage = () => {
+    const sourceURL = extractFirstURL(inputURL) || inputURL
+    const taskStatus = loading ? downloadProgress.stage : status || t.ready
+    return (
+      <NavigationStack>
+        <List
+          navigationTitle={t.download}
+          navigationBarTitleDisplayMode="inline"
+          listStyle="plain"
+          scrollContentBackground="hidden"
+          contentMargins={downloadActionMargin}
+          toolbar={{
+            cancellationAction: <Button title={t.close} action={dismiss} />,
+            topBarTrailing: <Button title="" systemImage="globe" accessibilityLabel={t.loginCookies} action={() => void openCookieLoginBrowser()} />,
+          }}
         >
-          {inputURL ? (
-            <HStack
-              spacing={8}
-              onTapGesture={loading ? undefined : retryCurrentTask}
-              contextMenu={{
-                menuItems: <Button title={t.retryCurrentTask} systemImage="arrow.clockwise" action={retryCurrentTask} disabled={loading} />,
-              }}
-            >
-              <Text lineLimit={3} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>{inputURL}</Text>
-              <Image systemName="arrow.clockwise" foregroundStyle={loading ? "secondaryLabel" : "systemBlue"} />
-            </HStack>
-          ) : (
-            <Text foregroundStyle="secondaryLabel">{t.noLinkAdded}</Text>
-          )}
-        </Section>
-
-        <Section
-          header={<Text>{t.downloadLog}</Text>}
-          footer={<Text font="caption" foregroundStyle="secondaryLabel">{t.downloadLogFooter}</Text>}
-        >
-          <ScrollViewReader>
-            {(proxy: any) => {
-              logProxyRef.current = proxy
-              return (
-                <ScrollView frame={{ maxWidth: "infinity", height: 220 }} onTapGesture={() => void copyDownloadLogs()}>
-                  <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-                    {downloadLogs.length === 0 ? (
-                      <Text foregroundStyle="secondaryLabel">{t.noLogs}</Text>
-                    ) : (
-                      downloadLogs.map((log, index) => (
-                        <Text key={`${index}-${log}`} font="caption" foregroundStyle="secondaryLabel">{localizeRuntimeText(log, preferences.language)}</Text>
-                      ))
-                    )}
-                    <Rectangle
-                      key="downloadLogBottom"
-                      foregroundStyle="clear"
-                      frame={{ maxWidth: "infinity", height: 1 }}
-                    />
+          <DownloadCardRow>
+            <DownloadTaskCard
+              media={taskMedia}
+              progress={downloadProgress}
+              status={taskStatus}
+              language={preferences.language}
+              phase={taskResult !== "idle" ? taskResult : loading ? "active" : "idle"}
+              onCopyStatus={() => void copyDownloadStatus()}
+            />
+          </DownloadCardRow>
+          {sourceURL ? (
+            <DownloadCardRow>
+              <DownloadPanel>
+                <HStack spacing={8}>
+                  <Image systemName="link" foregroundStyle={downloadAccent} />
+                  <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" }}>
+                    <Text font="subheadline" fontWeight="semibold">{t.sourceLink}</Text>
+                    <Text font="caption" lineLimit={2} foregroundStyle="secondaryLabel">{sourceURL}</Text>
                   </VStack>
-                </ScrollView>
-              )
-            }}
-          </ScrollViewReader>
-        </Section>
-
-        <Section title={t.status}>
-          {loading ? (
-            <VStack alignment="leading" spacing={8} onTapGesture={() => void copyDownloadStatus()}>
-              {downloadProgress.transferFraction !== undefined ? (
-                <ProgressView value={downloadProgress.transferFraction ?? undefined} total={1} progressViewStyle="linear" />
-              ) : null}
-              <Text>{localizeRuntimeText(downloadProgress.stage, preferences.language)}</Text>
-              {downloadProgress.transferFraction != null ? (
-                <Text font="caption" foregroundStyle="secondaryLabel">{t.progress}：{Math.round(downloadProgress.transferFraction * 100)}%</Text>
-              ) : null}
-            </VStack>
-          ) : (
-            <Text foregroundStyle="secondaryLabel" onTapGesture={() => void copyDownloadStatus()}>{localizeRuntimeText(status, preferences.language)}</Text>
-          )}
-        </Section>
-
-      </List>
-    </NavigationStack>
-  )
+                  <DownloadIconButton symbol="doc.on.doc" label={t.copySourceLink} action={() => void copyText(sourceURL, t.copiedSourceLink)} />
+                  <DownloadIconButton symbol="arrow.clockwise" label={t.retryCurrentTask} action={retryCurrentTask} disabled={loading} />
+                </HStack>
+              </DownloadPanel>
+            </DownloadCardRow>
+          ) : null}
+          <DownloadCardRow>
+            <DownloadLogCard logs={downloadLogs} language={preferences.language} active={loading} status={taskStatus} onCopy={() => void copyDownloadLogs()} />
+          </DownloadCardRow>
+        </List>
+      </NavigationStack>
+    )
+  }
 
   const renderSettingsPage = () => (
     <NavigationStack>
       <List
         navigationTitle={t.settings}
         navigationBarTitleDisplayMode="inline"
-        toolbar={{
-          cancellationAction: <Button title={t.close} action={dismiss} />,
-        }}
+        listStyle="plain"
+        scrollContentBackground="hidden"
+        contentMargins={downloadActionMargin}
+        toolbar={{ cancellationAction: <Button title={t.close} action={dismiss} /> }}
       >
-        <Section title={t.preferences}>
-          <Text foregroundStyle="secondaryLabel">
-            {t.defaultSaveMode}：{saveModeLabel(preferences.defaultSaveMode)}
-          </Text>
-          <Button title={t.changeDefaultSaveMode} action={() => void chooseDefaultSaveMode()} />
-          <Toggle
-            title={t.preferNoWatermark}
-            value={preferences.preferNoWatermark}
-            onChanged={(value) => updatePreferences({
-              ...preferences,
-              preferNoWatermark: value,
-            })}
-          />
-          <Toggle
-            title={t.keepHistoryFiles}
-            value={preferences.keepHistoryFiles}
-            onChanged={(value) => {
-              const next = {
+        <DownloadCardRow>
+          <DownloadPanel>
+            <Text font="headline" accessibilityAddTraits="isHeader">{t.preferences}</Text>
+            <Divider />
+            <SettingsAction title={t.defaultSaveMode} value={saveModeLabel(preferences.defaultSaveMode)} action={() => void chooseDefaultSaveMode()} />
+            <Divider />
+            <Toggle
+              title={t.preferNoWatermark}
+              value={preferences.preferNoWatermark}
+              onChanged={(value) => updatePreferences({
                 ...preferences,
-                keepHistoryFiles: value,
-              }
-              updatePreferences(next)
-              if (value) {
-                void pruneHistoryStorage({
-                  maxCacheBytes: next.historyCacheLimitMB == null ? null : next.historyCacheLimitMB * 1024 * 1024,
-                  maxRecordCount: next.historyRecordLimit,
-                }).then(refreshHistory)
-              }
-            }}
-          />
-          {preferences.keepHistoryFiles ? (
-            <>
-              <Text foregroundStyle="secondaryLabel">{t.maxHistoryCache}：{cacheLimitLabel(preferences.historyCacheLimitMB)}</Text>
-              <Slider
-                value={cacheLimitSliderValue(preferences.historyCacheLimitMB)}
-                min={1}
-                max={51}
-                step={1}
-                label={<Text>{t.maxHistoryCache}</Text>}
-                onChanged={(value) => {
-                  updateHistoryStoragePreferences({
-                    ...preferences,
-                    historyCacheLimitMB: cacheLimitFromSliderValue(value),
-                  })
-                }}
-              />
-              <Text foregroundStyle="secondaryLabel">{t.historyRecordLimit}：{recordLimitLabel(preferences.historyRecordLimit)}</Text>
-              <Slider
-                value={recordLimitSliderValue(preferences.historyRecordLimit)}
-                min={1}
-                max={51}
-                step={1}
-                label={<Text>{t.historyRecordLimit}</Text>}
-                onChanged={(value) => {
-                  updateHistoryStoragePreferences({
-                    ...preferences,
-                    historyRecordLimit: recordLimitFromSliderValue(value),
-                  })
-                }}
-              />
-            </>
-          ) : null}
-        </Section>
-        <Section title={t.tools}>
-          <HStack spacing={8}>
-            {ytDlpBusy ? <ProgressView /> : null}
-            <Text foregroundStyle="secondaryLabel">{ytDlpStatus || ytDlpStatusText(preferences, t)}</Text>
-            <Spacer />
-          </HStack>
-          <Button title={t.checkYtDlp} systemImage="checkmark.circle" action={() => void checkYtDlp()} />
-          <Button title={t.updateYtDlp} systemImage="arrow.triangle.2.circlepath" action={() => void installYtDlp()} />
-        </Section>
-        <Section title={t.language}>
-          <Text foregroundStyle="secondaryLabel">{languageLabel(preferences.language, t)}</Text>
-          <Button title={t.chooseLanguage} systemImage="globe" action={() => void chooseLanguage()} />
-        </Section>
-        <Section>
-          <Button title={t.about} systemImage="info.circle" action={() => void openAboutPage()} />
-        </Section>
+                preferNoWatermark: value,
+              })}
+            />
+            <Divider />
+            <Toggle
+              title={t.keepHistoryFiles}
+              value={preferences.keepHistoryFiles}
+              onChanged={(value) => {
+                const next = {
+                  ...preferences,
+                  keepHistoryFiles: value,
+                }
+                updatePreferences(next)
+                if (value) {
+                  void pruneHistoryStorage({
+                    maxCacheBytes: next.historyCacheLimitMB == null ? null : next.historyCacheLimitMB * 1024 * 1024,
+                    maxRecordCount: next.historyRecordLimit,
+                  }).then(refreshHistory)
+                }
+              }}
+            />
+            {preferences.keepHistoryFiles ? (
+              <>
+                <Divider />
+                <Text foregroundStyle="secondaryLabel">{t.maxHistoryCache}：{cacheLimitLabel(preferences.historyCacheLimitMB)}</Text>
+                <Slider
+                  value={cacheLimitSliderValue(preferences.historyCacheLimitMB)}
+                  min={1}
+                  max={51}
+                  step={1}
+                  label={<Text>{t.maxHistoryCache}</Text>}
+                  onChanged={(value) => {
+                    updateHistoryStoragePreferences({
+                      ...preferences,
+                      historyCacheLimitMB: cacheLimitFromSliderValue(value),
+                    })
+                  }}
+                />
+                <Text foregroundStyle="secondaryLabel">{t.historyRecordLimit}：{recordLimitLabel(preferences.historyRecordLimit)}</Text>
+                <Slider
+                  value={recordLimitSliderValue(preferences.historyRecordLimit)}
+                  min={1}
+                  max={51}
+                  step={1}
+                  label={<Text>{t.historyRecordLimit}</Text>}
+                  onChanged={(value) => {
+                    updateHistoryStoragePreferences({
+                      ...preferences,
+                      historyRecordLimit: recordLimitFromSliderValue(value),
+                    })
+                  }}
+                />
+              </>
+            ) : null}
+          </DownloadPanel>
+        </DownloadCardRow>
+        <DownloadCardRow>
+          <DownloadPanel>
+            <Text font="headline" accessibilityAddTraits="isHeader">{t.tools}</Text>
+            <Divider />
+            <HStack spacing={8}>
+              <Text>yt-dlp</Text>
+              <Spacer />
+              {ytDlpBusy ? <ProgressView /> : null}
+              <Text font="subheadline" foregroundStyle="secondaryLabel">{ytDlpStatus || ytDlpStatusText(preferences, t)}</Text>
+            </HStack>
+            <Divider />
+            <SettingsAction title={t.checkYtDlp} symbol="checkmark.circle" action={() => void checkYtDlp()} />
+            <Divider />
+            <SettingsAction title={t.updateYtDlp} symbol="arrow.triangle.2.circlepath" action={() => void installYtDlp()} />
+          </DownloadPanel>
+        </DownloadCardRow>
+        <DownloadCardRow>
+          <DownloadPanel>
+            <Text font="headline" accessibilityAddTraits="isHeader">{t.generalSettings}</Text>
+            <Divider />
+            <SettingsAction title={t.language} value={languageLabel(preferences.language, t)} action={() => void chooseLanguage()} />
+            <Divider />
+            <SettingsAction title={t.about} symbol="info.circle" action={() => void openAboutPage()} />
+          </DownloadPanel>
+        </DownloadCardRow>
       </List>
     </NavigationStack>
   )
 
   return (
     <ZStack
+      alignment="bottomTrailing"
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      background={<DownloadBackdrop />}
       sheet={releaseNotesSheet}
       toast={toastMessage ? {
         message: toastMessage,
@@ -1262,29 +1217,27 @@ function View() {
       } : undefined}
     >
       <TabView
-        selection={activeTab as any}
-        tint="systemPink"
-        tabViewStyle="sidebarAdaptable"
-        tabBarMinimizeBehavior="onScrollDown"
+        selection={activeTab}
+        tint={downloadAccent}
+        tabViewStyle={supportsDownloadGlass ? "sidebarAdaptable" : "automatic"}
+        tabBarMinimizeBehavior={supportsDownloadGlass ? "never" : undefined}
       >
         <Tab title={t.history} systemImage="clock.arrow.circlepath" value={HISTORY_TAB}>
           {renderHistoryPage()}
         </Tab>
-
         <Tab title={t.download} systemImage="arrow.down.circle.fill" value={DOWNLOAD_TAB}>
           {renderDownloadPage()}
         </Tab>
-
         <Tab title={t.settings} systemImage="gearshape.fill" value={SETTINGS_TAB}>
           {renderSettingsPage()}
         </Tab>
       </TabView>
-      <AddButtonCluster
-        visible={showAddActions}
+      <DownloadActions
+        activeTab={activeTab}
         loading={loading}
-        onToggle={toggleAddActions}
+        t={t}
         onPaste={() => void downloadFromClipboard()}
-        onManual={() => void openManualAddDialog()}
+        onEnter={() => void openManualAddDialog()}
         onCancel={() => void cancelDownload()}
       />
     </ZStack>

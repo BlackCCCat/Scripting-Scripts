@@ -17,6 +17,15 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+export function formatEta(seconds?: number | null): string | null {
+  if (seconds == null || seconds < 0 || !Number.isFinite(seconds)) return null
+  const total = Math.round(seconds)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const remainder = String(total % 60).padStart(2, "0")
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}` : `${minutes}:${remainder}`
+}
+
 export function formatDate(dateString: string): string {
   const date = new Date(dateString)
   if (Number.isNaN(date.getTime())) return dateString

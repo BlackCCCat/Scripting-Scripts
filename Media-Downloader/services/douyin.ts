@@ -41,9 +41,20 @@ export type DownloadSuccess = {
 }
 
 export type DownloadProgress = {
-  fraction: number
   stage: string
   transferFraction?: number | null
+  transfer?: {
+    bytes: number
+    total?: number | null
+    speed?: number | null
+    eta?: number | null
+  }
+}
+
+export type DownloadMediaInfo = {
+  title?: string | null
+  thumbnailURL?: string | null
+  detail?: string
 }
 
 export type DownloadLogFn = (message: string) => void
@@ -643,7 +654,7 @@ async function downloadImageBatch(options: {
   sourceURL: string
   extracted: ExtractedInfo
   imageURLs: string[]
-  onProgress: (fraction: number, stage: string, transferFraction?: number | null) => void
+  onProgress: DownloadProgressFn
   onLog: (message: string) => void
 }): Promise<DownloadSuccess> {
   const { sourceURL, extracted, imageURLs, onProgress, onLog } = options
@@ -652,13 +663,14 @@ async function downloadImageBatch(options: {
   let lastError = "未开始下载图片"
 
   onLog(`检测到 ${imageURLs.length} 张图片，开始批量下载图文。`)
-  onProgress(0.22, `检测到 ${imageURLs.length} 张图片`)
+  onProgress({ stage: `检测到 ${imageURLs.length} 张图片` })
 
   for (let index = 0; index < imageURLs.length; index++) {
     const imageURL = imageURLs[index]
-    const progressStart = 0.22 + (index / imageURLs.length) * 0.68
-    const progressEnd = 0.22 + ((index + 1) / imageURLs.length) * 0.68
-    onProgress(progressStart, `正在下载图片 ${index + 1}/${imageURLs.length}`, index / imageURLs.length)
+    onProgress({
+      stage: `正在下载图片 ${index + 1}/${imageURLs.length}`,
+      transferFraction: index / imageURLs.length,
+    })
     onLog(`下载图片 ${index + 1}/${imageURLs.length}`)
 
     try {
@@ -697,14 +709,11 @@ async function downloadImageBatch(options: {
           Referer: extracted.pageURL,
           Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
         },
-        start: progressStart,
-        end: progressEnd,
         stage: `正在下载图片 ${index + 1}/${imageURLs.length}`,
-        onProgress: ({ fraction, stage, transferFraction }) => onProgress(
-          fraction,
+        onProgress: ({ stage, transferFraction }) => onProgress({
           stage,
-          transferFraction == null ? null : (index + transferFraction) / imageURLs.length
-        ),
+          transferFraction: transferFraction == null ? null : (index + transferFraction) / imageURLs.length,
+        }),
       })
       const bytesWritten = FileManager.statSync(filePath).size
       if (bytesWritten === 0) {
@@ -731,7 +740,7 @@ async function downloadImageBatch(options: {
   }
 
   const bytesWritten = files.reduce((sum, file) => sum + file.bytesWritten, 0)
-  onProgress(1, `图文下载完成：${files.length} 张图片`)
+  onProgress({ stage: `图文下载完成：${files.length} 张图片` })
 
   return {
     id: UUID.string(),
@@ -766,15 +775,15 @@ export async function extractFromWebView(
     log?.("正在创建 WebView 并设置移动端 UA…")
     webView.setCustomUserAgent(MOBILE_SAFARI_UA)
 
-    report?.({ fraction: 0.05, stage: "正在打开分享链接" })
+    report?.({ stage: "正在打开分享链接" })
     log?.(`开始加载页面：${url}`)
     await webView.loadURL(url)
 
-    report?.({ fraction: 0.1, stage: "正在等待页面首屏加载" })
+    report?.({ stage: "正在等待页面首屏加载" })
     await waitForInitialWebViewLoad(webView, log)
     await sleep(2500)
 
-    report?.({ fraction: 0.14, stage: "正在尝试激活视频节点" })
+    report?.({ stage: "正在尝试激活视频节点" })
     await webView.evaluateJavaScript(`
       (async () => {
         const video = document.querySelector('video')
@@ -795,7 +804,7 @@ export async function extractFromWebView(
     log?.("已执行视频激活动作，继续等待页面内嵌数据出现…")
     await sleep(4000)
 
-    report?.({ fraction: 0.18, stage: "正在读取页面内嵌数据" })
+    report?.({ stage: "正在读取页面内嵌数据" })
     const data = await webView.evaluateJavaScript<ExtractedInfo>(`
       const stringifySafe = (value) => {
         try {
@@ -976,7 +985,7 @@ export async function extractFromWebView(
     const shouldFetchDetail = galleryLike || (!data.videoSrc && preliminaryImages.length === 0)
     const awemeId = shouldFetchDetail ? (extractAwemeIdFromURL(data.canonical) || extractAwemeIdFromURL(data.pageURL) || extractAwemeIdFromURL(url)) : null
     if (awemeId) {
-      report?.({ fraction: 0.19, stage: "正在尝试读取作品详情接口" })
+      report?.({ stage: "正在尝试读取作品详情接口" })
       try {
         const apiDetailJSON = await fetchAwemeDetailInWebView(webView, awemeId)
         if (apiDetailJSON) {
@@ -1077,16 +1086,16 @@ export async function downloadVideo(
     preferNoWatermark?: boolean
     onProgress?: DownloadProgressFn
     onLog?: DownloadLogFn
+    onMediaInfo?: (info: DownloadMediaInfo) => void
   }
 ): Promise<DownloadSuccess> {
-  const reportProgress = (fraction: number, stage: string, transferFraction?: number | null) => {
-    options?.onProgress?.({ fraction, stage, transferFraction })
-  }
+  const reportProgress: DownloadProgressFn = (progress) => options?.onProgress?.(progress)
+  const reportStage = (stage: string) => reportProgress({ stage })
   const log = (message: string) => {
     options?.onLog?.(message)
   }
 
-  reportProgress(0.03, "正在分析分享页面")
+  reportStage("正在分析分享页面")
   log("开始解析分享链接页面…")
 
   const extracted = await extractFromWebView(sourceURL, {
@@ -1104,6 +1113,11 @@ export async function downloadVideo(
     throw new Error("未能从页面中提取到视频地址、图片地址或 aweme 内嵌数据")
   }
 
+  options?.onMediaInfo?.({
+    title: extracted.title,
+    thumbnailURL: extractThumbnailURL(extracted) || imageURLs[0],
+    detail: "Douyin",
+  })
   await ensureDownloadDirectories()
   log("已确认下载目录可用：Documents/douyin-downloader/videos 与 images")
 
@@ -1144,12 +1158,11 @@ export async function downloadVideo(
 
   log(`共生成 ${candidates.length} 个下载候选，开始逐个尝试。`)
   log(`候选顺序：${candidates.map((item) => item.label).join(", ")}`)
-  reportProgress(0.22, `已生成 ${candidates.length} 个候选地址`)
+  reportStage(`已生成 ${candidates.length} 个候选地址`)
 
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index]
-    const attemptBase = 0.22 + (index / candidates.length) * 0.5
-    reportProgress(attemptBase, `正在尝试候选 ${index + 1}/${candidates.length}：${candidate.label}`)
+    reportStage(`正在尝试候选 ${index + 1}/${candidates.length}：${candidate.label}`)
     log(`尝试候选 ${index + 1}/${candidates.length}：${candidate.label}`)
 
     try {
@@ -1178,16 +1191,12 @@ export async function downloadVideo(
       const filePath = Path.join(DOWNLOAD_DIR, fileName)
 
       log(`候选命中：${candidate.label}，开始流式下载视频数据…`)
-      const downloadStart = Math.min(0.78, attemptBase + 0.04)
-      const downloadEnd = Math.min(0.94, attemptBase + (0.5 / candidates.length))
-      reportProgress(downloadStart, `候选命中：${candidate.label}，正在下载视频数据`)
+      reportStage(`候选命中：${candidate.label}，正在下载视频数据`)
       await cancelResponseBody(response)
       await downloadURLToFileWithProgress({
         url: response.url,
         destination: filePath,
         headers: candidate.headers,
-        start: downloadStart,
-        end: downloadEnd,
         stage: "正在下载视频",
         onProgress: options?.onProgress,
       })
@@ -1199,7 +1208,7 @@ export async function downloadVideo(
       }
 
       log(`文件写入完成：${fileName}`)
-      reportProgress(1, `下载完成：${fileName}`)
+      reportStage(`下载完成：${fileName}`)
 
       return {
         id: UUID.string(),
