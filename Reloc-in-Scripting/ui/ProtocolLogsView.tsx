@@ -42,6 +42,72 @@ interface ProtocolLogsViewProps {
   onClearLogs: () => void;
   onToast: (message: string) => void;
   onClose?: () => void;
+  embedded?: boolean;
+}
+
+export function ProtocolLogsToolbarActions(props: {
+  events: ProtocolEvent[];
+  onClearLogs: () => void;
+  onToast: (message: string) => void;
+  onClose?: () => void;
+}) {
+  const [copiedBanner, setCopiedBanner] = useState(false);
+
+  async function handleExport() {
+    try {
+      const msg = await exportDiagnosticLogs(props.events);
+      props.onToast(msg);
+    } catch (error) {
+      props.onToast(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return (
+    <HStack spacing={12}>
+      <Button
+        buttonStyle="borderless"
+        disabled={props.events.length === 0}
+        action={() => {
+          Pasteboard.setString(formatProtocolLogReport(props.events));
+          HapticFeedback.lightImpact();
+          setCopiedBanner(true);
+          props.onToast("已复制脱敏诊断报告");
+          setTimeout(() => setCopiedBanner(false), 1500);
+        }}
+      >
+        <Image systemName={copiedBanner ? "checkmark" : "doc.on.doc"} />
+      </Button>
+      <Menu label={<Image systemName="ellipsis.circle" />}>
+        <Button
+          disabled={props.events.length === 0}
+          action={() => void handleExport()}
+        >
+          <HStack>
+            <Image systemName="square.and.arrow.up" />
+            <Text>导出分享报告</Text>
+          </HStack>
+        </Button>
+        <Button
+          role="destructive"
+          disabled={props.events.length === 0}
+          action={props.onClearLogs}
+        >
+          <HStack>
+            <Image systemName="trash" />
+            <Text>清空日志</Text>
+          </HStack>
+        </Button>
+        {props.onClose ? (
+          <Button action={props.onClose}>
+            <HStack>
+              <Image systemName="xmark.circle" />
+              <Text>关闭</Text>
+            </HStack>
+          </Button>
+        ) : null}
+      </Menu>
+    </HStack>
+  );
 }
 
 function formatShortTime(iso: string): string {
@@ -58,7 +124,6 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
   const { snapshot, events, mfiStatus, telemetry, activeWgs84Target } = props;
   const [filter, setFilter] = useState<LogFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [copiedBanner, setCopiedBanner] = useState(false);
 
   const filteredEvents = events.filter((event) => {
     if (filter === "nmea") {
@@ -92,15 +157,6 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
           { latitude: activeWgs84Target.latitude, longitude: activeWgs84Target.longitude },
         )
       : null;
-
-  async function handleExport() {
-    try {
-      const msg = await exportDiagnosticLogs(events);
-      props.onToast(msg);
-    } catch (error) {
-      props.onToast(`导出失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
 
   function protocolBadge(title: string, subtitle: string, value: string, tint: Color, ok: boolean | null) {
     const shape = { type: "rect" as const, cornerRadius: 10, style: "continuous" as const };
@@ -140,68 +196,33 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
   const detailShape = { type: "rect" as const, cornerRadius: 8, style: "continuous" as const };
   const isSessionConnected = snapshot.isRunning && snapshot.authenticated;
 
-  return (
-    <NavigationStack>
-      <VStack
-        spacing={0}
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        background="systemGroupedBackground"
-        navigationTitle="定位实测与日志"
-        navigationBarTitleDisplayMode="inline"
-        searchable={{
-          value: searchQuery,
-          onChanged: setSearchQuery,
-          prompt: "筛选事件（如 FFFA / acknowledged）",
-        }}
-        toolbar={{
-          topBarTrailing: (
-            <HStack spacing={12}>
-              <Button
-                buttonStyle="borderless"
-                disabled={events.length === 0}
-                action={() => {
-                  Pasteboard.setString(formatProtocolLogReport(events));
-                  HapticFeedback.lightImpact();
-                  setCopiedBanner(true);
-                  props.onToast("已复制脱敏诊断报告");
-                  setTimeout(() => setCopiedBanner(false), 1500);
-                }}
-              >
-                <Image systemName={copiedBanner ? "checkmark" : "doc.on.doc"} />
-              </Button>
-              <Menu label={<Image systemName="ellipsis.circle" />}>
-                <Button
-                  disabled={events.length === 0}
-                  action={() => void handleExport()}
-                >
-                  <HStack>
-                    <Image systemName="square.and.arrow.up" />
-                    <Text>导出分享报告</Text>
-                  </HStack>
-                </Button>
-                <Button
-                  role="destructive"
-                  disabled={events.length === 0}
-                  action={props.onClearLogs}
-                >
-                  <HStack>
-                    <Image systemName="trash" />
-                    <Text>清空日志</Text>
-                  </HStack>
-                </Button>
-                {props.onClose ? (
-                  <Button action={props.onClose}>
-                    <HStack>
-                      <Image systemName="xmark.circle" />
-                      <Text>关闭</Text>
-                    </HStack>
-                  </Button>
-                ) : null}
-              </Menu>
-            </HStack>
-          ),
-        }}
-      >
+  const logsBody = (
+    <VStack
+      spacing={0}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      background="systemGroupedBackground"
+      navigationTitle={props.embedded ? undefined : "定位实测与日志"}
+      navigationBarTitleDisplayMode="inline"
+      searchable={{
+        value: searchQuery,
+        onChanged: setSearchQuery,
+        prompt: "筛选事件（如 FFFA / acknowledged）",
+      }}
+      toolbar={
+        props.embedded
+          ? undefined
+          : {
+              topBarTrailing: (
+                <ProtocolLogsToolbarActions
+                  events={events}
+                  onClearLogs={props.onClearLogs}
+                  onToast={props.onToast}
+                  onClose={props.onClose}
+                />
+              ),
+            }
+      }
+    >
         {/* 顶部实测与协议链路仪表盘卡片 */}
         <VStack padding={{ horizontal: 14, top: 10, bottom: 10 }}>
           <VStack
@@ -466,6 +487,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
           </List>
         )}
       </VStack>
-    </NavigationStack>
   );
+
+  return props.embedded ? logsBody : <NavigationStack>{logsBody}</NavigationStack>;
 }

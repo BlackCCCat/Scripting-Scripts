@@ -77,6 +77,7 @@ interface ConfigurationViewProps {
   onOpenChangelog?: () => void;
   onToast: (message: string) => void;
   onClose?: () => void;
+  embedded?: boolean;
 }
 
 export function ConfigurationView(props: ConfigurationViewProps) {
@@ -304,18 +305,17 @@ export function ConfigurationView(props: ConfigurationViewProps) {
     );
   }
 
-  return (
-    <NavigationStack>
-      <List
-        navigationTitle="设备配对与连接"
-        navigationBarTitleDisplayMode="inline"
-        listStyle="insetGroup"
-        toolbar={
-          props.onClose
-            ? { topBarTrailing: <Button title="关闭" action={props.onClose} /> }
-            : undefined
-        }
-      >
+  const listContent = (
+    <List
+      navigationTitle={props.embedded ? undefined : "设备配对与连接"}
+      navigationBarTitleDisplayMode="inline"
+      listStyle="insetGroup"
+      toolbar={
+        !props.embedded && props.onClose
+          ? { topBarTrailing: <Button title="关闭" action={props.onClose} /> }
+          : undefined
+      }
+    >
         {/* 顶部 Hero 状态概览卡片（对应 heroHeaderCard，overlay RoundedRectangle 确保四角描边与圆角完全贴合） */}
         <Section>
           <VStack
@@ -1047,6 +1047,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           ) : null}
         </Section>
       </List>
-    </NavigationStack>
   );
+
+  return props.embedded ? listContent : <NavigationStack>{listContent}</NavigationStack>;
 }

@@ -8,6 +8,7 @@ import {
   Label,
   LiveActivity,
   Navigation,
+  Picker,
   Script,
   Spacer,
   TabView,
@@ -60,7 +61,7 @@ import type {
 import { RELOC_COLORS } from "./ui/theme";
 import { ConfigurationView } from "./ui/ConfigurationView";
 import { MapPickerView } from "./ui/MapPickerView";
-import { ProtocolLogsView } from "./ui/ProtocolLogsView";
+import { ProtocolLogsToolbarActions, ProtocolLogsView } from "./ui/ProtocolLogsView";
 import { useMarkdownChangelogSheet } from "./ui/ReleaseNotesSheet";
 import { formatLatLon, mapCoordToDeviceWgs84, round6 } from "./utils/coords";
 import {
@@ -97,12 +98,14 @@ const MAX_EVENTS = 250;
 
 export function App(props: { shared?: { latitude: number; longitude: number; name?: string } }) {
   const dismiss = Navigation.useDismiss();
-  const canDismiss = Script.env !== "home_screen";
+  const isHomeScreen = Script.env === "home_screen";
+  const canDismiss = !isHomeScreen;
   const isUnsupportedIPad =
     typeof Device !== "undefined" &&
     typeof Device.hardwareModel === "string" &&
     Device.hardwareModel.startsWith("iPad");
   const tabSelection = useObservable<number>(0);
+  const [homeTab, setHomeTab] = useState<number>(0);
   const showPiP = useObservable<boolean>(false);
   const changelog = useMarkdownChangelogSheet({ title: "更新说明" });
 
@@ -367,6 +370,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     Location.addLocationListener(onLoc);
 
     const onTabChanged = (tab: number) => {
+      if (isHomeScreen) {
+        setHomeTab(tab);
+      }
       const onTelemetry = tab === 2;
       isTelemetryTabRef.current = onTelemetry;
       if (onTelemetry) {
@@ -884,6 +890,119 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     );
   }
 
+  const mapPickerProps = {
+    selectedTarget,
+    activeMapCoordinate,
+    settings,
+    snapshot,
+    mfiStatus,
+    pairingStatus,
+    connectionState,
+    favorites,
+    recents,
+    interruptedSession,
+    onSelectTarget: (next: PickTarget & { altitude: number }) => {
+      setSelectedTarget(next);
+      saveLastLocation(next);
+    },
+    onStartSpoofing: () => void startSession("send"),
+    onUpdateRunningLocation: updateRunningLocation,
+    onStopSpoofing: () => void stopSession(),
+    onStartProbe: () => void startSession("probe"),
+    onSwitchToConfig: () => tabSelection.setValue(1),
+    onChangeMapStyle: handleChangeMapStyle,
+    onAddFavorite: (t: PickTarget & { altitude: number }) => {
+      setFavorites(
+        addFavorite({
+          name: t.name || formatLatLon(t.latitude, t.longitude, 5),
+          subtitle: t.address,
+          latitude: t.latitude,
+          longitude: t.longitude,
+          altitude: t.altitude,
+        }),
+      );
+      fireToast("已加入收藏");
+    },
+    onRenameFavorite: (id: string, name: string) => setFavorites(renameFavorite(id, name)),
+    onRemoveFavorite: (id: string) => {
+      setFavorites(removeFavorite(id));
+      fireToast("已移除收藏");
+    },
+    onClearRecents: () => {
+      clearRecents();
+      setRecents([]);
+    },
+    onResumeInterrupted: (rec: InterruptedSessionRecord) => {
+      const restored: PickTarget & { altitude: number } = {
+        latitude: rec.latitude,
+        longitude: rec.longitude,
+        altitude: rec.altitude,
+        name: rec.placeName,
+      };
+      setSelectedTarget(restored);
+      setInterruptedSession(null);
+      clearInterruptedSession();
+      void startSession("send", restored);
+    },
+    onDismissInterrupted: () => {
+      clearInterruptedSession();
+      setInterruptedSession(null);
+    },
+    onToast: fireToast,
+    onClose: canDismiss ? () => dismiss() : undefined,
+  };
+
+  const configProps = {
+    settings,
+    mfiStatus,
+    pairingStatus,
+    pairingInProgress,
+    pairingPIN,
+    pairingStepMessage,
+    connectionState,
+    connectionSummary,
+    isSessionRunning: snapshot.isRunning,
+    onUpdateSettings: handleUpdateSettings,
+    onMFiChanged: refreshMFi,
+    onStartOnDevicePairing: () => void handleStartOnDevicePairing(),
+    onCancelOnDevicePairing: handleCancelOnDevicePairing,
+    onImportPairingBytes: handleImportPairingBytes,
+    onDeletePairing: () => {
+      deletePairing();
+      refreshPairing();
+    },
+    onTestConnection: handleTestConnection,
+    onToast: fireToast,
+    onOpenChangelog: () => void changelog.openManually(),
+    onClose: canDismiss ? () => dismiss() : undefined,
+    embedded: isHomeScreen,
+  };
+
+  const logsProps = {
+    snapshot,
+    events,
+    mfiStatus,
+    telemetry,
+    activeWgs84Target,
+    onStartProbe: () => void startSession("probe"),
+    onStartSend: () => void startSession("send"),
+    onStop: () => void stopSession(),
+    onRefreshTelemetry: () => void refreshCurrentTelemetry(true),
+    onClearLogs: () => {
+      eventBufferRef.current = [];
+      if (eventFlushTimerRef.current) {
+        clearTimeout(eventFlushTimerRef.current);
+        eventFlushTimerRef.current = null;
+      }
+      setEvents([]);
+      clearDebugLog();
+      fireToast("已清空日志");
+    },
+    onToast: fireToast,
+    onClose: canDismiss ? () => dismiss() : undefined,
+    embedded: isHomeScreen,
+  };
+
   return (
     <ZStack
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
@@ -942,124 +1061,80 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         <EmptyView />
       </Group>
 
-      <TabView selection={tabSelection} tint={RELOC_COLORS.accent}>
-        <MapPickerView
-          tabItem={<Label title="定位" systemImage="location.north.circle.fill" />}
-          tag={0}
-          selectedTarget={selectedTarget}
-          activeMapCoordinate={activeMapCoordinate}
-          settings={settings}
-          snapshot={snapshot}
-          mfiStatus={mfiStatus}
-          pairingStatus={pairingStatus}
-          connectionState={connectionState}
-          favorites={favorites}
-          recents={recents}
-          interruptedSession={interruptedSession}
-          onSelectTarget={(next) => {
-            setSelectedTarget(next);
-            saveLastLocation(next);
+      {isHomeScreen ? (
+        <ZStack
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          navigationBarTitleDisplayMode="inline"
+          toolbarTitleDisplayMode="inline"
+          toolbar={{
+            principal: (
+              <Picker
+                title="页面"
+                pickerStyle="segmented"
+                value={homeTab}
+                onChanged={(value: number) => {
+                  HapticFeedback.lightImpact();
+                  tabSelection.setValue(value);
+                }}
+                frame={{ width: 220 }}
+              >
+                <Image tag={0} systemName="location.north.circle.fill" />
+                <Image tag={1} systemName="antenna.radiowaves.left.and.right" />
+                <Image tag={2} systemName="waveform.path.ecg" />
+              </Picker>
+            ),
+            topBarTrailing:
+              homeTab === 2 ? (
+                <ProtocolLogsToolbarActions
+                  events={events}
+                  onClearLogs={logsProps.onClearLogs}
+                  onToast={fireToast}
+                />
+              ) : undefined,
           }}
-          onStartSpoofing={() => void startSession("send")}
-          onUpdateRunningLocation={updateRunningLocation}
-          onStopSpoofing={() => void stopSession()}
-          onStartProbe={() => void startSession("probe")}
-          onSwitchToConfig={() => tabSelection.setValue(1)}
-          onChangeMapStyle={handleChangeMapStyle}
-          onAddFavorite={(t) => {
-            setFavorites(
-              addFavorite({
-                name: t.name || formatLatLon(t.latitude, t.longitude, 5),
-                subtitle: t.address,
-                latitude: t.latitude,
-                longitude: t.longitude,
-                altitude: t.altitude,
-              }),
-            );
-            fireToast("已加入收藏");
-          }}
-          onRenameFavorite={(id, name) => setFavorites(renameFavorite(id, name))}
-          onRemoveFavorite={(id) => {
-            setFavorites(removeFavorite(id));
-            fireToast("已移除收藏");
-          }}
-          onClearRecents={() => {
-            clearRecents();
-            setRecents([]);
-          }}
-          onResumeInterrupted={(rec) => {
-            const restored: PickTarget & { altitude: number } = {
-              latitude: rec.latitude,
-              longitude: rec.longitude,
-              altitude: rec.altitude,
-              name: rec.placeName,
-            };
-            setSelectedTarget(restored);
-            setInterruptedSession(null);
-            clearInterruptedSession();
-            void startSession("send", restored);
-          }}
-          onDismissInterrupted={() => {
-            clearInterruptedSession();
-            setInterruptedSession(null);
-          }}
-          onToast={fireToast}
-          onClose={canDismiss ? () => dismiss() : undefined}
-        />
+        >
+          <ZStack
+            frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+            opacity={homeTab === 0 ? 1 : 0}
+            allowsHitTesting={homeTab === 0}
+            zIndex={homeTab === 0 ? 2 : 0}
+          >
+            <MapPickerView {...mapPickerProps} />
+          </ZStack>
 
-        <ConfigurationView
-          tabItem={<Label title="设备连接" systemImage="antenna.radiowaves.left.and.right" />}
-          tag={1}
-          settings={settings}
-          mfiStatus={mfiStatus}
-          pairingStatus={pairingStatus}
-          pairingInProgress={pairingInProgress}
-          pairingPIN={pairingPIN}
-          pairingStepMessage={pairingStepMessage}
-          connectionState={connectionState}
-          connectionSummary={connectionSummary}
-          isSessionRunning={snapshot.isRunning}
-          onUpdateSettings={handleUpdateSettings}
-          onMFiChanged={refreshMFi}
-          onStartOnDevicePairing={() => void handleStartOnDevicePairing()}
-          onCancelOnDevicePairing={handleCancelOnDevicePairing}
-          onImportPairingBytes={handleImportPairingBytes}
-          onDeletePairing={() => {
-            deletePairing();
-            refreshPairing();
-          }}
-          onTestConnection={handleTestConnection}
-          onToast={fireToast}
-          onOpenChangelog={() => void changelog.openManually()}
-          onClose={canDismiss ? () => dismiss() : undefined}
-        />
+          {homeTab === 1 ? (
+            <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }} zIndex={2}>
+              <ConfigurationView {...configProps} />
+            </ZStack>
+          ) : null}
 
-        <ProtocolLogsView
-          tabItem={<Label title="实测与日志" systemImage="waveform.path.ecg" />}
-          tag={2}
-          snapshot={snapshot}
-          events={events}
-          mfiStatus={mfiStatus}
-          telemetry={telemetry}
-          activeWgs84Target={activeWgs84Target}
-          onStartProbe={() => void startSession("probe")}
-          onStartSend={() => void startSession("send")}
-          onStop={() => void stopSession()}
-          onRefreshTelemetry={() => void refreshCurrentTelemetry(true)}
-          onClearLogs={() => {
-            eventBufferRef.current = [];
-            if (eventFlushTimerRef.current) {
-              clearTimeout(eventFlushTimerRef.current);
-              eventFlushTimerRef.current = null;
-            }
-            setEvents([]);
-            clearDebugLog();
-            fireToast("已清空日志");
-          }}
-          onToast={fireToast}
-          onClose={canDismiss ? () => dismiss() : undefined}
-        />
-      </TabView>
+          {homeTab === 2 ? (
+            <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }} zIndex={2}>
+              <ProtocolLogsView {...logsProps} />
+            </ZStack>
+          ) : null}
+        </ZStack>
+      ) : (
+        <TabView selection={tabSelection} tint={RELOC_COLORS.accent}>
+          <MapPickerView
+            tabItem={<Label title="定位" systemImage="location.north.circle.fill" />}
+            tag={0}
+            {...mapPickerProps}
+          />
+
+          <ConfigurationView
+            tabItem={<Label title="设备连接" systemImage="antenna.radiowaves.left.and.right" />}
+            tag={1}
+            {...configProps}
+          />
+
+          <ProtocolLogsView
+            tabItem={<Label title="实测与日志" systemImage="waveform.path.ecg" />}
+            tag={2}
+            {...logsProps}
+          />
+        </TabView>
+      )}
     </ZStack>
   );
 }

@@ -1,5 +1,10 @@
+import { NavigationStack } from "scripting";
 import { App } from "./index";
 
 export default function HomeScreenView() {
-  return <App />;
+  return (
+    <NavigationStack>
+      <App />
+    </NavigationStack>
+  );
 }
