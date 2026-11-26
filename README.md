@@ -25,6 +25,7 @@
 | [FileStore](./FileStore) | 功能齐全的文件管理脚本，该版本为二次修改版，[原版](https://github.com/Keywos/rule/tree/main/Scripting/FileStore) | [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/FileStore.zip) |
 | [AI-Dashboard](./AI-Dashboard) | AI用量看板，支持大量AI供应商数据接入，可展示账号额度、积分、余额等信息，支持多种登录方式（API Key、auth登录、钥匙串导入）；codex同时可显示重置卡数量、重置时间预测等信息 | [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/AI-Dashboard) |
 | [Workbuddy2API](./Workbuddy2API) | WorkBuddy反代API多账号管理，支持登录、钥匙串导入，查看及执行账号任务，提供本机或局域网HTTP API服务，账号轮询及用量统计等 | [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Workbuddy2API) |
+| [Reloc-in-Scripting](./Reloc-in-Scripting/) | 基于 [Reloc](https://github.com/Reukix/Reloc) 项目的虚拟定位项目，区别于 [WLOC](https://github.com/ios151/Scripting) ，该方法能够实现尾插定位效果 | [复制链接导入](https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Reloc-in-Scripting) |
 
 **本项目由Codex、Gemini完成**
 
@@ -46,3 +47,4 @@
 - [FileStore](./FileStore) 原版为 [Keywos](https://github.com/Keywos) 的 [FileStore](https://github.com/Keywos/rule/tree/main/Scipting/FileStore) 脚本，在此脚本基础上进行了二次修改
 - [AI-Dashboard](./AI-Dashboard) 接口访问等参考项目[TokenPulse](https://github.com/hqwuzhaoyi/TokenPulse)， Antigravity账号请求分析数据参考项目[Antigravity Manager](https://github.com/lbjlaq/Antigravity-Manager)，Codex账号部分数据获取方式参考项目[AI Usage](https://github.com/StarYunLee/Scripting/tree/main/AI%20Usage)
 - [Workbuddy2API](./Workbuddy2API) 项目复刻自[wb2api-ios](https://github.com/chenyynx/wb2api-ios)，并直接将上游后端在scripting实现，无须登录面板，直接登录账号，任务执行同时合并[WorkBuddy-Daily](https://github.com/L0NE-6/WorkBuddy-Daily)项目中任务的领取和运行
+- [Reloc-in-Scripting](./Reloc-in-Scripting/) 项目复刻自 [Reloc](https://github.com/Reukix/Reloc) ，暴露几个原项目中未公开的设置项，不包含 MFI 凭据，增加快捷指令跳转设置等
