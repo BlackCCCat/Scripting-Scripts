@@ -29,7 +29,11 @@ export const NMEAGenerator = {
     return `$${body}*${checksum.toString(16).toUpperCase().padStart(2, "0")}\r\n`;
   },
 
-  locationSentences(location: TargetLocation, date = new Date()): Record<number, string> {
+  locationSentences(
+    location: TargetLocation,
+    date = new Date(),
+    options?: { hdop?: number; fixQuality?: number },
+  ): Record<number, string> {
     const { formatted: lat, hemisphere: north } = this.formatCoordinate(location.latitude, true);
     const { formatted: lon, hemisphere: east } = this.formatCoordinate(location.longitude, false);
 
@@ -45,6 +49,8 @@ export const NMEAGenerator = {
     const ddmmyy = `${day}${month}${year}`;
 
     const altitudeStr = (Number.isFinite(location.altitude) ? location.altitude : 10.0).toFixed(1);
+    const fixQuality = Number.isInteger(options?.fixQuality) ? (options!.fixQuality as number) : 1;
+    const hdopStr = (Number.isFinite(options?.hdop) ? (options!.hdop as number) : 0.6).toFixed(1);
     const speedStr = Math.max(0.0, Number.isFinite(location.speedKnots) ? location.speedKnots : 0.0).toFixed(1);
     const courseNorm = Number.isFinite(location.courseDegrees)
       ? (((location.courseDegrees % 360.0) + 360.0) % 360.0)
@@ -52,7 +58,7 @@ export const NMEAGenerator = {
     const courseStr = courseNorm.toFixed(1);
 
     const gga = this.sentence(
-      `GPGGA,${clock},${lat},${north},${lon},${east},1,12,0.6,${altitudeStr},M,0.0,M,,`,
+      `GPGGA,${clock},${lat},${north},${lon},${east},${fixQuality},12,${hdopStr},${altitudeStr},M,0.0,M,,`,
     );
     const rmc = this.sentence(
       `GPRMC,${clock},A,${lat},${north},${lon},${east},${speedStr},${courseStr},${ddmmyy},,,A`,

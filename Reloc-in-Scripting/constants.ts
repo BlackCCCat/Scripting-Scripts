@@ -133,7 +133,7 @@ export const UPSTREAM_INFO = {
   author: "Reukix",
   repoUrl: "https://github.com/Reukix/Reloc",
   license: "AGPL-3.0-only",
-  baseTag: "v1.0.1",
-  baseCommit: "c6e96d312d4101ee3aa47e97205bb27e3fecfa6c",
-  baseCommitShort: "c6e96d3",
+  baseTag: "v1.0.2",
+  baseCommit: "8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f",
+  baseCommitShort: "8dc5aaa",
 } as const;

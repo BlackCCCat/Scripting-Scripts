@@ -571,12 +571,18 @@ export async function verifyDeviceConnection(options: {
 
 type SocketRunOutcome =
   | { kind: "completed"; packetCount: number }
+  | { kind: "reconnectRequested"; reason: string; packetCount: number }
   | { kind: "recoverableError"; error: string; didSendPackets: boolean; packetCount: number }
   | { kind: "fatalError"; error: string };
 
 export class AccessoryLocationSession {
   readonly locationBox: LiveLocationBox;
   private cancelled = false;
+  private fastBurstUntil = 0;
+  private pendingKalmanReset = false;
+  private burstMotionPacketsRemaining = 0;
+  private pendingReconnectReason: string | null = null;
+  private fallbackRealLocation: TargetLocation | null = null;
   private activeLink: IAP2Link | null = null;
   private activeTunnel: VPNRSDTunnel | null = null;
   private activePairingStream: ByteStream | null = null;
@@ -589,8 +595,43 @@ export class AccessoryLocationSession {
     private readonly onSubscriptionRestarted?: () => void,
     private readonly onUnrecoverableGuide?: (error: unknown) => void,
     private readonly onAuthenticated?: () => void,
+    private readonly onLocationRequested?: () => void,
+    private readonly onLocationStopped?: () => void,
   ) {
     this.locationBox = new LiveLocationBox(initialLocation);
+  }
+
+  /**
+   * 触发临时高频注入突发（5 Hz / 200ms），帮助 locationd 在刚订阅或切换点位时迅速锁定外设 GPS（对齐上游 triggerFastBurst）。
+   */
+  triggerFastBurst(seconds = 15.0): void {
+    const until = Date.now() + Math.max(0, seconds) * 1000;
+    this.fastBurstUntil = Math.max(this.fastBurstUntil, until);
+  }
+
+  /**
+   * 运行中更新目标坐标时触发 Kalman 复位脉冲（先发 void 清除旧点惯性 + 短暂 0.4kn 微速 + 5 Hz 突发），对齐上游 notifyLocationUpdated。
+   */
+  notifyLocationUpdated(resetKalman = true, burstSeconds = 10.0): void {
+    if (resetKalman) {
+      this.pendingKalmanReset = true;
+      this.burstMotionPacketsRemaining = Math.max(this.burstMotionPacketsRemaining, 2);
+    }
+    this.triggerFastBurst(burstSeconds);
+  }
+
+  /**
+   * 记录停止前最近一次确认的本机真实位置，停止时用于下发高误差 (HDOP=35.0) 劣化报文促使室内 Wi-Fi 立刻接管（同步上游 v1.0.2）。
+   */
+  setFallbackRealLocation(location: TargetLocation | null): void {
+    this.fallbackRealLocation = location ? { ...location } : null;
+  }
+
+  /**
+   * 若 0xAA05 后迟迟未等到 0xFFFA，请求主动重置并快速重建一次 iAP2 链路清理卡住的 iap2d 状态（对齐上游 requestLinkReconnect）。
+   */
+  requestLinkReconnect(reason: string): void {
+    this.pendingReconnectReason = reason;
   }
 
   start(options: {
@@ -600,6 +641,10 @@ export class AccessoryLocationSession {
     mfiSigner: MFiSigner;
   }): void {
     this.cancelled = false;
+    this.fastBurstUntil = 0;
+    this.pendingKalmanReset = false;
+    this.burstMotionPacketsRemaining = 0;
+    this.pendingReconnectReason = null;
     this.activeRunPromise = this.runLoop(options).finally(() => {
       this.activeRunPromise = null;
     });
@@ -608,7 +653,7 @@ export class AccessoryLocationSession {
   async stop(): Promise<void> {
     this.cancelled = true;
     if (this.activeLink && this.activeRunPromise) {
-      await Promise.race([this.activeRunPromise, delay(750)]);
+      await Promise.race([this.activeRunPromise, delay(900)]);
     }
     await this.activeLink?.close().catch(() => undefined);
     await this.activeTunnel?.close().catch(() => undefined);
@@ -773,10 +818,29 @@ export class AccessoryLocationSession {
 
         cumulativePackets = outcome.packetCount;
         if (configuration.mode !== "send" || this.cancelled) {
-          snapshot.lastError = this.cancelled ? null : outcome.error;
+          snapshot.lastError = this.cancelled ? null : outcome.kind === "recoverableError" ? outcome.error : null;
           break;
         }
         if (overallDeadline !== null && Date.now() >= overallDeadline) break;
+
+        if (outcome.kind === "reconnectRequested") {
+          reconnectAttempt = 0;
+          snapshot = {
+            isRunning: true,
+            mode: configuration.mode,
+            lockdownConnected: false,
+            linkReady: false,
+            identified: false,
+            authenticated: false,
+            activeSentences: [],
+            packetsAcknowledged: cumulativePackets,
+            lastError: null,
+          };
+          this.onSnapshot({ ...snapshot });
+          this.emitEvent("reconnecting", { attempt: 1, delay_s: 0.35, reason: outcome.reason });
+          await this.sleepCancellable(350, overallDeadline);
+          continue;
+        }
 
         if (outcome.didSendPackets) reconnectAttempt = 0;
         reconnectAttempt += 1;
@@ -886,6 +950,31 @@ export class AccessoryLocationSession {
       let sawLocationStopped = false;
 
       while (!this.cancelled) {
+        if (this.pendingReconnectReason) {
+          const reason = this.pendingReconnectReason;
+          this.pendingReconnectReason = null;
+          if (snapshot.authenticated) {
+            if (activeSentences.size > 0) {
+              const voidMap = NMEAGenerator.voidLocationSentences();
+              const voidOutgoing = [...activeSentences]
+                .sort((a, b) => a - b)
+                .map((id) => voidMap[id])
+                .filter((s): s is string => typeof s === "string");
+              if (voidOutgoing.length > 0) {
+                await link.sendBestEffort(NMEAGenerator.locationMessage(voidOutgoing), 200);
+              }
+            }
+            await link.sendReset();
+            this.emitEvent("iap2_link_reset_sent", { reason });
+            await delay(50);
+          }
+          return {
+            kind: "reconnectRequested",
+            reason,
+            packetCount: snapshot.packetsAcknowledged,
+          };
+        }
+
         const now = Date.now();
         if (deadline !== null && now >= deadline) break;
 
@@ -896,17 +985,21 @@ export class AccessoryLocationSession {
           snapshot.authenticated &&
           activeSentences.size > 0
         ) {
-          let nextDue = now + 1000;
-          for (const id of activeSentences) {
-            const last = lastSent.get(id);
-            const requiredMs = Math.max(
-              configuration.intervalSeconds * 1000,
-              minIntervalsMs.get(id) ?? 250,
-            );
-            const candidate = last !== undefined ? last + requiredMs : now;
-            if (candidate < nextDue) nextDue = candidate;
+          if (this.pendingKalmanReset) {
+            pollSliceMs = 15;
+          } else {
+            const burstActive = now < this.fastBurstUntil;
+            let nextDue = now + 1000;
+            for (const id of activeSentences) {
+              const last = lastSent.get(id);
+              const requiredMs = burstActive
+                ? 200
+                : Math.max(configuration.intervalSeconds * 1000, minIntervalsMs.get(id) ?? 250);
+              const candidate = last !== undefined ? last + requiredMs : now;
+              if (candidate < nextDue) nextDue = candidate;
+            }
+            pollSliceMs = Math.min(pollSliceMs, Math.max(20, nextDue - now));
           }
-          pollSliceMs = Math.min(pollSliceMs, Math.max(25, nextDue - now));
         }
         if (deadline !== null) {
           pollSliceMs = Math.min(pollSliceMs, Math.max(25, deadline - now));
@@ -979,12 +1072,14 @@ export class AccessoryLocationSession {
                 }
               }
               lastSent.clear();
+              this.triggerFastBurst(15.0);
               snapshot.activeSentences = [...activeSentences].sort((a, b) => a - b);
               this.onSnapshot({ ...snapshot });
               this.emitEvent("location_requested", {
                 sentences: snapshot.activeSentences,
                 min_intervals_ms: minIntervalsLog,
               });
+              this.onLocationRequested?.();
               if (sawLocationStopped) {
                 sawLocationStopped = false;
                 this.onSubscriptionRestarted?.();
@@ -997,6 +1092,7 @@ export class AccessoryLocationSession {
               snapshot.activeSentences = [];
               this.onSnapshot({ ...snapshot });
               this.emitEvent("location_stopped");
+              this.onLocationStopped?.();
               break;
             }
             default:
@@ -1011,24 +1107,48 @@ export class AccessoryLocationSession {
           activeSentences.size > 0 &&
           !this.cancelled
         ) {
+          if (this.pendingKalmanReset) {
+            this.pendingKalmanReset = false;
+            lastSent.clear();
+            const voidMap = NMEAGenerator.voidLocationSentences();
+            const voidOutgoing = [...activeSentences]
+              .sort((a, b) => a - b)
+              .map((id) => voidMap[id])
+              .filter((s): s is string => typeof s === "string");
+            if (voidOutgoing.length > 0) {
+              await link.send(NMEAGenerator.locationMessage(voidOutgoing)).catch(() => undefined);
+              this.emitEvent("kalman_reset_void_sent");
+              await delay(50);
+            }
+          }
+
           const tickNow = Date.now();
+          const burstActive = tickNow < this.fastBurstUntil;
           const due = [...activeSentences]
             .sort((a, b) => a - b)
             .filter((id) => {
               const last = lastSent.get(id);
-              const requiredMs = Math.max(
-                configuration.intervalSeconds * 1000,
-                minIntervalsMs.get(id) ?? 250,
-              );
+              const requiredMs = burstActive
+                ? 200
+                : Math.max(configuration.intervalSeconds * 1000, minIntervalsMs.get(id) ?? 250);
               return last === undefined || tickNow - last >= requiredMs;
             });
 
           if (due.length > 0) {
             const baseTarget = this.locationBox.get();
-            const outgoingTarget = configuration.microJitterEnabled
+            let outgoingTarget = configuration.microJitterEnabled
               ? CoordinateTransform.applyMicroJitter(baseTarget, 0.6)
-              : baseTarget;
-            const sentenceMap = NMEAGenerator.locationSentences(outgoingTarget);
+              : { ...baseTarget };
+            if (this.burstMotionPacketsRemaining > 0) {
+              this.burstMotionPacketsRemaining -= 1;
+              if (outgoingTarget.speedKnots === 0) {
+                outgoingTarget = { ...outgoingTarget, speedKnots: 0.4 };
+              }
+            }
+            const sentenceMap = NMEAGenerator.locationSentences(outgoingTarget, new Date(), {
+              hdop: 0.5,
+              fixQuality: 2,
+            });
             const outgoing = due.map((id) => sentenceMap[id]).filter((s): s is string => typeof s === "string");
             const locMsg = NMEAGenerator.locationMessage(outgoing);
             await link.send(locMsg);
@@ -1051,23 +1171,42 @@ export class AccessoryLocationSession {
       }
 
       if (this.cancelled && snapshot.authenticated) {
-        // 停止时主动发送无效定位报文 (quality=0 / V) 与 iAP2 RST，促使 locationd 立即切回真实 GPS（同步上游 v1.0.1）
+        // 停止三步柔和退位（同步上游 v1.0.2）：
+        // 1) 向真实回落坐标发送高误差 (HDOP=35.0) 劣化报文让室内 Wi-Fi/蜂窝优先接管；
+        // 2) 发送无效定位报文 (quality=0 / V)；
+        // 3) 发送 iAP2 RST 通知系统立即卸载外设源。
         if (activeSentences.size > 0) {
+          const sortedIds = [...activeSentences].sort((a, b) => a - b);
+          const degradeLoc = this.fallbackRealLocation ?? this.locationBox.get();
+          const degradedMap = NMEAGenerator.locationSentences(degradeLoc, new Date(), {
+            hdop: 35.0,
+            fixQuality: 1,
+          });
+          const degradedOutgoing = sortedIds
+            .map((id) => degradedMap[id])
+            .filter((s): s is string => typeof s === "string");
+          if (degradedOutgoing.length > 0) {
+            await link.sendBestEffort(NMEAGenerator.locationMessage(degradedOutgoing), 200);
+            this.emitEvent("location_degraded_sent", {
+              hdop: 35.0,
+              sentences: sortedIds,
+            });
+            await delay(40);
+          }
+
           const voidMap = NMEAGenerator.voidLocationSentences();
-          const voidOutgoing = [...activeSentences]
-            .sort((a, b) => a - b)
+          const voidOutgoing = sortedIds
             .map((id) => voidMap[id])
             .filter((s): s is string => typeof s === "string");
           if (voidOutgoing.length > 0) {
-            await link.send(NMEAGenerator.locationMessage(voidOutgoing)).catch(() => undefined);
-            this.emitEvent("location_void_sent", {
-              sentences: [...activeSentences].sort((a, b) => a - b),
-            });
+            await link.sendBestEffort(NMEAGenerator.locationMessage(voidOutgoing), 200);
+            this.emitEvent("location_void_sent", { sentences: sortedIds });
+            await delay(40);
           }
         }
         await link.sendReset();
         this.emitEvent("iap2_link_reset_sent");
-        await delay(80);
+        await delay(40);
       }
 
       this.emitEvent("finished", {

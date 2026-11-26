@@ -63,8 +63,10 @@ import { ConfigurationView } from "./ui/ConfigurationView";
 import { MapPickerView } from "./ui/MapPickerView";
 import { ProtocolLogsToolbarActions, ProtocolLogsView } from "./ui/ProtocolLogsView";
 import { useMarkdownChangelogSheet } from "./ui/ReleaseNotesSheet";
-import { formatLatLon, mapCoordToDeviceWgs84, round6 } from "./utils/coords";
+import { distanceMeters, formatLatLon, mapCoordToDeviceWgs84, round6 } from "./utils/coords";
 import {
+  nudgeLocationSubscription,
+  pulseLocationSubscription,
   refreshKeepAliveAfterLocationToggle,
   releaseKeepAlive,
   retainKeepAlive,
@@ -168,15 +170,19 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   const lastLiveActivityKeyRef = useRef<string>("");
   const liveActivityEnabledRef = useRef<boolean>(settings.liveActivityEnabled);
   liveActivityEnabledRef.current = settings.liveActivityEnabled;
-  const locationPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionStartedAtRef = useRef<number>(Date.now());
   const activePlaceNameRef = useRef<string>(selectedTarget.name || "模拟位置");
   const isTelemetryTabRef = useRef<boolean>(false);
-  const isSessionRunningRef = useRef<boolean>(false);
-  isSessionRunningRef.current = snapshot.isRunning;
   const latestTelemetryRef = useRef<LiveLocationTelemetry | null>(null);
   const eventBufferRef = useRef<ProtocolEvent[]>([]);
   const eventFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subscriptionWakeTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const didAutoReconnectSubRef = useRef<boolean>(false);
+  const activeSentencesRef = useRef<number[]>([]);
+  const lastKnownRealLocationRef = useRef<TargetLocation | null>(null);
+  const isRestoringRef = useRef<boolean>(false);
+  const stoppedWgsTargetRef = useRef<TargetLocation | null>(null);
+  const restoreTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
   function compactToastText(raw: string): string {
     const firstLine =
@@ -203,8 +209,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     const batch = eventBufferRef.current;
     if (batch.length === 0) return;
     eventBufferRef.current = [];
-    const incoming = batch.reverse();
-    setEvents((prev) => [...incoming, ...prev].slice(0, MAX_EVENTS));
+    // 按时间正序追加到底部（对齐上游 ProtocolLogsView.swift），避免实时测试下方第一行随 ACK 频繁跳动
+    setEvents((prev) => [...prev, ...batch].slice(-MAX_EVENTS));
   }
 
   function appendEvent(ev: ProtocolEvent) {
@@ -221,7 +227,17 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   }
 
   function refreshPairing() {
-    setPairingStatus(getPairingStatus());
+    const next = getPairingStatus();
+    setPairingStatus((prev) =>
+      prev.isLoaded === next.isLoaded &&
+      prev.summaryID === next.summaryID &&
+      prev.deviceUDID === next.deviceUDID &&
+      prev.kind === next.kind &&
+      prev.deviceName === next.deviceName &&
+      prev.errorMessage === next.errorMessage
+        ? prev
+        : next,
+    );
   }
 
   const lastLocLogAtRef = useRef<number>(0);
@@ -237,6 +253,21 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         };
         latestTelemetryRef.current = sample;
         setTelemetry(sample);
+        if (!sessionRef.current && !isRestoringRef.current) {
+          lastKnownRealLocationRef.current = {
+            latitude: sample.latitude,
+            longitude: sample.longitude,
+            altitude: settings.defaultAltitude,
+            speedKnots: 0,
+            courseDegrees: 0,
+          };
+        } else if (
+          isRestoringRef.current &&
+          stoppedWgsTargetRef.current &&
+          distanceMeters(stoppedWgsTargetRef.current, sample) > 80
+        ) {
+          completeRealLocationRecovery(sample);
+        }
         const now = Date.now();
         if (verbose || now - lastLocLogAtRef.current >= 10_000) {
           lastLocLogAtRef.current = now;
@@ -254,19 +285,137 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     }
   }
 
-  function startLocationPoll(intervalMs = 5000) {
-    if (locationPollTimerRef.current) clearInterval(locationPollTimerRef.current);
-    void refreshCurrentTelemetry();
-    locationPollTimerRef.current = setInterval(() => {
-      void refreshCurrentTelemetry();
-    }, intervalMs);
+  function cancelSubscriptionWakeups() {
+    for (const timer of subscriptionWakeTimersRef.current) {
+      clearTimeout(timer);
+    }
+    subscriptionWakeTimersRef.current = [];
   }
 
-  function stopLocationPoll() {
-    if (locationPollTimerRef.current) {
-      clearInterval(locationPollTimerRef.current);
-      locationPollTimerRef.current = null;
+  function scheduleSubscriptionWakeups(session: AccessoryLocationSession, mode: "probe" | "send") {
+    cancelSubscriptionWakeups();
+    if (mode !== "send") return;
+
+    const steps = [
+      { delayMs: 1500, attempt: 1, action: "nudge" as const },
+      { delayMs: 3500, attempt: 2, action: "nudge" as const },
+      { delayMs: 5500, attempt: 3, action: "pulse" as const },
+    ];
+    for (const step of steps) {
+      const id = setTimeout(() => {
+        if (sessionRef.current !== session || activeSentencesRef.current.length > 0) return;
+        appendEvent({
+          id: `${Date.now()}-wake-${step.attempt}`,
+          timestamp: new Date().toISOString(),
+          name: "auto_subscription_pulse",
+          detail: JSON.stringify({ attempt: step.attempt, mode: step.action }),
+          isError: false,
+        });
+        if (step.action === "nudge") {
+          void nudgeLocationSubscription();
+        } else {
+          void pulseLocationSubscription();
+        }
+      }, step.delayMs);
+      subscriptionWakeTimersRef.current.push(id);
     }
+
+    const reconnectTimer = setTimeout(() => {
+      if (sessionRef.current !== session || activeSentencesRef.current.length > 0) return;
+      if (!didAutoReconnectSubRef.current) {
+        didAutoReconnectSubRef.current = true;
+        appendEvent({
+          id: `${Date.now()}-wake-reconnect`,
+          timestamp: new Date().toISOString(),
+          name: "auto_subscription_reconnect",
+          detail: JSON.stringify({ reason: "waiting_subscription_timeout" }),
+          isError: false,
+        });
+        session.requestLinkReconnect("waiting_subscription_timeout");
+      } else {
+        fireToast("系统尚未订阅外设 GPS，可开关一次系统定位服务重试");
+      }
+    }, 8000);
+    subscriptionWakeTimersRef.current.push(reconnectTimer);
+  }
+
+  function cancelRealLocationRecovery() {
+    for (const timer of restoreTimersRef.current) {
+      clearTimeout(timer);
+    }
+    restoreTimersRef.current = [];
+    isRestoringRef.current = false;
+    stoppedWgsTargetRef.current = null;
+  }
+
+  function completeRealLocationRecovery(sample: LiveLocationTelemetry) {
+    if (!isRestoringRef.current) return;
+    lastKnownRealLocationRef.current = {
+      latitude: sample.latitude,
+      longitude: sample.longitude,
+      altitude: settings.defaultAltitude,
+      speedKnots: 0,
+      courseDegrees: 0,
+    };
+    cancelRealLocationRecovery();
+    appendEvent({
+      id: `${Date.now()}-real-restored`,
+      timestamp: new Date().toISOString(),
+      name: "real_location_restored",
+      detail: JSON.stringify({
+        lat: Number(sample.latitude.toFixed(5)),
+        lon: Number(sample.longitude.toFixed(5)),
+      }),
+      isError: false,
+    });
+    fireToast("已恢复本机真实 GPS");
+    void stopLocationMonitorUpdates();
+  }
+
+  function beginRealLocationRecovery(stoppedTarget: TargetLocation) {
+    cancelRealLocationRecovery();
+    isRestoringRef.current = true;
+    stoppedWgsTargetRef.current = stoppedTarget;
+
+    // 对齐上游 v1.0.2 beginRealLocationRecovery：等退位报文落盘后脉冲拉取本机真实定位冲刷缓存
+    const t1 = setTimeout(() => {
+      if (!isRestoringRef.current || sessionRef.current) return;
+      appendEvent({
+        id: `${Date.now()}-real-recovery-start`,
+        timestamp: new Date().toISOString(),
+        name: "real_location_recovery_started",
+        detail: JSON.stringify({ reason: "stop_session" }),
+        isError: false,
+      });
+      void startLocationMonitorUpdates()
+        .then(() => pulseLocationSubscription())
+        .then(() => refreshCurrentTelemetry());
+    }, 650);
+
+    const t2 = setTimeout(() => {
+      if (!isRestoringRef.current || sessionRef.current) return;
+      void pulseLocationSubscription().then(() => refreshCurrentTelemetry());
+    }, 3500);
+
+    const t3 = setTimeout(() => {
+      if (!isRestoringRef.current || sessionRef.current) return;
+      appendEvent({
+        id: `${Date.now()}-real-recovery-pending`,
+        timestamp: new Date().toISOString(),
+        name: "real_location_recovery_pending",
+        detail: JSON.stringify({ hint: "toggle_location_services_if_indoors" }),
+        isError: false,
+      });
+      fireToast("若仍停留在模拟位置，可用快捷指令开关一次定位服务");
+    }, 7500);
+
+    const t4 = setTimeout(() => {
+      if (!isRestoringRef.current || sessionRef.current) return;
+      cancelRealLocationRecovery();
+      void stopLocationMonitorUpdates();
+    }, 12_000);
+
+    restoreTimersRef.current.push(t1, t2, t3, t4);
   }
 
   function liveActivityStateFrom(
@@ -356,14 +505,35 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     }
 
     const onLoc = (loc: { latitude: number; longitude: number; timestamp: number }) => {
+      const prev = latestTelemetryRef.current;
       const sample: LiveLocationTelemetry = {
         latitude: loc.latitude,
         longitude: loc.longitude,
         timestamp: loc.timestamp,
       };
+      const samePoint =
+        prev !== null &&
+        Math.abs(prev.latitude - sample.latitude) < 1e-6 &&
+        Math.abs(prev.longitude - sample.longitude) < 1e-6 &&
+        sample.timestamp - prev.timestamp < 4000;
       latestTelemetryRef.current = sample;
-      // 仅在实测日志页同步到 React 状态，避免在定位页/设置页每秒触发全树与地图重绘
-      if (isTelemetryTabRef.current) {
+      if (!sessionRef.current && !isRestoringRef.current) {
+        lastKnownRealLocationRef.current = {
+          latitude: sample.latitude,
+          longitude: sample.longitude,
+          altitude: settings.defaultAltitude,
+          speedKnots: 0,
+          courseDegrees: 0,
+        };
+      } else if (
+        isRestoringRef.current &&
+        stoppedWgsTargetRef.current &&
+        distanceMeters(stoppedWgsTargetRef.current, sample) > 80
+      ) {
+        completeRealLocationRecovery(sample);
+      }
+      // 仅在实测日志页且坐标/时间窗口确有变化时更新 UI，避免无意义重绘和数字频闪
+      if (isTelemetryTabRef.current && !samePoint) {
         setTelemetry(sample);
       }
     };
@@ -378,15 +548,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       if (onTelemetry) {
         if (latestTelemetryRef.current) {
           setTelemetry(latestTelemetryRef.current);
-        }
-        if (isSessionRunningRef.current) {
-          void startLocationMonitorUpdates(true);
-          startLocationPoll(5000);
-        }
-      } else {
-        stopLocationPoll();
-        if (isSessionRunningRef.current) {
-          void startLocationMonitorUpdates(false);
+        } else {
+          void refreshCurrentTelemetry();
         }
       }
     };
@@ -415,6 +578,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     return () => {
       Location.removeLocationListener(onLoc);
       tabSelection.unsubscribe(onTabChanged);
+      cancelSubscriptionWakeups();
+      cancelRealLocationRecovery();
       if (eventFlushTimerRef.current) {
         clearTimeout(eventFlushTimerRef.current);
         eventFlushTimerRef.current = null;
@@ -427,7 +592,6 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         }
         clearSessionID();
       }
-      stopLocationPoll();
       pairingHandleRef.current?.cancel("页面卸载");
       void sessionRef.current?.stop();
       void stopLocationMonitorUpdates();
@@ -524,7 +688,10 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         debugLog("keepalive", "会话申请保活失败", describeError(error));
       }
     }
-    if (mode === "send" && isTelemetryTabRef.current) startLocationPoll();
+    didAutoReconnectSubRef.current = false;
+    activeSentencesRef.current = [];
+    cancelSubscriptionWakeups();
+    cancelRealLocationRecovery();
     await startSimulationLiveActivity(placeName, wgsTarget, {
       ...EMPTY_SNAPSHOT,
       isRunning: true,
@@ -535,11 +702,13 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       wgsTarget,
       (ev) => appendEvent(ev),
       (nextSnap) => {
+        activeSentencesRef.current = nextSnap.activeSentences;
         setSnapshot(nextSnap);
         void updateSimulationLiveActivity(nextSnap, session.locationBox.get());
         if (!nextSnap.isRunning && sessionRef.current === session) {
           sessionRef.current = null;
-          stopLocationPoll();
+          activeSentencesRef.current = [];
+          cancelSubscriptionWakeups();
           flushBufferedEvents();
           setActiveMapCoordinate(null);
           clearInterruptedSession();
@@ -554,7 +723,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         }
       },
       () => {
-        void refreshKeepAliveAfterLocationToggle(isTelemetryTabRef.current);
+        void refreshKeepAliveAfterLocationToggle();
         appendEvent({
           id: `${Date.now()}-restarted`,
           timestamp: new Date().toISOString(),
@@ -568,20 +737,28 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         void notifyConnectionFailureToast(err);
       },
       () => {
-        // 对齐上游 Reloc v1.0.1：MFi 鉴权通过 (0xAA05) 后再启动定位订阅，避免过早耗电与系统告警
-        void startLocationMonitorUpdates(isTelemetryTabRef.current)
+        // 对齐上游 Reloc：MFi 鉴权通过 (0xAA05) 后立即启用导航级定位订阅与唤醒阶梯
+        void startLocationMonitorUpdates()
           .then(() => {
-            if (settings.backgroundKeepAliveEnabled && isSessionRunningRef.current) {
+            if (settings.backgroundKeepAliveEnabled && sessionRef.current === session) {
               return retainKeepAlive("session");
             }
           })
           .catch((error) => {
             debugLog("keepalive", "鉴权后升级定位订阅失败", describeError(error));
           });
+        scheduleSubscriptionWakeups(session, mode);
+      },
+      () => {
+        cancelSubscriptionWakeups();
+      },
+      () => {
+        activeSentencesRef.current = [];
       },
     );
 
     sessionRef.current = session;
+    session.setFallbackRealLocation(lastKnownRealLocationRef.current);
     session.start({
       configuration: buildSessionConfigFromSettings(settings, mode),
       pairing: loadPairing(),
@@ -597,6 +774,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     activePlaceNameRef.current = placeName;
 
     session.locationBox.set(wgsTarget);
+    session.notifyLocationUpdated(true, 10);
     setActiveWgs84Target(wgsTarget);
     setActiveMapCoordinate({ ...selectedTarget });
     saveLastLocation(selectedTarget);
@@ -635,21 +813,26 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
 
   async function stopSession() {
     const session = sessionRef.current;
+    const stoppedMode = lastModeRef.current;
+    const stoppedTarget = activeWgs84Target ?? buildTargetWgs84(selectedTarget);
     sessionRef.current = null;
-    stopLocationPoll();
+    activeSentencesRef.current = [];
+    cancelSubscriptionWakeups();
     if (session) {
       await session.stop();
     }
     flushBufferedEvents();
     setActiveMapCoordinate(null);
+    setActiveWgs84Target(null);
     setSnapshot({ ...EMPTY_SNAPSHOT });
     clearInterruptedSession();
     setInterruptedSession(null);
     await stopAllLiveActivities();
     await releaseKeepAlive("session");
-    await stopLocationMonitorUpdates();
-    if (isTelemetryTabRef.current) {
-      void refreshCurrentTelemetry();
+    if (stoppedMode === "send") {
+      beginRealLocationRecovery(stoppedTarget);
+    } else {
+      await stopLocationMonitorUpdates();
     }
   }
 

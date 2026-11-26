@@ -894,7 +894,7 @@ export function MapPickerView(props: MapPickerViewProps) {
             </Text>
           </HStack>
 
-          {/* 上下文提示横幅 */}
+          {/* 静态上下文提示横幅（会话运行中不再增删多行提示，避免开关定位后卡片高度跳动闪烁） */}
           {!canStartSession ? (
             <Button buttonStyle="plain" action={props.onSwitchToConfig}>
               <HStack
@@ -914,24 +914,8 @@ export function MapPickerView(props: MapPickerViewProps) {
                 <Image systemName="chevron.right" font="caption2" fontWeight="bold" foregroundStyle="secondaryLabel" />
               </HStack>
             </Button>
-          ) : snapshot.isRunning && snapshot.authenticated && snapshot.activeSentences.length === 0 ? (
-            <HStack
-              spacing={7}
-              padding={9}
-              frame={{ maxWidth: "infinity" }}
-              background={{ style: "rgba(43, 115, 245, 0.10)", shape: bannerShape }}
-            >
-              <Image systemName="info.circle.fill" foregroundStyle={RELOC_COLORS.accent} />
-              <Text font="caption2" foregroundStyle="secondaryLabel">
-                已连接就绪，打开「地图」即可触发订阅；若位置未立刻切换，关闭定位服务约 5 秒再打开。
-              </Text>
-            </HStack>
-          ) : snapshot.lastError && snapshot.isRunning && !snapshot.authenticated ? (
-            <Text font="caption" foregroundStyle={RELOC_COLORS.amber} lineLimit={2}>
-              {snapshot.lastError}
-            </Text>
           ) : snapshot.lastError && !snapshot.isRunning ? (
-            <Text font="caption" foregroundStyle={RELOC_COLORS.crimson} lineLimit={2}>
+            <Text font="caption" foregroundStyle={RELOC_COLORS.crimson} lineLimit={1}>
               {`上次错误：${snapshot.lastError}`}
             </Text>
           ) : null}

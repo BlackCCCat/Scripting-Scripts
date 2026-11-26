@@ -196,8 +196,28 @@ export class IAP2Link {
     }
   }
 
+  private async waitAckForSequence(sequence: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + Math.max(1, timeoutMs);
+    while (true) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      const incoming = await this.readPacket(remaining);
+      if (!incoming) return false;
+      await this.accept(incoming);
+      if (
+        (incoming.flags & IAP2LinkFlags.ACK) !== 0 &&
+        incoming.acknowledgement === sequence
+      ) {
+        return true;
+      }
+    }
+  }
+
   async send(message: IAP2Message): Promise<void> {
     const raw = message.encode();
+    if (raw.length < 6 || raw.length > 0xffff) {
+      throw new IAP2LinkError("protocol", "iAP2 message exceeds maximum length");
+    }
     const chunkLimit = Math.max(1, this.maximumPacket - 10);
 
     let offset = 0;
@@ -218,28 +238,45 @@ export class IAP2Link {
           payload: chunk,
         });
         await this.writePacket(pkt);
-
-        const deadline = Date.now() + this.retransmitMs;
-        while (true) {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) break;
-          const incoming = await this.readPacket(remaining);
-          if (!incoming) break;
-          await this.accept(incoming);
-          if (
-            (incoming.flags & IAP2LinkFlags.ACK) !== 0 &&
-            incoming.acknowledgement === this.sequence
-          ) {
-            acknowledged = true;
-            break;
-          }
-        }
+        acknowledged = await this.waitAckForSequence(this.sequence, this.retransmitMs);
         if (acknowledged) break;
         this.emit("retransmit", { attempt });
       }
 
       if (!acknowledged) {
         throw new IAP2LinkError("timeout", "Peer did not acknowledge iAP2 data packet");
+      }
+    }
+  }
+
+  /**
+   * 停止/重连收尾阶段限时尽力发送单帧控制或 NMEA 报文（同步上游 Reloc v1.0.2），避免通道已挂起时阻塞清理。
+   */
+  async sendBestEffort(message: IAP2Message, timeoutMs = 250): Promise<void> {
+    if (this.closed) return;
+    const raw = message.encode();
+    if (raw.length < 6 || raw.length > 0xffff) return;
+    const chunkLimit = Math.max(1, this.maximumPacket - 10);
+
+    let offset = 0;
+    while (offset < raw.length) {
+      const end = Math.min(offset + chunkLimit, raw.length);
+      const chunk = raw.subarray(offset, end);
+      offset = end;
+
+      this.sequence = (this.sequence + 1) & 0xff;
+      const pkt = new IAP2Packet({
+        flags: IAP2LinkFlags.ACK,
+        sequence: this.sequence,
+        acknowledgement: this.peerSequence,
+        session: this.controlSession,
+        payload: chunk,
+      });
+      try {
+        await this.writePacket(pkt);
+        await this.waitAckForSequence(this.sequence, Math.min(200, timeoutMs));
+      } catch {
+        return;
       }
     }
   }

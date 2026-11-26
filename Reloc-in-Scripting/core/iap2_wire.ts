@@ -42,6 +42,9 @@ export class IAP2Packet {
 
   encode(): Uint8Array {
     const hasPayload = this.payload.length > 0;
+    if (this.payload.length > 0xffff - 10) {
+      throw new Error("iAP2 packet payload exceeds maximum length");
+    }
     const totalSize = 9 + this.payload.length + (hasPayload ? 1 : 0);
 
     const header = new Uint8Array(9);
@@ -113,6 +116,9 @@ export class IAP2Parameter {
 
   static encode(identifier: number, data?: Uint8Array | null): Uint8Array {
     const payload = data ?? new Uint8Array(0);
+    if (payload.length > 0xffff - 4) {
+      throw new Error("iAP2 parameter exceeds maximum length");
+    }
     const totalSize = payload.length + 4;
     const header = new Uint8Array([
       (totalSize >>> 8) & 0xff,
@@ -167,6 +173,9 @@ export class IAP2Message {
   }
 
   encode(): Uint8Array {
+    if (this.body.length > 0xffff - 6) {
+      throw new Error("iAP2 message body exceeds maximum length");
+    }
     const totalSize = this.body.length + 6;
     const header = new Uint8Array([
       0x40,

@@ -6,12 +6,12 @@
     "author": "Reukix",
     "license": "AGPL-3.0-only",
     "branch": "main",
-    "baseTag": "v1.0.1",
-    "baseCommit": "c6e96d312d4101ee3aa47e97205bb27e3fecfa6c",
-    "baseCommitDate": "2026-11-26T11:34:53Z",
-    "syncedAt": "2026-11-26"
+    "baseTag": "v1.0.2",
+    "baseCommit": "8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f",
+    "baseCommitDate": "2026-11-26T17:30:22Z",
+    "syncedAt": "2026-11-27"
   },
-  "compareUrl": "https://github.com/Reukix/Reloc/compare/c6e96d312d4101ee3aa47e97205bb27e3fecfa6c...main",
+  "compareUrl": "https://github.com/Reukix/Reloc/compare/8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f...main",
   "fileMap": {
     "Reloc/Core/ObjC/RLASN1DER.h,.m": "core/asn1.ts",
     "Reloc/Core/ObjC/RLMFiSigner.h,.m": "core/mfi_signer.ts + core/p256.ts (纯 JS/Node crypto + 本地导入)",
