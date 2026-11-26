@@ -1,0 +1,30 @@
+{
+  "name": "Reloc in Scripting",
+  "icon": "mappin.and.ellipse",
+  "color": "#2B73F5",
+  "version": "1.1.0",
+  "runInApp": true,
+  "permissions": [
+    "vpn",
+    "localDevVPN",
+    "location"
+  ],
+  "intentInputTypes": [
+    "URLs",
+    "Text"
+  ],
+  "localizedNames": {
+    "en": "Reloc in Scripting",
+    "zh": "Reloc in Scripting"
+  },
+  "description": "面向 iOS 的外设级定位模拟工具（iAP2 / MFi-v3 / NMEA），支持本地加载 MFi 凭据、本机配对、画中画指引、GCJ-02 纠偏与协议实测日志",
+  "localizedDescriptions": {
+    "en": "Peripheral-level iOS location simulation via CarKit / iAP2 / MFi-v3 / NMEA with local MFi credential import.",
+    "zh": "面向 iOS 的外设级定位模拟工具（iAP2 / MFi-v3 / NMEA），支持本地加载 MFi 凭据、本机配对、画中画指引、GCJ-02 纠偏与协议实测日志"
+  },
+  "remoteResource": {
+    "autoUpdateInterval": 86400,
+    "url": "https://github.com/BlackCCCat/Scripting-Scripts/tree/main/Reloc-in-Scripting",
+    "hash": ""
+  }
+}

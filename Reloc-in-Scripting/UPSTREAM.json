@@ -1,0 +1,47 @@
+{
+  "name": "Reloc in Scripting",
+  "upstream": {
+    "repo": "Reukix/Reloc",
+    "url": "https://github.com/Reukix/Reloc",
+    "author": "Reukix",
+    "license": "AGPL-3.0-only",
+    "branch": "main",
+    "baseTag": "v1.0.1",
+    "baseCommit": "c6e96d312d4101ee3aa47e97205bb27e3fecfa6c",
+    "baseCommitDate": "2026-11-26T11:34:53Z",
+    "syncedAt": "2026-11-26"
+  },
+  "compareUrl": "https://github.com/Reukix/Reloc/compare/c6e96d312d4101ee3aa47e97205bb27e3fecfa6c...main",
+  "fileMap": {
+    "Reloc/Core/ObjC/RLASN1DER.h,.m": "core/asn1.ts",
+    "Reloc/Core/ObjC/RLMFiSigner.h,.m": "core/mfi_signer.ts + core/p256.ts (纯 JS/Node crypto + 本地导入)",
+    "Reloc/Core/ObjC/RLIAP2Wire.h,.m": "core/iap2_wire.ts",
+    "Reloc/Core/Swift/IAP2Link.swift": "core/iap2_link.ts",
+    "Reloc/Core/Swift/NMEAGenerator.swift": "core/nmea.ts",
+    "Reloc/Core/ObjC/RLPairingRecord.h,.m": "core/pairing.ts + core/plist.ts + core/bplist.ts",
+    "Reloc/Core/ObjC/RLLockdownClient.h,.m + RLTLSSocket.h,.m": "core/accessory_session.ts + core/rsd_plist.ts + core/tcp.ts (复用 Scripting RSDCDTunnelTransport)",
+    "Reloc/Core/Swift/AccessoryLocationSession.swift": "core/accessory_session.ts",
+    "Reloc/Core/Swift/DevicePairingCoordinator.swift": "core/pair_setup.ts + core/rppairing.ts + core/srp.ts + core/tlv8.ts + core/opack.ts + core/bonjour.ts",
+    "Reloc/Core/Swift/CredentialStore.swift": "utils/storage.ts (Keychain 持久化 + 本地目录下探)",
+    "Reloc/Core/Swift/BackgroundKeepAlive.swift": "utils/keepalive.ts (BackgroundKeeper + 低功耗分段保活)",
+    "Reloc/Core/Swift/LiveCoreLocationMonitor.swift": "index.tsx (Location.requestCurrent / addLocationListener)",
+    "Reloc/Core/Swift/RelocViewModel.swift": "index.tsx + utils/storage.ts + utils/coords.ts",
+    "Reloc/UI/RelocApp.swift": "index.tsx",
+    "Reloc/UI/RelocTheme.swift": "ui/theme.ts + ui/components.tsx",
+    "Reloc/UI/MapPickerView.swift": "ui/MapPickerView.tsx",
+    "Reloc/UI/ConfigurationView.swift": "ui/ConfigurationView.tsx",
+    "Reloc/UI/ProtocolLogsView.swift": "ui/ProtocolLogsView.tsx"
+  },
+  "scriptingSpecificFiles": [
+    "app_intents.tsx",
+    "live_activity.tsx",
+    "home_screen_default_ui.tsx",
+    "intent.tsx",
+    "changelog.md",
+    "ui/ReleaseNotesSheet.tsx",
+    "utils/searchApi.ts",
+    "utils/logExport.ts",
+    "core/redact.ts",
+    "core/debug.ts"
+  ]
+}
