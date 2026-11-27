@@ -57,7 +57,7 @@ import {
   searchGlobalPlaces,
   type PlaceSearchResult,
 } from "../utils/searchApi";
-import { MapHUDIconButton, RelocPrimaryButton, SettingsIconBadge, StatusDot } from "./components";
+import { HomePageSwitcherMenu, MapHUDIconButton, RelocPrimaryButton, SettingsIconBadge, StatusDot } from "./components";
 import { launchShortcut } from "../utils/shortcut";
 import {
   RELOC_COLORS,
@@ -94,6 +94,7 @@ interface MapPickerViewProps {
   onDismissInterrupted: () => void;
   onToast: (message: string) => void;
   onClose?: () => void;
+  homeTabSwitcher?: { currentTab: number; onSelectTab: (tab: number) => void };
 }
 
 function toMapStyleSpec(style: MapDisplayStyle) {
@@ -497,8 +498,16 @@ export function MapPickerView(props: MapPickerViewProps) {
         spacing={10}
         padding={{ horizontal: 12, top: 8, bottom: 10 }}
       >
-        {/* Top Row: 可选退出按钮 + 搜索胶囊 */}
+        {/* Top Row: 左上角页面切换菜单/可选退出按钮 + 搜索胶囊 */}
         <HStack spacing={8}>
+          {props.homeTabSwitcher ? (
+            <HomePageSwitcherMenu
+              currentTab={props.homeTabSwitcher.currentTab}
+              onSelectTab={props.homeTabSwitcher.onSelectTab}
+              style="mapCircle"
+            />
+          ) : null}
+
           {props.onClose ? (
             <MapHUDIconButton
               systemName="xmark"
@@ -705,7 +714,7 @@ export function MapPickerView(props: MapPickerViewProps) {
           <VStack spacing={10}>
             {settings.shortcutButtonEnabled ? (
               <MapHUDIconButton
-                systemName="gearshape.fill"
+                systemName="bolt.fill"
                 foregroundColor={settings.shortcutName.trim() ? RELOC_COLORS.accent : "label"}
                 action={() => {
                   if (!settings.shortcutName.trim()) {

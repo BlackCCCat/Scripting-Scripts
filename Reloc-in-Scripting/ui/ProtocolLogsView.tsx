@@ -24,7 +24,7 @@ import type {
 } from "../types";
 import { distanceMeters, formatLatLon } from "../utils/coords";
 import { exportDiagnosticLogs, formatProtocolLogReport } from "../utils/logExport";
-import { MetricTile, RelocPrimaryButton, SettingsIconBadge } from "./components";
+import { HomePageSwitcherMenu, MetricTile, RelocPrimaryButton, SettingsIconBadge } from "./components";
 import { RELOC_COLORS, sessionPhaseText } from "./theme";
 
 type LogFilter = "all" | "nmea" | "errors";
@@ -42,10 +42,10 @@ interface ProtocolLogsViewProps {
   onClearLogs: () => void;
   onToast: (message: string) => void;
   onClose?: () => void;
-  embedded?: boolean;
+  homeTabSwitcher?: { currentTab: number; onSelectTab: (tab: number) => void };
 }
 
-export function ProtocolLogsToolbarActions(props: {
+function ProtocolLogsToolbarActions(props: {
   events: ProtocolEvent[];
   onClearLogs: () => void;
   onToast: (message: string) => void;
@@ -196,33 +196,37 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
   const detailShape = { type: "rect" as const, cornerRadius: 8, style: "continuous" as const };
   const isSessionConnected = snapshot.isRunning && snapshot.authenticated;
 
-  const logsBody = (
-    <VStack
-      spacing={0}
-      frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      background="systemGroupedBackground"
-      navigationTitle={props.embedded ? undefined : "定位实测与日志"}
-      navigationBarTitleDisplayMode="inline"
-      searchable={{
-        value: searchQuery,
-        onChanged: setSearchQuery,
-        prompt: "筛选事件（如 FFFA / acknowledged）",
-      }}
-      toolbar={
-        props.embedded
-          ? undefined
-          : {
-              topBarTrailing: (
-                <ProtocolLogsToolbarActions
-                  events={events}
-                  onClearLogs={props.onClearLogs}
-                  onToast={props.onToast}
-                  onClose={props.onClose}
-                />
-              ),
-            }
-      }
-    >
+  return (
+    <NavigationStack>
+      <VStack
+        spacing={0}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+        background="systemGroupedBackground"
+        navigationTitle="定位实测与日志"
+        navigationBarTitleDisplayMode="inline"
+        searchable={{
+          value: searchQuery,
+          onChanged: setSearchQuery,
+          prompt: "筛选事件（如 FFFA / acknowledged）",
+        }}
+        toolbar={{
+          topBarLeading: props.homeTabSwitcher ? (
+            <HomePageSwitcherMenu
+              currentTab={props.homeTabSwitcher.currentTab}
+              onSelectTab={props.homeTabSwitcher.onSelectTab}
+              style="toolbar"
+            />
+          ) : undefined,
+          topBarTrailing: (
+            <ProtocolLogsToolbarActions
+              events={events}
+              onClearLogs={props.onClearLogs}
+              onToast={props.onToast}
+              onClose={props.onClose}
+            />
+          ),
+        }}
+      >
         {/* 顶部实测与协议链路仪表盘卡片 */}
         <VStack padding={{ horizontal: 14, top: 10, bottom: 10 }}>
           <VStack
@@ -487,7 +491,6 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
           </List>
         )}
       </VStack>
+    </NavigationStack>
   );
-
-  return props.embedded ? logsBody : <NavigationStack>{logsBody}</NavigationStack>;
 }

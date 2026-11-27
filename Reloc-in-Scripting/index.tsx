@@ -8,7 +8,6 @@ import {
   Label,
   LiveActivity,
   Navigation,
-  Picker,
   Script,
   Spacer,
   TabView,
@@ -61,7 +60,7 @@ import type {
 import { RELOC_COLORS } from "./ui/theme";
 import { ConfigurationView } from "./ui/ConfigurationView";
 import { MapPickerView } from "./ui/MapPickerView";
-import { ProtocolLogsToolbarActions, ProtocolLogsView } from "./ui/ProtocolLogsView";
+import { ProtocolLogsView } from "./ui/ProtocolLogsView";
 import { useMarkdownChangelogSheet } from "./ui/ReleaseNotesSheet";
 import { distanceMeters, formatLatLon, mapCoordToDeviceWgs84, round6 } from "./utils/coords";
 import {
@@ -1133,6 +1132,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     },
     onToast: fireToast,
     onClose: canDismiss ? () => dismiss() : undefined,
+    homeTabSwitcher: isHomeScreen
+      ? { currentTab: homeTab, onSelectTab: (tab: number) => tabSelection.setValue(tab) }
+      : undefined,
   };
 
   const configProps = {
@@ -1158,7 +1160,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     onToast: fireToast,
     onOpenChangelog: () => void changelog.openManually(),
     onClose: canDismiss ? () => dismiss() : undefined,
-    embedded: isHomeScreen,
+    homeTabSwitcher: isHomeScreen
+      ? { currentTab: homeTab, onSelectTab: (tab: number) => tabSelection.setValue(tab) }
+      : undefined,
   };
 
   const logsProps = {
@@ -1183,7 +1187,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     },
     onToast: fireToast,
     onClose: canDismiss ? () => dismiss() : undefined,
-    embedded: isHomeScreen,
+    homeTabSwitcher: isHomeScreen
+      ? { currentTab: homeTab, onSelectTab: (tab: number) => tabSelection.setValue(tab) }
+      : undefined,
   };
 
   return (
@@ -1245,37 +1251,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       </Group>
 
       {isHomeScreen ? (
-        <ZStack
-          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-          navigationBarTitleDisplayMode="inline"
-          toolbarTitleDisplayMode="inline"
-          toolbar={{
-            principal: (
-              <Picker
-                title="页面"
-                pickerStyle="segmented"
-                value={homeTab}
-                onChanged={(value: number) => {
-                  HapticFeedback.lightImpact();
-                  tabSelection.setValue(value);
-                }}
-                frame={{ width: 220 }}
-              >
-                <Image tag={0} systemName="location.north.circle.fill" />
-                <Image tag={1} systemName="antenna.radiowaves.left.and.right" />
-                <Image tag={2} systemName="waveform.path.ecg" />
-              </Picker>
-            ),
-            topBarTrailing:
-              homeTab === 2 ? (
-                <ProtocolLogsToolbarActions
-                  events={events}
-                  onClearLogs={logsProps.onClearLogs}
-                  onToast={fireToast}
-                />
-              ) : undefined,
-          }}
-        >
+        <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
           <ZStack
             frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
             opacity={homeTab === 0 ? 1 : 0}
