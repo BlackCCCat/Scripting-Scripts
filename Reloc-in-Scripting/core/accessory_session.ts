@@ -1031,6 +1031,11 @@ export class AccessoryLocationSession {
             }
             case 0xaa00: {
               const certBody = IAP2Parameter.encode(0, mfiSigner.certificateContainerData);
+              this.emitEvent("auth_cert_sent", {
+                bytes: mfiSigner.certificateContainerData.length,
+                cert_count: mfiSigner.certificateCount,
+                leaf: mfiSigner.leafSubjectSummary,
+              });
               await link.send(new IAP2Message(0xaa01, certBody));
               break;
             }
@@ -1040,6 +1045,15 @@ export class AccessoryLocationSession {
                 throw new IAP2LinkError("protocol", "Invalid authentication challenge parameters");
               }
               const signature = mfiSigner.signChallenge(challenges[0]);
+              const selfVerified = mfiSigner.verifyRawSignature(signature, challenges[0]);
+              this.emitEvent("auth_challenge_signed", {
+                challenge_bytes: challenges[0].length,
+                signature_bytes: signature.length,
+                self_verified: selfVerified,
+              });
+              if (!selfVerified) {
+                throw new IAP2LinkError("protocol", "Local MFi signature self-verification failed before 0xAA03");
+              }
               const sigBody = IAP2Parameter.encode(0, signature);
               await link.send(new IAP2Message(0xaa03, sigBody));
               break;
@@ -1053,7 +1067,10 @@ export class AccessoryLocationSession {
               break;
             }
             case 0xaa04: {
-              throw new IAP2LinkError("protocol", "Accessory authentication failed (0xAA04)");
+              throw new IAP2LinkError(
+                "protocol",
+                `Accessory authentication failed (0xAA04)：iOS iap2d 拒绝了 MFi 证书或签名（${mfiSigner.leafSubjectSummary}, ${mfiSigner.certificateContainerData.length}B）`,
+              );
             }
             case 0xfffa: {
               activeSentences = new Set(

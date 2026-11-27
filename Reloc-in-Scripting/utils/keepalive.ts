@@ -68,6 +68,7 @@ export async function startLocationMonitorUpdates(): Promise<void> {
     locationUpdateActive = true;
     debugLog("location", "已开启导航级位置订阅监控 (bestForNavigation)");
   } catch (error) {
+    locationUpdateActive = false;
     debugLog("location", "开启位置更新监控失败", describeError(error));
   }
 }
@@ -116,11 +117,20 @@ export async function pulseLocationSubscription(): Promise<void> {
 }
 
 /**
- * 用户开关系统「定位服务」(0xFFFC -> 0xFFFA) 后重建导航级后台定位与保活会话，对齐 Reukix/Reloc refreshAfterLocationToggle。
+ * 用户开关系统「定位服务」(0xFFFC -> 0xFFFA) 后重同步导航级后台定位与保活会话，对齐 Reukix/Reloc refreshAfterLocationToggle。
+ * 不主动调用 stopUpdatingLocation()（否则会立刻引发多余 0xFFFC 抖动），若系统权限状态仍在过渡期则短暂退避重试。
  */
 export async function refreshKeepAliveAfterLocationToggle(): Promise<void> {
-  await stopLocationMonitorUpdates();
+  locationUpdateActive = false;
   await startLocationMonitorUpdates();
+  if (!locationUpdateActive) {
+    await delay(500);
+    await startLocationMonitorUpdates();
+  }
+  if (!locationUpdateActive) {
+    await delay(800);
+    await startLocationMonitorUpdates();
+  }
   await retainKeepAlive("session").catch((error) => {
     debugLog("keepalive", "重建保活失败", describeError(error));
   });

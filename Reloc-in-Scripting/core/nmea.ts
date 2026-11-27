@@ -60,8 +60,9 @@ export const NMEAGenerator = {
     const gga = this.sentence(
       `GPGGA,${clock},${lat},${north},${lon},${east},${fixQuality},12,${hdopStr},${altitudeStr},M,0.0,M,,`,
     );
+    const rmcMode = fixQuality === 2 ? "D" : "A";
     const rmc = this.sentence(
-      `GPRMC,${clock},A,${lat},${north},${lon},${east},${speedStr},${courseStr},${ddmmyy},,,A`,
+      `GPRMC,${clock},A,${lat},${north},${lon},${east},${speedStr},${courseStr},${ddmmyy},,,${rmcMode}`,
     );
     return { 1: gga, 2: rmc };
   },

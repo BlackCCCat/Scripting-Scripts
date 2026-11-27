@@ -546,6 +546,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         Math.abs(prev.longitude - sample.longitude) < 1e-6 &&
         sample.timestamp - prev.timestamp < 4000;
       latestTelemetryRef.current = sample;
+      if (!prev || distanceMeters(prev, sample) > 50) {
+        debugLog("location", `监听定位更新 lat=${sample.latitude.toFixed(5)}, lon=${sample.longitude.toFixed(5)}`);
+      }
       if (!sessionRef.current && !isRestoringRef.current) {
         lastKnownRealLocationRef.current = {
           latitude: sample.latitude,

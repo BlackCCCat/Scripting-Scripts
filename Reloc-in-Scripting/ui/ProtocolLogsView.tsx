@@ -7,6 +7,7 @@ import {
   List,
   Menu,
   NavigationStack,
+  Rectangle,
   RoundedRectangle,
   Spacer,
   Text,
@@ -197,11 +198,16 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
   const isSessionConnected = snapshot.isRunning && snapshot.authenticated;
 
   return (
-    <NavigationStack>
+    <NavigationStack ignoresSafeArea={{ regions: "container", edges: "vertical" }}>
       <VStack
         spacing={0}
         frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-        background="systemGroupedBackground"
+        background={
+          <Rectangle
+            fill="systemGroupedBackground"
+            ignoresSafeArea={{ regions: "all", edges: "vertical" }}
+          />
+        }
         navigationTitle="定位实测与日志"
         navigationBarTitleDisplayMode="inline"
         searchable={{
@@ -445,7 +451,10 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
             <Spacer />
           </VStack>
         ) : (
-          <List listStyle="plain">
+          <List
+            listStyle="plain"
+            ignoresSafeArea={{ regions: "container", edges: "bottom" }}
+          >
             {filteredEvents.map((event) => (
               <VStack
                 key={event.id}
