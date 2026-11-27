@@ -4,6 +4,8 @@ export type MapDisplayStyle = "standard" | "satellite" | "hybrid";
 
 export type SessionMode = "probe" | "send";
 
+export type AppLanguage = "system" | "zh-Hans" | "en";
+
 export interface Coordinate {
   latitude: number;
   longitude: number;
@@ -24,6 +26,7 @@ export interface PickTarget extends Coordinate {
 export interface ParsedCoord {
   latitude: number;
   longitude: number;
+  altitude?: number;
   name?: string;
   src?: string;
 }
@@ -135,6 +138,7 @@ export interface AppSettings {
   backgroundKeepAliveEnabled: boolean;
   liveActivityEnabled: boolean;
   microJitterEnabled: boolean;
+  language: AppLanguage;
   mapStyle: MapDisplayStyle;
   globalSearchEndpoint: string;
   shortcutButtonEnabled: boolean;

@@ -30,7 +30,10 @@ export function loadSettings(): AppSettings {
     rawTunnelSource === "builtIn" || rawTunnelSource === "loopback"
       ? "builtIn"
       : "proxyApp";
-  return { ...DEFAULT_SETTINGS, ...(saved ?? {}), tunnelSource };
+  const rawLang: string | undefined = saved?.language;
+  const language: AppSettings["language"] =
+    rawLang === "en" || rawLang === "zh-Hans" || rawLang === "system" ? rawLang : "system";
+  return { ...DEFAULT_SETTINGS, ...(saved ?? {}), tunnelSource, language };
 }
 
 export function saveSettings(settings: AppSettings): boolean {

@@ -17,6 +17,7 @@ import {
   useState,
 } from "scripting";
 import type {
+  AppLanguage,
   LiveLocationTelemetry,
   MFiStatus,
   ProtocolEvent,
@@ -24,6 +25,7 @@ import type {
   TargetLocation,
 } from "../types";
 import { distanceMeters, formatDistanceMeters, formatLatLon } from "../utils/coords";
+import { formatText, getStrings } from "../utils/i18n";
 import { exportDiagnosticLogs, formatProtocolLogReport } from "../utils/logExport";
 import {
   MetricTile,
@@ -41,6 +43,7 @@ interface ProtocolLogsViewProps {
   mfiStatus: MFiStatus;
   telemetry: LiveLocationTelemetry | null;
   activeWgs84Target: TargetLocation | null;
+  language?: AppLanguage;
   onStartProbe: () => void;
   onStartSend: () => void;
   onStop: () => void;
@@ -53,17 +56,19 @@ interface ProtocolLogsViewProps {
 
 function ProtocolLogsToolbarActions(props: {
   events: ProtocolEvent[];
+  language?: AppLanguage;
   onClearLogs: () => void;
   onToast: (message: string) => void;
 }) {
   const [copiedBanner, setCopiedBanner] = useState(false);
+  const s = getStrings(props.language).logs;
 
   async function handleExport() {
     try {
       const msg = await exportDiagnosticLogs(props.events);
       props.onToast(msg);
     } catch (error) {
-      props.onToast(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+      props.onToast(formatText(s.exportFailed, error instanceof Error ? error.message : String(error)));
     }
   }
 
@@ -76,7 +81,7 @@ function ProtocolLogsToolbarActions(props: {
           Pasteboard.setString(formatProtocolLogReport(props.events));
           HapticFeedback.lightImpact();
           setCopiedBanner(true);
-          props.onToast("已复制脱敏诊断报告");
+          props.onToast(s.copiedReportToast);
           setTimeout(() => setCopiedBanner(false), 1500);
         }}
       >
@@ -89,7 +94,7 @@ function ProtocolLogsToolbarActions(props: {
         >
           <HStack>
             <Image systemName="square.and.arrow.up" />
-            <Text>导出分享报告</Text>
+            <Text>{s.exportShare}</Text>
           </HStack>
         </Button>
         <Button
@@ -99,7 +104,7 @@ function ProtocolLogsToolbarActions(props: {
         >
           <HStack>
             <Image systemName="trash" />
-            <Text>清空日志</Text>
+            <Text>{s.clearLogs}</Text>
           </HStack>
         </Button>
       </Menu>
@@ -118,7 +123,8 @@ function formatShortTime(iso: string): string {
 }
 
 export function ProtocolLogsView(props: ProtocolLogsViewProps) {
-  const { snapshot, events, mfiStatus, telemetry, activeWgs84Target } = props;
+  const { snapshot, events, mfiStatus, telemetry, activeWgs84Target, language } = props;
+  const s = getStrings(language).logs;
   const [filter, setFilter] = useState<LogFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -204,12 +210,12 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
             ignoresSafeArea={{ regions: "all", edges: "vertical" }}
           />
         }
-        navigationTitle="定位实测与日志"
+        navigationTitle={s.navTitle}
         navigationBarTitleDisplayMode="inline"
         searchable={{
           value: searchQuery,
           onChanged: setSearchQuery,
-          prompt: "筛选事件（如 FFFA / acknowledged）",
+          prompt: s.searchPrompt,
         }}
         toolbar={{
           topBarLeading:
@@ -217,11 +223,13 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
               <ToolbarLeadingActions
                 homeTabSwitcher={props.homeTabSwitcher}
                 onClose={props.onClose}
+                language={language}
               />
             ) : undefined,
           topBarTrailing: (
             <ProtocolLogsToolbarActions
               events={events}
+              language={language}
               onClearLogs={props.onClearLogs}
               onToast={props.onToast}
             />
@@ -257,10 +265,16 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
               />
               <VStack alignment="leading" spacing={1}>
                 <Text font="subheadline" fontWeight="semibold">
-                  系统定位实时实测
+                  {s.telemetryTitle}
                 </Text>
                 <Text font="caption2" foregroundStyle="secondaryLabel">
-                  {`${sessionPhaseText(snapshot)} · 隧道${snapshot.lockdownConnected ? "✓" : "·"} / 链路${snapshot.linkReady ? "✓" : "·"} / 识别${snapshot.identified ? "✓" : "·"}`}
+                  {formatText(
+                    s.telemetryMeta,
+                    sessionPhaseText(snapshot, language),
+                    snapshot.lockdownConnected ? "✓" : "·",
+                    snapshot.linkReady ? "✓" : "·",
+                    snapshot.identified ? "✓" : "·",
+                  )}
                 </Text>
               </VStack>
               <Spacer />
@@ -277,7 +291,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
                   contentShape="capsule"
                 >
                   <Text font="caption" fontWeight="semibold" foregroundStyle={RELOC_COLORS.accent}>
-                    刷新实测
+                    {s.refreshBtn}
                   </Text>
                 </HStack>
               </Button>
@@ -285,12 +299,12 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
 
             <HStack spacing={8}>
               <MetricTile
-                title="纬度 / 经度 (WGS-84)"
-                value={telemetry ? formatLatLon(telemetry.latitude, telemetry.longitude, 5) : "点击刷新获取"}
+                title={s.latLonTile}
+                value={telemetry ? formatLatLon(telemetry.latitude, telemetry.longitude, 5) : s.clickToRefresh}
                 tint="label"
               />
               <MetricTile
-                title={offsetMeters !== null ? "与目标偏差" : "最近更新"}
+                title={offsetMeters !== null ? s.offsetTile : s.lastUpdateTile}
                 value={
                   offsetMeters !== null
                     ? formatDistanceMeters(offsetMeters)
@@ -310,18 +324,18 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
 
             <HStack spacing={8}>
               {protocolBadge(
-                "MFi 鉴权",
+                s.mfiBadge,
                 "0xAA02 -> 0xAA05",
-                snapshot.authenticated ? "已通过" : snapshot.isRunning ? "等待中" : "待机",
+                snapshot.authenticated ? s.mfiPassed : snapshot.isRunning ? s.mfiWaiting : s.mfiIdle,
                 snapshot.authenticated ? RELOC_COLORS.emerald : "secondaryLabel",
                 snapshot.authenticated ? true : null,
               )}
               {protocolBadge(
-                "外设注入",
+                s.injectBadge,
                 snapshot.activeSentences.length > 0
                   ? snapshot.activeSentences.map((id) => (id === 1 ? "$GPGGA" : id === 2 ? "$GPRMC" : `#${id}`)).join("+")
                   : "0xFFFA / 0xFFFB",
-                snapshot.packetsAcknowledged > 0 ? `ACK ${snapshot.packetsAcknowledged}` : snapshot.activeSentences.length > 0 ? "等待首包" : "未订阅",
+                snapshot.packetsAcknowledged > 0 ? `ACK ${snapshot.packetsAcknowledged}` : snapshot.activeSentences.length > 0 ? s.waitFirstPacket : s.unsubscribed,
                 snapshot.packetsAcknowledged > 0
                   ? RELOC_COLORS.emerald
                   : snapshot.lastError
@@ -336,7 +350,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
               {!snapshot.isRunning ? (
                 <>
                   <RelocPrimaryButton
-                    title="连接探测"
+                    title={s.startProbe}
                     systemImage="waveform.path.ecg"
                     variant="prominent"
                     tint="systemTeal"
@@ -344,7 +358,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
                     action={props.onStartProbe}
                   />
                   <RelocPrimaryButton
-                    title="开始注入"
+                    title={s.startSend}
                     systemImage="play.fill"
                     variant="prominent"
                     tint={RELOC_COLORS.accent}
@@ -354,7 +368,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
                 </>
               ) : !isSessionConnected ? (
                 <RelocPrimaryButton
-                  title={snapshot.mode === "probe" ? "探测连接中…" : "建立连接中…"}
+                  title={snapshot.mode === "probe" ? s.probingBtn : s.connectingBtn}
                   loading
                   variant="prominent"
                   tint={RELOC_COLORS.accent}
@@ -362,7 +376,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
                 />
               ) : (
                 <RelocPrimaryButton
-                  title={snapshot.mode === "probe" ? "探测就绪 · 停止" : "停止会话"}
+                  title={snapshot.mode === "probe" ? s.probeReadyStop : s.stopSessionBtn}
                   systemImage="stop.fill"
                   variant="prominent"
                   tint={snapshot.mode === "probe" ? RELOC_COLORS.emerald : RELOC_COLORS.crimson}
@@ -373,7 +387,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
 
             {snapshot.lastError ? (
               <Text font="caption2" foregroundStyle={RELOC_COLORS.crimson} lineLimit={2}>
-                {`最近错误: ${snapshot.lastError}`}
+                {formatText(s.recentError, snapshot.lastError)}
               </Text>
             ) : null}
           </VStack>
@@ -383,9 +397,9 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
         <HStack spacing={8} padding={{ horizontal: 14, bottom: 8 }}>
           {(
             [
-              { id: "all", label: "全部" },
-              { id: "nmea", label: "NMEA" },
-              { id: "errors", label: "错误" },
+              { id: "all", label: s.filterAll },
+              { id: "nmea", label: s.filterNmea },
+              { id: "errors", label: s.filterErrors },
             ] as { id: LogFilter; label: string }[]
           ).map((cat) => {
             const selected = filter === cat.id;
@@ -419,7 +433,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
           })}
           <Spacer />
           <Text font="caption2" monospacedDigit foregroundStyle="secondaryLabel">
-            {`${filteredEvents.length} 条事件`}
+            {formatText(s.eventCount, filteredEvents.length)}
           </Text>
         </HStack>
 
@@ -437,9 +451,9 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
               font="largeTitle"
               foregroundStyle="rgba(43, 115, 245, 0.65)"
             />
-            <Text font="headline">暂无协议事件</Text>
+            <Text font="headline">{s.emptyTitle}</Text>
             <Text font="caption" foregroundStyle="secondaryLabel" multilineTextAlignment="center">
-              开始定位或连接验证后，这里会实时展示连接握手与 NMEA 数据流。
+              {s.emptyBody}
             </Text>
             <Spacer />
           </VStack>

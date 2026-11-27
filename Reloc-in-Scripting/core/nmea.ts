@@ -48,7 +48,10 @@ export const NMEAGenerator = {
     const year = String(date.getUTCFullYear() % 100).padStart(2, "0");
     const ddmmyy = `${day}${month}${year}`;
 
-    const altitudeStr = (Number.isFinite(location.altitude) ? location.altitude : 10.0).toFixed(1);
+    const safeAlt = Number.isFinite(location.altitude)
+      ? Math.min(50_000.0, Math.max(-500.0, location.altitude))
+      : 10.0;
+    const altitudeStr = safeAlt.toFixed(1);
     const fixQuality = Number.isInteger(options?.fixQuality) ? (options!.fixQuality as number) : 1;
     const hdopStr = (Number.isFinite(options?.hdop) ? (options!.hdop as number) : 0.6).toFixed(1);
     const speedStr = Math.max(0.0, Number.isFinite(location.speedKnots) ? location.speedKnots : 0.0).toFixed(1);
@@ -213,10 +216,13 @@ export const CoordinateTransform = {
     const dLat = (radius * Math.cos(angle)) / 111_320.0;
     const cosLat = Math.max(0.01, Math.cos((location.latitude * Math.PI) / 180.0));
     const dLon = (radius * Math.sin(angle)) / (111_320.0 * cosLat);
+    const baseAlt = Number.isFinite(location.altitude) ? location.altitude : 10.0;
+    const dAlt = (Math.random() - 0.5) * 0.6;
     return {
       ...location,
       latitude: Math.min(90.0, Math.max(-90.0, location.latitude + dLat)),
       longitude: Math.min(180.0, Math.max(-180.0, location.longitude + dLon)),
+      altitude: Math.min(50_000.0, Math.max(-500.0, baseAlt + dAlt)),
     };
   },
 };

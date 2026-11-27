@@ -2,7 +2,7 @@
   "name": "Reloc in Scripting",
   "icon": "mappin.and.ellipse",
   "color": "#2B73F5",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "runInApp": true,
   "permissions": [
     "vpn",

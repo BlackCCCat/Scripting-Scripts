@@ -14,7 +14,10 @@
    - **安全说明**：本脚本**不内置任何 MFi 私钥或证书**。
 3. **选点并开始模拟**（「定位」页）：
    - 通过搜索、点选地图、收藏夹或手动输入坐标确定目标位置后，点击 **「开始定位」**。
+   - **海拔自动匹配与调整**：地图选点、地址搜索或链接解析会自动匹配当地真实地形海拔；搜索框与坐标输入框支持直接填写 `纬度, 经度, 海拔`（例如 `37.334606, -122.009102, 52.4`）；轻点底部卡片中的海拔标签可随时手动修改；开启「自然微漂移」时会同步加入约 `±0.3m` 海拔浮动。
    - 当状态栏与底部卡片开始计数 `ACK` 时，说明 iOS 已订阅外设坐标流；随后请结合下方注意事项确认系统位置已完成切换。
+4. **双语切换与快捷设置**（「设备连接 → 04」）：
+   - 支持 **简体中文 / English** 双语切换（默认跟随系统），可在「应用语言 / Language」中即时切换，地名解析与灵动岛文案也会同步适配。
 
 ---
 
@@ -61,11 +64,11 @@
 
 上游基线元数据统一维护在 [`UPSTREAM.json`](./UPSTREAM.json) 与 [`constants.ts`](./constants.ts)（`UPSTREAM_INFO`），后续跟随上游更新可直接对比变更：
 
-- **当前已同步版本**：`v1.0.2`
-- **基准 Commit**：[`8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f`](https://github.com/Reukix/Reloc/commit/8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f) (`2026-11-26T17:30:22Z`)
-- **对比链接**：https://github.com/Reukix/Reloc/compare/8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f...main
+- **当前已同步版本**：`v1.0.3`
+- **基准 Commit**：[`4c82a1719100840e84411a34a89870b97d8cf291`](https://github.com/Reukix/Reloc/commit/4c82a1719100840e84411a34a89870b97d8cf291) (`2026-11-27T10:30:26Z`)
+- **对比链接**：https://github.com/Reukix/Reloc/compare/4c82a1719100840e84411a34a89870b97d8cf291...main
 
-> 注：上游中针对原生 UIKit `WebMercatorMapView.swift` 的离线瓦片画布属于 iOS 原生 `MKTileOverlay` 方案，Scripting 使用原生 MapKit `<Map>` 组件，故仅同步其协议、保活、停止恢复及 iPad 兼容性检查改动。
+> 注：上游 `v1.0.3` 新增的独立免配对模式通过原生 ObjC `dlopen("/System/Library/PrivateFrameworks/CoreAccessories.framework/CoreAccessories")` 调用系统私有 `ACCTransportClient`，在 Scripting 沙箱内无对应原生桥接能力，因此本脚本保留「内置 RSD 隧道 / 外部代理回环 + 本机 Remote Pairing」连接路径与原有的 `BackgroundKeeper` 保活方式；其余海拔高度、双语国际化与会话稳定性改进已完整移植。
 
 ### 一键检查上游更新
 

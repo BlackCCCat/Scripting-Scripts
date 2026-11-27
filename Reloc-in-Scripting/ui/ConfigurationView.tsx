@@ -39,6 +39,7 @@ import {
   type PairingExportFormat,
 } from "../core/pairing";
 import type {
+  AppLanguage,
   AppSettings,
   ConnectionCheckState,
   MFiStatus,
@@ -46,6 +47,7 @@ import type {
   PairingStatus,
   TunnelSource,
 } from "../types";
+import { formatText, getStrings } from "../utils/i18n";
 import {
   clearMFiCredentials,
   mfiCandidateDirectories,
@@ -87,6 +89,7 @@ interface ConfigurationViewProps {
 
 export function ConfigurationView(props: ConfigurationViewProps) {
   const { settings, mfiStatus, pairingStatus } = props;
+  const s = getStrings(settings.language);
 
   const [pendingCertBytes, setPendingCertBytes] = useState<Uint8Array | null>(null);
   const [pendingCertName, setPendingCertName] = useState<string>("");
@@ -118,7 +121,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         if (pendingKeyBytes) {
           commitMFiPair(bytes, pendingKeyBytes, `${name} + ${pendingKeyName}`);
         } else {
-          props.onToast(`已读取证书 ${name}，请继续选择 identity.pk8 私钥`);
+          props.onToast(formatText(s.config.certPickedToast, name));
         }
       } else {
         setPendingKeyBytes(bytes);
@@ -126,44 +129,44 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         if (pendingCertBytes) {
           commitMFiPair(pendingCertBytes, bytes, `${pendingCertName} + ${name}`);
         } else {
-          props.onToast(`已读取私钥 ${name}，请继续选择 certificate.p7b 证书`);
+          props.onToast(formatText(s.config.keyPickedToast, name));
         }
       }
     } catch (error) {
-      props.onToast(`读取文件失败：${error instanceof Error ? error.message : String(error)}`);
+      props.onToast(formatText(s.config.mfiReadFailed, error instanceof Error ? error.message : String(error)));
     }
   }
 
   function commitMFiPair(certBytes: Uint8Array, keyBytes: Uint8Array, label: string) {
     try {
-      const status = saveMFiCredentials(certBytes, keyBytes, `手动导入 (${label})`);
+      const status = saveMFiCredentials(certBytes, keyBytes, label);
       setPendingCertBytes(null);
       setPendingCertName("");
       setPendingKeyBytes(null);
       setPendingKeyName("");
       props.onMFiChanged();
-      props.onToast(`✓ MFi 凭据校验通过：${status.leafSubject}`);
+      props.onToast(formatText(s.config.mfiSavedToast, status.leafSubject ?? ""));
     } catch (error) {
-      props.onToast(`MFi 校验失败：${error instanceof Error ? error.message : String(error)}`);
+      props.onToast(formatText(s.config.mfiVerifyFailed, error instanceof Error ? error.message : String(error)));
     }
   }
 
   function handleScanLocalMFi() {
     const found = scanLocalMFiDirectory();
     if (!found) {
-      props.onToast("未在本地预设目录找到匹配的 certificate.p7b 与 identity.pk8");
+      props.onToast(s.config.mfiScanNotFound);
       return;
     }
     props.onMFiChanged();
-    props.onToast(`✓ 已自动载入本地凭据（${found.status.leafSubject ?? ""}）`);
+    props.onToast(formatText(s.config.mfiScanLoaded, found.status.leafSubject ?? ""));
   }
 
   function handleTestMFiRoundTrip() {
     const res = testMFiSignerRoundTrip();
     if (res.ok) {
-      props.onToast(`✓ ECDSA P-256 签名验证通过 (${res.durationMs} ms)`);
+      props.onToast(formatText(s.config.mfiRoundTripOk, res.durationMs));
     } else {
-      props.onToast(`MFi 验证失败：${res.error ?? "未知错误"}`);
+      props.onToast(formatText(s.config.mfiRoundTripFail, res.error ?? s.common.unknownError));
     }
   }
 
@@ -176,14 +179,14 @@ export function ConfigurationView(props: ConfigurationViewProps) {
       const bytes = FileManager.readAsBytesSync(files[0]);
       await props.onImportPairingBytes(bytes);
     } catch (error) {
-      props.onToast(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+      props.onToast(formatText(s.config.importFailed, error instanceof Error ? error.message : String(error)));
     }
   }
 
   async function importPairingFromPasteboard() {
     const text = await Pasteboard.getString();
     if (!text) {
-      props.onToast("剪贴板为空");
+      props.onToast(s.config.clipboardEmpty);
       return;
     }
     await props.onImportPairingBytes(utf8(text));
@@ -200,7 +203,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
       if (toClipboard) {
         const text = format === "json" ? exportPairingAsJson(record) : exportPairingAsXml(record);
         Pasteboard.setString(text);
-        props.onToast(`✓ 已复制 ${spec.label} 到剪贴板`);
+        props.onToast(formatText(s.config.copiedUrlToast, spec.label));
         return;
       }
 
@@ -211,11 +214,11 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           : Data.fromString(
               format === "json" ? exportPairingAsJson(record) : exportPairingAsXml(record),
             );
-      if (!data) throw new Error("无法构建导出数据");
+      if (!data) throw new Error("Failed to build export data");
       const saved = await DocumentPicker.exportFiles({ files: [{ data, name }] });
-      props.onToast(saved.length > 0 ? `✓ 已导出 ${name}` : "已取消导出");
+      props.onToast(saved.length > 0 ? formatText(s.config.exportedFile, name) : s.config.exportCancelled);
     } catch (error) {
-      props.onToast(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+      props.onToast(formatText(s.config.exportFailed, error instanceof Error ? error.message : String(error)));
     }
   }
 
@@ -254,12 +257,12 @@ export function ConfigurationView(props: ConfigurationViewProps) {
   const pinBoxShape = { type: "rect" as const, cornerRadius: 10, style: "continuous" as const };
 
   const serviceStatusText = testingConn
-    ? "验证中"
+    ? s.config.svcChecking
     : connVerified === true
-      ? "已连接"
+      ? s.config.svcConnected
       : connVerified === false
-        ? "连接失败"
-        : "待验证";
+        ? s.config.svcFailed
+        : s.config.svcPending;
   const serviceStatusTint: Color =
     connVerified === true
       ? RELOC_COLORS.emerald
@@ -269,7 +272,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
   const stepIndex = !props.pairingInProgress
     ? 0
-    : props.pairingStepMessage.includes("保存")
+    : /保存|saved/i.test(props.pairingStepMessage)
       ? 3
       : props.pairingPIN
         ? 2
@@ -313,7 +316,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
   return (
     <NavigationStack>
       <List
-        navigationTitle="设备配对与连接"
+        navigationTitle={s.config.navTitle}
         navigationBarTitleDisplayMode="inline"
         listStyle="insetGroup"
         toolbar={
@@ -323,6 +326,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                   <ToolbarLeadingActions
                     homeTabSwitcher={props.homeTabSwitcher}
                     onClose={props.onClose}
+                    language={settings.language}
                   />
                 ),
               }
@@ -365,12 +369,10 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
               <VStack alignment="leading" spacing={3}>
                 <Text font="headline">
-                  {allReady ? "设备与认证已就绪" : "配置回环、配对与 MFi 凭据"}
+                  {allReady ? s.config.heroReadyTitle : s.config.heroSetupTitle}
                 </Text>
                 <Text font="caption" foregroundStyle="secondaryLabel">
-                  {allReady
-                    ? "可直接返回「定位」标签页开始定格定位"
-                    : "依次完成回环通路、设备配对、MFi 本地凭据与验证"}
+                  {allReady ? s.config.heroReadySub : s.config.heroSetupSub}
                 </Text>
               </VStack>
               <Spacer />
@@ -378,17 +380,17 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
             <HStack spacing={10}>
               <MetricTile
-                title="配对记录"
-                value={pairingStatus.isLoaded ? "已保存" : "未配置"}
+                title={s.config.tilePairing}
+                value={pairingStatus.isLoaded ? s.config.tilePairingSaved : s.config.tilePairingEmpty}
                 tint={pairingStatus.isLoaded ? RELOC_COLORS.emerald : "secondaryLabel"}
               />
               <MetricTile
-                title="MFi 凭据"
-                value={mfiStatus.isLoaded ? "已就绪" : "未导入"}
+                title={s.config.tileMFi}
+                value={mfiStatus.isLoaded ? s.config.tileMFiReady : s.config.tileMFiEmpty}
                 tint={mfiStatus.isLoaded ? RELOC_COLORS.emerald : RELOC_COLORS.amber}
               />
               <MetricTile
-                title="设备服务"
+                title={s.config.tileService}
                 value={serviceStatusText}
                 tint={serviceStatusTint}
               />
@@ -397,12 +399,12 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         </Section>
 
         {/* 01 隧道来源与连接目标 */}
-        <Section header={<StepSectionHeader number="01" title="隧道来源与连接目标" />}>
+        <Section header={<StepSectionHeader number="01" title={s.config.step1Title} />}>
           <Picker
             label={
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="network" color={RELOC_COLORS.accent} />
-                <Text>隧道来源</Text>
+                <Text>{s.config.tunnelSource}</Text>
               </HStack>
             }
             value={settings.tunnelSource}
@@ -410,14 +412,14 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             {TUNNEL_SOURCE_OPTIONS.map((opt) => (
               <Text key={opt.id} tag={opt.id}>
-                {opt.label}
+                {opt.id === "proxyApp" ? s.config.tunnelProxyLabel : s.config.tunnelBuiltInLabel}
               </Text>
             ))}
           </Picker>
 
           <HStack spacing={10}>
             <SettingsIconBadge systemName="server.rack" color="systemIndigo" />
-            <Text>目标主机</Text>
+            <Text>{s.config.targetHost}</Text>
             <Spacer />
             <TextField
               title="10.7.0.1"
@@ -431,7 +433,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
           <HStack spacing={10}>
             <SettingsIconBadge systemName="cable.connector" color="systemBlue" />
-            <Text>RSD 端口</Text>
+            <Text>{s.config.rsdPort}</Text>
             <Spacer />
             <TextField
               title="49152"
@@ -448,7 +450,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
           <HStack spacing={10}>
             <SettingsIconBadge systemName="lock.shield" color="systemTeal" />
-            <Text>Lockdown 端口</Text>
+            <Text>{s.config.lockdownPort}</Text>
             <Spacer />
             <TextField
               title="62078"
@@ -467,7 +469,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             label={
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="car.fill" color={RELOC_COLORS.emerald} />
-                <Text>CarKit 服务名</Text>
+                <Text>{s.config.carkitService}</Text>
               </HStack>
             }
             value={settings.serviceName}
@@ -504,10 +506,10 @@ export function ConfigurationView(props: ConfigurationViewProps) {
               )}
               <Text foregroundStyle="label">
                 {testingConn
-                  ? "正在检测设备连接与 CarKit 服务…"
+                  ? s.config.testConnChecking
                   : connVerified === true
-                    ? "重新检测设备连接"
-                    : "测试设备连接与 CarKit 服务"}
+                    ? s.config.testConnRetest
+                    : s.config.testConnRun}
               </Text>
             </HStack>
           </Button>
@@ -520,7 +522,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         </Section>
 
         {/* 02 设备配对 (Remote Pairing) */}
-        <Section header={<StepSectionHeader number="02" title="设备配对" />}>
+        <Section header={<StepSectionHeader number="02" title={s.config.step2Title} />}>
           <HStack spacing={10}>
             <SettingsIconBadge
               systemName={pairingStatus.isLoaded ? "checkmark.seal.fill" : "iphone.radiowaves.left.and.right"}
@@ -528,7 +530,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             />
             <VStack alignment="leading" spacing={2}>
               <Text font="subheadline" fontWeight="medium">
-                {pairingStatus.isLoaded ? pairingStatus.deviceName || "配对记录已保存" : "配对记录"}
+                {pairingStatus.isLoaded ? pairingStatus.deviceName || s.config.pairingSavedDefault : s.config.pairingRecord}
               </Text>
               <Text
                 font="caption"
@@ -537,7 +539,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
               >
                 {pairingStatus.isLoaded
                   ? `HostID: ${pairingStatus.summaryID ?? "-"}`
-                  : "尚未配置这台 iPhone"}
+                  : s.config.pairingNotConfigured}
               </Text>
             </VStack>
             <Spacer />
@@ -551,7 +553,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="iphone.gen3.radiowaves.left.and.right" color={RELOC_COLORS.accent} />
                 <Text font="subheadline" fontWeight="semibold" foregroundStyle="label">
-                  {pairingStatus.isLoaded ? "重新配对这台 iPhone" : "一键配对这台 iPhone"}
+                  {pairingStatus.isLoaded ? s.config.repairDevice : s.config.pairDevice}
                 </Text>
                 <Spacer />
                 <Text
@@ -561,7 +563,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                   padding={{ horizontal: 8, vertical: 3 }}
                   background={{ style: "rgba(43, 115, 245, 0.14)", shape: "capsule" }}
                 >
-                  悬浮窗指引
+                  {s.config.pipBadge}
                 </Text>
               </HStack>
             </Button>
@@ -571,20 +573,20 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             <VStack alignment="leading" spacing={10} padding={{ vertical: 4 }}>
               {props.pairingInProgress ? (
                 <HStack spacing={6}>
-                  {pairingStepPill(1, "广播就绪", stepIndex >= 1, stepIndex === 1)}
+                  {pairingStepPill(1, s.config.pairStep1, stepIndex >= 1, stepIndex === 1)}
                   <Image systemName="chevron.right" font="caption2" foregroundStyle="secondaryLabel" />
-                  {pairingStepPill(2, "输入配对码", stepIndex >= 2, stepIndex === 2)}
+                  {pairingStepPill(2, s.config.pairStep2, stepIndex >= 2, stepIndex === 2)}
                   <Image systemName="chevron.right" font="caption2" foregroundStyle="secondaryLabel" />
-                  {pairingStepPill(3, "保存完成", stepIndex >= 3, stepIndex === 3)}
+                  {pairingStepPill(3, s.config.pairStep3, stepIndex >= 3, stepIndex === 3)}
                 </HStack>
               ) : null}
 
               <Text
                 font="footnote"
                 fontWeight="medium"
-                foregroundStyle={props.pairingStepMessage.includes("失败") ? RELOC_COLORS.crimson : "label"}
+                foregroundStyle={/失败|未完成|fail|incomplete/i.test(props.pairingStepMessage) ? RELOC_COLORS.crimson : "label"}
               >
-                {props.pairingStepMessage || "正在等待系统设置完成配对…"}
+                {props.pairingStepMessage || s.config.pairingWaitMsg}
               </Text>
 
               {props.pairingPIN ? (
@@ -625,7 +627,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                 Pasteboard.setString(props.pairingPIN);
                 HapticFeedback.lightImpact();
                 setCopiedPinToast(true);
-                props.onToast("已复制 6 位配对码");
+                props.onToast(s.config.copiedPinToast);
                 setTimeout(() => setCopiedPinToast(false), 1500);
               }}
             >
@@ -635,7 +637,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                   color={RELOC_COLORS.amber}
                 />
                 <Text foregroundStyle={RELOC_COLORS.amber} fontWeight="semibold">
-                  {copiedPinToast ? "已复制配对码" : "复制配对码"}
+                  {copiedPinToast ? s.config.copiedPinBtn : s.config.copyPinBtn}
                 </Text>
               </HStack>
             </Button>
@@ -648,7 +650,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             >
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="xmark" color={RELOC_COLORS.crimson} />
-                <Text foregroundStyle={RELOC_COLORS.crimson}>取消配对</Text>
+                <Text foregroundStyle={RELOC_COLORS.crimson}>{s.config.cancelPairing}</Text>
               </HStack>
             </Button>
           ) : null}
@@ -659,7 +661,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="square.and.arrow.down" color="systemBlue" />
-              <Text foregroundStyle="label">导入已有配对文件 (.rppairing / .mobilepair / .json)</Text>
+              <Text foregroundStyle="label">{s.config.importPairingFile}</Text>
             </HStack>
           </Button>
 
@@ -669,23 +671,23 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="doc.on.clipboard" color="systemIndigo" />
-              <Text foregroundStyle="label">从剪贴板导入配对文本</Text>
+              <Text foregroundStyle="label">{s.config.importPairingClipboard}</Text>
             </HStack>
           </Button>
 
           <DisclosureGroup
-            title="手动粘贴或导出当前配对记录"
+            title={s.config.pairingDisclosure}
             isExpanded={exportExpanded}
             onChanged={setExportExpanded}
           >
             <TextField
-              title="粘贴 XML Plist 或 JSON 配对文本"
+              title={s.config.pastePairingPlaceholder}
               value={pastePairingText}
               onChanged={setPastePairingText}
-              prompt='{"identifier": ...} 或 <?xml ...'
+              prompt='{"identifier": ...} / <?xml ...'
             />
             <Button
-              title="解析并导入上方文本"
+              title={s.config.parseImportBtn}
               action={async () => {
                 const ok = await props.onImportPairingBytes(utf8(pastePairingText));
                 if (ok) setPastePairingText("");
@@ -694,15 +696,15 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             {pairingStatus.isLoaded ? (
               <>
                 <Button
-                  title="导出为 .mobiledevicepairing (XML)"
+                  title={s.config.exportXmlBtn}
                   action={() => void handleExportPairing("xml", false)}
                 />
                 <Button
-                  title="导出为 .mobiledevicepairing (Binary)"
+                  title={s.config.exportBinBtn}
                   action={() => void handleExportPairing("binary", false)}
                 />
                 <Button
-                  title="复制 JSON 到剪贴板"
+                  title={s.config.copyJsonBtn}
                   action={() => void handleExportPairing("json", true)}
                 />
               </>
@@ -715,26 +717,26 @@ export function ConfigurationView(props: ConfigurationViewProps) {
               disabled={props.pairingInProgress || props.isSessionRunning}
               action={async () => {
                 const confirmed = await Dialog.confirm({
-                  title: "删除当前 Remote Pairing 记录？",
-                  message: "删除后需要重新配对或导入配对文件才能建立 RSD 隧道。",
-                  confirmLabel: "删除",
-                  cancelLabel: "取消",
+                  title: s.config.deletePairingTitle,
+                  message: s.config.deletePairingMsg,
+                  confirmLabel: s.config.deletePairingConfirm,
+                  cancelLabel: s.common.cancel,
                 });
                 if (!confirmed) return;
                 props.onDeletePairing();
-                props.onToast("已删除配对记录");
+                props.onToast(s.config.deletedPairingToast);
               }}
             >
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="trash" color={RELOC_COLORS.crimson} />
-                <Text foregroundStyle={RELOC_COLORS.crimson}>移除已保存配对记录</Text>
+                <Text foregroundStyle={RELOC_COLORS.crimson}>{s.config.removePairingBtn}</Text>
               </HStack>
             </Button>
           ) : null}
         </Section>
 
         {/* 03 MFi 本地凭据导入 */}
-        <Section header={<StepSectionHeader number="03" title="MFi 本地凭据" />}>
+        <Section header={<StepSectionHeader number="03" title={s.config.step3Title} />}>
           <HStack spacing={10}>
             <SettingsIconBadge
               systemName={mfiStatus.isLoaded ? "checkmark.shield.fill" : "shield.slash.fill"}
@@ -742,16 +744,16 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             />
             <VStack alignment="leading" spacing={2}>
               <Text font="subheadline" fontWeight="medium">
-                {mfiStatus.isLoaded ? "MFi 凭据已就绪" : "尚未加载 MFi 凭据"}
+                {mfiStatus.isLoaded ? s.config.mfiReady : s.config.mfiEmpty}
               </Text>
               <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={2}>
                 {mfiStatus.isLoaded
-                  ? `${mfiStatus.leafSubject ?? "Leaf Cert"} · 共 ${mfiStatus.certificateCount} 张证书`
-                  : mfiStatus.errorMessage || "请选择 certificate.p7b 与 identity.pk8"}
+                  ? formatText(s.config.mfiCount, mfiStatus.leafSubject ?? "Leaf Cert", mfiStatus.certificateCount)
+                  : mfiStatus.errorMessage || s.config.mfiPrompt}
               </Text>
               {mfiStatus.sourceLabel ? (
                 <Text font="caption2" foregroundStyle="tertiaryLabel">
-                  {`来源：${mfiStatus.sourceLabel}`}
+                  {formatText(s.config.mfiSource, mfiStatus.sourceLabel)}
                 </Text>
               ) : null}
             </VStack>
@@ -762,7 +764,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             <HStack spacing={10}>
               <SettingsIconBadge systemName="doc.badge.plus" color={RELOC_COLORS.accent} />
               <Text foregroundStyle="label">
-                {pendingCertName ? `已选证书：${pendingCertName}（点此重选）` : "选择 certificate.p7b 证书文件"}
+                {pendingCertName ? formatText(s.config.pickCertSelected, pendingCertName) : s.config.pickCert}
               </Text>
             </HStack>
           </Button>
@@ -771,7 +773,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             <HStack spacing={10}>
               <SettingsIconBadge systemName="key.fill" color={RELOC_COLORS.amber} />
               <Text foregroundStyle="label">
-                {pendingKeyName ? `已选私钥：${pendingKeyName}（点此重选）` : "选择 identity.pk8 私钥文件"}
+                {pendingKeyName ? formatText(s.config.pickKeySelected, pendingKeyName) : s.config.pickKey}
               </Text>
             </HStack>
           </Button>
@@ -779,7 +781,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           <Button action={handleScanLocalMFi}>
             <HStack spacing={10}>
               <SettingsIconBadge systemName="folder.badge.gearshape" color="systemTeal" />
-              <Text foregroundStyle="label">从本地预设目录自动扫描</Text>
+              <Text foregroundStyle="label">{s.config.scanLocalMFi}</Text>
             </HStack>
           </Button>
 
@@ -788,7 +790,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
               <Button action={handleTestMFiRoundTrip}>
                 <HStack spacing={10}>
                   <SettingsIconBadge systemName="checkmark.seal" color={RELOC_COLORS.emerald} />
-                  <Text foregroundStyle="label">验证 MFi P-256 签名回环</Text>
+                  <Text foregroundStyle="label">{s.config.testMFiRoundTrip}</Text>
                 </HStack>
               </Button>
 
@@ -796,46 +798,46 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                 role="destructive"
                 action={async () => {
                   const confirmed = await Dialog.confirm({
-                    title: "清除本地 MFi 凭据？",
-                    message: "清除后需重新选择 certificate.p7b 与 identity.pk8 或自动扫描目录。",
-                    confirmLabel: "清除",
-                    cancelLabel: "取消",
+                    title: s.config.clearMFiTitle,
+                    message: s.config.clearMFiMsg,
+                    confirmLabel: s.config.clearMFiConfirm,
+                    cancelLabel: s.common.cancel,
                   });
                   if (!confirmed) return;
                   clearMFiCredentials();
                   props.onMFiChanged();
-                  props.onToast("已清除 MFi 凭据");
+                  props.onToast(s.config.clearedMFiToast);
                 }}
               >
                 <HStack spacing={10}>
                   <SettingsIconBadge systemName="trash" color={RELOC_COLORS.crimson} />
-                  <Text foregroundStyle={RELOC_COLORS.crimson}>清除已保存的 MFi 凭据</Text>
+                  <Text foregroundStyle={RELOC_COLORS.crimson}>{s.config.clearMFiBtn}</Text>
                 </HStack>
               </Button>
             </>
           ) : null}
 
           <DisclosureGroup
-            title="支持的本地目录与文件格式说明"
+            title={s.config.mfiGuideTitle}
             isExpanded={mfiGuideExpanded}
             onChanged={setMfiGuideExpanded}
           >
             <VStack alignment="leading" spacing={6} padding={{ vertical: 4 }}>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                • certificate.p7b：PKCS#7 SignedData 证书链（DER 或 PEM），需包含非 CA 的 EC P-256 叶子证书。
+                {s.config.mfiGuideCert}
               </Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                • identity.pk8：PKCS#8 或 SEC1 EC P-256 私钥（DER 或 PEM），将通过钥匙串本地签名 SHA-256 挑战。
+                {s.config.mfiGuideKey}
               </Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                {`• 自动扫描目录：\n${mfiCandidateDirectories().map((d) => `  - ${d}`).join("\n")}`}
+                {formatText(s.config.mfiGuideDirs, mfiCandidateDirectories().map((d) => `  - ${d}`).join("\n"))}
               </Text>
             </VStack>
           </DisclosureGroup>
         </Section>
 
-        {/* 04 定位选项与地图外观 */}
-        <Section header={<StepSectionHeader number="04" title="定位选项" />}>
+        {/* 04 定位与外观选项 */}
+        <Section header={<StepSectionHeader number="04" title={s.config.step4Title} />}>
           <Stepper
             onIncrement={() => {
               const next = Math.min(5.0, Math.round((settings.intervalSeconds + 0.25) * 100) / 100);
@@ -848,8 +850,8 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="timer" color={RELOC_COLORS.accent} />
-              <LabeledContent title="NMEA 发送间隔">
-                <Text fontDesign="monospaced">{`${settings.intervalSeconds.toFixed(2)} 秒`}</Text>
+              <LabeledContent title={s.config.nmeaInterval}>
+                <Text fontDesign="monospaced">{formatText(s.config.nmeaIntervalVal, settings.intervalSeconds.toFixed(2))}</Text>
               </LabeledContent>
             </HStack>
           </Stepper>
@@ -858,7 +860,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             label={
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="hourglass" color="systemPurple" />
-                <Text>会话时长</Text>
+                <Text>{s.config.durationLabel}</Text>
               </HStack>
             }
             value={settings.durationSeconds}
@@ -866,7 +868,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             {DURATION_OPTIONS.map((opt) => (
               <Text key={opt.value} tag={opt.value}>
-                {opt.label}
+                {opt.value === 0 ? s.config.durationContinuous : formatText(s.config.durationSeconds, opt.value)}
               </Text>
             ))}
           </Picker>
@@ -883,7 +885,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="mountain.2.fill" color="systemIndigo" />
-              <LabeledContent title="默认海拔">
+              <LabeledContent title={s.config.defaultAltitude}>
                 <Text fontDesign="monospaced">{`${settings.defaultAltitude.toFixed(0)} m`}</Text>
               </LabeledContent>
             </HStack>
@@ -895,7 +897,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="globe.asia.australia.fill" color={RELOC_COLORS.emerald} />
-              <Text>中国大陆地图 GCJ-02 纠偏</Text>
+              <Text>{s.config.gcj02Toggle}</Text>
             </HStack>
           </Toggle>
 
@@ -905,7 +907,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="dot.radiowaves.left.and.right" color={RELOC_COLORS.amber} />
-              <Text>自然微漂移 (±0.6m GPS 抖动)</Text>
+              <Text>{s.config.microJitterToggle}</Text>
             </HStack>
           </Toggle>
 
@@ -915,7 +917,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="bolt.shield.fill" color="systemTeal" />
-              <Text>后台保活（切换地图不断连）</Text>
+              <Text>{s.config.keepAliveToggle}</Text>
             </HStack>
           </Toggle>
 
@@ -925,28 +927,43 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="platter.filled.top.iphone" color="systemPink" />
-              <Text>显示灵动岛（实时活动）</Text>
+              <Text>{s.config.liveActivityToggle}</Text>
             </HStack>
           </Toggle>
 
           <Picker
             label={
               <HStack spacing={10}>
+                <SettingsIconBadge systemName="globe" color={RELOC_COLORS.accent} />
+                <Text>{s.config.languageLabel}</Text>
+              </HStack>
+            }
+            value={settings.language}
+            onChanged={(val: string) => updateSetting("language", val as AppLanguage)}
+          >
+            <Text tag="system">{s.config.languageSystem}</Text>
+            <Text tag="zh-Hans">简体中文</Text>
+            <Text tag="en">English</Text>
+          </Picker>
+
+          <Picker
+            label={
+              <HStack spacing={10}>
                 <SettingsIconBadge systemName="map.fill" color={RELOC_COLORS.accent} />
-                <Text>默认地图样式</Text>
+                <Text>{s.config.mapStyleLabel}</Text>
               </HStack>
             }
             value={settings.mapStyle}
-            onChanged={(s: string) => updateSetting("mapStyle", s as MapDisplayStyle)}
+            onChanged={(val: string) => updateSetting("mapStyle", val as MapDisplayStyle)}
           >
-            <Text tag="standard">标准地图</Text>
-            <Text tag="satellite">卫星图</Text>
-            <Text tag="hybrid">混合图</Text>
+            <Text tag="standard">{s.map.styleStandard}</Text>
+            <Text tag="satellite">{s.map.styleSatellite}</Text>
+            <Text tag="hybrid">{s.map.styleHybrid}</Text>
           </Picker>
         </Section>
 
         {/* 05 海外搜索服务 */}
-        <Section header={<StepSectionHeader number="05" title="海外地理编码 (OSM)" />}>
+        <Section header={<StepSectionHeader number="05" title={s.config.step5Title} />}>
           <HStack spacing={10}>
             <SettingsIconBadge systemName="magnifyingglass.circle.fill" color="systemBlue" />
             <TextField
@@ -958,21 +975,21 @@ export function ConfigurationView(props: ConfigurationViewProps) {
           </HStack>
           {settings.globalSearchEndpoint.trim() !== "" ? (
             <Button
-              title="恢复默认搜索服务地址"
+              title={s.config.restoreDefaultSearchBtn}
               action={() => updateSetting("globalSearchEndpoint", "")}
             />
           ) : null}
         </Section>
 
         {/* 06 快捷指令配置 */}
-        <Section header={<StepSectionHeader number="06" title="快捷指令" />}>
+        <Section header={<StepSectionHeader number="06" title={s.config.step6Title} />}>
           <Toggle
             value={settings.shortcutButtonEnabled}
             onChanged={(v) => updateSetting("shortcutButtonEnabled", v)}
           >
             <HStack spacing={10}>
               <SettingsIconBadge systemName="bolt.fill" color={RELOC_COLORS.accent} />
-              <Text>首页显示快捷指令按钮</Text>
+              <Text>{s.config.shortcutToggle}</Text>
             </HStack>
           </Toggle>
 
@@ -980,10 +997,10 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             <>
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="character.cursor.ibeam" color="systemIndigo" />
-                <Text>快捷指令名称</Text>
+                <Text>{s.config.shortcutNameLabel}</Text>
                 <Spacer />
                 <TextField
-                  title="输入快捷指令名称"
+                  title={s.config.shortcutNamePlaceholder}
                   value={settings.shortcutName}
                   onChanged={(v) => updateSetting("shortcutName", v)}
                   multilineTextAlignment="trailing"
@@ -996,13 +1013,13 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                   const target = "prefs:root=Privacy&path=LOCATION";
                   await Pasteboard.setString(target);
                   HapticFeedback.lightImpact();
-                  props.onToast(`已复制：${target}`);
+                  props.onToast(formatText(s.config.copiedUrlToast, target));
                 }}
               >
                 <HStack spacing={10}>
                   <SettingsIconBadge systemName="doc.on.doc.fill" color="systemBlue" />
                   <VStack alignment="leading" spacing={2}>
-                    <Text foregroundStyle="label">复制定位设置链接（用于创建快捷指令）</Text>
+                    <Text foregroundStyle="label">{s.config.copyLocationUrlTitle}</Text>
                     <Text font="caption" fontDesign="monospaced" foregroundStyle="secondaryLabel" lineLimit={1}>
                       {"prefs:root=Privacy&path=LOCATION"}
                     </Text>
@@ -1015,7 +1032,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
                 <Button action={() => void launchShortcut(settings.shortcutName, props.onToast)}>
                   <HStack spacing={10}>
                     <SettingsIconBadge systemName="play.fill" color={RELOC_COLORS.emerald} />
-                    <Text foregroundStyle="label">立即运行该快捷指令</Text>
+                    <Text foregroundStyle="label">{s.config.runShortcutBtn}</Text>
                   </HStack>
                 </Button>
               ) : null}
@@ -1024,10 +1041,10 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         </Section>
 
         {/* 07 上游项目与致谢 */}
-        <Section header={<StepSectionHeader number="07" title="关于与上游致谢" />}>
+        <Section header={<StepSectionHeader number="07" title={s.config.step7Title} />}>
           <HStack spacing={10}>
             <SettingsIconBadge systemName="arrow.triangle.branch" color={RELOC_COLORS.accent} />
-            <LabeledContent title="上游项目">
+            <LabeledContent title={s.config.upstreamProject}>
               <Link url={UPSTREAM_INFO.repoUrl}>
                 {UPSTREAM_INFO.name}
               </Link>
@@ -1036,7 +1053,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
           <HStack spacing={10}>
             <SettingsIconBadge systemName="tag.fill" color={RELOC_COLORS.emerald} />
-            <LabeledContent title="同步基准">
+            <LabeledContent title={s.config.syncBase}>
               <Text fontDesign="monospaced">
                 {`${UPSTREAM_INFO.baseTag} · ${UPSTREAM_INFO.baseCommitShort}`}
               </Text>
@@ -1045,7 +1062,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
 
           <HStack spacing={10}>
             <SettingsIconBadge systemName="doc.text.fill" color="systemPurple" />
-            <LabeledContent title="开源协议">
+            <LabeledContent title={s.config.license}>
               <Text fontDesign="monospaced">{UPSTREAM_INFO.license}</Text>
             </LabeledContent>
           </HStack>
@@ -1054,7 +1071,7 @@ export function ConfigurationView(props: ConfigurationViewProps) {
             <Button action={props.onOpenChangelog}>
               <HStack spacing={10}>
                 <SettingsIconBadge systemName="sparkles" color={RELOC_COLORS.amber} />
-                <Text foregroundStyle="label">查看更新说明</Text>
+                <Text foregroundStyle="label">{s.config.viewChangelog}</Text>
               </HStack>
             </Button>
           ) : null}

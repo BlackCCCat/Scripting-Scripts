@@ -1,6 +1,7 @@
 import { DEFAULT_GLOBAL_SEARCH_ENDPOINT } from "../constants";
-import type { Coordinate } from "../types";
+import type { AppLanguage, Coordinate } from "../types";
 import { deviceWgs84ToMapCoord } from "./coords";
+import { formatText, getStrings, isChineseLanguage } from "./i18n";
 
 export interface PlaceSearchResult {
   name: string;
@@ -66,20 +67,23 @@ export async function searchGlobalPlaces(
   query: string,
   customEndpoint?: string,
   gcj02CorrectionEnabled = true,
+  language: AppLanguage = "system",
 ): Promise<{ results: PlaceSearchResult[]; translatedQuery?: string }> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return { results: [] };
 
+  const s = getStrings(language);
   const endpoint = (customEndpoint || "").trim() || DEFAULT_GLOBAL_SEARCH_ENDPOINT;
-  if (!endpoint.startsWith("http")) throw new Error("全球搜索服务地址无效");
+  if (!endpoint.startsWith("http")) throw new Error(s.search.invalidGlobalEndpoint);
 
   const { text, translated } = await translateChineseQueryForOSM(trimmed);
-  const response = await fetch(`${endpoint}?q=${encodeURIComponent(text)}`, {
+  const langParam = isChineseLanguage(language) ? "zh-Hans" : "en";
+  const response = await fetch(`${endpoint}?q=${encodeURIComponent(text)}&lang=${langParam}`, {
     method: "GET",
     timeout: 12,
   } as RequestInit);
 
-  if (!response.ok) throw new Error(`全球搜索失败：HTTP ${response.status}`);
+  if (!response.ok) throw new Error(formatText(s.search.globalHttpError, response.status));
 
   const body = (await response.json()) as GlobalSearchResponse;
   const results: PlaceSearchResult[] = [];
@@ -104,17 +108,20 @@ export async function searchGlobalPlaces(
 }
 
 /**
- * 反向地理编码：先试系统 MapKit/CLGeocoder，境外空白时回退到全球反查端点。
+ * 反向地理编码：先试系统 MapKit/CLGeocoder（随应用语言切换 locale），境外空白时回退到全球反查端点。
  */
 export async function reverseGeocodePlace(
   mapLatitude: number,
   mapLongitude: number,
-  options?: { customEndpoint?: string; wgs84Coordinate?: Coordinate },
+  options?: { customEndpoint?: string; wgs84Coordinate?: Coordinate; language?: AppLanguage },
 ): Promise<{ name: string; address: string }> {
+  const chinese = isChineseLanguage(options?.language);
+  const localeTag = chinese ? "zh-Hans" : "en";
   try {
     const placemarks = await Location.reverseGeocode({
       latitude: mapLatitude,
       longitude: mapLongitude,
+      locale: localeTag,
     });
     const first = placemarks?.[0];
     if (first) {
@@ -141,7 +148,8 @@ export async function reverseGeocodePlace(
   try {
     const url =
       `${reverseEndpointFrom(endpoint)}?lat=${encodeURIComponent(target.latitude)}` +
-      `&lon=${encodeURIComponent(target.longitude)}`;
+      `&lon=${encodeURIComponent(target.longitude)}` +
+      `&lang=${localeTag}`;
     const response = await fetch(url, { method: "GET", timeout: 8 } as RequestInit);
     if (!response.ok) return { name: "", address: "" };
     const body = (await response.json()) as { name?: string; detail?: string };

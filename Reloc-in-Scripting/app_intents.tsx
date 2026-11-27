@@ -1,6 +1,7 @@
 import { AppIntentManager, AppIntentProtocol, LiveActivity, Notification } from "scripting";
 import { STORAGE_KEYS } from "./constants";
 import { debugLog, describeError } from "./core/debug";
+import { getStrings, loadActiveLanguage } from "./utils/i18n";
 
 type RestoreAck = {
   ok: boolean;
@@ -18,18 +19,20 @@ export const RelocStopSpoofingIntent = AppIntentManager.register({
       await LiveActivity.endAllActivities({ dismissTimeInterval: 0 }).catch(() => undefined);
       return;
     }
+    const t = getStrings(loadActiveLanguage()).intent;
     await Notification.schedule({
-      title: "请打开 Reloc 完成停止",
+      title: t.openRelocStopTitle,
       body: failure,
     }).catch(() => false);
   },
 });
 
 async function requestMainScriptStop(): Promise<string | null> {
+  const t = getStrings(loadActiveLanguage()).intent;
   const id = Storage.get<string>(STORAGE_KEYS.sessionID) ?? null;
   if (!id) {
     Storage.remove(STORAGE_KEYS.interrupted);
-    return "主脚本当前未运行，请打开 Reloc 确认。";
+    return t.mainNotRunning;
   }
 
   try {
@@ -43,9 +46,9 @@ async function requestMainScriptStop(): Promise<string | null> {
       Storage.remove(STORAGE_KEYS.interrupted);
       return null;
     }
-    return ack.message ?? "停止失败";
+    return ack.message ?? t.stopFailed;
   } catch (error) {
     debugLog("intent", "主脚本未响应", describeError(error));
-    return "无法联系 Reloc 主脚本，请打开 App 停止。";
+    return t.cannotContactMain;
   }
 }

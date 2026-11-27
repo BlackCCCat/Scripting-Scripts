@@ -9,6 +9,7 @@ import {
   useState,
 } from "scripting";
 import { STORAGE_KEYS } from "../constants";
+import { getStrings, loadActiveLanguage } from "../utils/i18n";
 import { isIOS26OrLater } from "./theme";
 
 const CHANGELOG_FILE = "changelog.md";
@@ -32,13 +33,14 @@ export function MarkdownChangelogSheet(props: {
   onDismiss: () => void;
 }) {
   const useGlass = isIOS26OrLater();
+  const s = getStrings(loadActiveLanguage());
 
   return (
     <NavigationStack presentationBackground={useGlass ? "clear" : undefined}>
       <ScrollView
         background="clear"
         scrollContentBackground="hidden"
-        navigationTitle={props.title ?? "更新说明"}
+        navigationTitle={props.title ?? s.config.changelogTitle}
         navigationBarTitleDisplayMode="inline"
         toolbarBackgroundVisibility="hidden"
         presentationDragIndicator="visible"
@@ -46,7 +48,7 @@ export function MarkdownChangelogSheet(props: {
         presentationBackground={useGlass ? "clear" : undefined}
         padding={{ top: 20, leading: 18, bottom: 20, trailing: 18 }}
         toolbar={{
-          topBarTrailing: <Button title="知道了" action={props.onDismiss} />,
+          topBarTrailing: <Button title={s.common.gotIt} action={props.onDismiss} />,
         }}
       >
         <Markdown

@@ -1,4 +1,12 @@
-import type { AppSettings, FavoriteLocation, MapDisplayStyle, SessionSnapshot, TargetLocation, TunnelSource } from "./types";
+import type {
+  AppLanguage,
+  AppSettings,
+  FavoriteLocation,
+  MapDisplayStyle,
+  SessionSnapshot,
+  TargetLocation,
+  TunnelSource,
+} from "./types";
 
 export const DEFAULT_HOST = "10.7.0.1";
 export const DEFAULT_REMOTE_PORT = 49152;
@@ -61,6 +69,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backgroundKeepAliveEnabled: true,
   liveActivityEnabled: true,
   microJitterEnabled: false,
+  language: "system" as AppLanguage,
   mapStyle: "standard",
   globalSearchEndpoint: "",
   shortcutButtonEnabled: true,
@@ -133,7 +142,7 @@ export const UPSTREAM_INFO = {
   author: "Reukix",
   repoUrl: "https://github.com/Reukix/Reloc",
   license: "AGPL-3.0-only",
-  baseTag: "v1.0.2",
-  baseCommit: "8dc5aaa6b9e2599423fdb903e4edc8eecc0b9c9f",
-  baseCommitShort: "8dc5aaa",
+  baseTag: "v1.0.3",
+  baseCommit: "4c82a1719100840e84411a34a89870b97d8cf291",
+  baseCommitShort: "4c82a17",
 } as const;

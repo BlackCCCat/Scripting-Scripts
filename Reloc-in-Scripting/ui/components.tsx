@@ -10,6 +10,8 @@ import {
   ZStack,
   type Color,
 } from "scripting";
+import type { AppLanguage } from "../types";
+import { getStrings } from "../utils/i18n";
 import { RELOC_COLORS, isIOS26OrLater, topCircleButtonStyle } from "./theme";
 
 /**
@@ -217,11 +219,14 @@ export function StatusDot(props: { color: Color; active: boolean }) {
   );
 }
 
-const HOME_TAB_ITEMS = [
-  { tag: 0, title: "定位", systemImage: "location.north.circle.fill" },
-  { tag: 1, title: "设备连接", systemImage: "antenna.radiowaves.left.and.right" },
-  { tag: 2, title: "实测与日志", systemImage: "waveform.path.ecg" },
-] as const;
+function homeTabItems(language?: AppLanguage) {
+  const t = getStrings(language).tabs;
+  return [
+    { tag: 0, title: t.location, systemImage: "location.north.circle.fill" },
+    { tag: 1, title: t.connection, systemImage: "antenna.radiowaves.left.and.right" },
+    { tag: 2, title: t.logs, systemImage: "waveform.path.ecg" },
+  ] as const;
+}
 
 /**
  * Scripting 首页模式下用于三页切换的原生菜单按钮（统一位于页面左上角，使用与底部 Tab 一致的图标）：
@@ -232,9 +237,11 @@ export function HomePageSwitcherMenu(props: {
   currentTab: number;
   onSelectTab: (tab: number) => void;
   style?: "mapCircle" | "toolbar";
+  language?: AppLanguage;
 }) {
   const mode = props.style ?? "mapCircle";
-  const currentItem = HOME_TAB_ITEMS.find((item) => item.tag === props.currentTab) ?? HOME_TAB_ITEMS[0];
+  const items = homeTabItems(props.language);
+  const currentItem = items.find((item) => item.tag === props.currentTab) ?? items[0];
 
   return (
     <Menu
@@ -253,7 +260,7 @@ export function HomePageSwitcherMenu(props: {
         )
       }
     >
-      {HOME_TAB_ITEMS.map((item) => (
+      {items.map((item) => (
         <Button
           key={item.tag}
           action={() => {
@@ -277,6 +284,7 @@ export function HomePageSwitcherMenu(props: {
 export function ToolbarLeadingActions(props: {
   homeTabSwitcher?: { currentTab: number; onSelectTab: (tab: number) => void };
   onClose?: () => void;
+  language?: AppLanguage;
 }) {
   if (props.homeTabSwitcher && props.onClose) {
     return (
@@ -285,6 +293,7 @@ export function ToolbarLeadingActions(props: {
           currentTab={props.homeTabSwitcher.currentTab}
           onSelectTab={props.homeTabSwitcher.onSelectTab}
           style="toolbar"
+          language={props.language}
         />
         <Button action={props.onClose}>
           <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
@@ -305,6 +314,7 @@ export function ToolbarLeadingActions(props: {
         currentTab={props.homeTabSwitcher.currentTab}
         onSelectTab={props.homeTabSwitcher.onSelectTab}
         style="toolbar"
+        language={props.language}
       />
     );
   }

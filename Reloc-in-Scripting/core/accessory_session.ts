@@ -578,6 +578,7 @@ type SocketRunOutcome =
 export class AccessoryLocationSession {
   readonly locationBox: LiveLocationBox;
   private cancelled = false;
+  private coreLocationConfirmed = false;
   private fastBurstUntil = 0;
   private pendingKalmanReset = false;
   private burstMotionPacketsRemaining = 0;
@@ -602,6 +603,13 @@ export class AccessoryLocationSession {
   }
 
   /**
+   * 标记系统是否已确认切至外设位置（同步上游 v1.0.3 markCoreLocationConfirmed），锁稳后提前结束 5Hz 高频突发节省功耗。
+   */
+  markCoreLocationConfirmed(confirmed: boolean): void {
+    this.coreLocationConfirmed = confirmed;
+  }
+
+  /**
    * 触发临时高频注入突发（5 Hz / 200ms），帮助 locationd 在刚订阅或切换点位时迅速锁定外设 GPS（对齐上游 triggerFastBurst）。
    */
   triggerFastBurst(seconds = 15.0): void {
@@ -613,6 +621,7 @@ export class AccessoryLocationSession {
    * 运行中更新目标坐标时触发 Kalman 复位脉冲（先发 void 清除旧点惯性 + 短暂 0.4kn 微速 + 5 Hz 突发），对齐上游 notifyLocationUpdated。
    */
   notifyLocationUpdated(resetKalman = true, burstSeconds = 10.0): void {
+    this.coreLocationConfirmed = false;
     if (resetKalman) {
       this.pendingKalmanReset = true;
       this.burstMotionPacketsRemaining = Math.max(this.burstMotionPacketsRemaining, 2);
@@ -641,6 +650,7 @@ export class AccessoryLocationSession {
     mfiSigner: MFiSigner;
   }): void {
     this.cancelled = false;
+    this.coreLocationConfirmed = false;
     this.fastBurstUntil = 0;
     this.pendingKalmanReset = false;
     this.burstMotionPacketsRemaining = 0;
@@ -938,6 +948,7 @@ export class AccessoryLocationSession {
       this.onSnapshot({ ...snapshot });
 
       const startTime = Date.now();
+      const authDeadline = startTime + 12_000;
       const deadline = overallDeadline ?? (
         configuration.durationSeconds > 0
           ? startTime + configuration.durationSeconds * 1000
@@ -977,6 +988,9 @@ export class AccessoryLocationSession {
 
         const now = Date.now();
         if (deadline !== null && now >= deadline) break;
+        if (!snapshot.authenticated && now >= authDeadline) {
+          throw new IAP2LinkError("timeout", "Accessory identification/authentication timed out");
+        }
 
         let pollSliceMs = 1000;
         if (
@@ -988,7 +1002,7 @@ export class AccessoryLocationSession {
           if (this.pendingKalmanReset) {
             pollSliceMs = 15;
           } else {
-            const burstActive = now < this.fastBurstUntil;
+            const burstActive = !this.coreLocationConfirmed && now < this.fastBurstUntil;
             let nextDue = now + 1000;
             for (const id of activeSentences) {
               const last = lastSent.get(id);
@@ -1140,7 +1154,7 @@ export class AccessoryLocationSession {
           }
 
           const tickNow = Date.now();
-          const burstActive = tickNow < this.fastBurstUntil;
+          const burstActive = !this.coreLocationConfirmed && tickNow < this.fastBurstUntil;
           const due = [...activeSentences]
             .sort((a, b) => a - b)
             .filter((id) => {
@@ -1180,6 +1194,7 @@ export class AccessoryLocationSession {
                 count: snapshot.packetsAcknowledged,
                 lat: outgoingTarget.latitude.toFixed(6),
                 lon: outgoingTarget.longitude.toFixed(6),
+                alt: outgoingTarget.altitude.toFixed(1),
                 nmea: outgoing.map((item) => item.trim()),
               });
             }

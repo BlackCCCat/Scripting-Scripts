@@ -19,6 +19,7 @@ import {
   type LiveActivityUIBuilder,
 } from "scripting";
 import { RelocStopSpoofingIntent } from "./app_intents";
+import { getStrings, loadActiveLanguage } from "./utils/i18n";
 import {
   formatDuoElapsedParts,
   isIPhoneDuo,
@@ -45,7 +46,7 @@ const TIMER_SPAN_MS = 24 * 3600 * 1000;
 
 function accentColor(state: RelocActivityState): Color {
   if (state.isError) return "systemOrange";
-  if (state.statusLabel.includes("模拟中")) return "systemGreen";
+  if (state.statusLabel.includes("模拟中") || state.statusLabel.includes("Simulating")) return "systemGreen";
   return "systemBlue";
 }
 
@@ -119,6 +120,7 @@ function RoundIcon(props: { systemName: string; fill: Color }) {
 function SimulationCard(state: RelocActivityState) {
   const accent = accentColor(state);
   const coord = coordinateText(state);
+  const la = getStrings(loadActiveLanguage()).liveActivity;
   return (
     <VStack alignment="leading" spacing={10} frame={{ maxWidth: "infinity" }}>
       <HStack spacing={10}>
@@ -128,7 +130,7 @@ function SimulationCard(state: RelocActivityState) {
         />
         <VStack alignment="leading" spacing={1}>
           <Text font="subheadline" fontWeight="semibold" lineLimit={1}>
-            {state.statusLabel || "位置模拟中"}
+            {state.statusLabel || la.simulating}
           </Text>
           <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
             {state.placeName || coord}
@@ -147,7 +149,7 @@ function SimulationCard(state: RelocActivityState) {
           {`${state.placeName ? coord : ""}${state.placeName ? " · " : ""}ACK ${state.packetsAcknowledged}`}
         </Text>
         <Spacer minLength={8} />
-        <Text font="caption" foregroundStyle="secondaryLabel">已持续</Text>
+        <Text font="caption" foregroundStyle="secondaryLabel">{la.elapsed}</Text>
         <ElapsedTimer startedAt={state.startedAt} font="caption" width={52} />
       </HStack>
     </VStack>
@@ -157,6 +159,7 @@ function SimulationCard(state: RelocActivityState) {
 function pairingUI(state: RelocActivityState) {
   const pin = state.pin ?? "";
   const duo = state.isDuo ?? isIPhoneDuo();
+  const la = getStrings(loadActiveLanguage()).liveActivity;
   return (
     <LiveActivityUI
       dynamicIslandContentMargins={
@@ -179,13 +182,13 @@ function pairingUI(state: RelocActivityState) {
           <HStack spacing={10}>
             <Image systemName="personalhotspot" foregroundStyle="systemBlue" font="title2" />
             <VStack alignment="leading" spacing={2}>
-              <Text font="caption" foregroundStyle="secondaryLabel">配对 PIN</Text>
+              <Text font="caption" foregroundStyle="secondaryLabel">{la.pairingPin}</Text>
               <Text font="title2" fontWeight="bold" fontDesign="monospaced">{pin}</Text>
             </VStack>
             <Spacer />
           </HStack>
           <Text font="caption2" foregroundStyle="secondaryLabel">
-            设置 → 隐私与安全性 → 开发者 → 配对
+            {la.pairingGuide}
           </Text>
         </VStack>
       }
@@ -216,13 +219,13 @@ function pairingUI(state: RelocActivityState) {
       </LiveActivityUIExpandedLeading>
       <LiveActivityUIExpandedCenter>
         <VStack alignment="leading" spacing={2}>
-          <Text font="caption2" foregroundStyle="secondaryLabel">配对 PIN</Text>
+          <Text font="caption2" foregroundStyle="secondaryLabel">{la.pairingPin}</Text>
           <Text font="title3" fontWeight="bold" fontDesign="monospaced">{pin}</Text>
         </VStack>
       </LiveActivityUIExpandedCenter>
       <LiveActivityUIExpandedBottom>
         <Text font="caption2" foregroundStyle="secondaryLabel">
-          设置 → 隐私与安全性 → 开发者 → 配对
+          {la.pairingGuide}
         </Text>
       </LiveActivityUIExpandedBottom>
     </LiveActivityUI>

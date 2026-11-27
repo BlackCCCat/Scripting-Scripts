@@ -1,5 +1,6 @@
 import type { Color, CommonViewProps } from "scripting";
-import type { SessionSnapshot } from "../types";
+import type { AppLanguage, SessionSnapshot } from "../types";
+import { formatText, getStrings } from "../utils/i18n";
 
 export const RELOC_COLORS = {
   accent: "#2B73F5" as Color,
@@ -76,17 +77,18 @@ export function floatingPillStyle(): Partial<CommonViewProps> {
   };
 }
 
-export function sessionPhaseText(snapshot: SessionSnapshot): string {
-  if (snapshot.lastError && !snapshot.isRunning) return "异常停止";
-  if (!snapshot.isRunning) return "待机";
+export function sessionPhaseText(snapshot: SessionSnapshot, language?: AppLanguage): string {
+  const logs = getStrings(language).logs;
+  if (snapshot.lastError && !snapshot.isRunning) return logs.phaseErrorStop;
+  if (!snapshot.isRunning) return logs.phaseIdle;
   if (snapshot.authenticated && snapshot.activeSentences.length > 0) {
     return snapshot.mode === "probe"
-      ? "探测就绪"
-      : `定位注入中 · ACK ${snapshot.packetsAcknowledged}`;
+      ? logs.phaseProbeReady
+      : formatText(logs.phaseInjecting, snapshot.packetsAcknowledged);
   }
-  if (snapshot.authenticated) return "已认证 · 等待订阅";
-  if (snapshot.identified) return "已识别 · MFi 认证中";
-  if (snapshot.linkReady) return "链路已建立 · 识别中";
-  if (snapshot.lockdownConnected) return "隧道已连接 · 握手中";
-  return "建立连接中…";
+  if (snapshot.authenticated) return logs.phaseAuthWaitSub;
+  if (snapshot.identified) return logs.phaseIdentified;
+  if (snapshot.linkReady) return logs.phaseLinkReady;
+  if (snapshot.lockdownConnected) return logs.phaseTunnelConnected;
+  return logs.phaseConnecting;
 }

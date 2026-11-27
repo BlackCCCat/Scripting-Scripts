@@ -64,6 +64,8 @@ import { MapPickerView } from "./ui/MapPickerView";
 import { ProtocolLogsView } from "./ui/ProtocolLogsView";
 import { useMarkdownChangelogSheet } from "./ui/ReleaseNotesSheet";
 import { distanceMeters, formatLatLon, mapCoordToDeviceWgs84, round6 } from "./utils/coords";
+import { fetchTerrainElevation } from "./utils/elevation";
+import { formatText, getStrings, resolveLanguageCode } from "./utils/i18n";
 import {
   nudgeLocationSubscription,
   pulseLocationSubscription,
@@ -73,6 +75,7 @@ import {
   startLocationMonitorUpdates,
   stopLocationMonitorUpdates,
 } from "./utils/keepalive";
+import { reverseGeocodePlace } from "./utils/searchApi";
 import {
   addFavorite,
   addRecent,
@@ -98,7 +101,9 @@ import {
 
 const MAX_EVENTS = 250;
 
-export function App(props: { shared?: { latitude: number; longitude: number; name?: string } }) {
+export function App(props: {
+  shared?: { latitude: number; longitude: number; altitude?: number; name?: string };
+}) {
   const dismiss = Navigation.useDismiss();
   const isHomeScreen = Script.env === "home_screen";
   const canDismiss = !isHomeScreen;
@@ -109,16 +114,22 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   const tabSelection = useObservable<number>(0);
   const [homeTab, setHomeTab] = useState<number>(0);
   const showPiP = useObservable<boolean>(false);
-  const changelog = useMarkdownChangelogSheet({ title: "更新说明" });
 
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const s = getStrings(settings.language);
+  const changelog = useMarkdownChangelogSheet({ title: s.config.changelogTitle });
+  const [resolvingAltitude, setResolvingAltitude] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<PickTarget & { altitude: number }>(() => {
     if (props.shared) {
+      const fallbackAlt = loadSettings().defaultAltitude;
       return {
         latitude: round6(props.shared.latitude),
         longitude: round6(props.shared.longitude),
-        altitude: loadSettings().defaultAltitude,
-        name: props.shared.name || "共享位置",
+        altitude:
+          typeof props.shared.altitude === "number" && Number.isFinite(props.shared.altitude)
+            ? props.shared.altitude
+            : fallbackAlt,
+        name: props.shared.name || getStrings(loadSettings().language).map.sharedPlace,
       };
     }
     return (
@@ -134,6 +145,16 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
 
   const [activeMapCoordinate, setActiveMapCoordinate] = useState<PickTarget | null>(null);
   const [activeWgs84Target, setActiveWgs84Target] = useState<TargetLocation | null>(null);
+  const settingsRef = useRef<AppSettings>(settings);
+  settingsRef.current = settings;
+  const liveS = () => getStrings(settingsRef.current.language);
+  const selectedTargetRef = useRef<PickTarget & { altitude: number }>(selectedTarget);
+  selectedTargetRef.current = selectedTarget;
+  const activeMapCoordinateRef = useRef<PickTarget | null>(activeMapCoordinate);
+  activeMapCoordinateRef.current = activeMapCoordinate;
+  const activeWgs84TargetRef = useRef<TargetLocation | null>(activeWgs84Target);
+  activeWgs84TargetRef.current = activeWgs84Target;
+  const elevationGenRef = useRef<number>(0);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>({ ...EMPTY_SNAPSHOT });
   const [events, setEvents] = useState<ProtocolEvent[]>([]);
 
@@ -173,7 +194,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   const liveActivityEnabledRef = useRef<boolean>(settings.liveActivityEnabled);
   liveActivityEnabledRef.current = settings.liveActivityEnabled;
   const sessionStartedAtRef = useRef<number>(Date.now());
-  const activePlaceNameRef = useRef<string>(selectedTarget.name || "模拟位置");
+  const activePlaceNameRef = useRef<string>(selectedTarget.name || liveS().map.simulatingPlace);
   const isTelemetryTabRef = useRef<boolean>(false);
   const latestTelemetryRef = useRef<LiveLocationTelemetry | null>(null);
   const eventBufferRef = useRef<ProtocolEvent[]>([]);
@@ -259,10 +280,18 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
           lastKnownRealLocationRef.current = {
             latitude: sample.latitude,
             longitude: sample.longitude,
-            altitude: settings.defaultAltitude,
+            altitude: settingsRef.current.defaultAltitude,
             speedKnots: 0,
             courseDegrees: 0,
           };
+        } else if (
+          sessionRef.current &&
+          lastModeRef.current === "send" &&
+          activeWgs84TargetRef.current
+        ) {
+          sessionRef.current.markCoreLocationConfirmed(
+            distanceMeters(sample, activeWgs84TargetRef.current) <= 50,
+          );
         } else if (
           isRestoringRef.current &&
           stoppedWgsTargetRef.current &&
@@ -335,7 +364,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         });
         session.requestLinkReconnect("waiting_subscription_timeout");
       } else {
-        fireToast("系统尚未订阅外设 GPS，可开关一次系统定位服务重试");
+        fireToast(liveS().sessionToast.subTimeoutToast);
       }
     }, 8000);
     subscriptionWakeTimersRef.current.push(reconnectTimer);
@@ -355,7 +384,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     lastKnownRealLocationRef.current = {
       latitude: sample.latitude,
       longitude: sample.longitude,
-      altitude: settings.defaultAltitude,
+      altitude: settingsRef.current.defaultAltitude,
       speedKnots: 0,
       courseDegrees: 0,
     };
@@ -370,7 +399,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       }),
       isError: false,
     });
-    fireToast("已恢复本机真实 GPS");
+    fireToast(liveS().sessionToast.realRestored);
     void stopLocationMonitorUpdates();
   }
 
@@ -408,7 +437,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         detail: JSON.stringify({ hint: "toggle_location_services_if_indoors" }),
         isError: false,
       });
-      fireToast("若仍停留在模拟位置，可用快捷指令开关一次定位服务");
+      fireToast(liveS().sessionToast.realRecoveryHint);
     }, 7500);
 
     const t4 = setTimeout(() => {
@@ -431,15 +460,17 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     snap: SessionSnapshot,
     placeName: string,
     wgs84: TargetLocation,
+    language = settingsRef.current.language,
   ): RelocActivityState {
-    let label = "连接中";
-    if (snap.lastError) label = "异常重连";
+    const la = getStrings(language).liveActivity;
+    let label = la.connecting;
+    if (snap.lastError) label = la.reconnecting;
     else if (snap.authenticated && snap.activeSentences.length > 0) {
-      label = snap.mode === "probe" ? "探测就绪" : "位置模拟中";
+      label = snap.mode === "probe" ? la.probeReady : la.simulating;
     } else if (snap.authenticated) {
-      label = "等待定位订阅";
+      label = la.waitSub;
     } else if (snap.identified) {
-      label = "MFi 认证中";
+      label = la.mfiAuth;
     }
     return {
       kind: "simulation",
@@ -467,7 +498,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       const allowed = await LiveActivity.areActivitiesEnabled();
       debugLog("liveactivity", `areActivitiesEnabled=${allowed}`);
       if (!allowed) {
-        fireToast("实时活动未开启，请在「设置 → Scripting → 实时活动」中打开");
+        fireToast(liveS().sessionToast.liveActivityDisabled);
         return;
       }
       await LiveActivity.endAllActivities({ dismissTimeInterval: 0 }).catch(() => undefined);
@@ -489,7 +520,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       }
     } catch (error) {
       debugLog("liveactivity", "启动模拟实时活动失败", describeError(error));
-      fireToast(`灵动岛启动失败：${describeError(error)}`);
+      fireToast(formatText(liveS().sessionToast.liveActivityFailed, describeError(error)));
     }
   }
 
@@ -497,11 +528,12 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     snap: SessionSnapshot,
     wgs84: TargetLocation,
     force = false,
+    language = settingsRef.current.language,
   ) {
     latestSnapForLiveActivityRef.current = { snap, wgs84 };
     if (!liveActivityEnabledRef.current) return;
     try {
-      const next = liveActivityStateFrom(snap, activePlaceNameRef.current, wgs84);
+      const next = liveActivityStateFrom(snap, activePlaceNameRef.current, wgs84, language);
       const key = liveActivityUpdateKey({
         ...next,
         duo: Boolean(next.isDuo),
@@ -529,8 +561,12 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       const found = scanLocalMFiDirectory();
       if (found) {
         setMFiStatus(found.status);
-        fireToast(`已自动载入本地 MFi 凭据：${found.status.leafSubject ?? ""}`);
+        fireToast(formatText(liveS().sessionToast.autoLoadedMFi, found.status.leafSubject ?? ""));
       }
+    }
+
+    if (props.shared && typeof props.shared.altitude !== "number") {
+      resolveElevationForTarget(selectedTargetRef.current);
     }
 
     const onLoc = (loc: { latitude: number; longitude: number; timestamp: number }) => {
@@ -553,10 +589,18 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         lastKnownRealLocationRef.current = {
           latitude: sample.latitude,
           longitude: sample.longitude,
-          altitude: settings.defaultAltitude,
+          altitude: settingsRef.current.defaultAltitude,
           speedKnots: 0,
           courseDegrees: 0,
         };
+      } else if (
+        sessionRef.current &&
+        lastModeRef.current === "send" &&
+        activeWgs84TargetRef.current
+      ) {
+        sessionRef.current.markCoreLocationConfirmed(
+          distanceMeters(sample, activeWgs84TargetRef.current) <= 50,
+        );
       } else if (
         isRestoringRef.current &&
         stoppedWgsTargetRef.current &&
@@ -634,6 +678,70 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     };
   }, [isUnsupportedIPad]);
 
+  function resolveElevationForTarget(target: PickTarget & { altitude: number }) {
+    const gen = ++elevationGenRef.current;
+    setResolvingAltitude(true);
+    const wgs = mapCoordToDeviceWgs84(
+      target.latitude,
+      target.longitude,
+      settingsRef.current.gcj02CorrectionEnabled,
+    );
+    void fetchTerrainElevation(wgs.latitude, wgs.longitude)
+      .then((alt) => {
+        if (elevationGenRef.current !== gen || alt === null) return;
+        const latest = selectedTargetRef.current;
+        if (
+          Math.abs(latest.latitude - target.latitude) > 1e-5 ||
+          Math.abs(latest.longitude - target.longitude) > 1e-5
+        ) {
+          return;
+        }
+        const updated: PickTarget & { altitude: number } = { ...latest, altitude: alt };
+        setSelectedTarget(updated);
+        saveLastLocation(updated);
+        const session = sessionRef.current;
+        const activeMap = activeMapCoordinateRef.current;
+        if (
+          session &&
+          lastModeRef.current === "send" &&
+          activeMap &&
+          Math.abs(activeMap.latitude - updated.latitude) < 1e-5 &&
+          Math.abs(activeMap.longitude - updated.longitude) < 1e-5
+        ) {
+          const wgsUpdated = buildTargetWgs84(updated, settingsRef.current);
+          session.locationBox.set(wgsUpdated);
+          setActiveWgs84Target(wgsUpdated);
+        }
+      })
+      .finally(() => {
+        if (elevationGenRef.current === gen) {
+          setResolvingAltitude(false);
+        }
+      });
+  }
+
+  function selectTarget(next: PickTarget & { altitude: number }, resolveAltitude?: boolean) {
+    if (resolveAltitude === undefined) {
+      setSelectedTarget((prev) => {
+        const sameCoord =
+          Math.abs(prev.latitude - next.latitude) < 1e-5 &&
+          Math.abs(prev.longitude - next.longitude) < 1e-5;
+        const merged = sameCoord ? { ...next, altitude: prev.altitude } : next;
+        saveLastLocation(merged);
+        return merged;
+      });
+      return;
+    }
+    setSelectedTarget(next);
+    saveLastLocation(next);
+    if (resolveAltitude) {
+      resolveElevationForTarget(next);
+    } else {
+      elevationGenRef.current += 1;
+      setResolvingAltitude(false);
+    }
+  }
+
   function buildTargetWgs84(target: PickTarget & { altitude: number }, cfg = settings): TargetLocation {
     const wgs = mapCoordToDeviceWgs84(
       target.latitude,
@@ -653,13 +761,13 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     try {
       const net = await Device.getNetworkState();
       if (net.interfaces.includes("cellular") && !net.interfaces.includes("wifi")) {
-        fireToast("未连接 Wi-Fi：请先确认代理回环正常，或开关一次飞行模式后重试");
+        fireToast(liveS().sessionToast.cellularGuide);
         return;
       }
     } catch {
       // 忽略网络状态读取失败，直接展示简洁错误提示
     }
-    fireToast(`连接异常：${describeError(err)}`);
+    fireToast(formatText(liveS().sessionToast.connError, describeError(err)));
   }
 
   async function startSession(
@@ -668,7 +776,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   ) {
     const signer = loadMFiSigner();
     if (!signer) {
-      fireToast("尚未加载本地 MFi 凭据（certificate.p7b + identity.pk8）");
+      fireToast(liveS().sessionToast.missingMFi);
       tabSelection.setValue(1);
       return;
     }
@@ -750,9 +858,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
           void releaseKeepAlive("session");
           void stopAllLiveActivities();
           if (nextSnap.lastError) {
-            fireToast(`会话结束：${nextSnap.lastError}`);
+            fireToast(formatText(liveS().sessionToast.sessionEnded, nextSnap.lastError));
           } else if (nextSnap.mode === "probe") {
-            fireToast("探测完成：MFi 认证与 CarKit 链路正常");
+            fireToast(liveS().sessionToast.probeDone);
           }
         }
       },
@@ -771,10 +879,10 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         void notifyConnectionFailureToast(err);
       },
       () => {
-        // 对齐上游 Reloc：MFi 鉴权通过 (0xAA05) 后立即启用导航级定位订阅与唤醒阶梯
+        // 对齐上游 Reloc：MFi 鉴权通过 (0xAA05) 后启用导航级定位订阅与纯定位后台保活
         void startLocationMonitorUpdates()
           .then(() => {
-            if (settings.backgroundKeepAliveEnabled && sessionRef.current === session) {
+            if (settingsRef.current.backgroundKeepAliveEnabled && sessionRef.current === session) {
               return retainKeepAlive("session");
             }
           })
@@ -842,7 +950,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     });
 
     void updateSimulationLiveActivity(snapshot, wgsTarget, true);
-    fireToast(`已切换目标至：${placeName}`);
+    fireToast(formatText(liveS().sessionToast.targetSwitched, placeName));
   }
 
   async function stopSession() {
@@ -871,11 +979,48 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   }
 
   function handleUpdateSettings(next: AppSettings) {
+    const prevLang = resolveLanguageCode(settings.language);
+    const nextLang = resolveLanguageCode(next.language);
     liveActivityEnabledRef.current = next.liveActivityEnabled;
     setSettings(next);
     saveSettings(next);
     if (!next.liveActivityEnabled) {
       void stopAllLiveActivities();
+    }
+    if (sessionRef.current && activeWgs84TargetRef.current) {
+      void updateSimulationLiveActivity(snapshot, activeWgs84TargetRef.current, true, next.language);
+    }
+    if (prevLang !== nextLang) {
+      const current = selectedTargetRef.current;
+      const wgs = mapCoordToDeviceWgs84(
+        current.latitude,
+        current.longitude,
+        next.gcj02CorrectionEnabled,
+      );
+      void reverseGeocodePlace(current.latitude, current.longitude, {
+        customEndpoint: next.globalSearchEndpoint,
+        wgs84Coordinate: wgs,
+        language: next.language,
+      })
+        .then((info) => {
+          const latest = selectedTargetRef.current;
+          if (
+            Math.abs(latest.latitude - current.latitude) > 1e-5 ||
+            Math.abs(latest.longitude - current.longitude) > 1e-5
+          ) {
+            return;
+          }
+          if (info.name || info.address) {
+            const updated: PickTarget & { altitude: number } = {
+              ...latest,
+              name: info.name ?? latest.name,
+              address: info.address ?? latest.address,
+            };
+            setSelectedTarget(updated);
+            saveLastLocation(updated);
+          }
+        })
+        .catch(() => undefined);
     }
   }
 
@@ -886,7 +1031,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   async function handleStartOnDevicePairing() {
     if (pairingInProgress) return;
     setPairingInProgress(true);
-    setPairingStepMessage("正在准备 Bonjour 广播与 SRP 密钥…");
+    setPairingStepMessage(liveS().sessionToast.pairingInit);
     let hasLease = false;
     let pairingActivity: ReturnType<typeof RelocLiveActivity> | null = null;
 
@@ -909,7 +1054,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
             placeName: "Remote Pairing",
             latitude: 0,
             longitude: 0,
-            statusLabel: "等待设置输入 PIN",
+            statusLabel: liveS().liveActivity.pairingWaitPin,
             packetsAcknowledged: 0,
             startedAt: Date.now(),
             now: Date.now(),
@@ -925,13 +1070,11 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         hasLease = false;
       }
 
-      setPairingStepMessage(
-        `PIN 码 ${pin}：请前往「系统设置 → 隐私与安全性 → 开发者 → 配对」选择主机并输入 PIN`,
-      );
+      setPairingStepMessage(formatText(liveS().sessionToast.pairingPinGuide, pin));
 
       const handle = startOnDevicePairing(host, pin, (ev) => {
         if (ev.type === "connected") {
-          setPairingStepMessage(`设备已连入，请核对并输入 PIN：${pin}`);
+          setPairingStepMessage(formatText(liveS().sessionToast.pairingConnected, pin));
         } else if (ev.type === "status") {
           setPairingStepMessage(ev.message);
         } else if (ev.type === "pin") {
@@ -944,11 +1087,11 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       savePairing(record);
       refreshPairing();
       setPairingStepMessage("");
-      fireToast(`✓ 配对成功：${record.deviceName || record.identifier}`);
+      fireToast(formatText(liveS().sessionToast.pairingSuccess, record.deviceName || record.identifier));
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      setPairingStepMessage(`配对未完成：${msg}`);
-      fireToast(`配对失败：${msg}`);
+      setPairingStepMessage(formatText(liveS().sessionToast.pairingIncomplete, msg));
+      fireToast(formatText(liveS().sessionToast.pairingFailed, msg));
     } finally {
       pairingHandleRef.current = null;
       showPiP.setValue(false);
@@ -977,7 +1120,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   }
 
   function handleCancelOnDevicePairing() {
-    pairingHandleRef.current?.cancel("用户取消配对");
+    pairingHandleRef.current?.cancel(liveS().sessionToast.pairingCancelled);
   }
 
   async function handleImportPairingBytes(bytes: Uint8Array): Promise<boolean> {
@@ -985,10 +1128,15 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       const record = await parsePairingFile(bytes);
       savePairing(record);
       refreshPairing();
-      fireToast(`✓ 已导入配对记录：${record.deviceName || record.identifier}`);
+      fireToast(formatText(liveS().sessionToast.importPairingOk, record.deviceName || record.identifier));
       return true;
     } catch (error) {
-      fireToast(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+      fireToast(
+        formatText(
+          liveS().sessionToast.importPairingFail,
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
       return false;
     }
   }
@@ -1000,13 +1148,13 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     if (!pairingStatus.isLoaded) {
       setConnectionState("idle");
       setConnectionSummary("");
-      return "请先配对这台 iPhone 或导入配对文件";
+      return liveS().sessionToast.needPairingHint;
     }
 
     verifyingConnRef.current = true;
     setConnectionState("checking");
     if (!silent) {
-      setConnectionSummary("正在探测设备端口与 CarKit 服务…");
+      setConnectionSummary(liveS().config.testConnChecking);
     }
 
     try {
@@ -1018,16 +1166,23 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         pairing: loadPairing(),
         silent,
       });
-      const summary = `✓ 已连上设备 (${result.udid.slice(0, 8)}… · 端口 ${result.port})，服务数 ${result.servicesCount}，CarKit: ${result.carkitService || "未显式列出，将直连探测"}`;
+      const st = liveS().sessionToast;
+      const summary = formatText(
+        st.probeSummary,
+        result.udid.slice(0, 8),
+        result.port,
+        result.servicesCount,
+        result.carkitService || st.carkitDirectProbe,
+      );
       setConnectionState("verified");
       setConnectionSummary(summary);
       if (!silent) {
-        fireToast("✓ 测试通过：设备与 CarKit 服务正常");
+        fireToast(st.probePassedToast);
       }
       return summary;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      const summary = `测试失败：${msg}`;
+      const summary = formatText(liveS().sessionToast.testFailedSummary, msg);
       setConnectionState("failed");
       setConnectionSummary(summary);
       if (!silent) {
@@ -1100,13 +1255,13 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         <Spacer />
         <Image systemName="ipad.slash" font="largeTitle" foregroundStyle="systemOrange" />
         <Text font="title3" fontWeight="semibold" multilineTextAlignment="center">
-          暂不支持 iPad 设备
+          {s.ipad.title}
         </Text>
         <Text font="subheadline" foregroundStyle="secondaryLabel" multilineTextAlignment="center">
-          iPadOS 缺乏 iPhone 上 CarKit / CoreLocation 虚拟配件定位的完整系统路径，当前版本仅支持在 iPhone 上运行。
+          {s.ipad.body}
         </Text>
         {canDismiss ? (
-          <Button title="关闭" buttonStyle="borderedProminent" action={() => dismiss()} />
+          <Button title={s.common.close} buttonStyle="borderedProminent" action={() => dismiss()} />
         ) : null}
         <Spacer />
       </VStack>
@@ -1120,6 +1275,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     snapshot,
     telemetry,
     activeWgs84Target,
+    resolvingAltitude,
     mfiStatus,
     pairingStatus,
     connectionState,
@@ -1127,10 +1283,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     recents,
     interruptedSession,
     onRefreshTelemetry: () => refreshCurrentTelemetry(true, !sessionRef.current),
-    onSelectTarget: (next: PickTarget & { altitude: number }) => {
-      setSelectedTarget(next);
-      saveLastLocation(next);
-    },
+    onSelectTarget: selectTarget,
     onStartSpoofing: () => void startSession("send"),
     onUpdateRunningLocation: updateRunningLocation,
     onStopSpoofing: () => void stopSession(),
@@ -1147,12 +1300,12 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
           altitude: t.altitude,
         }),
       );
-      fireToast("已加入收藏");
+      fireToast(s.map.addedFavToast);
     },
     onRenameFavorite: (id: string, name: string) => setFavorites(renameFavorite(id, name)),
     onRemoveFavorite: (id: string) => {
       setFavorites(removeFavorite(id));
-      fireToast("已移除收藏");
+      fireToast(s.map.removedFavToast);
     },
     onClearRecents: () => {
       clearRecents();
@@ -1165,7 +1318,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
         altitude: rec.altitude,
         name: rec.placeName,
       };
-      setSelectedTarget(restored);
+      selectTarget(restored, false);
       setInterruptedSession(null);
       clearInterruptedSession();
       void startSession("send", restored);
@@ -1215,6 +1368,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     mfiStatus,
     telemetry,
     activeWgs84Target,
+    language: settings.language,
     onStartProbe: () => void startSession("probe"),
     onStartSend: () => void startSession("send"),
     onStop: () => void stopSession(),
@@ -1227,7 +1381,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       }
       setEvents([]);
       clearDebugLog();
-      fireToast("已清空日志");
+      fireToast(s.sessionToast.clearedLogs);
     },
     onToast: fireToast,
     onClose: canDismiss ? () => dismiss() : undefined,
@@ -1285,7 +1439,7 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
                 {pairingPIN || "------"}
               </Text>
               <Text font="caption2" foregroundStyle="secondaryLabel">
-                系统设置 → 隐私与安全性 → 开发者 → 配对
+                {s.liveActivity.pairingGuide}
               </Text>
             </VStack>
           ),
@@ -1320,19 +1474,19 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       ) : (
         <TabView selection={tabSelection} tint={RELOC_COLORS.accent}>
           <MapPickerView
-            tabItem={<Label title="定位" systemImage="location.north.circle.fill" />}
+            tabItem={<Label title={s.tabs.location} systemImage="location.north.circle.fill" />}
             tag={0}
             {...mapPickerProps}
           />
 
           <ConfigurationView
-            tabItem={<Label title="设备连接" systemImage="antenna.radiowaves.left.and.right" />}
+            tabItem={<Label title={s.tabs.connection} systemImage="antenna.radiowaves.left.and.right" />}
             tag={1}
             {...configProps}
           />
 
           <ProtocolLogsView
-            tabItem={<Label title="实测与日志" systemImage="waveform.path.ecg" />}
+            tabItem={<Label title={s.tabs.logs} systemImage="waveform.path.ecg" />}
             tag={2}
             {...logsProps}
           />

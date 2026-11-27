@@ -19,6 +19,14 @@ export function isValidCoordinate(lat: number, lon: number): boolean {
   return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 }
 
+export function parseAltitudeValue(raw: string): number | undefined {
+  const cleaned = raw.trim().replace(/[mM米]$/u, "").trim();
+  if (!cleaned) return undefined;
+  const val = Number(cleaned);
+  if (!Number.isFinite(val) || val < -500 || val > 50_000) return undefined;
+  return Math.round(val * 10) / 10;
+}
+
 export function extractCoordFromString(raw: string): ParsedCoord | null {
   if (!raw) return null;
   const str = String(raw);
@@ -105,8 +113,22 @@ export function extractCoordFromString(raw: string): ParsedCoord | null {
   m = str.match(/(?:location|center)=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/i);
   if (m) return { latitude: +m[2], longitude: +m[1], src: "text" };
 
+  // 纯文本 纬度,经度[,海拔]（支持中文逗号与可选海拔 52 / 52m）
+  const normalized = str.replace(/，/g, ",");
+  const parts = normalized.split(",").map((p) => p.trim());
+  if (parts.length === 3) {
+    const a = Number(parts[0]);
+    const b = Number(parts[1]);
+    const alt = parseAltitudeValue(parts[2]);
+    if (Number.isFinite(a) && Number.isFinite(b) && alt !== undefined) {
+      if (Math.abs(a) <= 90 && Math.abs(b) > 90) return { latitude: a, longitude: b, altitude: alt, src: "text" };
+      if (Math.abs(b) <= 90 && Math.abs(a) > 90) return { latitude: b, longitude: a, altitude: alt, src: "text" };
+      return { latitude: a, longitude: b, altitude: alt, src: "text" };
+    }
+  }
+
   // 纯文本 纬度,经度（自动兼容 经度,纬度）
-  m = str.match(/(-?\d{1,3}\.\d{3,})\s*(?:,|%2C|\s)\s*(-?\d{1,3}\.\d{3,})/);
+  m = normalized.match(/(-?\d{1,3}\.\d{3,})\s*(?:,|%2C|\s)\s*(-?\d{1,3}\.\d{3,})/);
   if (m) {
     const a = +m[1];
     const b = +m[2];

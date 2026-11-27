@@ -31,6 +31,7 @@ import {
 } from "scripting";
 import { DEFAULT_SPAN } from "../constants";
 import type {
+  AppLanguage,
   AppSettings,
   ConnectionCheckState,
   FavoriteLocation,
@@ -51,9 +52,11 @@ import {
   formatDistanceMeters,
   formatLatLon,
   mapCoordToDeviceWgs84,
+  parseAltitudeValue,
   parseAndConvertToMapCoord,
   round6,
 } from "../utils/coords";
+import { formatText, getStrings } from "../utils/i18n";
 import {
   reverseGeocodePlace,
   searchDomesticPlaces,
@@ -78,6 +81,7 @@ interface MapPickerViewProps {
   snapshot: SessionSnapshot;
   telemetry: LiveLocationTelemetry | null;
   activeWgs84Target: TargetLocation | null;
+  resolvingAltitude?: boolean;
   mfiStatus: MFiStatus;
   pairingStatus: PairingStatus;
   connectionState: ConnectionCheckState;
@@ -85,7 +89,7 @@ interface MapPickerViewProps {
   recents: RecentLocation[];
   interruptedSession: InterruptedSessionRecord | null;
   onRefreshTelemetry: () => Promise<void> | void;
-  onSelectTarget: (target: PickTarget & { altitude: number }) => void;
+  onSelectTarget: (target: PickTarget & { altitude: number }, resolveAltitude?: boolean) => void;
   onStartSpoofing: () => void;
   onUpdateRunningLocation: () => void;
   onStopSpoofing: () => void;
@@ -115,20 +119,22 @@ function toMapStyleSpec(style: MapDisplayStyle) {
   }
 }
 
-function mapStyleTitle(style: MapDisplayStyle): string {
+function mapStyleTitle(style: MapDisplayStyle, language?: AppLanguage): string {
+  const m = getStrings(language).map;
   switch (style) {
     case "satellite":
-      return "卫星图";
+      return m.styleSatellite;
     case "hybrid":
-      return "混合图";
+      return m.styleHybrid;
     case "standard":
     default:
-      return "标准地图";
+      return m.styleStandard;
   }
 }
 
 export function MapPickerView(props: MapPickerViewProps) {
   const { selectedTarget, activeMapCoordinate, settings, snapshot, mfiStatus, pairingStatus } = props;
+  const s = getStrings(settings.language);
 
   const cameraPosition = useObservable<MapCameraPosition>(
     MapCameraPosition.region({
@@ -187,7 +193,7 @@ export function MapPickerView(props: MapPickerViewProps) {
     );
     moveCameraTo(mapped.latitude, mapped.longitude);
     setLocatingCurrent(false);
-    await pickCoordinateWithGeocode(mapped.latitude, mapped.longitude, undefined, undefined, true);
+    await pickCoordinateWithGeocode(mapped.latitude, mapped.longitude, undefined, undefined, true, true);
   }
 
   async function locateCurrentPosition() {
@@ -223,14 +229,14 @@ export function MapPickerView(props: MapPickerViewProps) {
       const fresh = await Location.requestCurrent({ forceRequest: true });
       if (!fresh) {
         if (locateReqIdRef.current === reqId) {
-          props.onToast("无法获取当前设备定位");
+          props.onToast(s.map.locateUnavailable);
         }
         return;
       }
       await focusLocatedCoord(fresh, reqId);
     } catch (error) {
       if (locateReqIdRef.current === reqId) {
-        props.onToast(`获取定位失败：${error instanceof Error ? error.message : String(error)}`);
+        props.onToast(formatText(s.map.locateFailed, error instanceof Error ? error.message : String(error)));
       }
     } finally {
       setLocatingCurrent(false);
@@ -243,6 +249,8 @@ export function MapPickerView(props: MapPickerViewProps) {
     presetName?: string,
     presetAddress?: string,
     fromAutoLocate = false,
+    resolveAltitude = true,
+    explicitAltitude?: number,
   ) {
     if (!fromAutoLocate) {
       locateReqIdRef.current += 1;
@@ -252,11 +260,14 @@ export function MapPickerView(props: MapPickerViewProps) {
     const immediate: PickTarget & { altitude: number } = {
       latitude: cleanLat,
       longitude: cleanLon,
-      altitude: selectedTarget.altitude ?? settings.defaultAltitude,
+      altitude:
+        typeof explicitAltitude === "number" && Number.isFinite(explicitAltitude)
+          ? explicitAltitude
+          : (selectedTarget.altitude ?? settings.defaultAltitude),
       name: presetName || `${cleanLat.toFixed(5)}, ${cleanLon.toFixed(5)}`,
       address: presetAddress,
     };
-    props.onSelectTarget(immediate);
+    props.onSelectTarget(immediate, resolveAltitude);
 
     if (presetName) return;
 
@@ -265,17 +276,21 @@ export function MapPickerView(props: MapPickerViewProps) {
     const place = await reverseGeocodePlace(cleanLat, cleanLon, {
       customEndpoint: settings.globalSearchEndpoint,
       wgs84Coordinate: wgs,
+      language: settings.language,
     });
     setResolvingGeocode(false);
 
     if (place.name) {
-      props.onSelectTarget({
-        latitude: cleanLat,
-        longitude: cleanLon,
-        altitude: immediate.altitude,
-        name: place.name,
-        address: place.address || undefined,
-      });
+      props.onSelectTarget(
+        {
+          latitude: cleanLat,
+          longitude: cleanLon,
+          altitude: immediate.altitude,
+          name: place.name,
+          address: place.address || undefined,
+        },
+        undefined,
+      );
     }
   }
 
@@ -286,6 +301,7 @@ export function MapPickerView(props: MapPickerViewProps) {
     try {
       try {
         const parsed = await parseAndConvertToMapCoord(trimmed);
+        const hasAlt = typeof parsed.altitude === "number" && Number.isFinite(parsed.altitude);
         setSearchResults([]);
         setSearchText("");
         moveCameraTo(parsed.latitude, parsed.longitude);
@@ -294,6 +310,9 @@ export function MapPickerView(props: MapPickerViewProps) {
           parsed.longitude,
           parsed.name || undefined,
           formatLatLon(parsed.latitude, parsed.longitude),
+          false,
+          !hasAlt,
+          parsed.altitude,
         );
         return;
       } catch {
@@ -303,22 +322,23 @@ export function MapPickerView(props: MapPickerViewProps) {
       if (searchRegion === "domestic") {
         const hits = await searchDomesticPlaces(trimmed);
         setSearchResults(hits);
-        if (hits.length === 0) props.onToast("未找到匹配地点，可切换为「全球」搜索");
+        if (hits.length === 0) props.onToast(s.map.searchDomesticEmpty);
       } else {
         const { results: hits, translatedQuery } = await searchGlobalPlaces(
           trimmed,
           settings.globalSearchEndpoint,
           settings.gcj02CorrectionEnabled,
+          settings.language,
         );
         setSearchResults(hits);
         if (translatedQuery && hits.length > 0) {
-          props.onToast(`已用英文关键词搜索：${translatedQuery}`);
+          props.onToast(formatText(s.map.searchTranslatedToast, translatedQuery));
         } else if (hits.length === 0) {
-          props.onToast("全球搜索无结果，请尝试英文地名或更具体关键词");
+          props.onToast(s.map.searchGlobalEmpty);
         }
       }
     } catch (error) {
-      props.onToast(`搜索失败：${error instanceof Error ? error.message : String(error)}`);
+      props.onToast(formatText(s.map.searchFailed, error instanceof Error ? error.message : String(error)));
     } finally {
       setIsSearching(false);
     }
@@ -378,21 +398,21 @@ export function MapPickerView(props: MapPickerViewProps) {
 
   const statusPillTitle = snapshot.isRunning
     ? snapshot.packetsAcknowledged > 0
-      ? `定位注入中 · ACK ${snapshot.packetsAcknowledged}`
+      ? formatText(s.map.statusAck, snapshot.packetsAcknowledged)
       : snapshot.authenticated
-        ? "已认证 · 等待订阅"
-        : "建立连接中…"
+        ? s.map.statusWaitSub
+        : s.map.statusConnecting
     : !pairingStatus.isLoaded
-      ? "未配对设备"
+      ? s.map.statusNoPairing
       : !mfiStatus.isLoaded
-        ? "待导入 MFi 凭据"
+        ? s.map.statusNoMFi
         : props.connectionState === "verified"
-          ? "回环已就绪"
+          ? s.map.statusVerified
           : props.connectionState === "checking"
-            ? "正在检测连接…"
+            ? s.map.statusChecking
             : props.connectionState === "failed"
-              ? "连接待检查"
-              : "已配对 · 待验证";
+              ? s.map.statusFailed
+              : s.map.statusPendingVerify;
 
   const cardAccentColor: Color = hasPendingShift
     ? RELOC_COLORS.amber
@@ -414,30 +434,34 @@ export function MapPickerView(props: MapPickerViewProps) {
         : null;
     const isSpoofSuccess = spoofOffsetMeters !== null && spoofOffsetMeters <= 50;
 
-    let statusText = "校验定位中";
+    let statusText = s.map.spoofVerifying;
     let statusColor: Color = "secondaryLabel";
     let statusBg: Color = "rgba(142, 142, 147, 0.13)";
 
     if (checkingTelemetry) {
-      statusText = "复测中…";
+      statusText = s.map.spoofChecking;
       statusColor = RELOC_COLORS.accent;
       statusBg = "rgba(43, 115, 245, 0.14)";
     } else if (snapshot.packetsAcknowledged === 0) {
-      statusText = snapshot.authenticated ? "等待订阅…" : "连接中…";
+      statusText = snapshot.authenticated ? s.map.spoofWaitSub : s.map.spoofConnecting;
     } else if (spoofOffsetMeters !== null) {
       statusText = isSpoofSuccess
-        ? `✓ 已生效 · ${formatDistanceMeters(spoofOffsetMeters)}`
-        : `未生效 · 偏 ${formatDistanceMeters(spoofOffsetMeters)}`;
+        ? formatText(s.map.spoofEffective, formatDistanceMeters(spoofOffsetMeters))
+        : formatText(s.map.spoofIneffective, formatDistanceMeters(spoofOffsetMeters));
       statusColor = isSpoofSuccess ? RELOC_COLORS.emerald : RELOC_COLORS.amber;
       statusBg = isSpoofSuccess ? "rgba(23, 184, 122, 0.15)" : "rgba(242, 153, 31, 0.15)";
     }
+
+    const altDisplayText = props.resolvingAltitude
+      ? s.map.resolvingAlt
+      : `${selectedTarget.altitude.toFixed(1)} m${settings.microJitterEnabled ? s.map.altitudeMicroSuffix : ""}`;
 
     return (
       <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
         <Text font="caption2" fontDesign="monospaced" foregroundStyle="secondaryLabel" lineLimit={1}>
           {readout.needsOffset
-            ? `地图 ${formatLatLon(readout.map.latitude, readout.map.longitude, 5)} · WGS ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude, 5)}`
-            : `WGS-84 ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude)}`}
+            ? `${s.map.mapLabelPrefix} ${formatLatLon(readout.map.latitude, readout.map.longitude, 5)} · ${s.map.wgsLabelPrefix} ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude, 5)}`
+            : `${s.map.wgsFullPrefix} ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude)}`}
         </Text>
         <Spacer />
         {showSpoofStatus ? (
@@ -472,9 +496,25 @@ export function MapPickerView(props: MapPickerViewProps) {
             </HStack>
           </Button>
         ) : (
-          <Text font="caption2" foregroundStyle="tertiaryLabel">
-            {`${selectedTarget.altitude.toFixed(0)}m${settings.microJitterEnabled ? " · ±0.6m" : ""}`}
-          </Text>
+          <Button
+            buttonStyle="plain"
+            action={() => {
+              HapticFeedback.lightImpact();
+              openSheet("manual");
+            }}
+          >
+            <HStack
+              spacing={4}
+              padding={{ horizontal: 7, vertical: 3 }}
+              background={{ style: "rgba(142, 142, 147, 0.12)", shape: "capsule" }}
+              contentShape="capsule"
+            >
+              <Image systemName="mountain.2.fill" font="caption2" foregroundStyle="secondaryLabel" />
+              <Text font="caption2" fontDesign="monospaced" foregroundStyle="secondaryLabel" lineLimit={1}>
+                {altDisplayText}
+              </Text>
+            </HStack>
+          </Button>
         )}
       </HStack>
     );
@@ -486,17 +526,21 @@ export function MapPickerView(props: MapPickerViewProps) {
         <LibrarySheet
           favorites={props.favorites}
           recents={props.recents}
+          language={settings.language}
           onSelect={(item) => {
             locateReqIdRef.current += 1;
             closeSheet();
             moveCameraTo(item.latitude, item.longitude);
-            props.onSelectTarget({
-              latitude: item.latitude,
-              longitude: item.longitude,
-              altitude: item.altitude,
-              name: item.name,
-              address: item.subtitle,
-            });
+            props.onSelectTarget(
+              {
+                latitude: item.latitude,
+                longitude: item.longitude,
+                altitude: item.altitude,
+                name: item.name,
+                address: item.subtitle,
+              },
+              false,
+            );
           }}
           onRenameFavorite={props.onRenameFavorite}
           onRemoveFavorite={props.onRemoveFavorite}
@@ -510,7 +554,8 @@ export function MapPickerView(props: MapPickerViewProps) {
         <ManualCoordinateSheet
           initialTarget={selectedTarget}
           gcj02Enabled={settings.gcj02CorrectionEnabled}
-          onApply={(target) => {
+          language={settings.language}
+          onApply={(target, resolveAltitude) => {
             closeSheet();
             moveCameraTo(target.latitude, target.longitude);
             void pickCoordinateWithGeocode(
@@ -518,6 +563,9 @@ export function MapPickerView(props: MapPickerViewProps) {
               target.longitude,
               target.name,
               target.address,
+              false,
+              resolveAltitude,
+              target.altitude,
             );
           }}
           onDismiss={closeSheet}
@@ -554,11 +602,11 @@ export function MapPickerView(props: MapPickerViewProps) {
               perform: (pt: Point) => {
                 const picked = proxy.convertPoint(pt);
                 if (!picked) {
-                  toastRef.current("地图视角尚未就绪，请稍后再点");
+                  toastRef.current(s.map.tapNotReady);
                   return;
                 }
                 HapticFeedback.lightImpact();
-                void pickRef.current(picked.latitude, picked.longitude);
+                void pickRef.current(picked.latitude, picked.longitude, undefined, undefined, false, true);
               },
             }}
           >
@@ -636,6 +684,7 @@ export function MapPickerView(props: MapPickerViewProps) {
               currentTab={props.homeTabSwitcher.currentTab}
               onSelectTab={props.homeTabSwitcher.onSelectTab}
               style="mapCircle"
+              language={settings.language}
             />
           ) : null}
 
@@ -656,7 +705,7 @@ export function MapPickerView(props: MapPickerViewProps) {
             <Image systemName="magnifyingglass" font="subheadline" fontWeight="semibold" foregroundStyle={RELOC_COLORS.accent} />
 
             <TextField
-              title="搜索地点或输入 纬度, 经度"
+              title={s.map.searchPlaceholder}
               value={searchText}
               onChanged={setSearchText}
               textInputAutocapitalization="never"
@@ -678,7 +727,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                 contentShape="capsule"
               >
                 <Text font="caption2" fontWeight="semibold" foregroundStyle={RELOC_COLORS.accent}>
-                  {searchRegion === "domestic" ? "国内" : "全球"}
+                  {searchRegion === "domestic" ? s.map.regionDomestic : s.map.regionGlobal}
                 </Text>
               </HStack>
             </Button>
@@ -743,7 +792,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                       <Image systemName="mappin.circle.fill" foregroundStyle={RELOC_COLORS.accent} />
                       <VStack alignment="leading" spacing={2}>
                         <Text font="subheadline" fontWeight="semibold" foregroundStyle="label" lineLimit={1}>
-                          {item.name || "未知地点"}
+                          {item.name || s.map.unknownPlace}
                         </Text>
                         {item.address ? (
                           <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={1}>
@@ -790,7 +839,7 @@ export function MapPickerView(props: MapPickerViewProps) {
             <HStack spacing={5} padding={{ horizontal: 10, vertical: 7 }} {...floatingPillStyle()}>
               <Image systemName="location.fill" font="caption2" foregroundStyle={RELOC_COLORS.emerald} />
               <Text font="caption2" fontWeight="semibold" fontDesign="monospaced" foregroundStyle="label">
-                {formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude, 4)}
+                {`${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude, 4)} · ${selectedTarget.altitude.toFixed(0)}m`}
               </Text>
             </HStack>
           ) : null}
@@ -802,10 +851,10 @@ export function MapPickerView(props: MapPickerViewProps) {
             <SettingsIconBadge systemName="arrow.counterclockwise" color={RELOC_COLORS.amber} />
             <VStack alignment="leading" spacing={1}>
               <Text font="caption" fontWeight="bold">
-                上次定位会话意外中断
+                {s.map.interruptedTitle}
               </Text>
               <Text font="caption2" foregroundStyle="secondaryLabel" lineLimit={1}>
-                {`恢复上次位置：${props.interruptedSession.placeName}`}
+                {formatText(s.map.interruptedSubtitle, props.interruptedSession.placeName)}
               </Text>
             </VStack>
             <Spacer />
@@ -825,7 +874,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                 contentShape="capsule"
               >
                 <Text font="caption" fontWeight="bold" foregroundStyle="white">
-                  恢复
+                  {s.map.restoreButton}
                 </Text>
               </HStack>
             </Button>
@@ -849,7 +898,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                 foregroundColor={settings.shortcutName.trim() ? RELOC_COLORS.accent : "label"}
                 action={() => {
                   if (!settings.shortcutName.trim()) {
-                    toastRef.current("请先在「设置」中填写快捷指令名称");
+                    toastRef.current(s.map.needShortcutToast);
                     props.onSwitchToConfig();
                     return;
                   }
@@ -871,7 +920,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                 </ZStack>
               }
             >
-              <Section header={<Text>地图样式</Text>}>
+              <Section header={<Text>{s.map.styleMenuTitle}</Text>}>
                 {(["standard", "satellite", "hybrid"] as MapDisplayStyle[]).map((style) => (
                   <Button
                     key={style}
@@ -882,16 +931,16 @@ export function MapPickerView(props: MapPickerViewProps) {
                   >
                     <HStack>
                       <Image systemName={settings.mapStyle === style ? "checkmark" : "map"} />
-                      <Text>{mapStyleTitle(style)}</Text>
+                      <Text>{mapStyleTitle(style, settings.language)}</Text>
                     </HStack>
                   </Button>
                 ))}
               </Section>
-              <Section header={<Text>坐标工具</Text>}>
+              <Section header={<Text>{s.map.coordToolsSection}</Text>}>
                 <Button action={() => openSheet("manual")}>
                   <HStack>
                     <Image systemName="number" />
-                    <Text>手动输入经纬度 / 解析链接</Text>
+                    <Text>{s.map.manualInputMenu}</Text>
                   </HStack>
                 </Button>
               </Section>
@@ -933,10 +982,10 @@ export function MapPickerView(props: MapPickerViewProps) {
             <VStack alignment="leading" spacing={2}>
               <HStack spacing={6}>
                 <Text font="headline" lineLimit={1} foregroundStyle="label">
-                  {selectedTarget.name || "当前坐标"}
+                  {selectedTarget.name || s.map.currentCoord}
                 </Text>
                 {resolvingGeocode ? (
-                  <Text font="caption2" foregroundStyle="tertiaryLabel">解析中…</Text>
+                  <Text font="caption2" foregroundStyle="tertiaryLabel">{s.map.resolvingGeocode}</Text>
                 ) : null}
               </HStack>
 
@@ -947,11 +996,11 @@ export function MapPickerView(props: MapPickerViewProps) {
                 <Button
                   buttonStyle="plain"
                   action={() => {
-                    const text = `${selectedTarget.name || "坐标"} (${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude)})`;
+                    const text = `${selectedTarget.name || s.map.currentCoord} (${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude)})`;
                     Pasteboard.setString(text);
                     HapticFeedback.lightImpact();
                     setCopiedAddressToast(true);
-                    props.onToast("已复制地点与 WGS-84 坐标");
+                    props.onToast(s.map.copyAddressToast);
                     setTimeout(() => setCopiedAddressToast(false), 1400);
                   }}
                 >
@@ -963,6 +1012,29 @@ export function MapPickerView(props: MapPickerViewProps) {
                     />
                   </ZStack>
                 </Button>
+                {snapshot.isRunning && snapshot.mode === "send" && !hasPendingShift ? (
+                  <Button
+                    buttonStyle="plain"
+                    action={() => {
+                      HapticFeedback.lightImpact();
+                      openSheet("manual");
+                    }}
+                  >
+                    <HStack
+                      spacing={3}
+                      padding={{ horizontal: 6, vertical: 2 }}
+                      background={{ style: "rgba(142, 142, 147, 0.12)", shape: "capsule" }}
+                      contentShape="capsule"
+                    >
+                      <Image systemName="mountain.2.fill" font="caption2" foregroundStyle="secondaryLabel" />
+                      <Text font="caption2" fontDesign="monospaced" foregroundStyle="secondaryLabel" lineLimit={1}>
+                        {props.resolvingAltitude
+                          ? s.map.resolvingAlt
+                          : formatText(s.map.altitudeBadge, selectedTarget.altitude.toFixed(1))}
+                      </Text>
+                    </HStack>
+                  </Button>
+                ) : null}
               </HStack>
             </VStack>
 
@@ -1031,8 +1103,8 @@ export function MapPickerView(props: MapPickerViewProps) {
                 <Image systemName="exclamationmark.triangle.fill" foregroundStyle={RELOC_COLORS.amber} />
                 <Text font="caption" fontWeight="semibold" foregroundStyle="label" lineLimit={1}>
                   {!pairingStatus.isLoaded
-                    ? "尚未配对这台 iPhone，前往「设备连接」配对"
-                    : "尚未导入 MFi 凭据，前往「设备连接」导入"}
+                    ? s.map.needPairingBanner
+                    : s.map.needMFiBanner}
                 </Text>
                 <Spacer />
                 <Image systemName="chevron.right" font="caption2" fontWeight="bold" foregroundStyle="secondaryLabel" />
@@ -1040,7 +1112,7 @@ export function MapPickerView(props: MapPickerViewProps) {
             </Button>
           ) : snapshot.lastError && !snapshot.isRunning ? (
             <Text font="caption" foregroundStyle={RELOC_COLORS.crimson} lineLimit={1}>
-              {`上次错误：${snapshot.lastError}`}
+              {formatText(s.map.lastErrorPrefix, snapshot.lastError)}
             </Text>
           ) : null}
 
@@ -1049,7 +1121,7 @@ export function MapPickerView(props: MapPickerViewProps) {
             {!snapshot.isRunning ? (
               <>
                 <RelocPrimaryButton
-                  title="开始定位"
+                  title={s.map.btnStart}
                   systemImage="paperplane.fill"
                   variant="prominent"
                   tint={RELOC_COLORS.accent}
@@ -1057,7 +1129,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                   action={props.onStartSpoofing}
                 />
                 <RelocPrimaryButton
-                  title="探测"
+                  title={s.map.btnProbe}
                   systemImage="waveform.path.ecg"
                   variant="prominent"
                   tint="systemTeal"
@@ -1070,10 +1142,10 @@ export function MapPickerView(props: MapPickerViewProps) {
               <RelocPrimaryButton
                 title={
                   snapshot.mode === "probe"
-                    ? "连接探测中…"
+                    ? s.map.btnProbing
                     : snapshot.packetsAcknowledged > 0
-                      ? `重连中（已注入 ${snapshot.packetsAcknowledged} 包）`
-                      : "建立连接中…"
+                      ? formatText(s.map.btnReconnectingPackets, snapshot.packetsAcknowledged)
+                      : s.map.btnConnecting
                 }
                 loading
                 variant="prominent"
@@ -1082,7 +1154,7 @@ export function MapPickerView(props: MapPickerViewProps) {
               />
             ) : snapshot.mode === "probe" ? (
               <RelocPrimaryButton
-                title="探测就绪 · 停止"
+                title={s.map.btnProbeReadyStop}
                 systemImage="checkmark.circle.fill"
                 variant="prominent"
                 tint={RELOC_COLORS.emerald}
@@ -1092,7 +1164,7 @@ export function MapPickerView(props: MapPickerViewProps) {
               <>
                 {hasPendingShift ? (
                   <RelocPrimaryButton
-                    title="更新到此位置"
+                    title={s.map.btnUpdateTarget}
                     systemImage="paperplane.fill"
                     variant="prominent"
                     tint={RELOC_COLORS.accent}
@@ -1100,7 +1172,7 @@ export function MapPickerView(props: MapPickerViewProps) {
                   />
                 ) : null}
                 <RelocPrimaryButton
-                  title="停止模拟"
+                  title={s.map.btnStopSpoofing}
                   systemImage="stop.fill"
                   variant="prominent"
                   tint={RELOC_COLORS.crimson}
@@ -1123,6 +1195,7 @@ export function MapPickerView(props: MapPickerViewProps) {
 function LibrarySheet(props: {
   favorites: FavoriteLocation[];
   recents: RecentLocation[];
+  language?: AppLanguage;
   onSelect: (item: {
     name: string;
     subtitle?: string;
@@ -1135,14 +1208,16 @@ function LibrarySheet(props: {
   onClearRecents: () => void;
   onDismiss: () => void;
 }) {
+  const s = getStrings(props.language);
+
   async function promptRename(fav: FavoriteLocation) {
     const next = await Dialog.prompt({
-      title: "重命名收藏",
-      message: `当前名称：${fav.name}`,
+      title: s.library.renameTitle,
+      message: formatText(s.library.renameMessage, fav.name),
       defaultValue: fav.name,
-      placeholder: "输入新的收藏名称",
-      cancelLabel: "取消",
-      confirmLabel: "保存",
+      placeholder: s.library.renamePlaceholder,
+      cancelLabel: s.common.cancel,
+      confirmLabel: s.common.save,
     });
     if (next && next.trim()) {
       props.onRenameFavorite(fav.id, next.trim());
@@ -1152,15 +1227,15 @@ function LibrarySheet(props: {
   return (
     <NavigationStack>
       <List
-        navigationTitle="收藏与历史"
+        navigationTitle={s.library.title}
         toolbar={{
-          topBarTrailing: <Button title="关闭" action={props.onDismiss} />,
+          topBarTrailing: <Button title={s.common.close} action={props.onDismiss} />,
         }}
       >
-        <Section header={<Text>{`收藏地点 (${props.favorites.length})`}</Text>}>
+        <Section header={<Text>{formatText(s.library.favoritesSection, props.favorites.length)}</Text>}>
           {props.favorites.length === 0 ? (
             <Text font="subheadline" foregroundStyle="secondaryLabel">
-              点击底部卡片右上角爱心即可保存常用位置。
+              {s.library.favoritesEmpty}
             </Text>
           ) : (
             props.favorites.map((fav) => (
@@ -1172,13 +1247,13 @@ function LibrarySheet(props: {
                   actions: [
                     <Button
                       key="delete"
-                      title="删除"
+                      title={s.common.delete}
                       role="destructive"
                       action={() => props.onRemoveFavorite(fav.id)}
                     />,
                     <Button
                       key="rename"
-                      title="改名"
+                      title={s.common.rename}
                       action={() => void promptRename(fav)}
                     />,
                   ],
@@ -1202,10 +1277,10 @@ function LibrarySheet(props: {
           )}
         </Section>
 
-        <Section header={<Text>{`最近使用 (${props.recents.length})`}</Text>}>
+        <Section header={<Text>{formatText(s.library.recentsSection, props.recents.length)}</Text>}>
           {props.recents.length === 0 ? (
             <Text font="subheadline" foregroundStyle="secondaryLabel">
-              暂无历史模拟记录。
+              {s.library.recentsEmpty}
             </Text>
           ) : (
             <>
@@ -1219,7 +1294,7 @@ function LibrarySheet(props: {
                   </VStack>
                 </Button>
               ))}
-              <Button title="清空最近记录" role="destructive" action={props.onClearRecents} />
+              <Button title={s.library.clearRecents} role="destructive" action={props.onClearRecents} />
             </>
           )}
         </Section>
@@ -1233,9 +1308,11 @@ function LibrarySheet(props: {
 function ManualCoordinateSheet(props: {
   initialTarget: PickTarget & { altitude: number };
   gcj02Enabled: boolean;
-  onApply: (target: PickTarget & { altitude: number }) => void;
+  language?: AppLanguage;
+  onApply: (target: PickTarget & { altitude: number }, resolveAltitude: boolean) => void;
   onDismiss: () => void;
 }) {
+  const s = getStrings(props.language);
   const initialWgs = mapCoordToDeviceWgs84(
     props.initialTarget.latitude,
     props.initialTarget.longitude,
@@ -1244,7 +1321,7 @@ function ManualCoordinateSheet(props: {
   const [inputMode, setInputMode] = useState<"map" | "wgs84">("wgs84");
   const [latText, setLatText] = useState(initialWgs.latitude.toFixed(6));
   const [lonText, setLonText] = useState(initialWgs.longitude.toFixed(6));
-  const [altText, setAltText] = useState(props.initialTarget.altitude.toFixed(0));
+  const [altText, setAltText] = useState(props.initialTarget.altitude.toFixed(1));
   const [linkText, setLinkText] = useState("");
   const [parseError, setParseError] = useState("");
 
@@ -1252,18 +1329,23 @@ function ManualCoordinateSheet(props: {
     setParseError("");
     const raw = fromClipboard ? (await Pasteboard.getString()) || "" : linkText;
     if (!raw.trim()) {
-      setParseError(fromClipboard ? "剪贴板为空" : "请先粘贴地图分享链接或经纬度文本");
+      setParseError(fromClipboard ? s.manual.clipboardEmpty : s.manual.needInput);
       return;
     }
     try {
       const parsed = await parseAndConvertToMapCoord(raw);
-      props.onApply({
-        latitude: parsed.latitude,
-        longitude: parsed.longitude,
-        altitude: Number.parseFloat(altText) || props.initialTarget.altitude,
-        name: parsed.name || `${parsed.latitude.toFixed(5)}, ${parsed.longitude.toFixed(5)}`,
-        address: `解析来源: ${parsed.src || "coordinate"}`,
-      });
+      const hasExplicitAlt = typeof parsed.altitude === "number" && Number.isFinite(parsed.altitude);
+      const fallbackAlt = parseAltitudeValue(altText) ?? props.initialTarget.altitude;
+      props.onApply(
+        {
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+          altitude: hasExplicitAlt ? (parsed.altitude as number) : fallbackAlt,
+          name: parsed.name || `${parsed.latitude.toFixed(5)}, ${parsed.longitude.toFixed(5)}`,
+          address: formatText(s.manual.parseSourcePrefix, parsed.src || "coordinate"),
+        },
+        !hasExplicitAlt,
+      );
     } catch (error) {
       setParseError(error instanceof Error ? error.message : String(error));
     }
@@ -1273,10 +1355,15 @@ function ManualCoordinateSheet(props: {
     setParseError("");
     const lat = Number.parseFloat(latText.trim());
     const lon = Number.parseFloat(lonText.trim());
-    const alt = Number.parseFloat(altText.trim());
+    const trimmedAlt = altText.trim();
+    const parsedAlt = trimmedAlt ? parseAltitudeValue(trimmedAlt) : props.initialTarget.altitude;
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-      setParseError("请输入有效经纬度（纬度 -90~90，经度 -180~180）");
+      setParseError(s.manual.invalidLatLon);
+      return;
+    }
+    if (trimmedAlt && parsedAlt === undefined) {
+      setParseError(s.manual.invalidAlt);
       return;
     }
 
@@ -1288,48 +1375,51 @@ function ManualCoordinateSheet(props: {
       mapLon = mapped.longitude;
     }
 
-    props.onApply({
-      latitude: round6(mapLat),
-      longitude: round6(mapLon),
-      altitude: Number.isFinite(alt) ? alt : props.initialTarget.altitude,
-    });
+    props.onApply(
+      {
+        latitude: round6(mapLat),
+        longitude: round6(mapLon),
+        altitude: parsedAlt ?? props.initialTarget.altitude,
+      },
+      false,
+    );
   }
 
   return (
     <NavigationStack>
       <List
-        navigationTitle="手动输入坐标"
+        navigationTitle={s.manual.title}
         toolbar={{
-          topBarLeading: <Button title="取消" action={props.onDismiss} />,
-          topBarTrailing: <Button title="应用" action={applyNumbers} />,
+          topBarLeading: <Button title={s.common.cancel} action={props.onDismiss} />,
+          topBarTrailing: <Button title={s.common.apply} action={applyNumbers} />,
         }}
       >
         <Section
-          header={<Text>从地图分享链接解析</Text>}
-          footer={<Text>支持 Apple 地图、高德（含短链）、Google Maps、百度 BD-09 及纯经纬度文本。</Text>}
+          header={<Text>{s.manual.linkSection}</Text>}
+          footer={<Text>{s.manual.linkFooter}</Text>}
         >
           <TextField
-            title="粘贴地图分享链接或 纬度, 经度"
+            title={s.manual.linkFieldPlaceholder}
             value={linkText}
             onChanged={setLinkText}
           />
-          <Button title="解析链接" action={() => void parseLinkOrClipboard(false)} />
-          <Button title="从剪贴板读取并解析" action={() => void parseLinkOrClipboard(true)} />
+          <Button title={s.manual.parseLinkBtn} action={() => void parseLinkOrClipboard(false)} />
+          <Button title={s.manual.parseClipboardBtn} action={() => void parseLinkOrClipboard(true)} />
         </Section>
 
-        <Section header={<Text>手动输入数值</Text>}>
+        <Section header={<Text>{s.manual.valuesSection}</Text>}>
           <Picker
-            label={<Text>输入坐标系</Text>}
+            label={<Text>{s.manual.coordSystemLabel}</Text>}
             value={inputMode}
             onChanged={(v: string) => setInputMode(v === "map" ? "map" : "wgs84")}
             pickerStyle="segmented"
           >
-            <Text tag="wgs84">真实 WGS-84</Text>
-            <Text tag="map">地图系 (GCJ-02)</Text>
+            <Text tag="wgs84">{s.manual.coordWgs84}</Text>
+            <Text tag="map">{s.manual.coordGcj02}</Text>
           </Picker>
 
           <HStack>
-            <Text>纬度 (Lat)</Text>
+            <Text>{s.manual.latLabel}</Text>
             <Spacer />
             <TextField
               title="37.334606"
@@ -1342,7 +1432,7 @@ function ManualCoordinateSheet(props: {
           </HStack>
 
           <HStack>
-            <Text>经度 (Lon)</Text>
+            <Text>{s.manual.lonLabel}</Text>
             <Spacer />
             <TextField
               title="-122.009102"
@@ -1355,10 +1445,10 @@ function ManualCoordinateSheet(props: {
           </HStack>
 
           <HStack>
-            <Text>海拔 (米)</Text>
+            <Text>{s.manual.altLabel}</Text>
             <Spacer />
             <TextField
-              title="10"
+              title="10.0"
               value={altText}
               onChanged={setAltText}
               multilineTextAlignment="trailing"

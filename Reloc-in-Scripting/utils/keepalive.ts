@@ -7,7 +7,9 @@ const owners = new Set<KeepAliveOwner>();
 let locationUpdateActive = false;
 
 /**
- * 申请后台保活并登记持有者；先启用音频保活，待 0xAA05 鉴权完成并开启定位订阅后再升级至 audioAndLocation。
+ * 申请后台保活并登记持有者（恢复至 v1.2.1 方式）：
+ * 先启用音频保活，待 0xAA05 鉴权完成并开启定位订阅后再升级至 audioAndLocation，失败时回退到 audio。
+ * 不注册 SharedAudioSession 监听、不启用轮询定时器，也不引入 AVPlayer。
  */
 export async function retainKeepAlive(owner: KeepAliveOwner): Promise<boolean> {
   let started = false;
@@ -25,6 +27,15 @@ export async function retainKeepAlive(owner: KeepAliveOwner): Promise<boolean> {
   }
   owners.add(owner);
   debugLog("keepalive", `keepAlive() -> ${started}（持有者: ${[...owners].join("+")}）`);
+  if (!started && typeof BackgroundKeeper.getState === "function") {
+    const state = await BackgroundKeeper.getState().catch(() => null);
+    if (state) {
+      debugLog(
+        "keepalive",
+        `keepAlive 详情 status=${state.status} audio=${state.modeStates.audio.status}(${state.modeStates.audio.lastFailure ?? "-"}) location=${state.modeStates.location.status}(${state.modeStates.location.lastFailure ?? "-"})`,
+      );
+    }
+  }
   return started;
 }
 
