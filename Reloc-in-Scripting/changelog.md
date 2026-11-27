@@ -1,3 +1,7 @@
+## v1.2.0
+- 首页UI调整
+- 灵动岛适配iPhone Duo
+
 ## v1.1.0
 
 ### 上游同步（Reukix/Reloc v1.0.2）

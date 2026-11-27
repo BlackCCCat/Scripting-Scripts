@@ -41,7 +41,8 @@ import {
   parsePairingFile,
   savePairing,
 } from "./core/pairing";
-import { RelocLiveActivity, type RelocActivityState } from "./live_activity";
+import { RelocLiveActivity, isIPhoneDuo, type RelocActivityState } from "./live_activity";
+import { liveActivityUpdateKey } from "./utils/liveActivityFormat";
 import type {
   AppSettings,
   ConnectionCheckState,
@@ -167,6 +168,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   const sessionRef = useRef<AccessoryLocationSession | null>(null);
   const liveActivity = useObservable(() => RelocLiveActivity());
   const lastLiveActivityKeyRef = useRef<string>("");
+  const duoLiveActivityTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const latestSnapForLiveActivityRef = useRef<{ snap: SessionSnapshot; wgs84: TargetLocation } | null>(null);
   const liveActivityEnabledRef = useRef<boolean>(settings.liveActivityEnabled);
   liveActivityEnabledRef.current = settings.liveActivityEnabled;
   const sessionStartedAtRef = useRef<number>(Date.now());
@@ -417,6 +420,13 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     restoreTimersRef.current.push(t1, t2, t3, t4);
   }
 
+  function stopDuoLiveActivityTimer() {
+    if (duoLiveActivityTimerRef.current) {
+      clearInterval(duoLiveActivityTimerRef.current);
+      duoLiveActivityTimerRef.current = null;
+    }
+  }
+
   function liveActivityStateFrom(
     snap: SessionSnapshot,
     placeName: string,
@@ -439,6 +449,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       statusLabel: label,
       packetsAcknowledged: snap.packetsAcknowledged,
       startedAt: sessionStartedAtRef.current,
+      now: Date.now(),
+      isDuo: isIPhoneDuo(),
       isError: Boolean(snap.lastError),
     };
   }
@@ -448,6 +460,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     wgs84: TargetLocation,
     snap: SessionSnapshot,
   ) {
+    stopDuoLiveActivityTimer();
+    latestSnapForLiveActivityRef.current = { snap, wgs84 };
     if (!liveActivityEnabledRef.current) return;
     try {
       const allowed = await LiveActivity.areActivitiesEnabled();
@@ -460,8 +474,19 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       const fresh = RelocLiveActivity();
       liveActivity.setValue(fresh);
       const initial = liveActivityStateFrom(snap, placeName, wgs84);
-      lastLiveActivityKeyRef.current = `${initial.statusLabel}|${initial.latitude.toFixed(5)}|${initial.longitude.toFixed(5)}|0`;
+      lastLiveActivityKeyRef.current = liveActivityUpdateKey({
+        ...initial,
+        duo: Boolean(initial.isDuo),
+      });
       await fresh.start(initial);
+      if (initial.isDuo) {
+        // iPhone Duo 竖向灵动岛使用双行文本展示时长，仅在 Duo 设备上每秒刷新一次状态
+        duoLiveActivityTimerRef.current = setInterval(() => {
+          const latest = latestSnapForLiveActivityRef.current;
+          if (!latest || !sessionRef.current || !liveActivityEnabledRef.current) return;
+          void updateSimulationLiveActivity(latest.snap, latest.wgs84);
+        }, 1000);
+      }
     } catch (error) {
       debugLog("liveactivity", "启动模拟实时活动失败", describeError(error));
       fireToast(`灵动岛启动失败：${describeError(error)}`);
@@ -473,11 +498,14 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     wgs84: TargetLocation,
     force = false,
   ) {
+    latestSnapForLiveActivityRef.current = { snap, wgs84 };
     if (!liveActivityEnabledRef.current) return;
     try {
       const next = liveActivityStateFrom(snap, activePlaceNameRef.current, wgs84);
-      const ackBucket = next.packetsAcknowledged === 1 ? 1 : Math.floor(next.packetsAcknowledged / 5);
-      const key = `${next.statusLabel}|${next.latitude.toFixed(5)}|${next.longitude.toFixed(5)}|${ackBucket}`;
+      const key = liveActivityUpdateKey({
+        ...next,
+        duo: Boolean(next.isDuo),
+      });
       if (!force && key === lastLiveActivityKeyRef.current) return;
       lastLiveActivityKeyRef.current = key;
       await liveActivity.value.update(next);
@@ -487,6 +515,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   }
 
   async function stopAllLiveActivities() {
+    stopDuoLiveActivityTimer();
+    latestSnapForLiveActivityRef.current = null;
     lastLiveActivityKeyRef.current = "";
     await LiveActivity.endAllActivities({ dismissTimeInterval: 0 }).catch(() => undefined);
   }
@@ -579,6 +609,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       tabSelection.unsubscribe(onTabChanged);
       cancelSubscriptionWakeups();
       cancelRealLocationRecovery();
+      stopDuoLiveActivityTimer();
+      latestSnapForLiveActivityRef.current = null;
       if (eventFlushTimerRef.current) {
         clearTimeout(eventFlushTimerRef.current);
         eventFlushTimerRef.current = null;
@@ -877,6 +909,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
             statusLabel: "等待设置输入 PIN",
             packetsAcknowledged: 0,
             startedAt: Date.now(),
+            now: Date.now(),
+            isDuo: isIPhoneDuo(),
             isError: false,
           })
           .catch(() => undefined);

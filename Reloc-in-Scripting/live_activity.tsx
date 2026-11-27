@@ -19,6 +19,13 @@ import {
   type LiveActivityUIBuilder,
 } from "scripting";
 import { RelocStopSpoofingIntent } from "./app_intents";
+import {
+  formatDuoElapsedParts,
+  isIPhoneDuo,
+  splitDuoPin,
+} from "./utils/liveActivityFormat";
+
+export { isIPhoneDuo };
 
 export interface RelocActivityState {
   kind?: "simulation" | "pairing";
@@ -29,6 +36,8 @@ export interface RelocActivityState {
   statusLabel: string;
   packetsAcknowledged: number;
   startedAt: number;
+  now?: number;
+  isDuo?: boolean;
   isError: boolean;
 }
 
@@ -54,6 +63,47 @@ function ElapsedTimer(props: { startedAt: number; font: Font; width: number }) {
       multilineTextAlignment="trailing"
       frame={{ width: props.width, alignment: "trailing" }}
     />
+  );
+}
+
+/**
+ * iPhone Duo 竖向灵动岛双行紧凑计时器（严格避免在 compact 槽位中使用 GeometryReader）
+ */
+function VerticalElapsed(props: { startedAt: number; now?: number }) {
+  const [top, bottom] = formatDuoElapsedParts(props.startedAt, props.now);
+  return (
+    <VStack spacing={0}>
+      <Text font={10} fontWeight="semibold" monospacedDigit lineLimit={1}>
+        {top}
+      </Text>
+      <Text font={10} fontWeight="semibold" monospacedDigit lineLimit={1}>
+        {bottom}
+      </Text>
+    </VStack>
+  );
+}
+
+/**
+ * iPhone Duo 竖向灵动岛双行紧凑配对码（6 位 PIN 拆分为上下各 3 位）
+ */
+function VerticalPin(props: { pin: string }) {
+  const parts = splitDuoPin(props.pin);
+  if (!parts) {
+    return (
+      <Text font={10} fontWeight="bold" fontDesign="monospaced" foregroundStyle="systemBlue" lineLimit={1}>
+        {props.pin}
+      </Text>
+    );
+  }
+  return (
+    <VStack spacing={0}>
+      <Text font={10} fontWeight="bold" fontDesign="monospaced" foregroundStyle="systemBlue" lineLimit={1}>
+        {parts[0]}
+      </Text>
+      <Text font={10} fontWeight="bold" fontDesign="monospaced" foregroundStyle="systemBlue" lineLimit={1}>
+        {parts[1]}
+      </Text>
+    </VStack>
   );
 }
 
@@ -106,8 +156,19 @@ function SimulationCard(state: RelocActivityState) {
 
 function pairingUI(state: RelocActivityState) {
   const pin = state.pin ?? "";
+  const duo = state.isDuo ?? isIPhoneDuo();
   return (
     <LiveActivityUI
+      dynamicIslandContentMargins={
+        duo
+          ? {
+              expanded: { horizontal: 20, bottom: 16 },
+              compactLeading: { all: 0 },
+              compactTrailing: { all: 0 },
+              minimal: { all: 0 },
+            }
+          : undefined
+      }
       content={
         <VStack
           alignment="leading"
@@ -128,9 +189,27 @@ function pairingUI(state: RelocActivityState) {
           </Text>
         </VStack>
       }
-      compactLeading={<Image systemName="personalhotspot" foregroundStyle="systemBlue" />}
-      compactTrailing={<Text font="caption2" fontDesign="monospaced" foregroundStyle="systemBlue">{pin}</Text>}
-      minimal={<Image systemName="personalhotspot" foregroundStyle="systemBlue" />}
+      compactLeading={
+        <Image
+          systemName="personalhotspot"
+          foregroundStyle="systemBlue"
+          font={duo ? "caption2" : undefined}
+        />
+      }
+      compactTrailing={
+        duo ? (
+          <VerticalPin pin={pin} />
+        ) : (
+          <Text font="caption2" fontDesign="monospaced" foregroundStyle="systemBlue">{pin}</Text>
+        )
+      }
+      minimal={
+        <Image
+          systemName="personalhotspot"
+          foregroundStyle="systemBlue"
+          font={duo ? "caption" : undefined}
+        />
+      }
     >
       <LiveActivityUIExpandedLeading>
         <Image systemName="personalhotspot" foregroundStyle="systemBlue" font="title2" />
@@ -150,39 +229,59 @@ function pairingUI(state: RelocActivityState) {
   );
 }
 
-const simulationUI: LiveActivityUIBuilder<RelocActivityState> = (state) => (
-  <LiveActivityUI
-    keylineTint={accentColor(state)}
-    dynamicIslandContentMargins={{ expanded: { horizontal: 20, bottom: 16 } }}
-    content={
-      <VStack
-        padding={{ vertical: 14, horizontal: 16 }}
-        activityBackgroundTint={{ light: "clear", dark: "clear" }}
-      >
-        <SimulationCard {...state} />
-      </VStack>
-    }
-    compactLeading={
-      <Image
-        systemName={state.isError ? "exclamationmark.triangle.fill" : "location.fill"}
-        foregroundStyle={accentColor(state)}
-      />
-    }
-    compactTrailing={<ElapsedTimer startedAt={state.startedAt} font="footnote" width={54} />}
-    minimal={
-      <Image
-        systemName={state.isError ? "exclamationmark.triangle.fill" : "location.fill"}
-        foregroundStyle={accentColor(state)}
-      />
-    }
-  >
-    <LiveActivityUIExpandedBottom>
-      <VStack padding={{ bottom: 8 }}>
-        <SimulationCard {...state} />
-      </VStack>
-    </LiveActivityUIExpandedBottom>
-  </LiveActivityUI>
-);
+const simulationUI: LiveActivityUIBuilder<RelocActivityState> = (state) => {
+  const duo = state.isDuo ?? isIPhoneDuo();
+  return (
+    <LiveActivityUI
+      keylineTint={accentColor(state)}
+      dynamicIslandContentMargins={
+        duo
+          ? {
+              expanded: { horizontal: 20, bottom: 16 },
+              compactLeading: { all: 0 },
+              compactTrailing: { all: 0 },
+              minimal: { all: 0 },
+            }
+          : { expanded: { horizontal: 20, bottom: 16 } }
+      }
+      content={
+        <VStack
+          padding={{ vertical: 14, horizontal: 16 }}
+          activityBackgroundTint={{ light: "clear", dark: "clear" }}
+        >
+          <SimulationCard {...state} />
+        </VStack>
+      }
+      compactLeading={
+        <Image
+          systemName={state.isError ? "exclamationmark.triangle.fill" : "location.fill"}
+          foregroundStyle={accentColor(state)}
+          font={duo ? "caption2" : undefined}
+        />
+      }
+      compactTrailing={
+        duo ? (
+          <VerticalElapsed startedAt={state.startedAt} now={state.now} />
+        ) : (
+          <ElapsedTimer startedAt={state.startedAt} font="footnote" width={54} />
+        )
+      }
+      minimal={
+        <Image
+          systemName={state.isError ? "exclamationmark.triangle.fill" : "location.fill"}
+          foregroundStyle={accentColor(state)}
+          font={duo ? "caption" : undefined}
+        />
+      }
+    >
+      <LiveActivityUIExpandedBottom>
+        <VStack padding={{ bottom: 8 }}>
+          <SimulationCard {...state} />
+        </VStack>
+      </LiveActivityUIExpandedBottom>
+    </LiveActivityUI>
+  );
+};
 
 const builder: LiveActivityUIBuilder<RelocActivityState> = (state) =>
   state.kind === "pairing" ? pairingUI(state) : simulationUI(state);
