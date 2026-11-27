@@ -23,7 +23,7 @@ import type {
   SessionSnapshot,
   TargetLocation,
 } from "../types";
-import { distanceMeters, formatLatLon } from "../utils/coords";
+import { distanceMeters, formatDistanceMeters, formatLatLon } from "../utils/coords";
 import { exportDiagnosticLogs, formatProtocolLogReport } from "../utils/logExport";
 import { HomePageSwitcherMenu, MetricTile, RelocPrimaryButton, SettingsIconBadge } from "./components";
 import { RELOC_COLORS, sessionPhaseText } from "./theme";
@@ -50,7 +50,6 @@ function ProtocolLogsToolbarActions(props: {
   events: ProtocolEvent[];
   onClearLogs: () => void;
   onToast: (message: string) => void;
-  onClose?: () => void;
 }) {
   const [copiedBanner, setCopiedBanner] = useState(false);
 
@@ -98,14 +97,6 @@ function ProtocolLogsToolbarActions(props: {
             <Text>清空日志</Text>
           </HStack>
         </Button>
-        {props.onClose ? (
-          <Button action={props.onClose}>
-            <HStack>
-              <Image systemName="xmark.circle" />
-              <Text>关闭</Text>
-            </HStack>
-          </Button>
-        ) : null}
       </Menu>
     </HStack>
   );
@@ -216,19 +207,34 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
           prompt: "筛选事件（如 FFFA / acknowledged）",
         }}
         toolbar={{
-          topBarLeading: props.homeTabSwitcher ? (
-            <HomePageSwitcherMenu
-              currentTab={props.homeTabSwitcher.currentTab}
-              onSelectTab={props.homeTabSwitcher.onSelectTab}
-              style="toolbar"
-            />
-          ) : undefined,
+          topBarLeading:
+            props.homeTabSwitcher && props.onClose ? (
+              <HStack spacing={10}>
+                <HomePageSwitcherMenu
+                  currentTab={props.homeTabSwitcher.currentTab}
+                  onSelectTab={props.homeTabSwitcher.onSelectTab}
+                  style="toolbar"
+                />
+                <Button action={props.onClose}>
+                  <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
+                </Button>
+              </HStack>
+            ) : props.onClose ? (
+              <Button action={props.onClose}>
+                <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
+              </Button>
+            ) : props.homeTabSwitcher ? (
+              <HomePageSwitcherMenu
+                currentTab={props.homeTabSwitcher.currentTab}
+                onSelectTab={props.homeTabSwitcher.onSelectTab}
+                style="toolbar"
+              />
+            ) : undefined,
           topBarTrailing: (
             <ProtocolLogsToolbarActions
               events={events}
               onClearLogs={props.onClearLogs}
               onToast={props.onToast}
-              onClose={props.onClose}
             />
           ),
         }}
@@ -298,9 +304,7 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
                 title={offsetMeters !== null ? "与目标偏差" : "最近更新"}
                 value={
                   offsetMeters !== null
-                    ? offsetMeters < 1000
-                      ? `${offsetMeters.toFixed(1)} m`
-                      : `${(offsetMeters / 1000).toFixed(2)} km`
+                    ? formatDistanceMeters(offsetMeters)
                     : telemetry
                       ? new Date(telemetry.timestamp).toLocaleTimeString()
                       : "--:--:--"

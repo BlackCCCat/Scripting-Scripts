@@ -261,3 +261,12 @@ export function distanceMeters(a: Coordinate, b: Coordinate): number {
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
 }
+
+/**
+ * 将米数格式化为人类可读的紧凑偏差标签（<1000m 显示 m，>=1000m 显示 km）。
+ */
+export function formatDistanceMeters(meters: number): string {
+  if (!Number.isFinite(meters) || meters < 0) return "--";
+  if (meters < 1000) return `${meters.toFixed(meters < 10 ? 1 : 0)} m`;
+  return `${(meters / 1000).toFixed(2)} km`;
+}

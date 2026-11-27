@@ -314,16 +314,29 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         toolbar={
           props.homeTabSwitcher || props.onClose
             ? {
-                topBarLeading: props.homeTabSwitcher ? (
-                  <HomePageSwitcherMenu
-                    currentTab={props.homeTabSwitcher.currentTab}
-                    onSelectTab={props.homeTabSwitcher.onSelectTab}
-                    style="toolbar"
-                  />
-                ) : undefined,
-                topBarTrailing: props.onClose ? (
-                  <Button title="关闭" action={props.onClose} />
-                ) : undefined,
+                topBarLeading:
+                  props.homeTabSwitcher && props.onClose ? (
+                    <HStack spacing={10}>
+                      <HomePageSwitcherMenu
+                        currentTab={props.homeTabSwitcher.currentTab}
+                        onSelectTab={props.homeTabSwitcher.onSelectTab}
+                        style="toolbar"
+                      />
+                      <Button action={props.onClose}>
+                        <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
+                      </Button>
+                    </HStack>
+                  ) : props.onClose ? (
+                    <Button action={props.onClose}>
+                      <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
+                    </Button>
+                  ) : (
+                    <HomePageSwitcherMenu
+                      currentTab={props.homeTabSwitcher!.currentTab}
+                      onSelectTab={props.homeTabSwitcher!.onSelectTab}
+                      style="toolbar"
+                    />
+                  ),
               }
             : undefined
         }

@@ -47,11 +47,14 @@ export function MapHUDIconButton(props: {
   systemName: string;
   foregroundColor?: Color;
   activeColor?: Color;
+  loading?: boolean;
   action: () => void;
 }) {
+  const iconTint: Color = props.activeColor ? "white" : (props.foregroundColor ?? "label");
   return (
     <Button
       buttonStyle="plain"
+      disabled={props.loading}
       action={() => {
         HapticFeedback.lightImpact();
         props.action();
@@ -62,12 +65,16 @@ export function MapHUDIconButton(props: {
         contentShape="circle"
         {...topCircleButtonStyle(props.activeColor)}
       >
-        <Image
-          systemName={props.systemName}
-          font="callout"
-          fontWeight="semibold"
-          foregroundStyle={props.activeColor ? "white" : (props.foregroundColor ?? "label")}
-        />
+        {props.loading ? (
+          <ProgressView controlSize="small" tint={iconTint} />
+        ) : (
+          <Image
+            systemName={props.systemName}
+            font="callout"
+            fontWeight="semibold"
+            foregroundStyle={iconTint}
+          />
+        )}
       </ZStack>
     </Button>
   );

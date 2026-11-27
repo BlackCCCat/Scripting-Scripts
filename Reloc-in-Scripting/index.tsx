@@ -244,9 +244,9 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
 
   const lastLocLogAtRef = useRef<number>(0);
 
-  async function refreshCurrentTelemetry(verbose = false) {
+  async function refreshCurrentTelemetry(verbose = false, force = true) {
     try {
-      const current = await Location.requestCurrent({ forceRequest: true });
+      const current = await Location.requestCurrent(force ? { forceRequest: true } : undefined);
       if (current) {
         const sample: LiveLocationTelemetry = {
           latitude: current.latitude,
@@ -564,8 +564,8 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
       ) {
         completeRealLocationRecovery(sample);
       }
-      // 仅在实测日志页且坐标/时间窗口确有变化时更新 UI，避免无意义重绘和数字频闪
-      if (isTelemetryTabRef.current && !samePoint) {
+      // 在实测日志页或会话运行期间同步更新 telemetry，确保地图底卡实时显示生效偏差；坐标未明显变化时不触发多余重绘
+      if ((isTelemetryTabRef.current || sessionRef.current !== null) && !samePoint) {
         setTelemetry(sample);
       }
     };
@@ -1062,6 +1062,10 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
   sceneActiveRef.current = () => {
     refreshPairing();
     void verifyConnectionIfNeeded(false);
+    // 仅使用非强制读取同步已收敛的位置，绝不在后台触发 forceRequest: true 干扰 locationd 外设锁定
+    if (sessionRef.current && lastModeRef.current === "send") {
+      void refreshCurrentTelemetry(false, false);
+    }
   };
 
   // 配置或配对状态变更时自动重新校验设备连接；切回前台时自动补检（对齐原版 Reloc）
@@ -1114,12 +1118,15 @@ export function App(props: { shared?: { latitude: number; longitude: number; nam
     activeMapCoordinate,
     settings,
     snapshot,
+    telemetry,
+    activeWgs84Target,
     mfiStatus,
     pairingStatus,
     connectionState,
     favorites,
     recents,
     interruptedSession,
+    onRefreshTelemetry: () => refreshCurrentTelemetry(true, !sessionRef.current),
     onSelectTarget: (next: PickTarget & { altitude: number }) => {
       setSelectedTarget(next);
       saveLastLocation(next);
