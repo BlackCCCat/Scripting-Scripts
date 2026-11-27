@@ -53,7 +53,12 @@ import {
   scanLocalMFiDirectory,
   testMFiSignerRoundTrip,
 } from "../utils/storage";
-import { HomePageSwitcherMenu, MetricTile, SettingsIconBadge, StepSectionHeader } from "./components";
+import {
+  MetricTile,
+  SettingsIconBadge,
+  StepSectionHeader,
+  ToolbarLeadingActions,
+} from "./components";
 import { RELOC_COLORS } from "./theme";
 import { launchShortcut } from "../utils/shortcut";
 
@@ -314,29 +319,12 @@ export function ConfigurationView(props: ConfigurationViewProps) {
         toolbar={
           props.homeTabSwitcher || props.onClose
             ? {
-                topBarLeading:
-                  props.homeTabSwitcher && props.onClose ? (
-                    <HStack spacing={10}>
-                      <HomePageSwitcherMenu
-                        currentTab={props.homeTabSwitcher.currentTab}
-                        onSelectTab={props.homeTabSwitcher.onSelectTab}
-                        style="toolbar"
-                      />
-                      <Button action={props.onClose}>
-                        <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
-                      </Button>
-                    </HStack>
-                  ) : props.onClose ? (
-                    <Button action={props.onClose}>
-                      <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
-                    </Button>
-                  ) : (
-                    <HomePageSwitcherMenu
-                      currentTab={props.homeTabSwitcher!.currentTab}
-                      onSelectTab={props.homeTabSwitcher!.onSelectTab}
-                      style="toolbar"
-                    />
-                  ),
+                topBarLeading: (
+                  <ToolbarLeadingActions
+                    homeTabSwitcher={props.homeTabSwitcher}
+                    onClose={props.onClose}
+                  />
+                ),
               }
             : undefined
         }

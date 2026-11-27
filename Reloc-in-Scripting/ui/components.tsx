@@ -270,3 +270,43 @@ export function HomePageSwitcherMenu(props: {
     </Menu>
   );
 }
+
+/**
+ * 导航栏左上角操作区（兼容主屏幕切换菜单与普通模式退出脚本按钮）。
+ */
+export function ToolbarLeadingActions(props: {
+  homeTabSwitcher?: { currentTab: number; onSelectTab: (tab: number) => void };
+  onClose?: () => void;
+}) {
+  if (props.homeTabSwitcher && props.onClose) {
+    return (
+      <HStack spacing={10}>
+        <HomePageSwitcherMenu
+          currentTab={props.homeTabSwitcher.currentTab}
+          onSelectTab={props.homeTabSwitcher.onSelectTab}
+          style="toolbar"
+        />
+        <Button action={props.onClose}>
+          <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
+        </Button>
+      </HStack>
+    );
+  }
+  if (props.onClose) {
+    return (
+      <Button action={props.onClose}>
+        <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
+      </Button>
+    );
+  }
+  if (props.homeTabSwitcher) {
+    return (
+      <HomePageSwitcherMenu
+        currentTab={props.homeTabSwitcher.currentTab}
+        onSelectTab={props.homeTabSwitcher.onSelectTab}
+        style="toolbar"
+      />
+    );
+  }
+  return null;
+}

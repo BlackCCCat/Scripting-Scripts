@@ -175,6 +175,21 @@ export function MapPickerView(props: MapPickerViewProps) {
     );
   }
 
+  async function focusLocatedCoord(
+    loc: { latitude: number; longitude: number },
+    reqId: number,
+  ): Promise<void> {
+    if (locateReqIdRef.current !== reqId) return;
+    const mapped = deviceWgs84ToMapCoord(
+      loc.latitude,
+      loc.longitude,
+      settings.gcj02CorrectionEnabled,
+    );
+    moveCameraTo(mapped.latitude, mapped.longitude);
+    setLocatingCurrent(false);
+    await pickCoordinateWithGeocode(mapped.latitude, mapped.longitude, undefined, undefined, true);
+  }
+
   async function locateCurrentPosition() {
     if (locatingCurrent) return;
     const reqId = ++locateReqIdRef.current;
@@ -192,39 +207,12 @@ export function MapPickerView(props: MapPickerViewProps) {
       }
 
       if (initial) {
-        if (locateReqIdRef.current !== reqId) return;
-        const mapped = deviceWgs84ToMapCoord(
-          initial.latitude,
-          initial.longitude,
-          settings.gcj02CorrectionEnabled,
-        );
-        moveCameraTo(mapped.latitude, mapped.longitude);
-        setLocatingCurrent(false);
-        const geocodeTask = pickCoordinateWithGeocode(
-          mapped.latitude,
-          mapped.longitude,
-          undefined,
-          undefined,
-          true,
-        );
-
+        const geocodeTask = focusLocatedCoord(initial, reqId);
         // 若缓存已超过 15 秒，后台静默高精度校准一次；位置变化 > 25m 再微调镜头
-        if (now - initial.timestamp > 15_000) {
+        if (Date.now() - initial.timestamp > 15_000) {
           const refined = await Location.requestCurrent({ forceRequest: true }).catch(() => null);
           if (refined && locateReqIdRef.current === reqId && distanceMeters(initial, refined) > 25) {
-            const refinedMap = deviceWgs84ToMapCoord(
-              refined.latitude,
-              refined.longitude,
-              settings.gcj02CorrectionEnabled,
-            );
-            moveCameraTo(refinedMap.latitude, refinedMap.longitude);
-            await pickCoordinateWithGeocode(
-              refinedMap.latitude,
-              refinedMap.longitude,
-              undefined,
-              undefined,
-              true,
-            );
+            await focusLocatedCoord(refined, reqId);
             return;
           }
         }
@@ -239,15 +227,7 @@ export function MapPickerView(props: MapPickerViewProps) {
         }
         return;
       }
-      if (locateReqIdRef.current !== reqId) return;
-      const mapped = deviceWgs84ToMapCoord(
-        fresh.latitude,
-        fresh.longitude,
-        settings.gcj02CorrectionEnabled,
-      );
-      moveCameraTo(mapped.latitude, mapped.longitude);
-      setLocatingCurrent(false);
-      await pickCoordinateWithGeocode(mapped.latitude, mapped.longitude, undefined, undefined, true);
+      await focusLocatedCoord(fresh, reqId);
     } catch (error) {
       if (locateReqIdRef.current === reqId) {
         props.onToast(`获取定位失败：${error instanceof Error ? error.message : String(error)}`);
@@ -425,6 +405,80 @@ export function MapPickerView(props: MapPickerViewProps) {
     : snapshot.isRunning
       ? "rgba(23, 184, 122, 0.16)"
       : "rgba(43, 115, 245, 0.16)";
+
+  function renderParameterRow() {
+    const showSpoofStatus = snapshot.isRunning && snapshot.mode === "send" && !hasPendingShift;
+    const spoofOffsetMeters =
+      showSpoofStatus && props.activeWgs84Target && props.telemetry
+        ? distanceMeters(props.telemetry, props.activeWgs84Target)
+        : null;
+    const isSpoofSuccess = spoofOffsetMeters !== null && spoofOffsetMeters <= 50;
+
+    let statusText = "校验定位中";
+    let statusColor: Color = "secondaryLabel";
+    let statusBg: Color = "rgba(142, 142, 147, 0.13)";
+
+    if (checkingTelemetry) {
+      statusText = "复测中…";
+      statusColor = RELOC_COLORS.accent;
+      statusBg = "rgba(43, 115, 245, 0.14)";
+    } else if (snapshot.packetsAcknowledged === 0) {
+      statusText = snapshot.authenticated ? "等待订阅…" : "连接中…";
+    } else if (spoofOffsetMeters !== null) {
+      statusText = isSpoofSuccess
+        ? `✓ 已生效 · ${formatDistanceMeters(spoofOffsetMeters)}`
+        : `未生效 · 偏 ${formatDistanceMeters(spoofOffsetMeters)}`;
+      statusColor = isSpoofSuccess ? RELOC_COLORS.emerald : RELOC_COLORS.amber;
+      statusBg = isSpoofSuccess ? "rgba(23, 184, 122, 0.15)" : "rgba(242, 153, 31, 0.15)";
+    }
+
+    return (
+      <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
+        <Text font="caption2" fontDesign="monospaced" foregroundStyle="secondaryLabel" lineLimit={1}>
+          {readout.needsOffset
+            ? `地图 ${formatLatLon(readout.map.latitude, readout.map.longitude, 5)} · WGS ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude, 5)}`
+            : `WGS-84 ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude)}`}
+        </Text>
+        <Spacer />
+        {showSpoofStatus ? (
+          <Button
+            buttonStyle="plain"
+            disabled={checkingTelemetry}
+            action={async () => {
+              HapticFeedback.lightImpact();
+              setCheckingTelemetry(true);
+              try {
+                await props.onRefreshTelemetry();
+              } finally {
+                setCheckingTelemetry(false);
+              }
+            }}
+          >
+            <HStack
+              spacing={4}
+              padding={{ horizontal: 8, vertical: 3 }}
+              background={{ style: statusBg, shape: "capsule" }}
+              contentShape="capsule"
+            >
+              <Text
+                font="caption2"
+                fontWeight="semibold"
+                monospacedDigit
+                foregroundStyle={statusColor}
+                lineLimit={1}
+              >
+                {statusText}
+              </Text>
+            </HStack>
+          </Button>
+        ) : (
+          <Text font="caption2" foregroundStyle="tertiaryLabel">
+            {`${selectedTarget.altitude.toFixed(0)}m${settings.microJitterEnabled ? " · ±0.6m" : ""}`}
+          </Text>
+        )}
+      </HStack>
+    );
+  }
 
   function buildSheetContent(kind: MapSheetKind) {
     if (kind === "library") {
@@ -962,86 +1016,7 @@ export function MapPickerView(props: MapPickerViewProps) {
           </HStack>
 
           {/* 坐标与海拔 / 模拟实测结果参数栏 */}
-          {(() => {
-            const showSpoofStatus = snapshot.isRunning && snapshot.mode === "send" && !hasPendingShift;
-            const spoofOffsetMeters =
-              showSpoofStatus && props.activeWgs84Target && props.telemetry
-                ? distanceMeters(props.telemetry, props.activeWgs84Target)
-                : null;
-            const isSpoofSuccess = spoofOffsetMeters !== null && spoofOffsetMeters <= 50;
-            const statusText = checkingTelemetry
-              ? "复测中…"
-              : snapshot.packetsAcknowledged === 0
-                ? snapshot.authenticated
-                  ? "等待订阅…"
-                  : "连接中…"
-                : spoofOffsetMeters === null
-                  ? "校验定位中"
-                  : isSpoofSuccess
-                    ? `✓ 已生效 · ${formatDistanceMeters(spoofOffsetMeters)}`
-                    : `未生效 · 偏 ${formatDistanceMeters(spoofOffsetMeters)}`;
-            const statusColor: Color = checkingTelemetry
-              ? RELOC_COLORS.accent
-              : snapshot.packetsAcknowledged === 0 || spoofOffsetMeters === null
-                ? "secondaryLabel"
-                : isSpoofSuccess
-                  ? RELOC_COLORS.emerald
-                  : RELOC_COLORS.amber;
-            const statusBg: Color = checkingTelemetry
-              ? "rgba(43, 115, 245, 0.14)"
-              : snapshot.packetsAcknowledged === 0 || spoofOffsetMeters === null
-                ? "rgba(142, 142, 147, 0.13)"
-                : isSpoofSuccess
-                  ? "rgba(23, 184, 122, 0.15)"
-                  : "rgba(242, 153, 31, 0.15)";
-
-            return (
-              <HStack spacing={8} frame={{ maxWidth: "infinity" }}>
-                <Text font="caption2" fontDesign="monospaced" foregroundStyle="secondaryLabel" lineLimit={1}>
-                  {readout.needsOffset
-                    ? `地图 ${formatLatLon(readout.map.latitude, readout.map.longitude, 5)} · WGS ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude, 5)}`
-                    : `WGS-84 ${formatLatLon(readout.wgs84.latitude, readout.wgs84.longitude)}`}
-                </Text>
-                <Spacer />
-                {showSpoofStatus ? (
-                  <Button
-                    buttonStyle="plain"
-                    disabled={checkingTelemetry}
-                    action={async () => {
-                      HapticFeedback.lightImpact();
-                      setCheckingTelemetry(true);
-                      try {
-                        await props.onRefreshTelemetry();
-                      } finally {
-                        setCheckingTelemetry(false);
-                      }
-                    }}
-                  >
-                    <HStack
-                      spacing={4}
-                      padding={{ horizontal: 8, vertical: 3 }}
-                      background={{ style: statusBg, shape: "capsule" }}
-                      contentShape="capsule"
-                    >
-                      <Text
-                        font="caption2"
-                        fontWeight="semibold"
-                        monospacedDigit
-                        foregroundStyle={statusColor}
-                        lineLimit={1}
-                      >
-                        {statusText}
-                      </Text>
-                    </HStack>
-                  </Button>
-                ) : (
-                  <Text font="caption2" foregroundStyle="tertiaryLabel">
-                    {`${selectedTarget.altitude.toFixed(0)}m${settings.microJitterEnabled ? " · ±0.6m" : ""}`}
-                  </Text>
-                )}
-              </HStack>
-            );
-          })()}
+          {renderParameterRow()}
 
           {/* 静态上下文提示横幅（会话运行中不再增删多行提示，避免开关定位后卡片高度跳动闪烁） */}
           {!canStartSession ? (

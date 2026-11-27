@@ -25,7 +25,12 @@ import type {
 } from "../types";
 import { distanceMeters, formatDistanceMeters, formatLatLon } from "../utils/coords";
 import { exportDiagnosticLogs, formatProtocolLogReport } from "../utils/logExport";
-import { HomePageSwitcherMenu, MetricTile, RelocPrimaryButton, SettingsIconBadge } from "./components";
+import {
+  MetricTile,
+  RelocPrimaryButton,
+  SettingsIconBadge,
+  ToolbarLeadingActions,
+} from "./components";
 import { RELOC_COLORS, sessionPhaseText } from "./theme";
 
 type LogFilter = "all" | "nmea" | "errors";
@@ -208,26 +213,10 @@ export function ProtocolLogsView(props: ProtocolLogsViewProps) {
         }}
         toolbar={{
           topBarLeading:
-            props.homeTabSwitcher && props.onClose ? (
-              <HStack spacing={10}>
-                <HomePageSwitcherMenu
-                  currentTab={props.homeTabSwitcher.currentTab}
-                  onSelectTab={props.homeTabSwitcher.onSelectTab}
-                  style="toolbar"
-                />
-                <Button action={props.onClose}>
-                  <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
-                </Button>
-              </HStack>
-            ) : props.onClose ? (
-              <Button action={props.onClose}>
-                <Image systemName="xmark" foregroundStyle={RELOC_COLORS.crimson} />
-              </Button>
-            ) : props.homeTabSwitcher ? (
-              <HomePageSwitcherMenu
-                currentTab={props.homeTabSwitcher.currentTab}
-                onSelectTab={props.homeTabSwitcher.onSelectTab}
-                style="toolbar"
+            props.homeTabSwitcher || props.onClose ? (
+              <ToolbarLeadingActions
+                homeTabSwitcher={props.homeTabSwitcher}
+                onClose={props.onClose}
               />
             ) : undefined,
           topBarTrailing: (
